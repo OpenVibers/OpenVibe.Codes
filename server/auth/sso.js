@@ -85,6 +85,18 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
         return data;
     }
 
+    /**
+     * A Codes session is a Network SESSION token: audience openvibe.network and a person. The Network
+     * signs FedCM assertions (audience = any owned-zone origin that asked), app/service tokens and
+     * internal tokens with the same key and issuer; none of them may become a session here.
+     */
+    function verifySession(token) {
+        const v = verifyJwt(token, { publicKey: keys.get(), issuer: config.networkIssuer, audience: config.oauth.sessionAudience, now: now() });
+        const c = v.claims;
+        if (c && (c.typ === 'fedcm' || c.actor_type !== undefined)) return { ok: false, reason: 'not a session token' };
+        return v;
+    }
+
     function viewerFromClaims(claims, token) {
         const subject = typeof claims.subject_id === 'string' ? claims.subject_id : null;
         const role = typeof claims.role === 'string' ? claims.role : 'user';
@@ -112,7 +124,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
         try {
             const data = await tokenGrant({ grant_type: 'refresh_token', refresh_token: rt });
             setSession(res, data);
-            const v = verifyJwt(data.access_token, { publicKey: keys.get(), issuer: config.networkIssuer, now: now() });
+            const v = verifySession(data.access_token);
             return v.ok ? viewerFromClaims(v.claims, data.access_token) : null;
         } catch (err) {
             if (err.status && err.status < 500) clearSession(res);
@@ -127,7 +139,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             const token = req.cookies && req.cookies[ACCESS_COOKIE];
             if (!token) return next();
             await keys.ensure();
-            const v = verifyJwt(token, { publicKey: keys.get(), issuer: config.networkIssuer, now: now() });
+            const v = verifySession(token);
             if (v.ok) { req.viewer = viewerFromClaims(v.claims, token); return next(); }
             if (v.expired) {
                 const fresh = await refresh(req, res);

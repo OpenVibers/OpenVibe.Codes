@@ -47,6 +47,9 @@ function load(env = process.env) {
             clientSecret: env.OV_OAUTH_CLIENT_SECRET || '',
             redirectUri: env.OV_OAUTH_REDIRECT_URI || `${baseUrl}/auth/callback`,
             scope: 'profile',
+            // Network session tokens (what /oauth/token hands Codes) carry this audience; FedCM
+            // assertions, app and service tokens signed with the same key do not.
+            sessionAudience: env.OV_SESSION_AUDIENCE || 'openvibe.network',
         },
         cookies: { secure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : isProduction },
         // Signs the per-person form token (CSRF). Unset: a random per-process key.
