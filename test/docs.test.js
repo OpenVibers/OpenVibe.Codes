@@ -19,11 +19,11 @@ const sdkPkg = require('openvibe-sdk/package.json');
 
     await check('package.json pins the contracts, SDK and shared tags that are installed', async () => {
         const tag = (dep) => (pkg.dependencies[dep].match(/refs\/tags\/(v[0-9.]+)$/) || [])[1];
-        assert.strictEqual(tag('openvibe-contracts'), 'v0.28.0');
+        assert.strictEqual(tag('openvibe-contracts'), 'v0.32.0');
         assert.strictEqual(tag('openvibe-sdk'), `v${sdkPkg.version}`);
         assert.strictEqual(tag('openvibe-shared'), `v${require('openvibe-shared/package.json').version}`);
-        assert.strictEqual(sdkPkg.version, '0.4.0');
-        // The contracts tag v0.28.0 carries the released codes manifest and codes.app-manifest@1.
+        assert.strictEqual(sdkPkg.version, '0.5.0');
+        // The contracts tag v0.32.0 carries the released codes manifest and codes.app-manifest@1.
         assert.ok(contracts.services.get('codes') && contracts.services.get('codes').status === 'alpha');
         assert.ok(contracts.resolve('codes.app-manifest@1'));
     });
@@ -33,13 +33,13 @@ const sdkPkg = require('openvibe-sdk/package.json');
             const r = await t.get(p);
             assert.strictEqual(r.status, 200, p);
             assert.ok(r.text.includes(`openvibe-contracts v${contractsVersion}`), `${p} names the installed contracts version`);
-            assert.ok(r.text.includes('OpenVibe.Contracts/tree/v0.28.0'), `${p} links the pinned tag`);
-            if (contractsVersion !== '0.28.0') assert.ok(r.text.includes('(tag v0.28.0)'), `${p} says the tag differs from the package version`);
+            assert.ok(r.text.includes('OpenVibe.Contracts/tree/v0.32.0'), `${p} links the pinned tag`);
+            if (contractsVersion !== '0.32.0') assert.ok(r.text.includes('(tag v0.32.0)'), `${p} says the tag differs from the package version`);
             assert.ok(r.text.includes(`openvibe-sdk v${sdkPkg.version}`), `${p} names the SDK version`);
         }
         const v = (await t.get('/api/v1/docs/versions')).json();
         assert.strictEqual(v.contracts, contractsVersion);
-        assert.strictEqual(v.contracts_tag, 'v0.28.0');
+        assert.strictEqual(v.contracts_tag, 'v0.32.0');
         assert.strictEqual(v.sdk, sdkPkg.version);
     });
 

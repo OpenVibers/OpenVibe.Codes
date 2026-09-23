@@ -1,6 +1,6 @@
 'use strict';
 /**
- * The released contracts (openvibe-contracts tag v0.28.0) describe what the code does: the codes
+ * The released contracts (openvibe-contracts tag v0.32.0) describe what the code does: the codes
  * service manifest's events are exactly what the outbox can produce, its capabilities are the ones
  * the API guards with requireCapability, and the release API answers with the contracts' problems.
  */
