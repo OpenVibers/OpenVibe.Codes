@@ -92,7 +92,13 @@ ${got.code ? html`<h2>Exchange it (on your server)</h2>
         viewer: req.viewer, config, path: '/tools/webhooks', title: 'Webhook tester', index: true, scripts: ['js/webhook.js'],
         crumbs: [{ label: 'Webhooks' }],
         body: html`<h1>Webhook tester and signed-event inspector</h1>
-<p>OpenVibe.Events delivers each event as <code>POST</code> with the body <code>{"event": &lt;envelope&gt;, "seq": &lt;n&gt;}</code> and <code>X-OpenVibe-Signature: sha256=&lt;hex HMAC-SHA256 of the raw body under your subscription secret&gt;</code>. Verify against the <strong>raw bytes</strong>, before parsing, with a constant-time comparison; <code>verifyDelivery()</code> in <a href="/docs/sdk/events"><code>openvibe-sdk/events</code></a> does exactly that.</p>
+<p>OpenVibe.Events delivers each event as <code>POST</code> with the body <code>{"event": &lt;envelope&gt;, "seq": &lt;n&gt;}</code> and these headers, signed with your subscription secret:</p>
+<ul>
+<li><code>X-OpenVibe-Signature: sha256=&lt;hex HMAC-SHA256 of the raw body&gt;</code> (v1).</li>
+<li><code>X-OpenVibe-Timestamp: &lt;unix seconds&gt;</code>, the time this attempt was sent. Every retry gets a new one.</li>
+<li><code>X-OpenVibe-Signature-V2: t=&lt;that timestamp&gt;,v2=&lt;hex HMAC-SHA256 of "&lt;t&gt;.&lt;raw body&gt;"&gt;</code> (v2).</li>
+</ul>
+<p>Verify against the <strong>raw bytes</strong>, before parsing, with a constant-time comparison. v1 covers only the body, so a captured delivery verifies forever. v2 also covers the time: refuse it when <code>t</code> is more than 300 seconds from your clock, in either direction. When the v2 header is present but does not verify or is stale, reject the delivery. Never fall back to v1. <code>parseDelivery(raw, headers, secret, { requireV2: true })</code> in <a href="/docs/sdk/events"><code>openvibe-sdk/events</code></a> (0.4.0 and later) does all of this, and also refuses deliveries that carry only v1. <code>verifyDelivery()</code> checks v1 only. The tester below checks the v1 header.</p>
 <h2>Verify a delivery</h2>
 <form method="post" action="/tools/webhooks/verify" class="stack" id="verify-form">
 <label>Raw body <textarea name="body" rows="8" required spellcheck="false">${values.body || ''}</textarea></label>
