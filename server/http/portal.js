@@ -24,6 +24,7 @@ const { csrfToken, checkCsrf, sameOrigin } = require('../auth/forms');
 const manifestsLib = require('../domain/manifests');
 const { RANK, ReleaseError } = require('../domain/releases');
 const { validationResult } = require('./tools');
+const { buildExport } = require('../domain/project-export');
 const { statusBadge } = require('./pages');
 
 const PRJ_RE = /^prj_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -172,8 +173,21 @@ ${!archived && assignable.length ? html`<h3>Add a member</h3>
 <form method="post" action="/projects/${project.id}/members" class="inline-form">${csrfField(c)}
 <label>Username <input name="username" required maxlength="64"></label>
 <label>Role <select name="role">${assignable.map((x) => html`<option>${x}</option>`)}</select></label><button type="submit">Add</button></form>` : ''}
+
+<h2>Export</h2>
+<p>Download this project's metadata as JSON: the project, members, apps with their credentials (ids and last four characters, never a secret) and grants, quotas${atLeast(role, 'admin') || req.viewer.staff ? ', the audit log' : ''} as OpenVibe.Network holds them, and Codes' releases, manifests, trust tiers and playground runs.${atLeast(role, 'admin') || req.viewer.staff ? '' : ' The audit log needs the admin role and is left out.'}</p>
+<p><a class="button" href="/projects/${project.id}/export" download>Download export (JSON)</a></p>
 ${role === 'owner' && !archived ? html`<h2>Archive</h2><form method="post" action="/projects/${project.id}/archive" class="stack">${csrfField(c)}
-<label><input type="checkbox" name="confirm" value="1" required> Archiving cannot be undone and revokes every app in the project</label><button type="submit" class="danger">Archive project</button></form>` : ''}`,
+<label><input type="checkbox" name="confirm" value="1" required> Archiving cannot be undone and revokes every app in the project</label><button type="submit" class="danger">Archive project</button></form>` : ''}
+${role === 'owner' || req.viewer.staff ? html`<h2>Delete</h2>
+<p>Deleting archives the project in OpenVibe.Network (every app and credential is revoked; this cannot be undone) and removes Codes' data for it:</p>
+<ul><li>draft releases and their manifests are deleted;</li>
+<li>published and deprecated releases are <strong>revoked</strong>, not erased, so people who installed them are told (the <a href="/policy/compatibility">compatibility policy</a>);</li>
+<li>playground run logs are deleted.</li></ul>
+<p class="muted small">OpenVibe.Network keeps the archived project record and its append-only audit log; it offers archiving, not erasure. Download the export first if you want a copy.</p>
+<form method="post" action="/projects/${project.id}/delete" class="stack">${csrfField(c)}
+<label>Type the project name, <strong>${project.name}</strong>, to confirm <input name="confirm_name" required autocomplete="off" spellcheck="false"></label>
+<button type="submit" class="danger">Delete project</button></form>` : ''}`,
         });
     });
 
@@ -213,6 +227,36 @@ ${canChange || self ? html`<form method="post" action="/projects/${project.id}/m
         if (req.body.confirm !== '1') return problemPage(req, res, { status: 422, code: 'codes.confirm', detail: 'tick the box to confirm' }, { back: back(req) });
         const got = await net(req, res, (t) => network.projects.archive(t, req.params.project));
         after(req, res, got, back(req), 'Project archived');
+    });
+
+    r.get('/:project/export', idParams, async (req, res) => {
+        const project = await loadProject(req, res);
+        if (!project) return;
+        const got = await net(req, res, (t) => buildExport({
+            network, token: t, project, includeAudit: atLeast(project.role, 'admin') || req.viewer.staff, releases, playground, trust,
+            meta: { now: new Date().toISOString(), subject: req.viewer.subject, networkUrl: config.networkUrl, baseUrl: config.baseUrl },
+        }));
+        if (!got.ok) return problemPage(req, res, got.problem, { title: 'Export', back: back(req) });
+        res.set('Cache-Control', 'no-store');
+        res.set('Content-Disposition', `attachment; filename="openvibe-project-${project.id}.json"`);
+        res.type('application/json').send(`${JSON.stringify(got.data, null, 2)}\n`);
+    });
+
+    r.post('/:project/delete', idParams, form, guard, async (req, res) => {
+        const project = await loadProject(req, res);
+        if (!project) return;
+        if (project.role !== 'owner' && !req.viewer.staff) return problemPage(req, res, { status: 403, code: 'project.forbidden', detail: 'only the project owner can delete it' }, { back: back(req) });
+        if (String(req.body.confirm_name || '').trim() !== project.name) return problemPage(req, res, { status: 422, code: 'codes.confirm', detail: 'type the project name exactly to confirm' }, { back: back(req) });
+        // Network first: if it refuses, nothing in Codes changes.
+        if (!project.archived_at) {
+            const got = await net(req, res, (t) => network.projects.archive(t, project.id));
+            if (!got.ok) return problemPage(req, res, got.problem, { title: 'Delete project', back: back(req) });
+        }
+        const actor = { kind: 'user', label: `user:${req.viewer.subject}`, subject: req.viewer.subject, role: project.role, staff: req.viewer.staff, traceparent: req.ov.traceparent };
+        const retired = releases.retireProject({ actor, projectId: project.id });
+        const runs = playground.deleteRunsForProject(project.id);
+        log.info(`[Codes] project ${project.id} deleted by ${actor.label}: archived in Network, ${retired.revoked.length} releases revoked, ${retired.deletedDrafts.length} drafts and ${runs} playground runs deleted`);
+        res.redirect(303, `${back(req)}?done=${encodeURIComponent(`Deleted: ${retired.revoked.length} revoked, ${retired.deletedDrafts.length} drafts and ${runs} runs removed`)}`);
     });
 
     r.get('/:project/audit', idParams, async (req, res) => {

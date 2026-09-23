@@ -77,6 +77,8 @@ function createPlayground({ store, config, network, keys, fetchImpl, log = conso
     }
 
     const runsFor = (appId, limit = 20) => db.prepare('SELECT id, at, actor, kind, capability, credential, outcome, stage, http_status, code, detail, ref FROM playground_runs WHERE app_id = ? ORDER BY at DESC, id DESC LIMIT ?').all(String(appId), limit);
+    const runsForProject = (projectId) => db.prepare('SELECT id, at, actor, app_id, kind, capability, credential, outcome, stage, http_status, code, detail, ref FROM playground_runs WHERE project_id = ? ORDER BY at, id').all(String(projectId));
+    const deleteRunsForProject = (projectId) => db.prepare('DELETE FROM playground_runs WHERE project_id = ?').run(String(projectId)).changes;
     const recentCount = (actor) => db.prepare('SELECT COUNT(*) AS n FROM playground_runs WHERE actor = ? AND at > ?').get(actor, new Date(store.now() - 3600_000).toISOString()).n;
 
     /** Steps 1–2 only: may this app run this playground at all? */
@@ -210,7 +212,7 @@ function createPlayground({ store, config, network, keys, fetchImpl, log = conso
         }
     }
 
-    return { run, precheck, runsFor, grantAdvice, KINDS, projectKey, appSource };
+    return { run, precheck, runsFor, runsForProject, deleteRunsForProject, grantAdvice, KINDS, projectKey, appSource };
 }
 
 module.exports = { createPlayground, KINDS, grantAdvice, scrub, projectKey, appSource };

@@ -178,7 +178,37 @@ function createReleases({ store, outbox, trust }) {
         return { release: get(r.id), event_id: env ? env.event_id : null };
     }
 
-    return { get, manifestOf, listForApp, recentPublic, log, createDraft, publish, deprecate, revoke, manageRole };
+    /** Every release of a project (drafts included), each with its manifest and log: for the project export. */
+    const listForProject = (projectId) => db.prepare('SELECT * FROM releases WHERE project_id = ? ORDER BY created_at, id').all(String(projectId))
+        .map((r) => ({ ...view(r), manifest: manifestOf(r.manifest_id), log: log(r.id) }));
+
+    /**
+     * Codes' part of deleting a project (Network archives the project itself). Drafts were never
+     * public, so they and their manifests are deleted (the append-only log records it). Published
+     * and deprecated releases are revoked, not erased: people who installed them need the
+     * revocation (compatibility policy), so each emits codes.app.revoked as any revocation does.
+     * The caller has checked that the actor owns the project (or is staff).
+     */
+    function retireProject({ actor, projectId, reason = 'project deleted by its owner' }) {
+        const rows = db.prepare("SELECT * FROM releases WHERE project_id = ? AND status != 'revoked' ORDER BY created_at, id").all(String(projectId));
+        const out = { revoked: [], deletedDrafts: [] };
+        for (const r of rows.filter((x) => x.status !== 'draft')) {
+            revoke({ actor, releaseId: r.id, app: null, reason });
+            out.revoked.push(r.id);
+        }
+        db.transaction(() => {
+            for (const r of rows.filter((x) => x.status === 'draft')) {
+                db.prepare("DELETE FROM releases WHERE id = ? AND status = 'draft'").run(r.id);
+                const shared = db.prepare('SELECT COUNT(*) AS n FROM releases WHERE manifest_id = ?').get(r.manifest_id).n;
+                if (!shared) db.prepare('DELETE FROM manifests WHERE id = ?').run(r.manifest_id);
+                writeLog(r.id, 'deleted', actor.label, { reason, was: 'draft' });
+                out.deletedDrafts.push(r.id);
+            }
+        })();
+        return out;
+    }
+
+    return { get, manifestOf, listForApp, listForProject, recentPublic, log, createDraft, publish, deprecate, revoke, retireProject, manageRole };
 }
 
 module.exports = { createReleases, ReleaseError, manageRole, RANK };

@@ -16,6 +16,7 @@
   "works": [
     "Sign-in with OpenVibe.Network (authorization code + PKCE S256), session tokens in httpOnly cookies",
     "Projects, members, apps, credentials (rotate, revoke), grants (request, approve, deny, revoke), quotas and audit over Network's /api/v1/projects API with the person's own token; Network's errors shown as Network answered them",
+    "Project export (one JSON document: Network's project, members, apps, credential ids and hints, grants, quotas, audit for admin+, plus Codes' releases, manifests, trust and playground runs) and delete (owner: archive in Network first, then drafts and playground runs deleted, public releases revoked). Network has no project erasure endpoint, only archive",
     "Client secrets shown once, in the create/rotate response only, with no-store; never stored or logged (tested)",
     "Scope editor offering only capabilities apps can be granted (public, or partner when in the allowance)",
     "Docs generated at boot from the pinned openvibe-contracts and openvibe-sdk: contracts with field tables and fixtures, capability catalog, event types, SDK reference; service registry read live from Network with its health",
@@ -30,7 +31,7 @@
   "notYet": [
     "The playgrounds have never been used on production (0 playground runs); the one production end-to-end run used curl, and it is not a committed, repeatable check",
     "No usage, trace or error dashboards: no service reports per-project usage yet; quotas show recorded limits only",
-    "Billing sandbox, Chat bot and Realtime playgrounds; CLI and scaffolding; templates; project data export and delete",
+    "Billing sandbox, Chat bot and Realtime playgrounds; CLI and scaffolding; templates",
     "Consent screen for third-party production apps (a Network gap)",
     "No JSON-LD or llms.txt on the public pages",
     "Governance material (contribution guide, code of conduct, contributor ladder, moderation policy) is not written"

@@ -74,7 +74,7 @@ function createNetworkClient({ config, fetchImpl, log = console }) {
             ? call(t, 'DELETE', `${A(p, a)}/grants/${enc(cap)}`)
             : call(t, 'POST', `${A(p, a)}/grants/${enc(cap)}/${decision === 'approved' ? 'approve' : 'deny'}`, {})),
         quotas: (t, p) => call(t, 'GET', `${P(p)}/quotas`),
-        audit: (t, p, { before } = {}) => call(t, 'GET', `${P(p)}/audit${before ? `?before=${enc(before)}` : ''}`),
+        audit: (t, p, { before, limit } = {}) => call(t, 'GET', `${P(p)}/audit${before || limit ? `?${new URLSearchParams({ ...(before ? { before: String(before) } : {}), ...(limit ? { limit: String(limit) } : {}) })}` : ''}`),
     };
 
     // Registry: public, cached for registryTtlMs so a page view never waits on Network twice.
