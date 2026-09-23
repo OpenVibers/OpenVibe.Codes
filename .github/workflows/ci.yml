@@ -18,3 +18,6 @@ jobs:
       # Blocking: the codes manifest, codes.release.manage|read and codes.app-manifest@1 are released
       # (openvibe-contracts tag v0.27.0).
       - run: npx openvibe-contracts-check --service codes --src server
+  # Secret scan (gitleaks) and dependency audit, shared by every OpenVibers repo (Track Q).
+  security:
+    uses: OpenVibers/OpenVibe.Shared/.github/workflows/security.yml@83c998b65424fb97e6f6de55ad9cc5981767e89c
