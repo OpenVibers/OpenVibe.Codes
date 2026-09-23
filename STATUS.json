@@ -9,7 +9,7 @@
   "domain": "openvibe.codes",
   "packages": [
     "openvibe-contracts v0.28.0 (same content as tag v0.27.0; the latest contracts release is v0.29.0)",
-    "openvibe-sdk v0.3.1 (v0.4.0 is released; not adopted yet)",
+    "openvibe-sdk v0.4.0",
     "openvibe-shared v1.3.0"
   ],
   "summary": "Deployed and public since 2026-09-23: https://openvibe.codes is served by this portal (openvibe-ovh, unit openvibe-codes on 127.0.0.1:4900 behind nginx, release a9371c3), and the domain left OpenVibe.Sites. Sign-in uses the registered Network OAuth client `codes` (PKCE S256); the principal `codes` holds events.event.publish and the Events relay is configured. It is barely used yet: production holds 0 manifests, 0 releases and 0 playground runs. The external-developer path (account, project, sandbox app, grants, Media upload, app events) was run once on production on 2026-09-23 with public endpoints and curl, not through these playgrounds; that check is not committed to a repository or CI.",
@@ -20,7 +20,7 @@
     "Scope editor offering only capabilities apps can be granted (public, or partner when in the allowance)",
     "Docs generated at boot from the pinned openvibe-contracts and openvibe-sdk: contracts with field tables and fixtures, capability catalog, event types, SDK reference; service registry read live from Network with its health",
     "OAuth callback helper and a test callback that never exchanges the code",
-    "Webhook signature verifier (server or in-browser) and signed sample deliveries for catalogued event types",
+    "Webhook tester for signature v1 and v2 (server or in-browser): decides as a receiver requiring v2 does, shows the timestamp's age and the ±300 s window, v1 shown but never deciding; signed sample deliveries carry v1, X-OpenVibe-Timestamp and v2",
     "Playgrounds (Media upload with media.object.upload, Events publish with events.app.publish) that run with the app's own token and refuse without the grant",
     "App and mod manifest validation; release metadata (draft, publish, deprecate, revoke) with codes.app.* events through the SDK outbox; trust tiers per ADR-013 (unreviewed, reviewed, first-party) as staff-set metadata, older names migrated at boot",
     "Policy pages rendered from the published ADRs; licensing read from package metadata",
@@ -28,7 +28,6 @@
     "Readiness (/api/ready), /release.json and loopback-only /metrics"
   ],
   "notYet": [
-    "Webhook tester verifies v1 signatures only; Events consumers now require v2 (X-OpenVibe-Signature-V2), which needs openvibe-sdk v0.4.0 here",
     "The playgrounds have never been used on production (0 playground runs); the one production end-to-end run used curl, and it is not a committed, repeatable check",
     "No usage, trace or error dashboards: no service reports per-project usage yet; quotas show recorded limits only",
     "Billing sandbox, Chat bot and Realtime playgrounds; CLI and scaffolding; templates; project data export and delete",
