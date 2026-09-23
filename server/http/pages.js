@@ -6,7 +6,9 @@
  *
  * Policy pages are derived, not paraphrased: the compatibility and deprecation policy renders
  * ADR-002 and ADR-016 exactly as openvibe-contracts publishes them; the decision index is the ADR
- * directory; licensing reads the license fields of the packages Codes runs.
+ * directory; licensing reads the license fields of the packages Codes runs; the governance pages
+ * (code of conduct, contributing, contributor ladder, moderation) render this repository's
+ * Markdown files as they are.
  */
 const fs = require('fs');
 const path = require('path');
@@ -22,11 +24,34 @@ const { EVENT_TYPES } = require('../events/outbox');
 const ROOT = path.join(__dirname, '..', '..');
 const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
 
+/**
+ * Governance documents: Markdown in this repository (the same files GitHub shows), rendered as
+ * they are. A document whose text starts with the draft line is shown with a draft notice, kept out
+ * of search engines and the sitemap; removing that line after the owner's review publishes it.
+ */
+const GOVERNANCE = [
+    { slug: 'code-of-conduct', file: 'CODE_OF_CONDUCT.md', blurb: 'how we treat each other, and how to report a problem' },
+    { slug: 'contributing', file: 'CONTRIBUTING.md', blurb: 'how to report a bug, propose a change and open a pull request' },
+    { slug: 'contributor-ladder', file: 'docs/governance/contributor-ladder.md', blurb: 'participant, contributor, reviewer, maintainer, owner' },
+    { slug: 'moderation', file: 'docs/governance/moderation.md', blurb: 'what is moderated, the steps, and appeals' },
+];
+const DRAFT_LINE = /^\*\*Draft — pending owner review\.\*\*.*$/m;
+function loadGovernance() {
+    return GOVERNANCE.map((g) => {
+        const text = fs.readFileSync(path.join(ROOT, g.file), 'utf8');
+        const title = (text.match(/^# (.+)$/m) || [null, g.slug])[1].trim();
+        const draft = DRAFT_LINE.test(text.split('\n').slice(0, 5).join('\n'));
+        const body = text.replace(/^# .+\n/m, '').replace(DRAFT_LINE, '');
+        return { ...g, title, draft, body };
+    });
+}
+
 function createPageRoutes(ctx) {
     const { config, docs, releases, trust, network, sso } = ctx;
     const r = asyncRouter();
     const form = express.urlencoded({ extended: false, limit: '32kb' });
     const PUBLIC_CACHE = 'public, max-age=300';
+    const governance = loadGovernance();
     const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, ...o });
 
     r.get('/', (req, res) => {
@@ -63,8 +88,20 @@ ${table(['App', 'Kind', 'Version', 'Status', 'Trust', 'Published'], recent.map((
 <li><a href="/policy/rfc"><strong>Proposals and decisions</strong></a><span>how a contract, capability or event changes; the decision record</span></li>
 <li><a href="/policy/compatibility"><strong>Compatibility and deprecation</strong></a><span>ADR-002 and ADR-016, as published</span></li>
 <li><a href="/policy/licensing"><strong>Licensing</strong></a><span>what each package is licensed under</span></li>
-<li><a href="/policy/transparency"><strong>Transparency</strong></a><span>what Codes stores, what it does not, and what works today</span></li></ul>`,
+<li><a href="/policy/transparency"><strong>Transparency</strong></a><span>what Codes stores, what it does not, and what works today</span></li></ul>
+<h2>Community</h2><ul class="cards">
+${governance.map((g) => html`<li><a href="/policy/${g.slug}"><strong>${g.title}</strong></a><span>${g.blurb}${g.draft ? ' (draft, pending owner review)' : ''}</span></li>`)}</ul>`,
     }));
+
+    for (const g of governance) {
+        r.get(`/policy/${g.slug}`, (req, res) => page(req, res, {
+            index: !g.draft, cache: PUBLIC_CACHE, title: g.title, crumbs: [{ label: 'Policy', href: '/policy' }, { label: g.title }],
+            body: html`<h1>${g.title}</h1>
+${g.draft ? notice(html`<strong>Draft — pending owner review.</strong> This is a proposal, not yet in effect. It takes effect when the owner of the OpenVibers organization approves it.`, 'warn') : ''}
+<article class="prose">${raw(markdown(g.body, { headingOffset: 0 }))}</article>
+<p class="muted small">Source: <a href="https://github.com/OpenVibers/OpenVibe.Codes/blob/main/${g.file}"><code>${g.file}</code></a>. Changes go through a pull request that the owner approves.</p>`,
+        }));
+    }
 
     r.get('/policy/rfc', (req, res) => page(req, res, {
         index: true, cache: PUBLIC_CACHE, title: 'Proposals and decisions', crumbs: [{ label: 'Policy', href: '/policy' }, { label: 'Proposals' }],
@@ -232,6 +269,7 @@ ${signedIn ? releaseActions(req, rel) : ''}
     r.get('/sitemap.xml', (req, res) => {
         const urls = ['/', '/docs', '/docs/contracts', '/docs/capabilities', '/docs/events', '/docs/services', '/docs/sdk', '/oauth', '/tools/webhooks', '/manifests/validate',
             '/policy', '/policy/rfc', '/policy/compatibility', '/policy/licensing', '/policy/transparency',
+            ...governance.filter((g) => !g.draft).map((g) => `/policy/${g.slug}`),
             ...docs.contracts.map((c) => `/docs/contracts/${c.id}`), ...docs.capabilities.map((c) => `/docs/capabilities/${c.id}`),
             ...docs.sdk.map((m) => `/docs/sdk/${m.slug}`), ...docs.adrs.map((a) => `/docs/adr/${a.id}`)];
         const x = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -243,4 +281,4 @@ ${signedIn ? releaseActions(req, rel) : ''}
 
 const statusBadge = (s) => badge(s, s === 'published' ? 'ok' : (s === 'revoked' ? 'bad' : (s === 'deprecated' ? 'warn' : '')));
 
-module.exports = { createPageRoutes, statusBadge };
+module.exports = { createPageRoutes, statusBadge, GOVERNANCE };

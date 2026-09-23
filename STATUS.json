@@ -24,7 +24,7 @@
     "Webhook tester for signature v1 and v2 (server or in-browser): decides as a receiver requiring v2 does, shows the timestamp's age and the ±300 s window, v1 shown but never deciding; signed sample deliveries carry v1, X-OpenVibe-Timestamp and v2",
     "Playgrounds (Media upload with media.object.upload, Events publish with events.app.publish) that run with the app's own token and refuse without the grant",
     "App and mod manifest validation; release metadata (draft, publish, deprecate, revoke) with codes.app.* events through the SDK outbox; trust tiers per ADR-013 (unreviewed, reviewed, first-party) as staff-set metadata, older names migrated at boot",
-    "Policy pages rendered from the published ADRs; licensing read from package metadata",
+    "Policy pages rendered from the published ADRs; licensing read from package metadata; governance pages (code of conduct, contributing, contributor ladder, moderation policy) rendered from the repository's Markdown",
     "Release API guarded by openvibe-contracts requireCapability (codes.release.manage, codes.release.read)",
     "Readiness (/api/ready), /release.json and loopback-only /metrics"
   ],
@@ -34,7 +34,7 @@
     "Billing sandbox, Chat bot and Realtime playgrounds; CLI and scaffolding; templates",
     "Consent screen for third-party production apps (a Network gap)",
     "No JSON-LD or llms.txt on the public pages",
-    "Governance material (contribution guide, code of conduct, contributor ladder, moderation policy) is not written"
+    "Governance material (code of conduct, contribution guide, contributor ladder, moderation policy) is written as drafts pending owner review: not in effect, not indexed"
   ],
   "capabilitiesRegistered": true,
   "serviceManifestRegistered": true,
