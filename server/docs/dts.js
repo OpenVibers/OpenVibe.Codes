@@ -51,6 +51,10 @@ function parseDts(source) {
         for (; j < src.length; j++) {
             const ch = src[j];
             if (inStr) { if (ch === inStr && src[j - 1] !== '\\') inStr = null; continue; }
+            // Comments inside a declaration (doc comments on interface members) may hold quotes or
+            // brackets ("the app's …"); skip them so they never open a string or change the depth.
+            if (ch === '/' && src[j + 1] === '*') { const end = src.indexOf('*/', j + 2); j = end < 0 ? src.length : end + 1; continue; }
+            if (ch === '/' && src[j + 1] === '/') { const nl = src.indexOf('\n', j); j = nl < 0 ? src.length : nl; continue; }
             if (ch === '\'' || ch === '"' || ch === '`') { inStr = ch; continue; }
             if (ch === '{' || ch === '(' || ch === '<' || ch === '[') { if (ch === '{') sawBrace = true; depth++; continue; }
             if (ch === '}' || ch === ')' || ch === ']' || (ch === '>' && src[j - 1] !== '=')) {
