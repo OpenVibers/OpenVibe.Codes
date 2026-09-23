@@ -2,7 +2,7 @@
 
 > The developer portal: projects and apps over OpenVibe.Network, scoped credentials, generated contract and SDK docs, OAuth and webhook tools, grant-respecting playgrounds, manifest validation and release metadata.
 
-**Status:** alpha (roadmap Wave 20). Runs and is tested against in-process stand-ins for Network, Events and Media. **Not deployed**; `openvibe.codes` still serves its placeholder from [OpenVibe.Sites](https://github.com/OpenVibers/OpenVibe.Sites). See [STATUS.json](STATUS.json) for exactly what works and what does not.
+**Status:** alpha (roadmap Wave 20). **Deployed and public since 2026-09-23:** `https://openvibe.codes` is served by this portal (openvibe-ovh, unit `openvibe-codes` on 127.0.0.1:4900 behind nginx), and the domain left [OpenVibe.Sites](https://github.com/OpenVibers/OpenVibe.Sites). The Network OAuth client `codes` is registered. Production use so far is nil (0 manifests, 0 releases, 0 playground runs). Tests run against in-process stand-ins for Network, Events and Media. See [STATUS.json](STATUS.json) for exactly what works and what does not.
 **Domain:** `openvibe.codes` · **Port:** 4900 · **Service id:** `codes`
 **Plan:** OpenVibe End-to-End Realignment & Implementation Plan, revision 3 (20 Sep 2026), §15.17, §24.2 (proof flow 6), §30; binding decision ADR-014 in OpenVibe.Contracts.
 **License:** AGPL-3.0 (same as every OpenVibe service).
@@ -58,9 +58,9 @@ In Network (`server/identity/principals.js` / `server/db/database.js`, as for co
 - OAuth client `codes`, name `OpenVibe.Codes`, redirect URI `https://openvibe.codes/auth/callback`.
 - Service grant `['codes', 'events.event.publish', 'openvibe.events', []]` (the outbox relay).
 
-The Codes service manifest, `codes.release.manage|read` and `codes.app-manifest@1` are released in openvibe-contracts (tag v0.27.0); the CI contracts check is blocking.
+The Codes service manifest, `codes.release.manage|read` and `codes.app-manifest@1` are released in openvibe-contracts (tag v0.27.0; this repository pins v0.28.0, same content); the CI contracts check is blocking.
 
-For the playgrounds to succeed end to end (not Codes' code; configuration elsewhere): Network `DEV_SANDBOX_AUDIENCES` including `openvibe.media` and `openvibe.events`, a staff-set allowance containing `media.object.upload` and `events.app.publish` for the project, a Media tenant keyed by the project id, and OpenVibe.Events serving `events.app.publish` for app tokens.
+For the playgrounds to succeed end to end (not Codes' code; configuration elsewhere): Network `DEV_SANDBOX_AUDIENCES` including `openvibe.media` and `openvibe.events`, a staff-set allowance containing `media.object.upload` and `events.app.publish` for the project, a Media tenant keyed by the project id, and OpenVibe.Events serving `events.app.publish` for app tokens. On 2026-09-23 these were in place on production: a sandbox app uploaded to Media (tenant `prj_…-sandbox`) and published and read app events through public endpoints. That run used curl, not the Codes playgrounds, and it is not yet a committed, repeatable check.
 
 ## Configuration
 
@@ -88,14 +88,14 @@ Tests: ADR-013 trust-tier migration; secrets never persisted or re-displayed; Ne
 
 ## Acceptance (must be true before "done")
 
-- A new external developer goes from account to a working Media, event and capability integration with only public docs, the SDK and scoped credentials — no loopback key. **Codes' part is built; the path end to end also needs the Network registration, sandbox audiences, a project Media tenant and a public events capability listed above.**
-- Credentials can be inspected, scoped, rotated and revoked. **Yes, through Network's API (tested against a stand-in).**
+- A new external developer goes from account to a working Media, event and capability integration with only public docs, the SDK and scoped credentials — no loopback key. **Partly shown: one production run on 2026-09-23 covered account, project, sandbox app, auto-approved grants, Media upload and app event publish/read with public endpoints (curl, not the SDK or the playgrounds). It is not committed as a repeatable check, and it did not cover webhook delivery to an external endpoint, publishing a release or revoking credentials.**
+- Credentials can be inspected, scoped, rotated and revoked. **Yes, through Network's API (tested against a stand-in; not yet used on production).**
 - The playground cannot exceed its project's grants. **Yes (tested).**
 - A published app or mod release carries compatibility and trust metadata. **Yes (tested).**
 
 ## Launch rule
 
-This repository does not make the product real, and the domain keeps its placeholder page on [OpenVibers/OpenVibe.Sites](https://github.com/OpenVibers/OpenVibe.Sites) until all of the following exist (plan §12.12): an owning runtime with health/readiness and observability (**done**); canonical identity/auth integration (**done in code; the OAuth client is not registered**); server-rendered public routes useful without JavaScript (**done**); real persistence and end-to-end workflows (**persistence done; end-to-end blocked on the items above**); capability and event registration against OpenVibe.Contracts (**released**); a migration/seed strategy (none needed: no data is imported; raw old developer keys are never imported), a security review and sitemap/robots behaviour (**sitemap and robots done**); acceptance tests proving the advertised functionality (**against stand-ins**). Roadmap binding: do not launch Codes as a developer portal while these paths are mocked.
+The domain keeps its placeholder page on [OpenVibers/OpenVibe.Sites](https://github.com/OpenVibers/OpenVibe.Sites) until all of the following exist (plan §12.12). **Codes left Sites on 2026-09-23 and serves `openvibe.codes`.** The items: an owning runtime with health/readiness and observability (**done**); canonical identity/auth integration (**done; the OAuth client `codes` is registered**); server-rendered public routes useful without JavaScript (**done**); real persistence and end-to-end workflows (**persistence done; the external-developer path ran once on production with curl, not yet through the portal**); capability and event registration against OpenVibe.Contracts (**released**); a migration/seed strategy (none needed: no data is imported; raw old developer keys are never imported), a security review and sitemap/robots behaviour (**sitemap and robots done; the security review is the threat notes below, self-authored**); acceptance tests proving the advertised functionality (**against stand-ins**). Roadmap binding: do not launch Codes as a developer portal while these paths are mocked.
 
 ### Threat notes
 

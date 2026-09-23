@@ -8,11 +8,11 @@
   "port": 4900,
   "domain": "openvibe.codes",
   "packages": [
-    "openvibe-contracts tag v0.27.0 (package.json 0.28.0)",
-    "openvibe-sdk v0.2.2",
+    "openvibe-contracts v0.28.0 (same content as tag v0.27.0; the latest contracts release is v0.29.0)",
+    "openvibe-sdk v0.3.1 (v0.4.0 is released; not adopted yet)",
     "openvibe-shared v1.3.0"
   ],
-  "summary": "The developer portal runs and is tested against in-process stand-ins for Network, Events and Media. It is not deployed, the OAuth client and grants it needs are not registered in Network yet, and openvibe.codes still serves the OpenVibe.Sites placeholder.",
+  "summary": "Deployed and public since 2026-09-23: https://openvibe.codes is served by this portal (openvibe-ovh, unit openvibe-codes on 127.0.0.1:4900 behind nginx, release a9371c3), and the domain left OpenVibe.Sites. Sign-in uses the registered Network OAuth client `codes` (PKCE S256); the principal `codes` holds events.event.publish and the Events relay is configured. It is barely used yet: production holds 0 manifests, 0 releases and 0 playground runs. The external-developer path (account, project, sandbox app, grants, Media upload, app events) was run once on production on 2026-09-23 with public endpoints and curl, not through these playgrounds; that check is not committed to a repository or CI.",
   "works": [
     "Sign-in with OpenVibe.Network (authorization code + PKCE S256), session tokens in httpOnly cookies",
     "Projects, members, apps, credentials (rotate, revoke), grants (request, approve, deny, revoke), quotas and audit over Network's /api/v1/projects API with the person's own token; Network's errors shown as Network answered them",
@@ -24,19 +24,21 @@
     "Playgrounds (Media upload with media.object.upload, Events publish with events.app.publish) that run with the app's own token and refuse without the grant",
     "App and mod manifest validation; release metadata (draft, publish, deprecate, revoke) with codes.app.* events through the SDK outbox; trust tiers per ADR-013 (unreviewed, reviewed, first-party) as staff-set metadata, older names migrated at boot",
     "Policy pages rendered from the published ADRs; licensing read from package metadata",
-    "Release API guarded by openvibe-contracts requireCapability (codes.release.manage, codes.release.read)"
+    "Release API guarded by openvibe-contracts requireCapability (codes.release.manage, codes.release.read)",
+    "Readiness (/api/ready), /release.json and loopback-only /metrics"
   ],
   "notYet": [
-    "Not deployed; the Network OAuth client `codes` and the events.event.publish grant are not registered",
-    "The Events playground needs Network to accept sandbox tokens for openvibe.events, events.app.publish in the project's allowance, and Events serving app tokens",
-    "The Media playground needs Network to accept sandbox tokens for openvibe.media (DEV_SANDBOX_AUDIENCES) and Media to have a tenant per project id; neither exists yet",
-    "No usage, trace or error dashboards: no service reports per-project usage yet",
-    "Billing sandbox, Chat bot and Realtime playgrounds; CLI and scaffolding; templates; project data export",
-    "Consent screen for third-party production apps (a Network gap)"
+    "Webhook tester verifies v1 signatures only; Events consumers now require v2 (X-OpenVibe-Signature-V2), which needs openvibe-sdk v0.4.0 here",
+    "The playgrounds have never been used on production (0 playground runs); the one production end-to-end run used curl, and it is not a committed, repeatable check",
+    "No usage, trace or error dashboards: no service reports per-project usage yet; quotas show recorded limits only",
+    "Billing sandbox, Chat bot and Realtime playgrounds; CLI and scaffolding; templates; project data export and delete",
+    "Consent screen for third-party production apps (a Network gap)",
+    "No JSON-LD or llms.txt on the public pages",
+    "Governance material (contribution guide, code of conduct, contributor ladder, moderation policy) is not written"
   ],
   "capabilitiesRegistered": true,
   "serviceManifestRegistered": true,
-  "deployed": false,
-  "placeholderInSites": true,
+  "deployed": true,
+  "placeholderInSites": false,
   "updated": "2026-09-23"
 }
