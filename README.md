@@ -47,7 +47,7 @@ Everything is server-rendered and usable without JavaScript. The only scripts of
 - **OpenVibe.Network** — SSO (OAuth client `codes`, PKCE S256), JWKS, `/api/v1/projects` (called server-side with the person's Network access token), the registry (`/api/v1/registry/services`, `/.well-known/openvibe`), client-credentials tokens (Codes' own for the events relay; the app's own in playgrounds).
 - **OpenVibe.Events** — the outbox relay publishes `codes.app.*` with Codes' service token (`events.event.publish`); the Events playground calls it with the app's token (`events.app.publish`).
 - **OpenVibe.Media** — the Media playground uploads with the app's token into the project's namespace.
-- **openvibe-contracts** v0.32.0, **openvibe-sdk v0.5.0**, **openvibe-shared v1.5.0** (pinned tag tarballs; the docs show the tag and the package version, and say so when they differ).
+- **openvibe-contracts** v0.33.0, **openvibe-sdk v0.5.0**, **openvibe-shared v1.5.1** (pinned tag tarballs; the docs show the tag and the package version, and say so when they differ).
 
 No path in Codes sends or accepts a shared loopback key (tested by grep and at runtime).
 
@@ -58,7 +58,7 @@ In Network (`server/identity/principals.js` / `server/db/database.js`, as for co
 - OAuth client `codes`, name `OpenVibe.Codes`, redirect URI `https://openvibe.codes/auth/callback`.
 - Service grant `['codes', 'events.event.publish', 'openvibe.events', []]` (the outbox relay).
 
-The Codes service manifest, `codes.release.manage|read` and `codes.app-manifest@1` are released in openvibe-contracts (tag v0.27.0; this repository pins v0.32.0); the CI contracts check is blocking.
+The Codes service manifest, `codes.release.manage|read` and `codes.app-manifest@1` are released in openvibe-contracts (tag v0.27.0; this repository pins v0.33.0); the CI contracts check is blocking.
 
 For the playgrounds to succeed end to end (not Codes' code; configuration elsewhere): Network `DEV_SANDBOX_AUDIENCES` including `openvibe.media` and `openvibe.events`, a staff-set allowance containing `media.object.upload` and `events.app.publish` for the project, a Media tenant keyed by the project id, and OpenVibe.Events serving `events.app.publish` for app tokens. On 2026-09-23 these were in place on production: a sandbox app uploaded to Media (tenant `prj_…-sandbox`) and published and read app events through public endpoints. That run used curl, not the Codes playgrounds, and it is not yet a committed, repeatable check.
 

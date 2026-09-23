@@ -8,9 +8,9 @@
   "port": 4900,
   "domain": "openvibe.codes",
   "packages": [
-    "openvibe-contracts v0.32.0",
+    "openvibe-contracts v0.33.0",
     "openvibe-sdk v0.5.0",
-    "openvibe-shared v1.5.0"
+    "openvibe-shared v1.5.1"
   ],
   "summary": "Deployed and public since 2026-09-23: https://openvibe.codes is served by this portal (openvibe-ovh, unit openvibe-codes on 127.0.0.1:4900 behind nginx, release a9371c3), and the domain left OpenVibe.Sites. Sign-in uses the registered Network OAuth client `codes` (PKCE S256); the principal `codes` holds events.event.publish and the Events relay is configured. It is barely used yet: production holds 0 manifests, 0 releases and 0 playground runs. The external-developer path (account, project, sandbox app, grants, Media upload, app events) was run once on production on 2026-09-23 with public endpoints and curl, not through these playgrounds; that check is not committed to a repository or CI.",
   "works": [
