@@ -1,7 +1,42 @@
 {
   "repository": "OpenVibers/OpenVibe.Codes",
-  "stage": "placeholder",
-  "code": false,
+  "stage": "alpha",
+  "code": true,
+  "wave": "W20",
   "plan": "OpenVibe End-to-End Realignment & Implementation Plan, revision 3 (20 Sep 2026)",
-  "updated": "2026-09-21"
+  "runtime": "node 22, express 4, better-sqlite3 11",
+  "port": 4900,
+  "domain": "openvibe.codes",
+  "packages": [
+    "openvibe-contracts v0.26.0",
+    "openvibe-sdk v0.2.2",
+    "openvibe-shared v1.3.0"
+  ],
+  "summary": "The developer portal runs and is tested against in-process stand-ins for Network, Events and Media. It is not deployed, the OAuth client and grants it needs are not registered in Network yet, and openvibe.codes still serves the OpenVibe.Sites placeholder.",
+  "works": [
+    "Sign-in with OpenVibe.Network (authorization code + PKCE S256), session tokens in httpOnly cookies",
+    "Projects, members, apps, credentials (rotate, revoke), grants (request, approve, deny, revoke), quotas and audit over Network's /api/v1/projects API with the person's own token; Network's errors shown as Network answered them",
+    "Client secrets shown once, in the create/rotate response only, with no-store; never stored or logged (tested)",
+    "Scope editor offering only capabilities apps can be granted (public, or partner when in the allowance)",
+    "Docs generated at boot from openvibe-contracts v0.26.0 and openvibe-sdk v0.2.2: contracts with field tables and fixtures, capability catalog, event types, SDK reference; service registry read live from Network with its health",
+    "OAuth callback helper and a test callback that never exchanges the code",
+    "Webhook signature verifier (server or in-browser) and signed sample deliveries for catalogued event types",
+    "Playgrounds (Media upload, Events publish) that run with the app's own token and refuse without the grant",
+    "App and mod manifest validation; release metadata (draft, publish, deprecate, revoke) with codes.app.* events through the SDK outbox; trust tiers as staff-set metadata",
+    "Policy pages rendered from the published ADRs; licensing read from package metadata"
+  ],
+  "notYet": [
+    "Not deployed; the Network OAuth client `codes` and the events.event.publish grant are not registered",
+    "The Events playground cannot run for any app: events.event.publish is internal in openvibe-contracts v0.26.0 and Network never grants it to apps",
+    "The Media playground needs Network to accept sandbox tokens for openvibe.media (DEV_SANDBOX_AUDIENCES) and Media to have a tenant per project id; neither exists yet",
+    "codes.release.manage and codes.release.read are proposals; until Contracts releases them no app can hold the release-management grant",
+    "No usage, trace or error dashboards: no service reports per-project usage yet",
+    "Billing sandbox, Chat bot and Realtime playgrounds; CLI and scaffolding; templates; project data export",
+    "Consent screen for third-party production apps (a Network gap)"
+  ],
+  "capabilitiesRegistered": false,
+  "serviceManifestRegistered": false,
+  "deployed": false,
+  "placeholderInSites": true,
+  "updated": "2026-09-22"
 }

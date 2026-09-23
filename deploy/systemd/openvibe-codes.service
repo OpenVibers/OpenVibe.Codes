@@ -1,0 +1,32 @@
+[Unit]
+Description=OpenVibe.Codes — the developer portal (projects over Network's API, generated docs, tools, release metadata)
+# Network (sign-in, JWKS, the projects API, registry, tokens) and Events (the outbox relay) should be
+# up first, but Codes degrades honestly without them: docs, tools and policy pages serve; project
+# pages show Network's failure; events wait in the outbox (see /api/ready).
+After=network.target
+Wants=openvibe-network.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/openvibe.codes
+EnvironmentFile=/etc/openvibe/codes.env
+Environment=NODE_ENV=production
+Environment=PORT=4900
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env node /opt/openvibe.codes/server/index.js
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# Codes' own database lives in /var/lib/openvibe-codes; the code tree stays read-only.
+StateDirectory=openvibe-codes
+Environment=CODES_DB_PATH=/var/lib/openvibe-codes/codes.db
+
+[Install]
+WantedBy=multi-user.target

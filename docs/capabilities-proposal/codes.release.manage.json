@@ -1,0 +1,19 @@
+{
+  "id": "codes.release.manage",
+  "version": "1.0",
+  "owner": "codes",
+  "status": "active",
+  "visibility": "public",
+  "description": "An app manages release metadata for ITSELF with its own token (audience openvibe.codes): create a release from a validated app or mod manifest, publish, deprecate (with a reason and an optional replacement) and revoke it. The token's sub must be app:<the app in the path>; people manage releases in the portal with their project role instead. Trust tiers are not part of this capability (staff metadata only).",
+  "inputSchema": "codes.app-manifest@1",
+  "permissions": ["codes:releases:write"],
+  "resourceConstraints": ["owner", "project"],
+  "quotaClass": "codes-release-write",
+  "events": ["codes.app.published", "codes.app.deprecated", "codes.app.revoked"],
+  "implementedBy": [
+    "POST /api/v1/apps/:app/releases",
+    "POST /api/v1/releases/:id/publish",
+    "POST /api/v1/releases/:id/deprecate",
+    "POST /api/v1/releases/:id/revoke"
+  ]
+}

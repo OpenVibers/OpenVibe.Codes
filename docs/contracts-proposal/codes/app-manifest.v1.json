@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openvibe.network/contracts/codes/app-manifest.v1.json",
+  "title": "AppManifest",
+  "description": "PROPOSAL (OpenVibe.Codes, roadmap Wave 20): an app release as the platform knows it. The app is a Network developer app (ADR-014): its id is the Network app id, its capabilities are only a request (the grants in Network are the authority), and trust tiers are metadata that never change a grant check. OpenVibe.Codes validates with this schema, loaded into openvibe-contracts' validator, until Contracts publishes it as codes.app-manifest@1.",
+  "type": "object",
+  "required": ["id", "name", "version", "publisher", "project_id", "capabilities", "compatibility"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^app_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "The Network app id (its client_id). Its principal subject is app:<id>."
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$",
+      "description": "Semantic version of this release."
+    },
+    "description": { "type": "string", "maxLength": 1000 },
+    "publisher": {
+      "$ref": "../identity/subject-ref.v1.json",
+      "description": "Who publishes the release: the app itself or a member of its project."
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "The Network project that owns the app. Tenancy in other services is keyed by it (ADR-014)."
+    },
+    "environment": { "enum": ["sandbox", "production"], "description": "The app's environment. Apps never change environment." },
+    "capabilities": {
+      "description": "Capability ids the app asks for (3+ segments). Only active public (or partner, by staff allowance) capabilities can ever be granted to apps.",
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+){2,}$" }
+    },
+    "events": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "consumes": {
+          "description": "Event types (or a trailing .* family) the app subscribes to.",
+          "type": "array", "maxItems": 64, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+)*(\\.\\*)?$" }
+        }
+      }
+    },
+    "redirect_uris": {
+      "description": "Informational copy of the redirect URIs registered in Network (Network's list is the authority).",
+      "type": "array", "maxItems": 10, "uniqueItems": true,
+      "items": { "type": "string", "maxLength": 500 }
+    },
+    "homepage": { "type": "string", "pattern": "^https://[^\\s]{1,2000}$" },
+    "repository": { "type": "string", "pattern": "^https://[^\\s]{1,2000}$" },
+    "license": { "type": "string", "minLength": 1, "maxLength": 100, "description": "SPDX license expression." },
+    "compatibility": {
+      "type": "object",
+      "required": ["contracts"],
+      "additionalProperties": false,
+      "properties": {
+        "contracts": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Semver range of openvibe-contracts releases it was built against." },
+        "sdk": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Semver range of openvibe-sdk releases it uses." }
+      }
+    }
+  }
+}
