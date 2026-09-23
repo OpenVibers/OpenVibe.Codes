@@ -3,7 +3,9 @@
 /**
  * Playgrounds that cannot exceed the project's grants (ADR-014 acceptance).
  *
- *   events   publish one test event            needs events.event.publish   (audience openvibe.events)
+ *   events   publish one test event            needs events.app.publish     (audience openvibe.events;
+ *                                                                              type app.<project_key>.…,
+ *                                                                              source app-<app ulid>)
  *   media    upload one small file (sandbox)   needs media.object.upload    (audience openvibe.media,
  *                                                                              namespace = project id)
  *
@@ -33,7 +35,7 @@ const contractsVersion = require('openvibe-contracts/package.json').version;
 
 const KINDS = {
     // `needs`: the capability the APP must hold (owned by Events / Media; Codes guards nothing with it).
-    events: { needs: 'events.event.publish', audience: 'openvibe.events', label: 'Events: publish a test event' },
+    events: { needs: 'events.app.publish', audience: 'openvibe.events', label: 'Events: publish a test event' },
     media: { needs: 'media.object.upload', audience: 'openvibe.media', label: 'Media: upload a file to the sandbox' },
 };
 
@@ -42,6 +44,14 @@ function scrub(text, secrets) {
     for (const x of secrets) if (x && x.length >= 8) s = s.split(x).join('[redacted]');
     return s.replace(/ovsec_[A-Za-z0-9_-]+/g, '[redacted]').replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted token]');
 }
+
+/**
+ * What events.app.publish allows an app (openvibe-contracts): types app.<project_key>.<name>[…]
+ * where project_key is 'p' + the project's ULID in lowercase, and source 'app-' + the app's ULID
+ * in lowercase.
+ */
+const projectKey = (projectId) => `p${String(projectId).replace(/^prj_/, '').toLowerCase()}`;
+const appSource = (appId) => `app-${String(appId).replace(/^app_/, '').toLowerCase()}`;
 
 /** Why a capability is not granted, from the pinned catalog. */
 function grantAdvice(capability) {
@@ -92,11 +102,14 @@ function createPlayground({ store, config, network, keys, fetchImpl, log = conso
             try { payload = JSON.parse(raw); } catch (err) { return { error: `payload is not JSON: ${err.message.slice(0, 120)}` }; }
             if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return { error: 'payload must be a JSON object' };
         }
+        const eventType = String(input.event_type || '').trim();
+        const prefix = `app.${projectKey(input.projectId)}.`;
+        if (!eventType.startsWith(prefix) || eventType.length === prefix.length) return { error: `this app may publish only event types starting with ${prefix} (events.app.publish)` };
         const envelope = {
             event_id: contracts.ids.newId('event', store.now()),
-            event_type: String(input.event_type || '').trim(),
+            event_type: eventType,
             version: 1,
-            source: String(input.source || '').trim(),
+            source: appSource(input.appId),
             actor: { type: 'app', id: input.appId },
             timestamp: new Date(store.now()).toISOString(),
             visibility: 'internal',
@@ -160,7 +173,7 @@ function createPlayground({ store, config, network, keys, fetchImpl, log = conso
 
         let envelope = null;
         if (kind === 'events') {
-            const e = eventInput({ ...input, appId: app.id });
+            const e = eventInput({ ...input, appId: app.id, projectId: app.project_id });
             if (e.error) return finish({ outcome: 'refused', stage: 'input', code: 'playground.invalid_input', detail: e.error });
             envelope = e.envelope;
         } else {
@@ -197,7 +210,7 @@ function createPlayground({ store, config, network, keys, fetchImpl, log = conso
         }
     }
 
-    return { run, precheck, runsFor, grantAdvice, KINDS };
+    return { run, precheck, runsFor, grantAdvice, KINDS, projectKey, appSource };
 }
 
-module.exports = { createPlayground, KINDS, grantAdvice, scrub };
+module.exports = { createPlayground, KINDS, grantAdvice, scrub, projectKey, appSource };

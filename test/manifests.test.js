@@ -72,12 +72,14 @@ const PRJ = 'prj_01JABCDEFGHJKMNPQRSTVWXYZ0';
         assert.ok(ungranted.warnings.some((w) => /not granted to this app yet/.test(w.message)));
     });
 
-    await check('the app manifest schema is loaded into openvibe-contracts\' validator (proposal until released)', async () => {
-        const info = manifests.appSchemaInfo();
-        assert.strictEqual(info.id, 'codes.app-manifest');
-        assert.strictEqual(info.released, false);
+    await check('app manifests validate as the released codes.app-manifest@1, fixtures included', async () => {
+        assert.strictEqual(manifests.SCHEMAS.app, 'codes.app-manifest@1');
+        const dir = path.join(path.dirname(require.resolve('openvibe-contracts/package.json')), 'fixtures', 'codes.app-manifest');
+        for (const f of fs.readdirSync(path.join(dir, 'valid'))) assert.deepStrictEqual(manifests.validate('app', read(path.join(dir, 'valid', f))).errors.filter((e) => !/not in openvibe-contracts|never granted/.test(e.message)), [], f);
+        for (const f of fs.readdirSync(path.join(dir, 'invalid'))) assert.strictEqual(manifests.validate('app', read(path.join(dir, 'invalid', f))).valid, false, f);
         const v = manifests.validate('app', { ...manifests.template('app'), publisher: { type: 'nobody', id: 'x' } });
         assert.ok(v.errors.some((e) => e.path.startsWith('/publisher')), 'the $ref to identity.subject-ref resolves');
+        assert.strictEqual(v.schema.id, 'codes.app-manifest');
     });
 
     const t = await boot();

@@ -134,14 +134,12 @@ ${v.parsed && v.parsed.note ? html`<dt>Body</dt><dd>${v.parsed.note}</dd>` : ''}
     });
 
     // ── Manifest validator ──────────────────────────────────
-    const info = manifests.appSchemaInfo();
     const validatorPage = (req, res, { status = 200, kind = 'app', text = null, result = null, parseError = null } = {}) => send(res, status, {
         viewer: req.viewer, config, path: '/manifests/validate', title: 'Manifest validator', index: true,
         crumbs: [{ label: 'Manifests' }],
         body: html`<h1>Manifest validator</h1>
 <p>Checks an app manifest or a mod manifest with <code>openvibe-contracts v${docs.contractsVersion}</code>: the JSON Schema first, then that every requested capability exists and can be granted to apps, that version ranges parse, and that consumed events are produced by someone. Nothing is stored. To publish a release, open your app's page.</p>
-<ul class="plain small muted"><li>mod: <a href="/docs/contracts/mods.mod-manifest"><code>mods.mod-manifest@1</code></a> (released)</li>
-<li>app: <code>${info.id}@1</code> ${info.released ? '(released)' : html`— a proposal Codes validates with until Contracts releases it (<a href="https://github.com/OpenVibers/OpenVibe.Codes/blob/main/docs/contracts-proposal/codes/app-manifest.v1.json">schema</a>)`}</li></ul>
+<ul class="plain small muted"><li>app: <a href="/docs/contracts/codes.app-manifest"><code>codes.app-manifest@1</code></a></li><li>mod: <a href="/docs/contracts/mods.mod-manifest"><code>mods.mod-manifest@1</code></a></li></ul>
 <form method="post" action="/manifests/validate" class="stack">
 <label>Kind <select name="kind"><option value="app"${kind === 'app' ? raw(' selected') : ''}>app</option><option value="mod"${kind === 'mod' ? raw(' selected') : ''}>mod</option></select></label>
 <label>Manifest (JSON) <textarea name="manifest" rows="18" spellcheck="false">${text != null ? text : JSON.stringify(manifests.template(kind), null, 2)}</textarea></label>

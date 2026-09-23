@@ -3,47 +3,21 @@
 /**
  * Manifest validation with openvibe-contracts.
  *
- *   mod   mods.mod-manifest@1 from the pinned openvibe-contracts (contracts.validate)
- *   app   codes.app-manifest@1 — published by Contracts once released; until then the proposal in
- *         docs/contracts-proposal/codes/app-manifest.v1.json, compiled into openvibe-contracts' own
- *         Ajv instance so its $refs resolve to the released identity schemas
+ *   mod   mods.mod-manifest@1
+ *   app   codes.app-manifest@1
  *
  * Schema errors come first; then checks the schema cannot express, against the pinned catalog:
  * every requested capability must exist and be grantable to apps (active + public/partner), ranges
  * must parse, consumed events should be produced by someone. With an app context (a release), the
  * manifest must also describe THAT app: same id, project and environment.
  */
-const fs = require('fs');
-const path = require('path');
 const contracts = require('openvibe-contracts');
-const contractsRegistry = require('openvibe-contracts/lib/registry');
 const { satisfiesRange } = require('openvibe-sdk/core');
 const { GRANTABLE_VISIBILITIES } = require('../docs/generate');
 
 const contractsVersion = require('openvibe-contracts/package.json').version;
 const sdkVersion = require('openvibe-sdk/package.json').version;
-const APP_SCHEMA_FILE = path.join(__dirname, '..', '..', 'docs', 'contracts-proposal', 'codes', 'app-manifest.v1.json');
-
-let appValidator = null;
-let appSchemaSource = null;
-function appSchema() {
-    if (appValidator) return appValidator;
-    try {
-        const entry = contracts.resolve('codes.app-manifest@1');
-        appSchemaSource = { released: true, id: entry.id, version: entry.version };
-        appValidator = (value) => contracts.validate('codes.app-manifest@1', value);
-    } catch {
-        const schema = JSON.parse(fs.readFileSync(APP_SCHEMA_FILE, 'utf8'));
-        const { ajv } = contractsRegistry;
-        const fn = ajv.getSchema(schema.$id) || (ajv.addSchema(schema), ajv.getSchema(schema.$id));
-        appSchemaSource = { released: false, id: 'codes.app-manifest', version: '1.0.0 (proposal)' };
-        appValidator = (value) => {
-            const valid = fn(value);
-            return { valid, errors: valid ? [] : fn.errors.map((e) => ({ path: e.instancePath || '/', message: e.message })) };
-        };
-    }
-    return appValidator;
-}
+const SCHEMAS = { app: 'codes.app-manifest@1', mod: 'mods.mod-manifest@1' };
 
 function rangeError(range) {
     try { satisfiesRange('0.0.0', range); return null; } catch (err) { return err.message; }
@@ -80,7 +54,7 @@ function template(kind, { appId, projectId, environment, name, subject } = {}) {
 /**
  * validate(kind, manifest, { app, viewerSubject, eventTypes })
  *   app: the Network app view (id, project_id, environment, grants) when validating for a release
- * → { valid, errors: [{ path, message }], warnings: [{ path, message }], schema: { id, version, released } }
+ * → { valid, errors: [{ path, message }], warnings: [{ path, message }], schema: { id, version } }
  */
 function validate(kind, manifest, { app = null, viewerSubject = null, eventTypes = null } = {}) {
     const errors = [];
@@ -89,17 +63,10 @@ function validate(kind, manifest, { app = null, viewerSubject = null, eventTypes
     if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
         return { valid: false, errors: [{ path: '/', message: 'a manifest is a JSON object' }], warnings, schema: null };
     }
-    let schema;
-    if (kind === 'mod') {
-        const r = contracts.validate('mods.mod-manifest@1', manifest);
-        errors.push(...r.errors);
-        const e = contracts.resolve('mods.mod-manifest@1');
-        schema = { id: e.id, version: e.version, released: true };
-    } else {
-        const r = appSchema()(manifest);
-        errors.push(...r.errors);
-        schema = appSchemaSource;
-    }
+    const r = contracts.validate(SCHEMAS[kind], manifest);
+    errors.push(...r.errors);
+    const entry = contracts.resolve(SCHEMAS[kind]);
+    const schema = { id: entry.id, version: entry.version };
 
     // Requested capabilities: must exist in the pinned catalog and be grantable to apps.
     const requested = kind === 'mod'
@@ -164,4 +131,4 @@ function parse(text) {
     try { return { manifest: JSON.parse(s) }; } catch (err) { return { error: `not valid JSON: ${err.message.slice(0, 200)}` }; }
 }
 
-module.exports = { validate, parse, template, appSchemaInfo: () => (appSchema(), appSchemaSource), APP_SCHEMA_FILE };
+module.exports = { validate, parse, template, SCHEMAS };

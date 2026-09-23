@@ -14,7 +14,7 @@ A place where a developer outside the network goes from an OpenVibe account to a
 ## Owns
 
 - **Release metadata** keyed to Network app ids: validated app and mod manifests, releases (`draft → published → deprecated → revoked`), an append-only release log.
-- **Trust tiers** (`untrusted`, `verified`, `trusted`, `platform-maintained`) — **metadata only**; a tier never grants, allows or bypasses anything.
+- **Trust tiers** per ADR-013 (`unreviewed`, `reviewed`, `first-party`) — **metadata only**: a tier changes defaults and discovery, never a grant check. Databases written with the earlier four names are migrated at boot (untrusted→unreviewed, verified/trusted→reviewed, platform-maintained→first-party), idempotently.
 - **Playground run logs** (who ran what, outcome, stage, problem code; never a credential).
 - The events `codes.app.published`, `codes.app.deprecated`, `codes.app.revoked` (through the openvibe-sdk transactional outbox).
 - The generated reference (rendered from the pinned packages at boot; nothing hand-written that can drift) and the portal's pages.
@@ -34,10 +34,10 @@ A place where a developer outside the network goes from an OpenVibe account to a
 | OAuth helper | `/oauth`, `/oauth/test-callback` | Explains authorization code + PKCE (S256) for apps, builds a test authorize URL, and a callback that shows `code`/`state`/`error` and **never exchanges** the code. |
 | Webhook tools | `/tools/webhooks` | Verify `X-OpenVibe-Signature: sha256=<HMAC>` against a raw body (in the browser with Web Crypto, or on the server without JavaScript, constant-time, secret dropped); generate a signed sample delivery for any event type the contracts catalog lists. |
 | Docs | `/docs/*` | Contracts (field tables, fixtures as examples, raw schema), capability catalog (grantable ones highlighted), event types, SDK reference from its `.d.ts` files, ADRs. Every page states the versions it was generated from. The service registry is read live from Network, with health as Network reports it. |
-| Playgrounds | `/projects/:project/apps/:app/playground` | Media upload (sandbox) and Events publish, run **as the app** with its own token (from its secret typed for that one request, or a pasted token). Refused — with the missing grant named, and nothing requested or called — unless Network lists the grant as approved. Sandbox apps only. |
-| Manifests | `/manifests/validate`, `/projects/:project/apps/:app/releases/new` | Validate `mods.mod-manifest@1` and app manifests with openvibe-contracts; create, publish, deprecate and revoke releases. |
+| Playgrounds | `/projects/:project/apps/:app/playground` | Media upload (sandbox, `media.object.upload`) and Events publish (`events.app.publish`: types `app.<project_key>.*`, source `app-<app ULID>`), run **as the app** with its own token (from its secret typed for that one request, or a pasted token). Refused — with the missing grant named, and nothing requested or called — unless Network lists the grant as approved. Sandbox apps only. |
+| Manifests | `/manifests/validate`, `/projects/:project/apps/:app/releases/new` | Validate `codes.app-manifest@1` and `mods.mod-manifest@1` with openvibe-contracts; create, publish, deprecate and revoke releases. |
 | Policy | `/policy/*` | Proposal process and the decision record; compatibility and deprecation policy rendered from ADR-002 and ADR-016 as published; licensing read from package metadata; transparency (what Codes stores and does not). |
-| API | `/api/v1/*` | Public release reads, manifest validation, docs versions; release management by an app with its own token (`codes.release.manage`, proposed). RFC 9457 problems. |
+| API | `/api/v1/*` | Public release reads (`codes.release.read`: no token needed; a presented token must hold it), manifest validation, docs versions; release management by an app with its own token (`codes.release.manage`). Guarded with openvibe-contracts `requireCapability`. RFC 9457 problems. |
 | Machine | `/api/health`, `/api/ready`, `/release.json`, `/metrics` | Readiness is truthful (db and docs required; Network, JWKS, OAuth client and events relay reported as optional checks). `/metrics` answers loopback callers only. |
 
 Everything is server-rendered and usable without JavaScript. The only scripts of Codes' own are optional: in-browser webhook verification and a copy button.
@@ -45,9 +45,9 @@ Everything is server-rendered and usable without JavaScript. The only scripts of
 ## Depends on
 
 - **OpenVibe.Network** — SSO (OAuth client `codes`, PKCE S256), JWKS, `/api/v1/projects` (called server-side with the person's Network access token), the registry (`/api/v1/registry/services`, `/.well-known/openvibe`), client-credentials tokens (Codes' own for the events relay; the app's own in playgrounds).
-- **OpenVibe.Events** — the outbox relay publishes `codes.app.*` with Codes' service token (`events.event.publish`); the Events playground calls it with the app's token.
+- **OpenVibe.Events** — the outbox relay publishes `codes.app.*` with Codes' service token (`events.event.publish`); the Events playground calls it with the app's token (`events.app.publish`).
 - **OpenVibe.Media** — the Media playground uploads with the app's token into the project's namespace.
-- **openvibe-contracts v0.26.0**, **openvibe-sdk v0.2.2**, **openvibe-shared v1.3.0** (pinned tag tarballs).
+- **openvibe-contracts** tag v0.27.0 (its package.json says 0.28.0; the docs show both), **openvibe-sdk v0.2.2**, **openvibe-shared v1.3.0** (pinned tag tarballs).
 
 No path in Codes sends or accepts a shared loopback key (tested by grep and at runtime).
 
@@ -58,9 +58,9 @@ In Network (`server/identity/principals.js` / `server/db/database.js`, as for co
 - OAuth client `codes`, name `OpenVibe.Codes`, redirect URI `https://openvibe.codes/auth/callback`.
 - Service grant `['codes', 'events.event.publish', 'openvibe.events', []]` (the outbox relay).
 
-In OpenVibe.Contracts (next release): the service manifest `docs/service-manifest-proposal.json`, the capabilities in `docs/capabilities-proposal/`, and the contract `codes.app-manifest@1` from `docs/contracts-proposal/`.
+The Codes service manifest, `codes.release.manage|read` and `codes.app-manifest@1` are released in openvibe-contracts (tag v0.27.0); the CI contracts check is blocking.
 
-For the playgrounds to succeed end to end (not Codes' code; configuration elsewhere): Network `DEV_SANDBOX_AUDIENCES` including `openvibe.media` (and `openvibe.events`), a staff-set allowance containing `media.object.upload` for the project, and a Media tenant keyed by the project id. `events.event.publish` is `internal` in contracts v0.26.0, so no app can publish events until Events publishes a public capability; the playground says so.
+For the playgrounds to succeed end to end (not Codes' code; configuration elsewhere): Network `DEV_SANDBOX_AUDIENCES` including `openvibe.media` and `openvibe.events`, a staff-set allowance containing `media.object.upload` and `events.app.publish` for the project, a Media tenant keyed by the project id, and OpenVibe.Events serving `events.app.publish` for app tokens.
 
 ## Configuration
 
@@ -84,7 +84,7 @@ fnm exec --using=22.22.1 npm run dev       # http://localhost:4900
 npx openvibe-contracts-check --service codes --src server
 ```
 
-Tests: secrets never persisted or re-displayed; Network errors surfaced honestly (404/403/409/422/503, unreachable, expired session refresh); scope editor offers only grantable capabilities and refuses forged requests before Network sees them; generated docs match the pinned versions (every contract, capability, event type, SDK module); webhook verification (tampering, prefixes, lengths, constant-time); playgrounds refuse without the grant and call nothing; manifest validation; release lifecycle and events; no internal key anywhere; PKCE sign-in; readiness, release.json, loopback metrics; proposals valid against the contract schemas.
+Tests: ADR-013 trust-tier migration; secrets never persisted or re-displayed; Network errors surfaced honestly (404/403/409/422/503, unreachable, expired session refresh); scope editor offers only grantable capabilities and refuses forged requests before Network sees them; generated docs match the pinned versions (every contract, capability, event type, SDK module); webhook verification (tampering, prefixes, lengths, constant-time); playgrounds refuse without the grant and call nothing; manifest validation; release lifecycle and events; no internal key anywhere; PKCE sign-in; readiness, release.json, loopback metrics; the released codes manifest matching the code.
 
 ## Acceptance (must be true before "done")
 
@@ -95,7 +95,7 @@ Tests: secrets never persisted or re-displayed; Network errors surfaced honestly
 
 ## Launch rule
 
-This repository does not make the product real, and the domain keeps its placeholder page on [OpenVibers/OpenVibe.Sites](https://github.com/OpenVibers/OpenVibe.Sites) until all of the following exist (plan §12.12): an owning runtime with health/readiness and observability (**done**); canonical identity/auth integration (**done in code; the OAuth client is not registered**); server-rendered public routes useful without JavaScript (**done**); real persistence and end-to-end workflows (**persistence done; end-to-end blocked on the items above**); capability and event registration against OpenVibe.Contracts (**proposed, not released**); a migration/seed strategy (none needed: no data is imported; raw old developer keys are never imported), a security review and sitemap/robots behaviour (**sitemap and robots done**); acceptance tests proving the advertised functionality (**against stand-ins**). Roadmap binding: do not launch Codes as a developer portal while these paths are mocked.
+This repository does not make the product real, and the domain keeps its placeholder page on [OpenVibers/OpenVibe.Sites](https://github.com/OpenVibers/OpenVibe.Sites) until all of the following exist (plan §12.12): an owning runtime with health/readiness and observability (**done**); canonical identity/auth integration (**done in code; the OAuth client is not registered**); server-rendered public routes useful without JavaScript (**done**); real persistence and end-to-end workflows (**persistence done; end-to-end blocked on the items above**); capability and event registration against OpenVibe.Contracts (**released**); a migration/seed strategy (none needed: no data is imported; raw old developer keys are never imported), a security review and sitemap/robots behaviour (**sitemap and robots done**); acceptance tests proving the advertised functionality (**against stand-ins**). Roadmap binding: do not launch Codes as a developer portal while these paths are mocked.
 
 ### Threat notes
 

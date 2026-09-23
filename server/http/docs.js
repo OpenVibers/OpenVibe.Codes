@@ -23,9 +23,10 @@ function createDocsRoutes(ctx) {
     const r = asyncRouter();
     const PUBLIC_CACHE = 'public, max-age=300';
 
+    const tagNote = (tag, version) => (tag !== `v${version}` ? html` (tag ${tag})` : '');
     const versions = () => html`<p class="versions">Generated at ${time(docs.generatedAt)} from
-<a href="https://github.com/OpenVibers/OpenVibe.Contracts/tree/v${docs.contractsVersion}"><code>openvibe-contracts v${docs.contractsVersion}</code></a> and
-<a href="https://github.com/OpenVibers/OpenVibe.SDK/tree/v${docs.sdkVersion}"><code>openvibe-sdk v${docs.sdkVersion}</code></a>.</p>`;
+<a href="https://github.com/OpenVibers/OpenVibe.Contracts/tree/${docs.contractsTag}"><code>openvibe-contracts v${docs.contractsVersion}</code></a>${tagNote(docs.contractsTag, docs.contractsVersion)} and
+<a href="https://github.com/OpenVibers/OpenVibe.SDK/tree/${docs.sdkTag}"><code>openvibe-sdk v${docs.sdkVersion}</code></a>${tagNote(docs.sdkTag, docs.sdkVersion)}.</p>`;
     const page = (req, res, o, status = 200) => send(res, status, { index: true, cache: PUBLIC_CACHE, viewer: req.viewer, config, path: req.originalUrl, ...o });
 
     r.get('/', (req, res) => {
@@ -45,8 +46,8 @@ function createDocsRoutes(ctx) {
 <li><a href="/policy/rfc"><strong>Decisions</strong></a><span>${docs.adrs.length} architecture decision records</span></li>
 </ul>
 <h2>Install</h2>
-<pre><code>npm install https://codeload.github.com/OpenVibers/OpenVibe.SDK/tar.gz/refs/tags/v${docs.sdkVersion}
-npm install https://codeload.github.com/OpenVibers/OpenVibe.Contracts/tar.gz/refs/tags/v${docs.contractsVersion}</code></pre>
+<pre><code>npm install https://codeload.github.com/OpenVibers/OpenVibe.SDK/tar.gz/refs/tags/${docs.sdkTag}
+npm install https://codeload.github.com/OpenVibers/OpenVibe.Contracts/tar.gz/refs/tags/${docs.contractsTag}</code></pre>
 <p>The SDK is ${docs.sdkLicense}; the contracts are ${docs.contractsLicense}. The SDK release is tested against contracts <code>${docs.sdkContractsRange || 'n/a'}</code>.</p>`,
         });
     });

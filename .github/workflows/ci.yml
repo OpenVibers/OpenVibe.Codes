@@ -15,8 +15,6 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: for f in $(find server public/js test -name '*.js'); do node --check "$f"; done
       - run: npm test
-      # Codes' service manifest, its capabilities and codes.app-manifest@1 are proposals (docs/) until
-      # the lead releases them in openvibe-contracts; until then the check reports the placeholder
-      # manifest's range and the unreleased contract, so it does not fail the build.
+      # Blocking: the codes manifest, codes.release.manage|read and codes.app-manifest@1 are released
+      # (openvibe-contracts tag v0.27.0).
       - run: npx openvibe-contracts-check --service codes --src server
-        continue-on-error: true

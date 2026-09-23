@@ -7,7 +7,7 @@
  *   - with the grant: the app's own token (from its secret, or pasted) is used through the SDK
  *   - a pasted token for another app, another audience or without the capability is refused
  *   - the Network refusing the token request surfaces as Network said it
- *   - events.event.publish is internal in contracts v0.26.0: the page says it can never be granted
+ *   - the Events playground uses events.app.publish: app.<project_key>.* types, source app-<ulid>
  */
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/boot');
@@ -18,6 +18,7 @@ const { boot, check, done } = require('./helpers/boot');
     const projectId = await t.project(owner, 'Play');
     const app = await t.app(owner, projectId);
     const base = `/projects/${projectId}/apps/${app.id}`;
+    const key = `p${projectId.replace(/^prj_/, '').toLowerCase()}`;
     const media = (fields, file = { name: 'a.txt', content: 'hello' }) => t.get(`${base}/playground/media`, { as: owner, multipart: { fields, file } });
     const outside = () => ({
         token: t.network.tokenRequests.filter((x) => x.client_id === app.id).length,
@@ -37,11 +38,12 @@ const { boot, check, done } = require('./helpers/boot');
         assert.ok(!page.text.includes(`action="${base}/playground/media"`), 'no upload form without the grant');
     });
 
-    await check('the events playground explains that events.event.publish is never granted to apps', async () => {
+    await check('without events.app.publish: refused, the grant named, nothing requested or called', async () => {
         const before = outside();
-        const r = await t.get(`${base}/playground/events`, { as: owner, form: { event_type: 'play.thing.done', source: 'play', credential_type: 'client_secret', credential: app.secret } });
+        const r = await t.get(`${base}/playground/events`, { as: owner, form: { event_type: `app.${key}.test.ping`, credential_type: 'client_secret', credential: app.secret } });
         assert.strictEqual(r.status, 403);
-        assert.match(r.text, /events\.event\.publish is internal in openvibe-contracts 0\.26\.0/);
+        assert.match(r.text, /does not hold events\.app\.publish/);
+        assert.match(r.text, /Request events\.app\.publish on the app page/);
         assert.deepStrictEqual(outside(), before);
     });
 
@@ -146,23 +148,27 @@ const { boot, check, done } = require('./helpers/boot');
         assert.match(r.text, /project\.not_found/);
     });
 
-    await check('the events path publishes through the SDK when an app does hold the grant (future public capability)', async () => {
-        // No app can hold events.event.publish today (internal); exercise the path with an app view
-        // as Network would report it once a publish capability is grantable.
-        const view = { id: app.id, project_id: projectId, environment: 'sandbox', grants: ['events.event.publish'], revoked_at: null };
-        const token = t.network.mintApp(app.id, 'openvibe.events', ['events.event.publish']);
-        const out = await t.ctx.playground.run({
-            actor: `user:${owner.subject}`, app: view, kind: 'events', credential: { type: 'access_token', value: token },
-            input: { event_type: 'play.thing.done', source: 'play', payload: '{"n":1}' },
-        });
-        assert.strictEqual(out.outcome, 'ok', JSON.stringify(out));
+    await check('with events.app.publish: publishes as the app, with its source and project-scoped type', async () => {
+        await t.grant(owner, projectId, app.id, 'events.app.publish');
+        const r = await t.get(`${base}/playground/events`, { as: owner, form: { event_type: `app.${key}.test.ping`, payload: '{"n":1}', credential_type: 'client_secret', credential: app.secret } });
+        assert.strictEqual(r.status, 200, r.text.slice(0, 600));
+        assert.match(r.text, /Done\./);
         assert.strictEqual(t.events.published.length, 1);
-        assert.strictEqual(t.events.published[0].sub, `app:${app.id}`);
-        assert.strictEqual(t.events.published[0].event.event_type, 'play.thing.done');
-        const bad = await t.ctx.playground.run({ actor: `user:${owner.subject}`, app: view, kind: 'events', credential: { type: 'access_token', value: token }, input: { event_type: 'two.segments', source: 'play' } });
-        assert.strictEqual(bad.outcome, 'refused');
-        assert.strictEqual(bad.stage, 'input');
-        assert.strictEqual(t.events.published.length, 1);
+        const e = t.events.published[0];
+        assert.strictEqual(e.sub, `app:${app.id}`);
+        assert.strictEqual(e.event.source, `app-${app.id.replace(/^app_/, '').toLowerCase()}`);
+        assert.deepStrictEqual(e.event.actor, { type: 'app', id: app.id });
+        const tok = t.network.tokenRequests.filter((x) => x.client_id === app.id).pop();
+        assert.strictEqual(tok.audience, 'openvibe.events');
+        assert.strictEqual(tok.scope, 'events.app.publish');
+    });
+
+    await check('an event type outside the project\'s app.<project_key>.* space is refused locally', async () => {
+        const before = outside();
+        const r = await t.get(`${base}/playground/events`, { as: owner, form: { event_type: 'network.app.created', credential_type: 'client_secret', credential: app.secret } });
+        assert.strictEqual(r.status, 422);
+        assert.match(r.text, new RegExp(`starting with app\\.${key}\\.`));
+        assert.deepStrictEqual(outside(), before);
     });
 
     await t.close();

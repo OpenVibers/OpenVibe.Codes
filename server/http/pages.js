@@ -147,7 +147,7 @@ ${Array.isArray(status.notYet) ? html`<h3>Not yet</h3><ul>${status.notYet.map((w
             crumbs: [{ label: 'Apps' }, { label: req.params.app }],
             body: html`<h1>${list[0] ? list[0].name : 'App'} <small><code>${req.params.app}</code></small></h1>
 <p>Trust tier: ${badge(t.tier)} ${t.note ? html`<span class="muted">— ${t.note}</span>` : ''}</p>
-<p class="muted small">Trust tiers are metadata. They never grant anything: what an app may do comes only from its grants in OpenVibe.Network.</p>
+<p class="muted small">Trust tiers (<a href="/docs/adr/ADR-013">ADR-013</a>: unreviewed, reviewed, first-party) are metadata. They change defaults and discovery, never a grant check: what an app may do comes only from its grants in OpenVibe.Network.</p>
 <h2>Releases</h2>
 ${table(['Version', 'Kind', 'Environment', 'Status', 'Published', 'Compatibility'], list.map((x) => [
                 html`<a href="/releases/${x.id}">${x.version}</a>`, x.kind, x.environment, statusBadge(x.status), time(x.published_at),
@@ -204,7 +204,7 @@ ${signedIn ? releaseActions(req, rel) : ''}
         page(req, res, {
             title: 'Staff: trust tiers', crumbs: [{ label: 'Staff' }],
             body: html`<h1>Trust tiers</h1>${req.query.done ? notice('Saved.', 'ok') : ''}
-<p>Metadata only: a tier never grants, allows or bypasses anything. Grants and allowances are set in Network.</p>
+<p>Tiers follow <a href="/docs/adr/ADR-013">ADR-013</a>: <code>unreviewed</code> (the default), <code>reviewed</code>, <code>first-party</code>. Metadata only: a tier never grants, allows or bypasses anything. Grants and allowances are set in Network.</p>
 <form method="post" action="/staff/trust" class="stack">${csrfField(csrfToken(config, req.viewer))}
 <label>App id <input name="app_id" required pattern="app_[0-9A-HJKMNP-TV-Z]{26}"></label>
 <label>Tier <select name="tier">${trust.TIERS.map((t) => html`<option>${t}</option>`)}</select></label>

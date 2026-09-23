@@ -8,7 +8,7 @@
   "port": 4900,
   "domain": "openvibe.codes",
   "packages": [
-    "openvibe-contracts v0.26.0",
+    "openvibe-contracts tag v0.27.0 (package.json 0.28.0)",
     "openvibe-sdk v0.2.2",
     "openvibe-shared v1.3.0"
   ],
@@ -18,25 +18,25 @@
     "Projects, members, apps, credentials (rotate, revoke), grants (request, approve, deny, revoke), quotas and audit over Network's /api/v1/projects API with the person's own token; Network's errors shown as Network answered them",
     "Client secrets shown once, in the create/rotate response only, with no-store; never stored or logged (tested)",
     "Scope editor offering only capabilities apps can be granted (public, or partner when in the allowance)",
-    "Docs generated at boot from openvibe-contracts v0.26.0 and openvibe-sdk v0.2.2: contracts with field tables and fixtures, capability catalog, event types, SDK reference; service registry read live from Network with its health",
+    "Docs generated at boot from the pinned openvibe-contracts and openvibe-sdk: contracts with field tables and fixtures, capability catalog, event types, SDK reference; service registry read live from Network with its health",
     "OAuth callback helper and a test callback that never exchanges the code",
     "Webhook signature verifier (server or in-browser) and signed sample deliveries for catalogued event types",
-    "Playgrounds (Media upload, Events publish) that run with the app's own token and refuse without the grant",
-    "App and mod manifest validation; release metadata (draft, publish, deprecate, revoke) with codes.app.* events through the SDK outbox; trust tiers as staff-set metadata",
-    "Policy pages rendered from the published ADRs; licensing read from package metadata"
+    "Playgrounds (Media upload with media.object.upload, Events publish with events.app.publish) that run with the app's own token and refuse without the grant",
+    "App and mod manifest validation; release metadata (draft, publish, deprecate, revoke) with codes.app.* events through the SDK outbox; trust tiers per ADR-013 (unreviewed, reviewed, first-party) as staff-set metadata, older names migrated at boot",
+    "Policy pages rendered from the published ADRs; licensing read from package metadata",
+    "Release API guarded by openvibe-contracts requireCapability (codes.release.manage, codes.release.read)"
   ],
   "notYet": [
     "Not deployed; the Network OAuth client `codes` and the events.event.publish grant are not registered",
-    "The Events playground cannot run for any app: events.event.publish is internal in openvibe-contracts v0.26.0 and Network never grants it to apps",
+    "The Events playground needs Network to accept sandbox tokens for openvibe.events, events.app.publish in the project's allowance, and Events serving app tokens",
     "The Media playground needs Network to accept sandbox tokens for openvibe.media (DEV_SANDBOX_AUDIENCES) and Media to have a tenant per project id; neither exists yet",
-    "codes.release.manage and codes.release.read are proposals; until Contracts releases them no app can hold the release-management grant",
     "No usage, trace or error dashboards: no service reports per-project usage yet",
     "Billing sandbox, Chat bot and Realtime playgrounds; CLI and scaffolding; templates; project data export",
     "Consent screen for third-party production apps (a Network gap)"
   ],
-  "capabilitiesRegistered": false,
-  "serviceManifestRegistered": false,
+  "capabilitiesRegistered": true,
+  "serviceManifestRegistered": true,
   "deployed": false,
   "placeholderInSites": true,
-  "updated": "2026-09-22"
+  "updated": "2026-09-23"
 }

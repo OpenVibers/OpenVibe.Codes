@@ -70,7 +70,7 @@ CREATE TRIGGER IF NOT EXISTS release_log_append_only_delete BEFORE DELETE ON rel
 
 CREATE TABLE IF NOT EXISTS trust (
     app_id  TEXT PRIMARY KEY,
-    tier    TEXT NOT NULL CHECK (tier IN ('untrusted', 'verified', 'trusted', 'platform-maintained')),
+    tier    TEXT NOT NULL CHECK (tier IN ('unreviewed', 'reviewed', 'first-party')),
     note    TEXT NOT NULL DEFAULT '',
     set_by  TEXT NOT NULL,
     set_at  TEXT NOT NULL
@@ -105,6 +105,38 @@ CREATE INDEX IF NOT EXISTS idx_runs_app ON playground_runs(app_id, at);
 CREATE INDEX IF NOT EXISTS idx_runs_actor ON playground_runs(actor, at);
 `;
 
+/**
+ * ADR-013 is binding for trust tiers: unreviewed, reviewed, first-party. Databases created before
+ * that used the roadmap's four names; map them (untrusted→unreviewed, verified|trusted→reviewed,
+ * platform-maintained→first-party) and rebuild `trust` with the new CHECK. Idempotent: a database
+ * already on ADR-013 names is left untouched. Tiers stay metadata; no grant depends on them.
+ */
+const TIER_MAP = { untrusted: 'unreviewed', verified: 'reviewed', trusted: 'reviewed', 'platform-maintained': 'first-party' };
+function migrateTrustTiers(db) {
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'trust'").get();
+    const oldCheck = row && /'untrusted'/.test(row.sql);
+    const stale = db.prepare(`SELECT COUNT(*) AS n FROM trust_history WHERE from_tier IN (${Object.keys(TIER_MAP).map(() => '?').join(', ')}) OR to_tier IN (${Object.keys(TIER_MAP).map(() => '?').join(', ')})`)
+        .get(...Object.keys(TIER_MAP), ...Object.keys(TIER_MAP)).n;
+    if (!oldCheck && !stale) return { migrated: false };
+    const mapSql = (col) => `CASE ${col} ${Object.entries(TIER_MAP).map(([a, b]) => `WHEN '${a}' THEN '${b}'`).join(' ')} ELSE ${col} END`;
+    db.transaction(() => {
+        if (oldCheck) {
+            db.exec(`CREATE TABLE trust_adr013 (
+                app_id  TEXT PRIMARY KEY,
+                tier    TEXT NOT NULL CHECK (tier IN ('unreviewed', 'reviewed', 'first-party')),
+                note    TEXT NOT NULL DEFAULT '',
+                set_by  TEXT NOT NULL,
+                set_at  TEXT NOT NULL
+            );
+            INSERT INTO trust_adr013 (app_id, tier, note, set_by, set_at) SELECT app_id, ${mapSql('tier')}, note, set_by, set_at FROM trust;
+            DROP TABLE trust;
+            ALTER TABLE trust_adr013 RENAME TO trust;`);
+        }
+        db.exec(`UPDATE trust_history SET from_tier = ${mapSql('from_tier')}, to_tier = ${mapSql('to_tier')}`);
+    })();
+    return { migrated: true };
+}
+
 function openStore(dbPath, { now = () => Date.now() } = {}) {
     if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
     const db = new Database(dbPath);
@@ -112,6 +144,7 @@ function openStore(dbPath, { now = () => Date.now() } = {}) {
     db.pragma('foreign_keys = ON');
     db.pragma('busy_timeout = 5000');
     db.exec(SCHEMA);
+    migrateTrustTiers(db);
     return {
         db,
         now,
@@ -121,4 +154,4 @@ function openStore(dbPath, { now = () => Date.now() } = {}) {
     };
 }
 
-module.exports = { openStore, TABLES };
+module.exports = { openStore, TABLES, TIER_MAP, migrateTrustTiers };

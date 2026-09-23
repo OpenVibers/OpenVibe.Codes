@@ -306,9 +306,20 @@ async function startEvents(network) {
         if (req.url === '/api/v1/events' && req.method === 'POST') {
             const v = serviceAuth.verifyServiceToken(String(req.headers.authorization || '').slice(7), { publicKey: network.publicPem, issuer: network.url, audience: 'openvibe.events', acceptSandbox: true });
             if (!v.ok) return json(401, { type: 'x', title: 'Unauthorized', status: 401, code: v.code, detail: v.reason });
-            if (!v.claims.cap.includes('events.event.publish')) return json(403, { type: 'x', title: 'Forbidden', status: 403, code: 'capability.denied', detail: 'events.event.publish not granted' });
+            const isApp = String(v.claims.sub).startsWith('app:');
+            const needed = isApp ? 'events.app.publish' : 'events.event.publish';
+            if (!v.claims.cap.includes(needed)) return json(403, { type: 'x', title: 'Forbidden', status: 403, code: 'capability.denied', detail: `${needed} not granted` });
             const body = JSON.parse(raw.toString('utf8'));
             const events = body.events || [body];
+            if (isApp) {
+                // events.app.publish: app.<project_key>.* types, source app-<lowercase app ULID>.
+                const key = `p${v.claims.project_id.replace(/^prj_/, '').toLowerCase()}`;
+                const src = `app-${v.claims.sub.replace(/^app:app_/, '').toLowerCase()}`;
+                for (const e of events) {
+                    if (!e.event_type.startsWith(`app.${key}.`)) return json(403, { type: 'x', title: 'Forbidden', status: 403, code: 'events.type_not_allowed', detail: `apps publish app.${key}.* only` });
+                    if (e.source !== src) return json(403, { type: 'x', title: 'Forbidden', status: 403, code: 'events.source_mismatch', detail: `source must be ${src}` });
+                }
+            }
             const results = events.map((e) => { published.push({ event: e, sub: v.claims.sub }); return { event_id: e.event_id, seq: ++seq, duplicate: false }; });
             return json(201, body.events ? { results } : results[0]);
         }

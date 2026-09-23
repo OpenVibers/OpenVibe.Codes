@@ -1,50 +1,49 @@
 'use strict';
 /**
- * The proposals Codes ships validate against the released contract schemas, and they describe what
- * the code actually does: the events the outbox can produce and the capability the API checks.
+ * The released contracts (openvibe-contracts tag v0.27.0) describe what the code does: the codes
+ * service manifest's events are exactly what the outbox can produce, its capabilities are the ones
+ * the API guards with requireCapability, and the release API answers with the contracts' problems.
  */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const contracts = require('openvibe-contracts');
 const { EVENT_TYPES } = require('../server/events/outbox');
-const { MANAGE } = require('../server/http/api');
+const { MANAGE, READ } = require('../server/http/api');
 const { check, done } = require('./helpers/boot');
 
-const DOCS = path.join(__dirname, '..', 'docs');
-
 (async () => {
-    const caps = fs.readdirSync(path.join(DOCS, 'capabilities-proposal')).map((f) => JSON.parse(fs.readFileSync(path.join(DOCS, 'capabilities-proposal', f), 'utf8')));
-    const service = JSON.parse(fs.readFileSync(path.join(DOCS, 'service-manifest-proposal.json'), 'utf8'));
+    const manifest = contracts.services.get('codes');
 
-    await check('capability proposals validate as capabilities.capability@1 and are owned by codes', async () => {
-        assert.ok(caps.length >= 2);
-        for (const c of caps) {
-            const v = contracts.validate('capabilities.capability@1', c);
-            assert.ok(v.valid, `${c.id}: ${JSON.stringify(v.errors)}`);
-            assert.strictEqual(c.owner, 'codes');
-            assert.ok(c.id.startsWith('codes.'));
-            assert.ok(!contracts.capabilities.get(c.id), `${c.id} is already released; drop the proposal`);
-        }
-    });
-
-    await check('the service manifest proposal validates and matches the code', async () => {
-        const v = contracts.validate('registry.service-manifest@1', service);
-        assert.ok(v.valid, JSON.stringify(v.errors));
-        assert.strictEqual(service.id, 'codes');
-        assert.deepStrictEqual([...service.eventsProduced].sort(), [...EVENT_TYPES].sort());
-        assert.deepStrictEqual([...service.capabilities].sort(), caps.map((c) => c.id).sort());
-        assert.ok(service.capabilities.includes(MANAGE));
-        for (const e of service.eventsProduced) assert.strictEqual(e.split('.').length, 3, `${e} has three segments`);
-        const range = service.contractRanges['openvibe-contracts'];
+    await check('the codes service manifest is released as alpha, with this code\'s events', async () => {
+        assert.ok(manifest);
+        assert.strictEqual(manifest.status, 'alpha');
+        assert.deepStrictEqual(manifest.domains, ['openvibe.codes']);
+        assert.deepStrictEqual([...manifest.eventsProduced].sort(), [...EVENT_TYPES].sort());
+        for (const e of manifest.eventsProduced) assert.strictEqual(e.split('.').length, 3, `${e} has three segments`);
+        const range = manifest.contractRanges['openvibe-contracts'];
         assert.ok(require('openvibe-sdk/core').satisfiesRange(require('openvibe-contracts/package.json').version, range));
     });
 
-    await check('the app manifest proposal is a valid JSON Schema the contracts validator compiles', async () => {
-        const schema = JSON.parse(fs.readFileSync(path.join(DOCS, 'contracts-proposal', 'codes', 'app-manifest.v1.json'), 'utf8'));
-        assert.strictEqual(schema.$id, 'https://openvibe.network/contracts/codes/app-manifest.v1.json');
-        const info = require('../server/domain/manifests').appSchemaInfo();
-        assert.strictEqual(info.id, 'codes.app-manifest');
+    await check('its capabilities exist, are owned by codes, and are the ones the API guards', async () => {
+        assert.deepStrictEqual([...manifest.capabilities].sort(), [MANAGE, READ].sort());
+        for (const id of manifest.capabilities) {
+            const c = contracts.capabilities.get(id);
+            assert.ok(c, id);
+            assert.strictEqual(c.owner, 'codes');
+            assert.strictEqual(c.status, 'active');
+        }
+        const api = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
+        assert.match(api, /requireCapability\('codes\.release\.manage'/);
+        assert.match(api, /requireCapability\('codes\.release\.read'/);
+    });
+
+    await check('no proposal left behind: everything proposed is released', async () => {
+        const docs = path.join(__dirname, '..', 'docs');
+        assert.ok(!fs.existsSync(path.join(docs, 'capabilities-proposal')));
+        assert.ok(!fs.existsSync(path.join(docs, 'service-manifest-proposal.json')));
+        assert.ok(!fs.existsSync(path.join(docs, 'contracts-proposal')));
+        assert.ok(contracts.resolve('codes.app-manifest@1'));
     });
 
     done();

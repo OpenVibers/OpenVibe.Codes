@@ -461,10 +461,9 @@ ${manage ? html`<h2>Revoke this app</h2><form method="post" action="${base}/revo
 <p>Calls here run <strong>as the app</strong>, with its own token, against the real services: the playground can do exactly what this app is granted and nothing more. Codes' own credentials are never used. Sandbox apps only.</p>
 ${result ? runResult(result) : ''}
 <h2>${playground.KINDS.events.label}</h2>
-<p class="muted small">Needs <code>events.event.publish</code> (audience <code>openvibe.events</code>). Endpoint: <code>${config.playground.eventsUrl}</code>.</p>
+<p class="muted small">Needs <code>events.app.publish</code> (audience <code>openvibe.events</code>). This app may publish types starting with <code>app.${playground.projectKey(project.id)}.</code> with source <code>${playground.appSource(app.id)}</code>; sandbox events reach sandbox subscriptions only. Endpoint: <code>${config.playground.eventsUrl}</code>.</p>
 ${pre(events)}${events.ok ? html`<form method="post" action="${base}/playground/events" class="stack">${csrfField(c)}
-<label>Event type <input name="event_type" required value="${values.event_type || ''}" placeholder="myapp.thing.happened"></label>
-<label>Source <input name="source" required value="${values.source || ''}" placeholder="myapp"></label>
+<label>Event type <input name="event_type" required value="${values.event_type || `app.${playground.projectKey(project.id)}.test.ping`}"></label>
 <label>Subject type <input name="subject_type" value="${values.subject_type || 'test'}"></label>
 <label>Subject id <input name="subject_id" value="${values.subject_id || 'test-1'}"></label>
 <label>Payload (JSON object) <textarea name="payload" rows="4" spellcheck="false">${values.payload || '{}'}</textarea></label>
@@ -497,10 +496,10 @@ ${r.result ? html`<pre><code>${JSON.stringify(r.result, null, 2)}</code></pre>` 
         const out = await playground.run({
             actor: `user:${req.viewer.subject}`, app: got.data, kind: 'events',
             credential: { type: b.credential_type === 'access_token' ? 'access_token' : 'client_secret', value: typeof b.credential === 'string' ? b.credential.trim() : '' },
-            input: { event_type: b.event_type, source: b.source, subject_type: b.subject_type, subject_id: b.subject_id, payload: b.payload },
+            input: { event_type: b.event_type, subject_type: b.subject_type, subject_id: b.subject_id, payload: b.payload },
         });
         // The credential is NOT passed back: the form comes back with it empty.
-        return playgroundPage(req, res, { result: out, values: { event_type: b.event_type, source: b.source, subject_type: b.subject_type, subject_id: b.subject_id, payload: b.payload }, status: statusFor(out) });
+        return playgroundPage(req, res, { result: out, values: { event_type: b.event_type, subject_type: b.subject_type, subject_id: b.subject_id, payload: b.payload }, status: statusFor(out) });
     });
 
     r.post('/:project/apps/:app/playground/media', idParams, async (req, res) => {

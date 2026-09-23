@@ -27,7 +27,7 @@ function files(dir) {
     await check('no mention in server/, public/, deploy/, docs/*.json, .env.example, package.json or CI', async () => {
         const targets = [
             ...files(path.join(ROOT, 'server')), ...files(path.join(ROOT, 'public')), ...files(path.join(ROOT, 'deploy')),
-            ...files(path.join(ROOT, 'docs')).filter((f) => f.endsWith('.json')),
+            ...(fs.existsSync(path.join(ROOT, 'docs')) ? files(path.join(ROOT, 'docs')).filter((f) => f.endsWith('.json')) : []),
             path.join(ROOT, '.env.example'), path.join(ROOT, 'package.json'), path.join(ROOT, '.github', 'workflows', 'ci.yml'),
         ].filter((f) => fs.existsSync(f));
         assert.ok(targets.length > 20);

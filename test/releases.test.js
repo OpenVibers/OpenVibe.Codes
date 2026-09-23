@@ -76,7 +76,7 @@ const { boot, check, done } = require('./helpers/boot');
         assert.deepStrictEqual(e.actor, { type: 'user', id: owner.subject });
         assert.strictEqual(e.payload.release_id, rel1);
         assert.strictEqual(e.payload.project_id, projectId);
-        assert.strictEqual(e.payload.trust_tier, 'untrusted');
+        assert.strictEqual(e.payload.trust_tier, 'unreviewed');
         assert.strictEqual(contracts.validate('events.event-envelope@1', e).valid, true);
         const pub = await t.get(`/api/v1/apps/${app.id}/releases`);
         assert.strictEqual(pub.json().releases[0].status, 'published');
@@ -123,14 +123,18 @@ const { boot, check, done } = require('./helpers/boot');
     });
 
     await check('trust tiers: staff only, noted, recorded, and they change no permission', async () => {
-        const denied = await t.get('/staff/trust', { as: owner, form: { app_id: app.id, tier: 'trusted', note: 'me' } });
+        const denied = await t.get('/staff/trust', { as: owner, form: { app_id: app.id, tier: 'reviewed', note: 'me' } });
         assert.strictEqual(denied.status, 403);
-        const ok = await t.get('/staff/trust', { as: staff, form: { app_id: app.id, tier: 'verified', note: 'Reviewed the source' } });
+        const old = await t.get('/staff/trust', { as: staff, form: { app_id: app.id, tier: 'verified', note: 'pre-ADR-013 name' } });
+        assert.strictEqual(old.status, 422, 'only ADR-013 tiers are accepted');
+        const page = await t.get('/staff', { as: staff });
+        assert.deepStrictEqual([...page.text.matchAll(/<option>([^<]+)<\/option>/g)].map((m) => m[1]), ['unreviewed', 'reviewed', 'first-party']);
+        const ok = await t.get('/staff/trust', { as: staff, form: { app_id: app.id, tier: 'reviewed', note: 'Reviewed the source' } });
         assert.strictEqual(ok.status, 303);
         const trust = (await t.get(`/api/v1/apps/${app.id}/trust`)).json();
-        assert.strictEqual(trust.tier, 'verified');
+        assert.strictEqual(trust.tier, 'reviewed');
         assert.match(trust.note_on_authority, /metadata only/);
-        // A verified app is still refused by the playground without the grant.
+        // A reviewed app is still refused by the playground without the grant.
         const r = await t.get(`${base}/playground/media`, { as: owner, multipart: { fields: { credential_type: 'client_secret', credential: app.secret }, file: { name: 'x', content: 'x' } } });
         assert.strictEqual(r.status, 403);
         // And a viewer still cannot publish.
@@ -170,10 +174,23 @@ const { boot, check, done } = require('./helpers/boot');
         const other = await t.app(owner, projectId, { name: 'Other' });
         const otherTok = t.network.mintApp(other.id, 'openvibe.codes', ['codes.release.manage']);
         const r4 = await t.get(`/api/v1/apps/${app.id}/releases`, { headers: { authorization: `Bearer ${otherTok}` }, json: body });
+        assert.strictEqual(r4.json().code, 'release.forbidden');
         assert.strictEqual(r4.status, 403);
         assert.strictEqual(r4.headers.get('content-type'), 'application/problem+json');
         const userTok = t.network.userToken(owner);
         assert.strictEqual((await t.get(`/api/v1/apps/${app.id}/releases`, { headers: { authorization: `Bearer ${userTok}` }, json: body })).status, 401);
+    });
+
+    await check('public reads need no token; a presented token must hold codes.release.read', async () => {
+        assert.strictEqual((await t.get(`/api/v1/apps/${app.id}/releases`)).status, 200);
+        const withRead = t.network.mintApp(app.id, 'openvibe.codes', ['codes.release.read']);
+        assert.strictEqual((await t.get(`/api/v1/apps/${app.id}/releases`, { headers: { authorization: `Bearer ${withRead}` } })).status, 200);
+        const without = t.network.mintApp(app.id, 'openvibe.codes', ['codes.release.manage']);
+        const r = await t.get(`/api/v1/apps/${app.id}/trust`, { headers: { authorization: `Bearer ${without}` } });
+        assert.strictEqual(r.status, 403);
+        assert.strictEqual(r.json().code, 'capability.denied');
+        const forged = await t.get(`/api/v1/apps/${app.id}/releases`, { headers: { authorization: 'Bearer not.a.jwt' } });
+        assert.strictEqual(forged.status, 401);
     });
 
     await t.close();

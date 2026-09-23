@@ -18,6 +18,13 @@ const CONTRACTS_ROOT = path.dirname(require.resolve('openvibe-contracts/package.
 const SDK_ROOT = path.dirname(require.resolve('openvibe-sdk/package.json'));
 const contractsPkg = require('openvibe-contracts/package.json');
 const sdkPkg = require('openvibe-sdk/package.json');
+const ownPkg = require('../../package.json');
+
+/** The git tag this release pins a package to (from package.json's tarball URL), or null. */
+function pinnedTag(dep) {
+    const m = String((ownPkg.dependencies || {})[dep] || '').match(/refs\/tags\/(v[0-9A-Za-z.-]+)$/);
+    return m ? m[1] : null;
+}
 
 /** Visibilities an app may ever be granted (Network's grantability rule, ADR-014). */
 const GRANTABLE_VISIBILITIES = new Set(['public', 'partner']);
@@ -159,6 +166,10 @@ function generate({ now = () => Date.now() } = {}) {
     return {
         generatedAt: new Date(now()).toISOString(),
         contractsVersion: contractsPkg.version,
+        // The tag may differ from the version the package declares (the contracts tag v0.27.0 ships
+        // package.json 0.28.0); pages show both rather than pick one.
+        contractsTag: pinnedTag('openvibe-contracts') || `v${contractsPkg.version}`,
+        sdkTag: pinnedTag('openvibe-sdk') || `v${sdkPkg.version}`,
         contractsLicense: contractsPkg.license,
         sdkVersion: sdkPkg.version,
         sdkLicense: sdkPkg.license,
@@ -175,4 +186,4 @@ function generate({ now = () => Date.now() } = {}) {
     };
 }
 
-module.exports = { generate, fieldRows, GRANTABLE_VISIBILITIES, CONTRACTS_ROOT, SDK_ROOT };
+module.exports = { generate, fieldRows, pinnedTag, GRANTABLE_VISIBILITIES, CONTRACTS_ROOT, SDK_ROOT };

@@ -1,14 +1,14 @@
 'use strict';
 
 /**
- * Trust tiers (roadmap §15.17): untrusted, verified, trusted, platform-maintained.
+ * Trust tiers (ADR-013, binding): unreviewed, reviewed, first-party.
  *
- * METADATA ONLY. "Actual authority comes from grants. Trust may affect default quotas/review
- * requirements, never bypass policy." Nothing in Codes (or anywhere) reads a tier to allow an
- * action; the tier is shown next to releases and carried in codes.app.* event payloads.
- * Every app starts untrusted; Codes staff change it, with a note, and every change is kept.
+ * METADATA ONLY. "A tier changes defaults and discovery, but never the grant check." Nothing in
+ * Codes (or anywhere) reads a tier to allow an action; the tier is shown next to releases and
+ * carried in codes.app.* event payloads. Every app starts unreviewed; Codes staff change it, with
+ * a note, and every change is kept. Older names are migrated at boot (server/db.js).
  */
-const TIERS = ['untrusted', 'verified', 'trusted', 'platform-maintained'];
+const TIERS = ['unreviewed', 'reviewed', 'first-party'];
 const APP_ID_RE = /^app_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 function createTrust({ store }) {
@@ -16,7 +16,7 @@ function createTrust({ store }) {
 
     function get(appId) {
         const r = db.prepare('SELECT * FROM trust WHERE app_id = ?').get(String(appId));
-        return r ? { tier: r.tier, note: r.note, set_by: r.set_by, set_at: r.set_at } : { tier: 'untrusted', note: '', set_by: null, set_at: null };
+        return r ? { tier: r.tier, note: r.note, set_by: r.set_by, set_at: r.set_at } : { tier: 'unreviewed', note: '', set_by: null, set_at: null };
     }
 
     function set({ appId, tier, note, actor }) {

@@ -17,24 +17,29 @@ const sdkPkg = require('openvibe-sdk/package.json');
 (async () => {
     const t = await boot();
 
-    await check('package.json pins exactly the installed contracts, SDK and shared releases', async () => {
-        const tag = (dep) => (pkg.dependencies[dep].match(/refs\/tags\/v([0-9.]+)$/) || [])[1];
-        assert.strictEqual(tag('openvibe-contracts'), contractsVersion);
-        assert.strictEqual(tag('openvibe-sdk'), sdkPkg.version);
-        assert.strictEqual(tag('openvibe-shared'), require('openvibe-shared/package.json').version);
-        assert.strictEqual(contractsVersion, '0.26.0');
+    await check('package.json pins the contracts, SDK and shared tags that are installed', async () => {
+        const tag = (dep) => (pkg.dependencies[dep].match(/refs\/tags\/(v[0-9.]+)$/) || [])[1];
+        assert.strictEqual(tag('openvibe-contracts'), 'v0.27.0');
+        assert.strictEqual(tag('openvibe-sdk'), `v${sdkPkg.version}`);
+        assert.strictEqual(tag('openvibe-shared'), `v${require('openvibe-shared/package.json').version}`);
         assert.strictEqual(sdkPkg.version, '0.2.2');
+        // The contracts tag v0.27.0 carries the released codes manifest and codes.app-manifest@1.
+        assert.ok(contracts.services.get('codes') && contracts.services.get('codes').status === 'alpha');
+        assert.ok(contracts.resolve('codes.app-manifest@1'));
     });
 
     await check('every docs page states the versions it was generated from', async () => {
         for (const p of ['/docs', '/docs/contracts', '/docs/capabilities', '/docs/events', '/docs/sdk', '/docs/contracts/errors.problem', '/docs/sdk/core']) {
             const r = await t.get(p);
             assert.strictEqual(r.status, 200, p);
-            assert.ok(r.text.includes(`openvibe-contracts v${contractsVersion}`), `${p} names the contracts version`);
+            assert.ok(r.text.includes(`openvibe-contracts v${contractsVersion}`), `${p} names the installed contracts version`);
+            assert.ok(r.text.includes('OpenVibe.Contracts/tree/v0.27.0'), `${p} links the pinned tag`);
+            if (contractsVersion !== '0.27.0') assert.ok(r.text.includes('(tag v0.27.0)'), `${p} says the tag differs from the package version`);
             assert.ok(r.text.includes(`openvibe-sdk v${sdkPkg.version}`), `${p} names the SDK version`);
         }
         const v = (await t.get('/api/v1/docs/versions')).json();
         assert.strictEqual(v.contracts, contractsVersion);
+        assert.strictEqual(v.contracts_tag, 'v0.27.0');
         assert.strictEqual(v.sdk, sdkPkg.version);
     });
 
