@@ -206,7 +206,26 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             }
         });
 
-        r.get('/logout', async (req, res) => {
+        // Sign-out ends the session, so another site must not be able to trigger it (a cross-site
+        // <img src=/auth/logout> or link). A same-origin navigation or form, or the address bar
+        // (Sec-Fetch-Site none), signs out directly; anything else gets a confirm button (POST).
+        const sameOriginRequest = (req) => {
+            const site = String(req.get('sec-fetch-site') || '');
+            if (site) return site === 'same-origin' || (site === 'none' && req.method === 'GET');
+            const origin = req.get('origin');
+            if (origin) return origin === `${req.protocol}://${req.get('host')}`;
+            return req.method === 'GET';    // no fetch metadata and no Origin: an old browser navigating
+        };
+        r.get('/logout', (req, res, next) => {
+            if (sameOriginRequest(req)) return next();
+            res.set('Cache-Control', 'private, no-store');
+            const q = req.query.next ? `?next=${encodeURIComponent(sanitizeNext(req.query.next))}` : '';
+            res.type('html').send(`<!doctype html><meta charset="utf-8"><title>Sign out</title><meta name="viewport" content="width=device-width,initial-scale=1">`
+                + `<form method="post" action="/auth/logout${q}" style="font:16px system-ui;margin:3em auto;max-width:24em;text-align:center">`
+                + `<p>Sign out of OpenVibe.Codes?</p><button type="submit">Sign out</button> <a href="/">Cancel</a></form>`);
+        });
+        r.post('/logout', (req, res, next) => (sameOriginRequest(req) ? next() : res.status(403).type('text/plain').send('Sign-out must come from this site.')));
+        r.all('/logout', async (req, res) => {
             const rt = req.cookies && req.cookies[REFRESH_COOKIE];
             if (rt) {
                 fetchImpl(`${config.networkInternalUrl}/oauth/revoke`, {
@@ -217,7 +236,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             }
             clearSession(res);
             res.cookie(HINT_COOKIE, 'guest', { sameSite: 'lax', secure: config.cookies.secure, httpOnly: false, path: '/', maxAge: 365 * 24 * 60 * 60 * 1000 });
-            res.redirect(sanitizeNext(req.query.next));
+            res.redirect(303, sanitizeNext(req.query.next));
         });
 
         r.get('/me', (req, res) => {

@@ -46,6 +46,19 @@ const { signJwt } = require('./helpers/mocks');
         assert.strictEqual(s.ctx.trust.get(APP).tier, 'reviewed');
     });
 
+    await check('another site cannot sign a person out; this site can', async () => {
+        const cross = await s.get('/auth/logout', { as: staff, headers: { 'sec-fetch-site': 'cross-site' } });
+        assert.strictEqual(cross.status, 200, 'a confirm page, not a sign-out');
+        assert.ok(!/codes_at=;|codes_at=deleted/i.test(String(cross.headers.get('set-cookie') || '')), 'the session cookie is kept');
+        assert.match(cross.text, /method="post"/);
+        const crossPost = await s.get('/auth/logout', { as: staff, method: 'POST', headers: { 'sec-fetch-site': 'cross-site' } });
+        assert.strictEqual(crossPost.status, 403);
+        const same = await s.get('/auth/logout?next=/projects', { as: staff, headers: { 'sec-fetch-site': 'same-origin' } });
+        assert.strictEqual(same.status, 303);
+        assert.strictEqual(same.headers.get('location'), '/projects');
+        assert.match(String(same.headers.get('set-cookie') || ''), /codes_at=;/);
+    });
+
     await s.close();
     done();
 })();
