@@ -1,4 +1,6 @@
 'use strict';
+// The docs tests fetch one page per contract (hundreds); the per-address limit would answer 429 part-way.
+process.env.CODES_RATE_LIMIT_PER_MIN = process.env.CODES_RATE_LIMIT_PER_MIN || '100000';
 /**
  * Boots Codes on a temp database with mocks of Network, Events and Media, captures every log line
  * (the app's logger AND console), and returns a small HTTP client. Every test file gets its own.

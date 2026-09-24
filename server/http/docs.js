@@ -148,13 +148,15 @@ ${c.outputSchema ? html`<dt>Output</dt><dd>${c.outputSchema}</dd>` : ''}
     });
 
     // ── Events ──────────────────────────────────────────────
+    // Event types that have a payload contract (events/payloads/<type>.v<major>.json in openvibe-contracts).
+    const payloadIds = new Set(require('openvibe-contracts').catalog.filter((c) => String(c.schema || '').startsWith('events/payloads/')).map((c) => c.id));
     r.get('/events', (req, res) => {
         page(req, res, {
             title: 'Event types',
             crumbs: [{ label: 'Docs', href: '/docs' }, { label: 'Events' }],
             body: html`<h1>Event types</h1>${versions()}
-<p>Every event type a service manifest declares it produces, and who declares they consume it. Events travel as <a href="/docs/contracts/events.event-envelope">events.event-envelope@1</a>; deliveries are signed (<a href="/tools/webhooks">webhook tester</a>). Contracts do not define per-event payload schemas yet.</p>
-${table(['Event type', 'Produced by', 'Consumed by'], docs.events.map((e) => [code(e.type), e.producers.join(', '), e.consumers.join(', ') || '—']))}`,
+<p>Every event type a service manifest declares it produces, and who declares they consume it. Events travel as <a href="/docs/contracts/events.event-envelope">events.event-envelope@1</a>; deliveries are signed (<a href="/tools/webhooks">webhook tester</a>). Each event's payload has its own contract where one is published (named after the event type, version = the envelope's <code>version</code>).</p>
+${table(['Event type', 'Payload', 'Produced by', 'Consumed by'], docs.events.map((e) => [code(e.type), payloadIds.has(e.type) ? html`<a href="/docs/contracts/${e.type}">schema</a>` : html`<span class="muted">planned</span>`, e.producers.join(', '), e.consumers.join(', ') || '—']))}`,
         });
     });
 
