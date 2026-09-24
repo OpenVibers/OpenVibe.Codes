@@ -55,7 +55,7 @@ function load(env = process.env) {
         // Signs the per-person form token (CSRF). Unset: a random per-process key.
         formSecret: env.CODES_FORM_SECRET || '',
 
-        // Staff (trust tiers): Network admins, plus these subjects (usr_…).
+        // Staff (trust tiers): staff.site.configure (Network admins), plus these subjects (usr_…).
         staffSubjects: list(env.CODES_STAFF_SUBJECTS),
 
         // Where playgrounds call, with the APP's own token (never Codes' credentials). Defaults are
