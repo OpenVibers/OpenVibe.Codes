@@ -42,6 +42,7 @@ function createDocsRoutes(ctx) {
 <li><a href="/docs/capabilities"><strong>Capabilities</strong></a><span>${docs.capabilities.length} capabilities; ${grantable} can be granted to apps</span></li>
 <li><a href="/docs/events"><strong>Events</strong></a><span>${docs.events.length} event types services declare they produce</span></li>
 <li><a href="/docs/services"><strong>Services</strong></a><span>the registry as OpenVibe.Network reports it, with health</span></li>
+<li><a href="/docs/tools"><strong>Tools API</strong></a><span>every OpenVibe tool you can call from code, from the live registry</span></li>
 <li><a href="/docs/sdk"><strong>SDK</strong></a><span>${docs.sdk.length} modules of openvibe-sdk from their type definitions</span></li>
 <li><a href="/policy/rfc"><strong>Decisions</strong></a><span>${docs.adrs.length} architecture decision records</span></li>
 </ul>
@@ -186,6 +187,37 @@ ${problem ? html`${problemBox(problem, { title: 'The registry could not be read'
 <p>The service manifests published in <code>openvibe-contracts v${docs.contractsVersion}</code> are below, without health (nothing here says whether they run).</p>
 ${table(['Service', 'Status (manifest)', 'Domains'], docs.services.map((s) => [html`<strong>${s.name}</strong><br><code>${s.id}</code>`, s.status, (s.domains || []).join(', ') || '—']))}`
                 : table(['Service', 'Maturity', 'Domains', 'Health (as reported)', 'Checked', 'Capabilities'], rows)}`,
+        });
+    });
+
+    // ── Tools (live registry from OpenVibe.Tools, ADR-027) ──────────
+    const TOOLS_URL = (process.env.OV_TOOLS_INTERNAL_URL || 'http://127.0.0.1:4001').replace(/\/$/, '');
+    let toolsCache = { at: 0, list: null };
+    r.get('/tools', async (req, res) => {
+        let list = toolsCache.list; let problem = null;
+        if (!list || Date.now() - toolsCache.at > 300_000) {
+            try {
+                const out = await fetch(`${TOOLS_URL}/api/v1/tools`, { headers: { Host: 'openvibe.tools', Accept: 'application/json' }, signal: AbortSignal.timeout(4000) });
+                if (!out.ok) throw new Error(`Tools answered ${out.status}`);
+                list = (await out.json()).tools || [];
+                toolsCache = { at: Date.now(), list };
+            } catch (err) { problem = { code: 'codes.tools_unavailable', detail: err.message }; }
+        }
+        const api = (list || []).filter((t) => t.api && t.status !== 'unavailable');
+        const families = [...new Set(api.map((t) => t.family))].sort();
+        send(res, problem && !list ? 502 : 200, {
+            index: true, cache: 'public, max-age=60', viewer: req.viewer, config, path: req.originalUrl,
+            title: 'Tools API',
+            crumbs: [{ label: 'Docs', href: '/docs' }, { label: 'Tools' }],
+            body: html`<h1>Tools API</h1>
+<p>${api.length} tools on <a href="https://openvibe.tools">OpenVibe.Tools</a> can be called from code: <code>POST https://openvibe.tools/api/v1/tools/{id}/run</code> (capability <code>tools.tool.run</code>; anonymous calls run on the lowest tier), long work as jobs at <code>/api/v1/jobs/{id}</code>. OpenAPI: <a href="https://openvibe.tools/api/v1/openapi.json">openapi.json</a> · guide: <a href="https://openvibe.tools/developers">openvibe.tools/developers</a> · SDK: <code>openvibe-sdk/tools</code>.</p>
+${problem && !list ? html`${problemBox(problem, { title: 'The Tools registry could not be read' })}` : ''}
+${families.map((f) => html`<h2>${f}</h2>${table(['Tool', 'Runs as', 'Access', 'Inputs'], api.filter((t) => t.family === f).map((t) => [
+                html`<a href="${t.docs || `https://openvibe.tools/tool/${t.id}`}"><strong>${t.name}</strong></a><br><code>${t.id}</code>`,
+                t.execution === 'job' ? 'job' : 'direct',
+                t.auth && t.auth.anonymous ? 'anonymous or token' : (t.auth && t.auth.capability === 'tools.net.probe' ? 'partner token (tools.net.probe)' : 'session or token'),
+                t.files ? `files (${t.files.min}-${t.files.max})` : 'JSON',
+            ]))}`)}`,
         });
     });
 
