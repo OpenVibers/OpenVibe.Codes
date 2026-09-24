@@ -11,6 +11,7 @@
  * Markdown files as they are.
  */
 const fs = require('fs');
+const ovServe = require('openvibe-shared/serve');
 const frame = require('openvibe-shared/frame');
 const path = require('path');
 const express = require('express');
@@ -84,7 +85,7 @@ ${table(['App', 'Kind', 'Version', 'Status', 'Trust', 'Published'], recent.map((
     // ── Policy ──────────────────────────────────────────────
     const adr = (id) => docs.adrs.find((a) => a.id === id);
     // What shipped on OpenVibe.Codes: the shared update log every OpenVibe site has.
-    r.get('/updates', (req, res) => page(req, res, { index: true, cache: PUBLIC_CACHE, title: 'What shipped on OpenVibe.Codes', body: raw(frame.updatesBody({ service: 'codes', siteName: 'OpenVibe.Codes' }) + frame.shippedScript()) }));
+    r.get('/updates', (req, res) => page(req, res, { index: true, cache: PUBLIC_CACHE, title: 'What shipped on OpenVibe.Codes', body: raw(frame.updatesBody({ service: 'codes', siteName: 'OpenVibe.Codes' }) + `<script src="${ovServe.url('shipped.js')}" defer></script>`) }));
     r.get('/policy', (req, res) => page(req, res, {
         index: true, cache: PUBLIC_CACHE, title: 'Policy', crumbs: [{ label: 'Policy' }],
         body: html`<h1>Policy</h1><ul class="cards">
