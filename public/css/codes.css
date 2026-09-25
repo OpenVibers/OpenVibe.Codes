@@ -39,6 +39,13 @@ ol.steps li { margin: .4rem 0; }
 .badge.ok { border-color: var(--success, #22c55e); color: var(--success, #22c55e); }
 .badge.warn { border-color: var(--warning, #f59e0b); color: var(--warning, #f59e0b); }
 .badge.bad { border-color: var(--error, #ef4444); color: var(--error, #ef4444); }
+/* API explorer: one block per route, the method as a badge */
+.api-op { border: 1px solid var(--border, #1f2d47); border-radius: 10px; padding: 10px 14px; margin: 12px 0; background: var(--bg-card, #131c2e); scroll-margin-top: 72px; }
+.api-op h3 { margin: 0 0 4px; font-size: 1rem; overflow-wrap: anywhere; }
+.api-op .facts { margin: 6px 0; }
+.badge.method-get { border-color: var(--success, #22c55e); color: var(--success, #22c55e); }
+.badge.method-post, .badge.method-put, .badge.method-patch { border-color: var(--accent-light, #60a5fa); color: var(--accent-light, #60a5fa); }
+.badge.method-delete { border-color: var(--error, #ef4444); color: var(--error, #ef4444); }
 .notice, .problem, .result { border-left: 3px solid var(--info, #38bdf8); padding: 8px 12px; margin: 12px 0; background: var(--bg-card, #131c2e); border-radius: 0 8px 8px 0; }
 .notice.ok, .result.ok { border-left-color: var(--success, #22c55e); }
 .notice.warn { border-left-color: var(--warning, #f59e0b); }

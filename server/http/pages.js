@@ -74,7 +74,7 @@ function createPageRoutes(ctx) {
 <li>Publish release metadata with a <a href="/manifests/validate">validated manifest</a>; rotate or revoke credentials any time.</li>
 </ol>
 <h2>Reference</h2>
-<p>Generated from <code>openvibe-contracts v${docs.contractsVersion}</code> and <code>openvibe-sdk v${docs.sdkVersion}</code>: <a href="/docs/contracts">contracts</a> · <a href="/docs/capabilities">capabilities</a> · <a href="/docs/events">events</a> · <a href="/docs/services">services</a> · <a href="/docs/tools">tools</a> · <a href="/docs/sdk">SDK</a>.</p>
+<p>Generated from <code>openvibe-contracts v${docs.contractsVersion}</code> and <code>openvibe-sdk v${docs.sdkVersion}</code>: <a href="/docs/api">API explorer</a> · <a href="/docs/contracts">contracts</a> · <a href="/docs/capabilities">capabilities</a> · <a href="/docs/events">events</a> · <a href="/docs/services">services</a> · <a href="/docs/tools">tools</a> · <a href="/docs/sdk">SDK</a>.</p>
 <h2>Recent releases</h2>
 ${table(['App', 'Kind', 'Version', 'Status', 'Trust', 'Published'], recent.map((x) => [
                 html`<a href="/apps/${x.app_id}">${x.name}</a>`, x.kind, html`<a href="/releases/${x.id}">${x.version}</a>`, x.status, x.trust.tier, time(x.published_at),
@@ -271,10 +271,11 @@ ${signedIn ? releaseActions(req, rel) : ''}
         ].join('\n'));
     });
     r.get('/sitemap.xml', (req, res) => {
-        const urls = ['/', '/docs', '/docs/contracts', '/docs/capabilities', '/docs/events', '/docs/services', '/docs/tools', '/docs/sdk', '/oauth', '/tools/webhooks', '/manifests/validate',
+        const urls = ['/', '/docs', '/docs/api', '/docs/contracts', '/docs/capabilities', '/docs/events', '/docs/services', '/docs/tools', '/docs/sdk', '/oauth', '/tools/webhooks', '/manifests/validate',
             '/policy', '/policy/rfc', '/policy/compatibility', '/policy/licensing', '/policy/transparency',
             ...governance.filter((g) => !g.draft).map((g) => `/policy/${g.slug}`),
             ...docs.contracts.map((c) => `/docs/contracts/${c.id}`), ...docs.capabilities.map((c) => `/docs/capabilities/${c.id}`),
+            ...require('openvibe-contracts').openapi.index().map((x) => `/docs/api/${x.service}`),
             ...docs.sdk.map((m) => `/docs/sdk/${m.slug}`), ...docs.adrs.map((a) => `/docs/adr/${a.id}`)];
         const x = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
         res.set('Cache-Control', 'public, max-age=3600').type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `<url><loc>${x(config.baseUrl + u)}</loc></url>`).join('\n')}\n</urlset>\n`);

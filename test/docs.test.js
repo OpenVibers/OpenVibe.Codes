@@ -19,11 +19,11 @@ const sdkPkg = require('openvibe-sdk/package.json');
 
     await check('package.json pins the contracts, SDK and shared tags that are installed', async () => {
         const tag = (dep) => (pkg.dependencies[dep].match(/refs\/tags\/(v[0-9.]+)$/) || [])[1];
-        assert.strictEqual(tag('openvibe-contracts'), 'v0.49.0');
+        assert.strictEqual(tag('openvibe-contracts'), 'v0.51.0');
         assert.strictEqual(tag('openvibe-sdk'), `v${sdkPkg.version}`);
         assert.strictEqual(tag('openvibe-shared'), `v${require('openvibe-shared/package.json').version}`);
         assert.strictEqual(sdkPkg.version, '0.11.0');
-        // The contracts tag v0.49.0 carries the released codes manifest and codes.app-manifest@1.
+        // The contracts tag v0.51.0 carries the released codes manifest and codes.app-manifest@1.
         assert.ok(contracts.services.get('codes') && contracts.services.get('codes').status === 'alpha');
         assert.ok(contracts.resolve('codes.app-manifest@1'));
     });
@@ -33,13 +33,13 @@ const sdkPkg = require('openvibe-sdk/package.json');
             const r = await t.get(p);
             assert.strictEqual(r.status, 200, p);
             assert.ok(r.text.includes(`openvibe-contracts v${contractsVersion}`), `${p} names the installed contracts version`);
-            assert.ok(r.text.includes('OpenVibe.Contracts/tree/v0.49.0'), `${p} links the pinned tag`);
-            if (contractsVersion !== '0.49.0') assert.ok(r.text.includes('(tag v0.49.0)'), `${p} says the tag differs from the package version`);
+            assert.ok(r.text.includes('OpenVibe.Contracts/tree/v0.51.0'), `${p} links the pinned tag`);
+            if (contractsVersion !== '0.51.0') assert.ok(r.text.includes('(tag v0.51.0)'), `${p} says the tag differs from the package version`);
             assert.ok(r.text.includes(`openvibe-sdk v${sdkPkg.version}`), `${p} names the SDK version`);
         }
         const v = (await t.get('/api/v1/docs/versions')).json();
         assert.strictEqual(v.contracts, contractsVersion);
-        assert.strictEqual(v.contracts_tag, 'v0.49.0');
+        assert.strictEqual(v.contracts_tag, 'v0.51.0');
         assert.strictEqual(v.sdk, sdkPkg.version);
     });
 
@@ -105,6 +105,35 @@ const sdkPkg = require('openvibe-sdk/package.json');
         assert.match(r.headers.get('cache-control'), /public/);
         const sm = await t.get('/sitemap.xml');
         assert.ok(sm.text.includes('/docs/contracts/mods.mod-manifest</loc>'));
+        assert.ok(sm.text.includes('/docs/api</loc>') && sm.text.includes('/docs/api/tools</loc>'), 'the API explorer is in the sitemap');
+    });
+
+    await check('the API explorer lists every service document from the pinned contracts (WS-C task 6)', async () => {
+        const index = contracts.openapi.index();
+        assert.ok(index.length >= 20);
+        const list = await t.get('/docs/api');
+        assert.strictEqual(list.status, 200);
+        for (const s of index) assert.ok(list.text.includes(`href="/docs/api/${s.service}"`), `${s.service} is listed`);
+        assert.ok((await t.get('/docs')).text.includes('href="/docs/api"'), 'the docs index links it');
+        const raw = await t.get('/docs/api/tools.json');
+        assert.strictEqual(raw.status, 200);
+        assert.match(raw.headers.get('content-type'), /application\/vnd\.oai\.openapi\+json/);
+        assert.strictEqual(raw.headers.get('access-control-allow-origin'), '*');
+        assert.deepStrictEqual(raw.json(), contracts.openapi.document('tools'), 'the document as the package ships it');
+        const page = await t.get('/docs/api/tools');
+        assert.strictEqual(page.status, 200);
+        const doc = contracts.openapi.document('tools');
+        const ops = Object.values(doc.paths).reduce((n, m) => n + Object.keys(m).length, 0);
+        assert.strictEqual((page.text.match(/class="api-op"/g) || []).length, ops, 'one block per route');
+        assert.ok(page.text.includes('id="cap-tools.job.create"') && page.text.includes('href="/docs/capabilities/tools.job.create"'), 'capabilities anchored and linked');
+        assert.ok(page.text.includes('href="/docs/contracts/tools.job"'), 'schemas link to their contract pages');
+        assert.ok(page.text.includes('<code>/api/v1/jobs/{id}</code>'));
+        const pub = await t.get('/docs/api/tools?public=1');
+        assert.ok((pub.text.match(/class="api-op"/g) || []).length <= ops);
+        assert.strictEqual((await t.get('/docs/api/nope')).status, 404);
+        assert.strictEqual((await t.get('/docs/api/nope.json')).status, 404);
+        const cap = await t.get('/docs/capabilities/tools.job.create');
+        assert.ok(cap.text.includes('href="/docs/api/tools#cap-tools.job.create"'), 'a capability links its routes');
     });
 
     await check('pages rendered for a signed-in person are never publicly cacheable', async () => {
