@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * The signed-in portal: projects, members, apps, credentials, grants, quotas and audit — all over
+ * The signed-in portal: projects, members, apps, credentials, grants, quotas, usage and audit — all over
  * OpenVibe.Network's /api/v1/projects API with the person's own access token (ADR-014: Network owns
  * every one of these; Codes stores none of them). Plus the Codes-owned parts that hang off an app:
  * releases (manifest editor, publish/deprecate/revoke) and playgrounds.
@@ -12,6 +12,8 @@
  *   - a client secret appears only in the response to the create/rotate that produced it, with
  *     Cache-Control: no-store, and is never stored, logged or redirected through a URL
  *   - quotas are "recorded limit — enforced by <service>": Network records, the owner enforces
+ *   - usage (owner and admins, staff) is what Network added up from the services' hourly rollups,
+ *     shown with its lag; Codes computes nothing of its own
  *   - the scope editor offers only capabilities apps can be granted (public, or partner when in the
  *     allowance) and refuses to forward anything else
  */
@@ -27,6 +29,7 @@ const { validationResult } = require('./tools');
 const { buildExport } = require('../domain/project-export');
 const { ArchiveError } = require('../domain/project-archive');
 const { statusBadge } = require('./pages');
+const { usageBody, usageQuery } = require('../render/usage');
 
 const PRJ_RE = /^prj_[0-9A-HJKMNP-TV-Z]{26}$/;
 const APP_RE = /^app_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -38,7 +41,7 @@ const REL_RE = /^rel_[0-9A-HJKMNP-TV-Z]{26}$/;
 const atLeast = (role, need) => Boolean(role) && RANK[role] >= RANK[need];
 
 function createPortalRoutes(ctx) {
-    const { config, docs, network, sso, releases, trust, playground, archiver, log } = ctx;
+    const { config, docs, network, sso, releases, trust, playground, archiver, limits, log } = ctx;
     const r = asyncRouter();
     const form = express.urlencoded({ extended: false, limit: '96kb' });
 
@@ -142,7 +145,7 @@ ${archived ? notice('This project is archived: every app in it is revoked.', 'ba
 <dt>Environments</dt><dd>${envs.join(', ')}${project.environment_policy === 'sandbox' ? html` <span class="muted small">(production apps need staff to enable production for this project)</span>` : ''}</dd>
 <dt>Allowance</dt><dd>${(project.allowance || []).length ? html`<ul class="plain">${project.allowance.map((id) => html`<li><a href="/docs/capabilities/${id}"><code>${id}</code></a></li>`)}</ul>` : html`<span class="muted">empty: staff decide which capabilities this project's apps may hold</span>`}</dd>
 <dt>Created</dt><dd>${time(project.created_at)}</dd></dl>
-${atLeast(role, 'admin') || req.viewer.staff ? html`<p><a href="/projects/${project.id}/audit">Audit log</a></p>` : ''}
+${atLeast(role, 'admin') || req.viewer.staff ? html`<p><a href="/projects/${project.id}/usage">Usage, quotas and errors</a> · <a href="/projects/${project.id}/audit">Audit log</a></p>` : ''}
 
 <h2>Apps</h2>
 ${apps.ok ? table(['App', 'Environment', 'Type', 'Grants', 'Created'], (apps.data.apps || []).map((a) => [
@@ -162,7 +165,7 @@ ${quotas.ok ? html`${table(['Capability', 'Limit', 'Window', 'Unit', 'Enforcemen
                 html`<a href="/docs/capabilities/${q.capability}"><code>${q.capability}</code></a>`, String(q.limit), q.window, q.unit,
                 html`recorded limit — enforced by <code>${q.enforced_by || 'the owning service'}</code>`,
             ]), { empty: 'No quotas recorded for this project.' })}
-<p class="muted small">${quotas.data.note || ''} Codes shows these limits; it does not enforce them, and no usage numbers are collected yet.</p>` : problemBox(quotas.problem, { title: 'Quotas could not be loaded' })}
+<p class="muted small">${quotas.data.note || ''} Codes shows these limits; it does not enforce them.${atLeast(role, 'admin') || req.viewer.staff ? html` <a href="/projects/${project.id}/usage#quotas">What each window has used</a>.` : ' The owner and admins see what each window has used.'}</p>` : problemBox(quotas.problem, { title: 'Quotas could not be loaded' })}
 
 <h2>Members</h2>
 ${members.ok ? table(['Member', 'Role', 'Added', ''], (members.data.members || []).map((m) => [
@@ -314,6 +317,23 @@ ${table(['When', 'Actor', 'Action', 'Target', 'Detail', 'Event'], (got.data.entr
             ]))}
 ${got.data.next_before ? html`<p><a href="/projects/${project.id}/audit?before=${got.data.next_before}">Older</a></p>` : ''}`,
         });
+    });
+
+    // ── Usage (WS-N task 4): Network's per-day numbers from the services' rollups ──
+    r.get('/:project/usage', idParams, async (req, res) => {
+        const project = await loadProject(req, res);
+        if (!project) return;
+        const crumbs = [{ label: 'Projects', href: '/projects' }, { label: project.name, href: back(req) }, { label: 'Usage' }];
+        if (!atLeast(project.role, 'admin') && !req.viewer.staff) {
+            return page(req, res, { title: `Usage · ${project.name}`, crumbs, body: html`<h1>Usage</h1><p>A project's usage and errors are for its owner and admins.</p><p><a href="${back(req)}">Back to the project</a></p>` }, 403);
+        }
+        const query = usageQuery(req.query);
+        const got = await net(req, res, (t) => network.projects.usage(t, project.id, query));
+        if (!got.ok) return problemPage(req, res, got.problem, { title: 'Usage', back: back(req) });
+        // The published limits of the services this project used (cached by the reader).
+        const used = new Set((got.data.totals || []).map((t) => t.service));
+        const answers = limits ? await Promise.all(limits.sources.filter((src) => used.has(src.service)).map(async (src) => ({ src, ...(await limits.read(src)) }))) : [];
+        page(req, res, { title: `Usage · ${project.name}`, crumbs, body: usageBody({ project, usage: got.data, limits: answers, query }) });
     });
 
     // ── Apps ────────────────────────────────────────────────

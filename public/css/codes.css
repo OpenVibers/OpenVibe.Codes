@@ -72,3 +72,5 @@ fieldset { border: 1px solid var(--border, #1f2d47); border-radius: 8px; display
 .prose { max-width: 820px; }
 .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 640px) { .facts { grid-template-columns: 1fr; } .facts dt { margin-top: 6px; } .toc ul { columns: 1; } }
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+meter.headroom { width: 8rem; max-width: 100%; vertical-align: middle; }

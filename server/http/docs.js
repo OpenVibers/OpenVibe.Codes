@@ -24,6 +24,7 @@ const { asyncRouter } = require('./router');
 const { html, raw, table, code, badge, time, problemBox } = require('../render/html');
 const { send } = require('../render/layout');
 const { markdown } = require('../render/markdown');
+const { createLimitsReader, amount } = require('../domain/limits');
 
 function createDocsRoutes(ctx) {
     const { docs, config, network } = ctx;
@@ -415,40 +416,9 @@ ${table(['Rule', 'Value'], [
     // Each service that publishes a /limits.json (read from its running config) is shown as it
     // answered; a service not answering shows a problem, never remembered numbers. Public
     // capabilities whose owner publishes none are listed with their quota class and said so.
-    const LIMIT_SOURCES = [
-        // public: null until openvibe.host serves Host itself (WS-N task 10, Stage B step 2); read internally meanwhile.
-        { service: 'host', name: 'OpenVibe Host', internal: process.env.OV_HOST_INTERNAL_URL || 'http://127.0.0.1:4910', public: null },
-        { service: 'events', name: 'OpenVibe Events', internal: process.env.OV_EVENTS_INTERNAL_URL || 'http://127.0.0.1:4300', public: 'https://events.openvibe.network/limits.json' },
-        { service: 'media', name: 'OpenVibe Media', internal: process.env.OV_MEDIA_INTERNAL_URL || 'http://127.0.0.1:4100', public: 'https://openvibe.media/limits.json' },
-    ];
-    const limitsCache = new Map();
-    async function limitsOf(src) {
-        const hit = limitsCache.get(src.service);
-        if (hit && Date.now() - hit.at < 300_000) return { body: hit.body };
-        try {
-            const out = await fetch(`${src.internal.replace(/\/$/, '')}/limits.json`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(4000) });
-            if (!out.ok) throw new Error(`${src.name} answered ${out.status}`);
-            const body = await out.json();
-            if (!body || !Array.isArray(body.limits)) throw new Error(`${src.name} answered without a limits list`);
-            limitsCache.set(src.service, { at: Date.now(), body });
-            return { body };
-        } catch (err) {
-            return { problem: { code: 'codes.limits_unavailable', detail: err.message } };
-        }
-    }
-    const MB = 1024 * 1024;
-    const bytes = (n) => (n >= 1024 * MB ? `${+(n / 1024 / MB).toFixed(2)} GB` : n >= MB ? `${+(n / MB).toFixed(2)} MB` : n >= 1024 ? `${+(n / 1024).toFixed(1)} KB` : `${n} bytes`);
-    function amount(v, unit) {
-        if (v === null || v === undefined) return 'no limit';
-        if (v === 0) return 'none';
-        const n = Number(v).toLocaleString('en-US');
-        if (unit === 'bytes') return bytes(Number(v));
-        if (unit === 'per_minute') return `${n} a minute`;
-        if (unit === 'per_day') return `${n} in 24 hours`;
-        if (unit === 'hours') return `${n} hours`;
-        if (unit === 'days') return `${n} days`;
-        return n;
-    }
+    const limitsReader = ctx.limits || createLimitsReader();
+    const LIMIT_SOURCES = limitsReader.sources;
+    const limitsOf = limitsReader.read;
     r.get('/limits', async (req, res) => {
         const answers = await Promise.all(LIMIT_SOURCES.map(async (src) => ({ src, ...(await limitsOf(src)) })));
         const covered = new Set(LIMIT_SOURCES.map((s) => s.service));
@@ -467,6 +437,7 @@ ${table(['Rule', 'Value'], [
 <li><strong>Past a limit</strong> the answer is a problem (<code>application/problem+json</code>) with a stable code: <code>429</code> for a rate or a count, <code>413</code> for a size. Rate limits say when to retry (<code>Retry-After</code> or <code>retry_after</code>).</li>
 <li><strong>Trust tiers</strong> (unreviewed, reviewed, first-party; <a href="/docs/adr/ADR-013">ADR-013</a>) change defaults and discovery, never the grant check. Every tier meets the same limits today.</li>
 <li><strong>Raising a limit</strong> is a per-project override staff set at the owning service; the numbers here are the defaults every project starts with.</li>
+<li><strong>What a project used</strong> is on its usage page (<code>/projects/&lt;project&gt;/usage</code>, for the owner and admins): per day, service and capability, with the headroom of its recorded quotas and its recent failures. The services report it as hourly rollups, so it trails by an hour.</li>
 </ul>
 ${answers.map(({ src, body, problem }) => html`<h2 id="${src.service}">${src.name}</h2>
 ${problem ? problemBox(problem, { title: `${src.name}'s limits could not be read` }) : html`<p class="muted small">${src.public ? html`From <a href="${src.public}"><code>${src.public.replace('https://', '')}</code></a>` : html`From ${src.name}'s <code>/limits.json</code>`}${body.scope ? html`: ${body.scope}` : ''}.</p>

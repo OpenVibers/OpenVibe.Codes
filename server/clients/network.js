@@ -75,6 +75,8 @@ function createNetworkClient({ config, fetchImpl, log = console }) {
             ? call(t, 'DELETE', `${A(p, a)}/grants/${enc(cap)}`)
             : call(t, 'POST', `${A(p, a)}/grants/${enc(cap)}/${decision === 'approved' ? 'approve' : 'deny'}`, {})),
         quotas: (t, p) => call(t, 'GET', `${P(p)}/quotas`),
+        // Usage per day, quotas with their use and recent errors (network.project-usage-result@1; owner/admin).
+        usage: (t, p, { days, env } = {}) => call(t, 'GET', `${P(p)}/usage?${new URLSearchParams({ days: String(days || 30), env: env || 'all' })}`),
         audit: (t, p, { before, limit } = {}) => call(t, 'GET', `${P(p)}/audit${before || limit ? `?${new URLSearchParams({ ...(before ? { before: String(before) } : {}), ...(limit ? { limit: String(limit) } : {}) })}` : ''}`),
         // A 5-minute read-only token for the project export (owner/admin; Network checks and audits).
         exportToken: (t, p, body) => call(t, 'POST', `${P(p)}/export-tokens`, body),

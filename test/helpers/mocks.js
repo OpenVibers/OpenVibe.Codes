@@ -9,6 +9,8 @@
  *             with the same shapes, roles and problem codes as OpenVibe.Network's developer API
  *             (simplified: no audit paging, no rate limits). setDown(true) makes it refuse
  *             connections-equivalent (503) and drop() closes the socket.
+ *             GET /api/v1/projects/:project/usage (owner/admin or staff; days 1-90, env all|sandbox|production)
+ *             answers what setUsage() stored for the project, or an empty network.project-usage-result@1.
  *             POST /api/v1/projects/:project/export-tokens as Network mints them (owner/admin only,
  *             sub app:app_<project ULID>, read-only caps, purpose export), recorded in exportTokens.
  *   Events    POST /api/v1/events: verifies the app token (openvibe-contracts), needs the capability;
@@ -59,7 +61,7 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
     const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' });
     const st = {
         users: new Map(), byUsername: new Map(), projects: new Map(), members: new Map(), apps: new Map(), creds: new Map(),
-        grants: new Map(), quotas: new Map(), audit: [], codes: new Map(), refresh: new Map(),
+        grants: new Map(), quotas: new Map(), usage: new Map(), audit: [], codes: new Map(), refresh: new Map(),
         catalog: null, down: false, requests: [], tokenRequests: [], exportTokens: [], exportTtl: 300,
     };
     let issuer = null;
@@ -153,6 +155,18 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
             if (m === 'DELETE') { if (s !== u.subject && !need('admin')) return; if (mem.get(s) === 'owner') return problem(json, 403, 'member.forbidden', 'the owner cannot be removed'); mem.delete(s); res204(json); return; }
         }
         if (rest[0] === 'quotas' && m === 'GET') return json(200, { quotas: [...st.quotas.values()].filter((x) => x.project_id === p.id).map((x) => ({ capability: x.capability, limit: x.limit, window: x.window, unit: x.unit, enforced_by: `openvibe.${capabilities.get(x.capability).owner}`, updated_at: x.updated_at })), note: 'quotas are enforced by the service that owns each capability; Network records and exposes them' });
+        if (rest[0] === 'usage' && m === 'GET') {
+            if ((!role || RANK[role] < RANK.admin) && !staff) return problem(json, 403, 'project.forbidden', 'requires admin role');
+            const days = q.get('days') || '30';
+            const env = q.get('env') || 'all';
+            if (!/^\d{1,3}$/.test(days) || Number(days) < 1 || Number(days) > 90) return problem(json, 422, 'usage.invalid', 'days is a whole number from 1 to 90');
+            if (!['all', 'sandbox', 'production'].includes(env)) return problem(json, 422, 'usage.invalid', 'env is all, sandbox or production');
+            const today = new Date().toISOString().slice(0, 10);
+            const range = { days: Number(days), from: new Date(Date.now() - (Number(days) - 1) * 86400000).toISOString().slice(0, 10), to: today };
+            const u = st.usage.get(p.id);
+            if (u) return json(200, { ...u, project_id: p.id, env, range });
+            return json(200, { project_id: p.id, env, range, generated_at: new Date().toISOString(), last_recorded_at: null, freshness: 'No usage has been recorded for this project yet.', totals: [], daily: [], quotas: [], errors: { total: 0, by_code: [], recent: [] } });
+        }
         if (rest[0] === 'audit' && m === 'GET') { if (!role || RANK[role] < RANK.admin) { if (!staff) return problem(json, 403, 'project.forbidden', 'requires admin role'); } return json(200, { entries: st.audit.filter((e) => e.project_id === p.id).slice().reverse(), next_before: null }); }
         if (rest[0] === 'apps') {
             if (rest.length === 1 && m === 'GET') return json(200, { apps: [...st.apps.values()].filter((a) => a.project_id === p.id).map(appView) });
@@ -241,7 +255,7 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
 
     const srv = await listen(async (req, raw, json, res) => {
         const url = new URL(req.url, 'http://x');
-        st.requests.push({ method: req.method, path: url.pathname, headers: req.headers });
+        st.requests.push({ method: req.method, path: url.pathname, query: url.search, headers: req.headers });
         if (st.down) return problem(json, 503, 'network.down', 'Network is restarting');
         if (url.pathname === '/api/.well-known/jwks') return json(200, { public_key: publicPem, algorithm: 'RS256' });
         if (url.pathname === '/.well-known/openvibe') return json(200, { name: 'OpenVibe', issuer, contracts: { version: require('openvibe-contracts/package.json').version }, services: [] });
@@ -310,6 +324,7 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
         issueCode(user, challenge) { const code = `code_${crypto.randomBytes(8).toString('hex')}`; st.codes.set(code, { user, challenge }); return code; },
         setAllowance(projectId, caps) { st.projects.get(projectId).allowance = caps; },
         setEnvironmentPolicy(projectId, policy) { st.projects.get(projectId).environment_policy = policy; },
+        setUsage(projectId, body) { st.usage.set(projectId, body); },
         setQuota(projectId, capability, limit, window, unit) { st.quotas.set(`${projectId} ${capability}`, { project_id: projectId, capability, limit, window, unit, updated_at: new Date().toISOString() }); },
         setCatalog(list) { st.catalog = list; },
         setDown(v) { st.down = v; },
