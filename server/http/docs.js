@@ -16,6 +16,7 @@
  *   /docs/services              the Network's registry with health as reported (never invented)
  *   /docs/billing               the billing policy as OpenVibe.Billing's /policy.json states it (never restated)
  *   /docs/limits                limits and tiers: each service's /limits.json as it answers (never restated)
+ *   /docs/export                the project export: the metadata JSON and the full archive's layout
  *   /docs/sdk[/:module]         SDK reference from its .d.ts files
  *   /docs/adr/:id               ADRs as published in openvibe-contracts
  */
@@ -56,6 +57,7 @@ function createDocsRoutes(ctx) {
 <li><a href="/docs/tools"><strong>Tools API</strong></a><span>every OpenVibe tool you can call from code, from the live registry</span></li>
 <li><a href="/docs/billing"><strong>Billing policy</strong></a><span>prices, the creator split, fees, holds and cashouts, live from OpenVibe.Billing</span></li>
 <li><a href="/docs/limits"><strong>Limits and tiers</strong></a><span>what a project may do in sandbox and production, live from the services that enforce it</span></li>
+<li><a href="/docs/export"><strong>Project export</strong></a><span>take a project with you: its configuration, modules, objects and events as one download</span></li>
 <li><a href="/docs/sdk"><strong>SDK</strong></a><span>${docs.sdk.length} modules of openvibe-sdk from their type definitions</span></li>
 <li><a href="/policy/rfc"><strong>Decisions</strong></a><span>${docs.adrs.length} architecture decision records</span></li>
 </ul>
@@ -475,6 +477,39 @@ ${table(['Limit', 'Capability', 'Sandbox', 'Production', 'Past it'], body.limits
 <h2>Other capabilities</h2>
 <p>These can be granted to apps, but their owners do not publish their limits yet. Each shows its quota class from <code>openvibe-contracts v${docs.contractsVersion}</code>.</p>
 ${table(['Owner', 'Capabilities (quota class)'], owners.map((o) => [code(o), html`${rest.filter((c) => c.owner === o).map((c, i) => html`${i ? ', ' : ''}<a href="/docs/capabilities/${c.id}">${c.id}</a> (${c.quotaClass})`)}`]))}`,
+        });
+    });
+
+    // ── Project export (WS-N task 9; server/domain/project-archive.js) ──
+    r.get('/export', (req, res) => {
+        const x = config.export;
+        page(req, res, {
+            title: 'Project export',
+            description: 'What an OpenVibe project export holds: the metadata JSON and the full archive (configuration, modules, objects, events).',
+            crumbs: [{ label: 'Docs', href: '/docs' }, { label: 'Project export' }],
+            body: html`<h1>Project export</h1>
+<p>A project's data is yours to take elsewhere. On the project's page in the portal there are two downloads. Neither contains a secret: credentials appear by id and last four characters only, and no token is ever written into either.</p>
+<h2>Metadata (JSON)</h2>
+<p>Any member can download it. It is one JSON document (<code>openvibe.codes.project-export</code> v1) with what OpenVibe.Network holds for the project (the project, members, apps, credentials, grants and quotas, plus the audit log for admins) and what Codes holds (releases with their manifests and logs, trust tiers, playground runs). If Network fails part-way, you get an error, never half a document.</p>
+<h2>Full archive (zip)</h2>
+<p>The owner and admins can download it. Codes asks OpenVibe.Network for a read-only <em>export token</em> for each service and environment. Network checks your role, records the request in the project's audit log, and the token lasts five minutes. Codes then reads the project's data with it. Codes keeps nothing of the archive.</p>
+${table(['File', 'What it holds'], [
+                [code('manifest.json'), 'format (openvibe.codes.project-archive v1), counts per part, whether each part is complete and where it stopped, every file with its size and SHA-256, and what is not included'],
+                [code('README.txt'), 'the same in words, with a one-line script that fetches the objects'],
+                [code('project.json'), 'the metadata document above, with the audit log. This is the project\'s configuration: environments, allowance, apps and redirect URIs, grants, quotas'],
+                [code('modules/<release_id>.json'), 'each release\'s manifest (codes.app-manifest@1 or mods.mod-manifest@1) exactly as validated'],
+                [code('media/<env>/namespaces.json'), 'OpenVibe.Media\'s namespaces for the project: policy, quotas, usage'],
+                [code('media/<env>/objects.jsonl'), html`every object, soft-deleted ones included, one per line with Media's metadata and <code>download</code>: a public URL, or a signed one valid for ${Math.round(x.urlTtlS / 60)} minutes`],
+                [code('events/<env>.jsonl'), html`the project's app events (<code>app.&lt;project_key&gt;.*</code>) that OpenVibe.Events still keeps, one <code>{ seq, event }</code> per line`],
+            ])}
+<p><code>&lt;env&gt;</code> is <code>production</code> and <code>sandbox</code>, both always present (empty when the project has nothing there).</p>
+<ul>
+<li><strong>Objects are listed, not copied.</strong> A project can hold gigabytes; the zip holds each object's URL, and the bytes come straight from Media. Fetch them before the signed URLs expire, or download the archive again for fresh ones.</li>
+<li><strong>Limits.</strong> At most ${x.maxObjects} objects and ${x.maxEvents} events per environment. A part that reaches its limit says <code>complete: false</code> and the cursor to continue from, and so does the archive as a whole.</li>
+<li><strong>All or nothing.</strong> If Network, Media or Events fails or refuses, the page names the service, part and environment, and nothing is downloaded.</li>
+<li><strong>Retention.</strong> Events keeps app events for a limited time (see <a href="/docs/limits#events">Limits</a>); older ones are gone before any export.</li>
+<li><strong>Not included:</strong> Tools job results (readable only by Tools), Events webhook subscriptions (each app's own, with signing secrets), and Network user modules (per person, not per project: each member exports their own from Network).</li>
+</ul>`,
         });
     });
 

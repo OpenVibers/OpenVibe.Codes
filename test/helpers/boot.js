@@ -35,6 +35,7 @@ async function boot(opts = {}) {
         OV_OAUTH_CLIENT_ID: 'codes', OV_OAUTH_CLIENT_SECRET: 'codes-secret', COOKIE_SECURE: 'false',
         CODES_FORM_SECRET: 'test-form-secret',
         CODES_PLAYGROUND_EVENTS_URL: events.url, CODES_PLAYGROUND_MEDIA_URL: media.url,
+        CODES_EXPORT_EVENTS_URL: events.url, CODES_EXPORT_MEDIA_URL: media.url,
         CODES_REGISTRY_TTL_MS: '0',
         ...(opts.relay ? { EVENTS_URL: events.url, EVENTS_RELAY_INTERVAL_MS: '50' } : {}),
         ...(opts.env || {}),
@@ -74,8 +75,9 @@ async function boot(opts = {}) {
             body = fd;
         }
         const res = await fetch(base + p, { method: o.method || (body ? 'POST' : 'GET'), headers, body, redirect: 'manual' });
-        const text = await res.text();
-        return { status: res.status, headers: res.headers, text, json() { return JSON.parse(text); } };
+        const buf = Buffer.from(await res.arrayBuffer());
+        const text = buf.toString('utf8');
+        return { status: res.status, headers: res.headers, text, buffer: buf, json() { return JSON.parse(text); } };
     }
 
     /** Every value in every table of Codes' database, as one string. */

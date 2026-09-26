@@ -30,6 +30,7 @@ const { generate } = require('./docs/generate');
 const { createTrust } = require('./domain/trust');
 const { createReleases } = require('./domain/releases');
 const { createPlayground } = require('./domain/playground');
+const { createArchiver } = require('./domain/project-archive');
 const { createDocsRoutes } = require('./http/docs');
 const { createToolRoutes } = require('./http/tools');
 const { createPageRoutes } = require('./http/pages');
@@ -57,8 +58,9 @@ function createApp(opts = {}) {
     const trust = createTrust({ store, outbox });
     const releases = createReleases({ store, outbox, trust });
     const playground = createPlayground({ store, config, network, keys, fetchImpl, log });
+    const archiver = createArchiver({ config, fetchImpl, log });
 
-    const ctx = { config, store, docs, keys, sso, network, outbox, trust, releases, playground, log };
+    const ctx = { config, store, docs, keys, sso, network, outbox, trust, releases, playground, archiver, log };
 
     const app = express();
     app.disable('x-powered-by');

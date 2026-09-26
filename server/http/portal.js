@@ -25,6 +25,7 @@ const manifestsLib = require('../domain/manifests');
 const { RANK, ReleaseError } = require('../domain/releases');
 const { validationResult } = require('./tools');
 const { buildExport } = require('../domain/project-export');
+const { ArchiveError } = require('../domain/project-archive');
 const { statusBadge } = require('./pages');
 
 const PRJ_RE = /^prj_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -37,7 +38,7 @@ const REL_RE = /^rel_[0-9A-HJKMNP-TV-Z]{26}$/;
 const atLeast = (role, need) => Boolean(role) && RANK[role] >= RANK[need];
 
 function createPortalRoutes(ctx) {
-    const { config, docs, network, sso, releases, trust, playground, log } = ctx;
+    const { config, docs, network, sso, releases, trust, playground, archiver, log } = ctx;
     const r = asyncRouter();
     const form = express.urlencoded({ extended: false, limit: '96kb' });
 
@@ -177,6 +178,9 @@ ${!archived && assignable.length ? html`<h3>Add a member</h3>
 <h2>Export</h2>
 <p>Download this project's metadata as JSON: the project, members, apps with their credentials (ids and last four characters, never a secret) and grants, quotas${atLeast(role, 'admin') || req.viewer.staff ? ', the audit log' : ''} as OpenVibe.Network holds them, and Codes' releases, manifests, trust tiers and playground runs.${atLeast(role, 'admin') || req.viewer.staff ? '' : ' The audit log needs the admin role and is left out.'}</p>
 <p><a class="button" href="/projects/${project.id}/export" download>Download export (JSON)</a></p>
+${atLeast(role, 'admin') ? html`<h3>Full archive</h3>
+<p>Everything the project holds, as one zip: the metadata above with the audit log, its release manifests (its app and mod modules), its Media objects and namespaces, and the app events OpenVibe.Events still keeps, in both environments. Objects are listed with their download URLs (signed ones stay valid for ${Math.round(config.export.urlTtlS / 60)} minutes), not copied into the zip. At most ${config.export.maxObjects} objects and ${config.export.maxEvents} events per environment: the archive says when a part stops short, and if a service fails nothing is downloaded. <a href="/docs/export">What is in it</a>.</p>
+<form method="post" action="/projects/${project.id}/export/archive" class="stack">${csrfField(c)}<button type="submit">Download full archive (zip)</button></form>` : html`<p class="muted small">The full archive (objects, events and modules too) is for the project's owner and admins.</p>`}
 ${role === 'owner' && !archived ? html`<h2>Archive</h2><form method="post" action="/projects/${project.id}/archive" class="stack">${csrfField(c)}
 <label><input type="checkbox" name="confirm" value="1" required> Archiving cannot be undone and revokes every app in the project</label><button type="submit" class="danger">Archive project</button></form>` : ''}
 ${role === 'owner' || req.viewer.staff ? html`<h2>Delete</h2>
@@ -240,6 +244,43 @@ ${canChange || self ? html`<form method="post" action="/projects/${project.id}/m
         res.set('Cache-Control', 'no-store');
         res.set('Content-Disposition', `attachment; filename="openvibe-project-${project.id}.json"`);
         res.type('application/json').send(`${JSON.stringify(got.data, null, 2)}\n`);
+    });
+
+    // The full archive (owner/admin; Network checks the role again when it mints the export tokens).
+    // One at a time per project: it reads every object and event the project holds.
+    const exporting = new Set();
+    r.post('/:project/export/archive', idParams, form, guard, async (req, res) => {
+        const project = await loadProject(req, res);
+        if (!project) return;
+        if (!atLeast(project.role, 'admin')) return problemPage(req, res, { status: 403, code: 'project.forbidden', detail: 'only the project owner or an admin can download the full archive' }, { title: 'Export', back: back(req) });
+        if (exporting.has(project.id)) return problemPage(req, res, { status: 429, code: 'codes.export_running', detail: 'an archive of this project is being built; try again when it is done' }, { title: 'Export', back: back(req) });
+        exporting.add(project.id);
+        try {
+            const meta = { now: new Date().toISOString(), subject: req.viewer.subject, networkUrl: config.networkUrl, baseUrl: config.baseUrl };
+            const metadata = await net(req, res, (t) => buildExport({ network, token: t, project, includeAudit: true, releases, playground, trust, meta }));
+            if (!metadata.ok) return problemPage(req, res, metadata.problem, { title: 'Export', back: back(req) });
+            const mintToken = async (audience, env) => {
+                const got = await net(req, res, (t) => network.projects.exportToken(t, project.id, { audience, env }));
+                if (!got.ok) throw Object.assign(new Error('export token refused'), { networkProblem: got.problem });
+                return got.data;
+            };
+            const out = await archiver.build({ project, metadata: metadata.data, mintToken, meta });
+            log.info(`[Codes] project ${project.id} archive exported by user:${req.viewer.subject}: ${out.summary.objects} objects, ${out.summary.events} events, ${out.summary.modules} modules, ${out.summary.bytes} bytes${out.summary.complete ? '' : ' (a limit was reached)'}`);
+            res.set('Cache-Control', 'no-store');
+            res.set('Content-Disposition', `attachment; filename="${out.filename}"`);
+            res.type('application/zip').send(out.buffer);
+        } catch (err) {
+            if (err.networkProblem) return problemPage(req, res, err.networkProblem, { title: 'Export', back: back(req) });
+            if (!(err instanceof ArchiveError)) throw err;
+            log.warn(`[Codes] project ${project.id} archive failed: ${err.message}`);
+            page(req, res, {
+                title: 'Export failed',
+                body: html`<h1>Export failed</h1>${problemBox(err.problem, { title: 'The archive could not be built' })}
+<p>Nothing was downloaded. Try again in a moment; the metadata export (JSON) does not depend on these services.</p><p><a href="${back(req)}">Back</a></p>`,
+            }, err.problem.status);
+        } finally {
+            exporting.delete(project.id);
+        }
     });
 
     r.post('/:project/delete', idParams, form, guard, async (req, res) => {

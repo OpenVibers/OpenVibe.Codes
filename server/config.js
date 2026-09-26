@@ -67,6 +67,18 @@ function load(env = process.env) {
             runsPerHour: int(env.CODES_PLAYGROUND_RUNS_PER_HOUR, 60),
         },
 
+        // The full project archive (server/domain/project-archive.js): Media and Events are read
+        // server-side (loopback by default, as for /docs/limits) with Network's read-only export
+        // tokens. The limits bound one archive: objects and events per environment, and how long
+        // Media's signed download URLs in it stay valid (Media allows at most an hour).
+        export: {
+            mediaUrl: trim(env.CODES_EXPORT_MEDIA_URL || env.OV_MEDIA_INTERNAL_URL || 'http://127.0.0.1:4100'),
+            eventsUrl: trim(env.CODES_EXPORT_EVENTS_URL || env.OV_EVENTS_INTERNAL_URL || 'http://127.0.0.1:4300'),
+            maxObjects: Math.max(1, int(env.CODES_EXPORT_MAX_OBJECTS, 5000)),
+            maxEvents: Math.max(1, int(env.CODES_EXPORT_MAX_EVENTS, 10000)),
+            urlTtlS: Math.min(3600, Math.max(60, int(env.CODES_EXPORT_URL_TTL_S, 3600))),
+        },
+
         // Registry answers are cached this long (Network's own health poll runs every 60 s).
         registryTtlMs: int(env.CODES_REGISTRY_TTL_MS, 30 * 1000),
 

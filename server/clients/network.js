@@ -7,6 +7,7 @@
  *              Network owns projects, members, apps, credentials, grants and quotas (ADR-014); Codes
  *              renders what it answers and forwards what the person asks. It never stores any of it.
  *   registry   /api/v1/registry/* and /.well-known/openvibe (public, cached briefly).
+ *              POST /:project/export-tokens mints the project export's read-only tokens (never kept).
  *   appToken   /oauth/token client_credentials for an app — only in playgrounds, with the secret the
  *              developer typed for that one request (never stored, never logged, never echoed).
  *
@@ -75,6 +76,8 @@ function createNetworkClient({ config, fetchImpl, log = console }) {
             : call(t, 'POST', `${A(p, a)}/grants/${enc(cap)}/${decision === 'approved' ? 'approve' : 'deny'}`, {})),
         quotas: (t, p) => call(t, 'GET', `${P(p)}/quotas`),
         audit: (t, p, { before, limit } = {}) => call(t, 'GET', `${P(p)}/audit${before || limit ? `?${new URLSearchParams({ ...(before ? { before: String(before) } : {}), ...(limit ? { limit: String(limit) } : {}) })}` : ''}`),
+        // A 5-minute read-only token for the project export (owner/admin; Network checks and audits).
+        exportToken: (t, p, body) => call(t, 'POST', `${P(p)}/export-tokens`, body),
     };
 
     // Registry: public, cached for registryTtlMs so a page view never waits on Network twice.
