@@ -417,6 +417,7 @@ ${table(['Rule', 'Value'], [
         // public: null until openvibe.host serves Host itself (WS-N task 10, Stage B step 2); read internally meanwhile.
         { service: 'host', name: 'OpenVibe Host', internal: process.env.OV_HOST_INTERNAL_URL || 'http://127.0.0.1:4910', public: null },
         { service: 'events', name: 'OpenVibe Events', internal: process.env.OV_EVENTS_INTERNAL_URL || 'http://127.0.0.1:4300', public: 'https://events.openvibe.network/limits.json' },
+        { service: 'media', name: 'OpenVibe Media', internal: process.env.OV_MEDIA_INTERNAL_URL || 'http://127.0.0.1:4100', public: 'https://openvibe.media/limits.json' },
     ];
     const limitsCache = new Map();
     async function limitsOf(src) {
@@ -442,6 +443,7 @@ ${table(['Rule', 'Value'], [
         if (unit === 'bytes') return bytes(Number(v));
         if (unit === 'per_minute') return `${n} a minute`;
         if (unit === 'per_day') return `${n} in 24 hours`;
+        if (unit === 'hours') return `${n} hours`;
         if (unit === 'days') return `${n} days`;
         return n;
     }

@@ -25,6 +25,14 @@ const EVENTS = {
     ],
 };
 
+const MEDIA = {
+    service: 'media', scope: 'per project tenant and environment',
+    limits: [
+        { id: 'storage_bytes', label: 'Stored bytes (every namespace of the tenant)', capability: 'media.object.upload', unit: 'bytes', production: 1073741824, sandbox: 104857600, exceeded: '413 media.quota.exceeded' },
+        { id: 'unfinished_upload_hours', label: 'Hours an unfinished upload holds its quota', capability: 'media.object.upload', unit: 'hours', production: 72, sandbox: 72, exceeded: 'failed, bytes freed' },
+    ],
+};
+
 function serve(body) {
     const s = http.createServer((req, res) => {
         if (!s.up) { res.statusCode = 503; return res.end('{}'); }
@@ -41,6 +49,8 @@ function serve(body) {
     const events = await serve(EVENTS);
     process.env.OV_HOST_INTERNAL_URL = `http://127.0.0.1:${host.address().port}`;
     process.env.OV_EVENTS_INTERNAL_URL = `http://127.0.0.1:${events.address().port}`;
+    const media = await serve(MEDIA);
+    process.env.OV_MEDIA_INTERNAL_URL = `http://127.0.0.1:${media.address().port}`;
     const { boot, check, done } = require('./helpers/boot');
     const t = await boot();
 
@@ -48,13 +58,14 @@ function serve(body) {
         const r = await t.get('/docs/limits');
         assert.strictEqual(r.status, 200, r.text.slice(0, 300));
         for (const s of ['1 GB', '100 MB', '50 in 24 hours', '120 a minute', '30 a minute', '7 days', 'quota.custom_domains', 'events.quota_exceeded',
-            'events.openvibe.network/limits.json', 'per project and environment (ADR-014)']) {
+            'events.openvibe.network/limits.json', 'openvibe.media/limits.json', '72 hours', 'media.quota.exceeded', 'per project and environment (ADR-014)']) {
             assert.ok(r.text.includes(s), `the page says ${s}`);
         }
         assert.match(r.text, /Custom domains<\/td><td[^>]*>[^<]*<a[^>]*><code>host\.site\.manage<\/code><\/a><\/td><td[^>]*>none<\/td>/, 'sandbox 0 reads "none"');
         assert.match(r.text, /Webhook subscriptions.*?<td[^>]*>5<\/td><td[^>]*>no limit<\/td>/s, 'production null reads "no limit"');
         assert.ok(!/\bfree\b/i.test(r.text.replace(/<[^>]+>/g, ' ')), 'no "free" copy');
-        assert.ok(r.text.includes('Other capabilities') && r.text.includes('/docs/capabilities/media.object.upload'), 'owners without /limits.json are listed');
+        assert.ok(r.text.includes('Other capabilities') && r.text.includes('/docs/capabilities/tools.tool.run'), 'owners without /limits.json are listed');
+        assert.ok(!/Other capabilities[\s\S]*media\.object\.upload \(/.test(r.text), 'Media publishes its own now');
         assert.ok(!/Other capabilities[\s\S]*events\.app\.publish \(/.test(r.text), 'a covered owner is not listed again');
         assert.ok((await t.get('/docs')).text.includes('href="/docs/limits"'), 'the docs index links it');
         assert.ok((await t.get('/sitemap.xml')).text.includes('/docs/limits'), 'and the sitemap');
@@ -75,5 +86,6 @@ function serve(body) {
     await t.close();
     host.close();
     events.close();
+    media.close();
     done();
 })().catch((err) => { console.error(err); process.exit(1); });
