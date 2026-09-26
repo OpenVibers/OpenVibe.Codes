@@ -14,6 +14,7 @@
  *                               helpers, from the installed openvibe-shared and openvibe-sdk, with a live sample
  *   /docs/events                event types from the service manifests
  *   /docs/services              the Network's registry with health as reported (never invented)
+ *   /docs/billing               the billing policy as OpenVibe.Billing's /policy.json states it (never restated)
  *   /docs/sdk[/:module]         SDK reference from its .d.ts files
  *   /docs/adr/:id               ADRs as published in openvibe-contracts
  */
@@ -52,6 +53,7 @@ function createDocsRoutes(ctx) {
 <li><a href="/docs/events"><strong>Events</strong></a><span>${docs.events.length} event types services declare they produce</span></li>
 <li><a href="/docs/services"><strong>Services</strong></a><span>the registry as OpenVibe.Network reports it, with health</span></li>
 <li><a href="/docs/tools"><strong>Tools API</strong></a><span>every OpenVibe tool you can call from code, from the live registry</span></li>
+<li><a href="/docs/billing"><strong>Billing policy</strong></a><span>prices, the creator split, fees, holds and cashouts, live from OpenVibe.Billing</span></li>
 <li><a href="/docs/sdk"><strong>SDK</strong></a><span>${docs.sdk.length} modules of openvibe-sdk from their type definitions</span></li>
 <li><a href="/policy/rfc"><strong>Decisions</strong></a><span>${docs.adrs.length} architecture decision records</span></li>
 </ul>
@@ -354,6 +356,54 @@ ${families.map((f) => html`<h2>${f}</h2>${table(['Tool', 'Runs as', 'Access', 'I
                 t.auth && t.auth.anonymous ? 'anonymous or token' : (t.auth && t.auth.capability === 'tools.net.probe' ? 'partner token (tools.net.probe)' : 'session or token'),
                 t.files ? `files (${t.files.min}-${t.files.max})` : 'JSON',
             ]))}`)}`,
+        });
+    });
+
+    // ── Billing policy (live from OpenVibe.Billing, WS-K task 10) ──
+    // The numbers are Billing's /policy.json (read from the rates the ledger charges); nothing is
+    // restated here. Billing not answering shows a problem, never remembered or invented numbers.
+    const BILLING_URL = (process.env.OV_BILLING_INTERNAL_URL || 'http://127.0.0.1:4600').replace(/\/$/, '');
+    let billingCache = { at: 0, policy: null };
+    r.get('/billing', async (req, res) => {
+        let policy = billingCache.policy; let problem = null;
+        if (!policy || Date.now() - billingCache.at > 300_000) {
+            try {
+                const out = await fetch(`${BILLING_URL}/policy.json`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(4000) });
+                if (!out.ok) throw new Error(`Billing answered ${out.status}`);
+                policy = await out.json();
+                billingCache = { at: Date.now(), policy };
+            } catch (err) { problem = { code: 'codes.billing_unavailable', detail: err.message }; }
+        }
+        const usd = (c) => `$${(c / 100).toFixed(2)}`;
+        const n = (x) => Number(x).toLocaleString('en-US');
+        const p = policy;
+        send(res, problem && !p ? 502 : 200, {
+            index: true, cache: 'public, max-age=300', viewer: req.viewer, config, path: req.originalUrl,
+            title: 'Billing policy',
+            crumbs: [{ label: 'Docs', href: '/docs' }, { label: 'Billing' }],
+            body: html`<h1>Billing policy</h1>
+<p>How money moves on OpenVibe, as <a href="https://billing.openvibe.network/policy">billing.openvibe.network/policy</a> states it for everyone. The numbers below are Billing's <a href="https://billing.openvibe.network/policy.json"><code>/policy.json</code></a>, read from the rates the ledger charges, fetched at most every 5 minutes. Apps that take payments or show balances should link to that page rather than restate it.</p>
+${problem && !p ? problemBox(problem, { title: 'The billing policy could not be read' }) : html`
+<p>Ledger: <strong>${p.authority === 'billing' ? 'OpenVibe Billing' : 'openvibe.live'}</strong> (<code>authority: ${p.authority}</code>). Wording last changed ${p.wording_date}.</p>
+<h2>Currencies</h2>
+${table(['Currency', 'Bought with money', 'Withdrawable'], [
+    ['Vibes', 'yes', `only Vibes received; ${usd(p.currencies.vibes.cash_value_per_100_cents)} per 100`],
+    ['OpenCoins', 'no', 'never'],
+    ['Channel points', 'no', 'never'],
+])}
+<h2>Buying Vibes</h2>
+${table(['Vibes in one purchase', 'Price per 100', 'Creator value per 100', 'OpenVibe keeps'], p.purchase.tiers.map((t) => [
+    `${n(t.from)}${t.to == null ? ' or more' : `–${n(t.to)}`}`, usd(t.price_per_100_cents), usd(t.creator_value_per_100_cents), `${t.openvibe_keeps_pct}%`,
+]))}
+<p>One purchase: ${n(p.purchase.min_vibes)} to ${n(p.purchase.max_vibes)} Vibes. Tips reach the creator in full (${p.tips.creator_receives_pct}%).</p>
+<h2>Subscriptions and cashouts</h2>
+${table(['Rule', 'Value'], [
+    ['Subscription', `${usd(p.subscription.price_cents)} for ${n(p.subscription.period_days)} days`],
+    ['Creator share (paid through OpenVibe’s PowerChat)', `${p.subscription.creator_share_pct}% (${usd(p.subscription.creator_share_cents)})`],
+    ['Site routing fee, on top', `${p.subscription.site_route_fee_pct}% (${usd(p.subscription.site_route_fee_cents)})`],
+    ['Minimum cashout', `${n(p.cashout.min_vibes)} Vibes (${usd(p.cashout.min_cents)})`],
+    ['Cashout hold, then review', `${n(p.cashout.hold_days)} days`],
+])}`}`,
         });
     });
 
