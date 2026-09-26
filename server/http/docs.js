@@ -414,7 +414,8 @@ ${table(['Rule', 'Value'], [
     // answered; a service not answering shows a problem, never remembered numbers. Public
     // capabilities whose owner publishes none are listed with their quota class and said so.
     const LIMIT_SOURCES = [
-        { service: 'host', name: 'OpenVibe Host', internal: process.env.OV_HOST_INTERNAL_URL || 'http://127.0.0.1:4910', public: 'https://openvibe.host/limits.json' },
+        // public: null until openvibe.host serves Host itself (WS-N task 10, Stage B step 2); read internally meanwhile.
+        { service: 'host', name: 'OpenVibe Host', internal: process.env.OV_HOST_INTERNAL_URL || 'http://127.0.0.1:4910', public: null },
         { service: 'events', name: 'OpenVibe Events', internal: process.env.OV_EVENTS_INTERNAL_URL || 'http://127.0.0.1:4300', public: 'https://events.openvibe.network/limits.json' },
     ];
     const limitsCache = new Map();
@@ -464,7 +465,7 @@ ${table(['Rule', 'Value'], [
 <li><strong>Raising a limit</strong> is a per-project override staff set at the owning service; the numbers here are the defaults every project starts with.</li>
 </ul>
 ${answers.map(({ src, body, problem }) => html`<h2 id="${src.service}">${src.name}</h2>
-${problem ? problemBox(problem, { title: `${src.name}'s limits could not be read` }) : html`<p class="muted small">From <a href="${src.public}"><code>${src.public.replace('https://', '')}</code></a>${body.scope ? html`: ${body.scope}` : ''}.</p>
+${problem ? problemBox(problem, { title: `${src.name}'s limits could not be read` }) : html`<p class="muted small">${src.public ? html`From <a href="${src.public}"><code>${src.public.replace('https://', '')}</code></a>` : html`From ${src.name}'s <code>/limits.json</code>`}${body.scope ? html`: ${body.scope}` : ''}.</p>
 ${table(['Limit', 'Capability', 'Sandbox', 'Production', 'Past it'], body.limits.map((l) => [
     l.label, l.capability ? html`<a href="/docs/capabilities/${l.capability}"><code>${l.capability}</code></a>` : '—',
     amount(l.sandbox, l.unit), amount(l.production, l.unit), l.exceeded ? code(l.exceeded) : '—',

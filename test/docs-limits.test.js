@@ -48,7 +48,7 @@ function serve(body) {
         const r = await t.get('/docs/limits');
         assert.strictEqual(r.status, 200, r.text.slice(0, 300));
         for (const s of ['1 GB', '100 MB', '50 in 24 hours', '120 a minute', '30 a minute', '7 days', 'quota.custom_domains', 'events.quota_exceeded',
-            'openvibe.host/limits.json', 'events.openvibe.network/limits.json', 'per project and environment (ADR-014)']) {
+            'events.openvibe.network/limits.json', 'per project and environment (ADR-014)']) {
             assert.ok(r.text.includes(s), `the page says ${s}`);
         }
         assert.match(r.text, /Custom domains<\/td><td[^>]*>[^<]*<a[^>]*><code>host\.site\.manage<\/code><\/a><\/td><td[^>]*>none<\/td>/, 'sandbox 0 reads "none"');
