@@ -136,6 +136,15 @@ const sdkPkg = require('openvibe-sdk/package.json');
         assert.ok(cap.text.includes('href="/docs/api/tools#cap-tools.job.create"'), 'a capability links its routes');
     });
 
+    await check('the update system page documents the feed, the markup and the helpers (WS-A task 4)', async () => {
+        const r = await t.get('/docs/updates');
+        assert.strictEqual(r.status, 200);
+        for (const s of ['/api/v1/changelog', 'data-ov-shipped="latest"', 'frame.shipped(', 'updatesBody(', 'mountFrame', 'openvibe-shared v' + require('openvibe-shared/package.json').version])
+            assert.ok(r.text.includes(s.replace(/"/g, '&quot;')) || r.text.includes(s), `names ${s}`);
+        assert.ok((await t.get('/docs')).text.includes('href="/docs/updates"'), 'linked from the docs index');
+        assert.ok((await t.get('/sitemap.xml')).text.includes('/docs/updates</loc>'));
+    });
+
     await check('pages rendered for a signed-in person are never publicly cacheable', async () => {
         const u = t.network.addUser('pat');
         const r = await t.get('/docs', { as: u });

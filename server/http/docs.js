@@ -10,6 +10,8 @@
  *   /docs/capabilities[/:id]    capability catalog; grantable (public/partner, active) highlighted
  *   /docs/api[/:service]        API explorer: every service's routes from openvibe-contracts' OpenAPI
  *   /docs/api/:service.json     that OpenAPI 3.1 document (CORS *, for Swagger-style tools)
+ *   /docs/updates               the update system ("shipped" and /updates on every site): feed, markup,
+ *                               helpers, from the installed openvibe-shared and openvibe-sdk, with a live sample
  *   /docs/events                event types from the service manifests
  *   /docs/services              the Network's registry with health as reported (never invented)
  *   /docs/sdk[/:module]         SDK reference from its .d.ts files
@@ -45,6 +47,7 @@ function createDocsRoutes(ctx) {
 <ul class="cards">
 <li><a href="/docs/contracts"><strong>Contracts</strong></a><span>${docs.contracts.length} JSON Schemas with fields, examples and versions</span></li>
 <li><a href="/docs/api"><strong>API explorer</strong></a><span>${apiIndex.reduce((n, s) => n + s.operations, 0)} routes across ${apiIndex.length} services, with their capabilities and schemas (OpenAPI 3.1)</span></li>
+<li><a href="/docs/updates"><strong>Update system</strong></a><span>the "shipped" pill, recent list and /updates log every OpenVibe site shows, and how to add them to yours</span></li>
 <li><a href="/docs/capabilities"><strong>Capabilities</strong></a><span>${docs.capabilities.length} capabilities; ${grantable} can be granted to apps</span></li>
 <li><a href="/docs/events"><strong>Events</strong></a><span>${docs.events.length} event types services declare they produce</span></li>
 <li><a href="/docs/services"><strong>Services</strong></a><span>the registry as OpenVibe.Network reports it, with health</span></li>
@@ -230,6 +233,54 @@ ${op['x-openvibe-input'] && !op.requestBody ? html`<dt>Input</dt><dd>${schemaLin
 <form method="get" action="/docs/api/${s.service}" class="inline-form"><label><input type="checkbox" name="public" value="1"${onlyPublic ? raw(' checked') : ''}> only routes apps can be granted (public, partner)</label> <button type="submit">Filter</button></form>
 ${ops.length ? ops.map(opBlock) : html`<p class="muted">No route here matches.</p>`}
 ${(doc['x-openvibe-other-bindings'] || []).length ? html`<h2>Other bindings</h2><ul class="plain">${doc['x-openvibe-other-bindings'].map((b) => html`<li><a href="/docs/capabilities/${b.capability}">${b.capability}</a>: <code>${b.binding}</code></li>`)}</ul>` : ''}`,
+        });
+    });
+
+    // ── The update system (roadmap WS-A task 4) ─────────────
+    const sharedVersion = (() => { try { return require('openvibe-shared/package.json').version; } catch { return null; } })();
+    const frameHelpers = (() => { try { return Object.keys(require('openvibe-shared/frame')).filter((k) => ['shipped', 'updatesBody', 'shippedScript'].includes(k)); } catch { return []; } })();
+    const sdkFrame = (() => { try { return Object.keys(require('openvibe-sdk/frame')); } catch { return []; } })();
+    r.get('/updates', async (req, res) => {
+        const feedUrl = `${config.networkUrl}/api/v1/changelog?service=codes&limit=3`;
+        let sample = null, failed = null;
+        try {
+            const f = await fetch(feedUrl, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(3000) });
+            if (!f.ok) throw new Error(`answered ${f.status}`);
+            sample = await f.json();
+        } catch (err) { failed = err.message; }
+        send(res, 200, {
+            index: true, cache: 'public, max-age=60', viewer: req.viewer, config, path: req.originalUrl,
+            title: 'The update system',
+            description: 'How every OpenVibe site shows what shipped: the network changelog feed, the data-ov-shipped markup and the openvibe-shared / openvibe-sdk helpers.',
+            crumbs: [{ label: 'Docs', href: '/docs' }, { label: 'Update system' }],
+            body: html`<h1>The update system</h1>
+<p class="versions">Helpers as installed here: <code>openvibe-shared v${sharedVersion || '?'}</code> (frame: ${frameHelpers.map((k, i) => html`${i ? ', ' : ''}<code>${k}()</code>`)}) and <code>openvibe-sdk v${docs.sdkVersion}</code> (frame: ${sdkFrame.map((k, i) => html`${i ? ', ' : ''}<code>${k}</code>`)}).</p>
+<p>Every OpenVibe site shows what shipped on it. It has three pieces: a "🚀 shipped X ago" line in the footer, a "Recently shipped" list on the home page, and a <code>/updates</code> page with the whole log. They all read one feed, so a commit that reaches production shows up everywhere without anyone writing release notes twice.</p>
+<h2>Where entries come from</h2>
+<p>OpenVibe.Blog watches every running service's release: the <code>release</code> in its <code>/release.json</code>, as OpenVibe.Network's registry reports it. When a release changes, GitHub's compare of the old and new commit gives the commits that shipped. Each one becomes an entry, with the commit message as its text, and batches of them are published as "Patch notes" posts. A service appears once it serves <code>/release.json</code> and its registry entry names its repository.</p>
+<h2>The feed</h2>
+<pre><code>GET https://openvibe.network/api/v1/changelog?service=&lt;id&gt;&amp;limit=&lt;1-100&gt;&amp;before=&lt;cursor&gt;
+→ { service, entries: [{ service, sha, short, subject, author, committed_at, deployed_at, major, url, post_id }],
+    latest_post: { id, title, url, published_at, entries } | null, posts, next }</code></pre>
+<p>It is public, CORS <code>*</code> and cached for 60 s (stale while the blog is down). Leave <code>service</code> out for the whole network.</p>
+${sample ? html`<details open><summary>Live sample: the last ${String((sample.entries || []).length)} entries for this site</summary><ul>${(sample.entries || []).map((e) => html`<li><a href="${e.url}"><code>${e.short}</code></a> ${e.subject} ${e.deployed_at ? html`<span class="muted small">(${time(e.deployed_at)})</span>` : ''}</li>`)}</ul></details>`
+        : html`<p class="muted">The feed could not be read just now (${failed}); the shape above is what it answers.</p>`}
+<h2>On a server-rendered site</h2>
+<pre><code>const frame = require('openvibe-shared/frame');
+frame.shipped({ service: 'myservice', title: 'Recently shipped on MySite' })   // home: pill + recent list
+frame.updatesBody({ service: 'myservice', siteName: 'MySite' })                // the body of your /updates page
+frame.shippedScript()                                                          // the &lt;script&gt; that fills them</code></pre>
+<p>The footer from <code>openvibe-shared/footer</code> already carries the "shipped X ago" line and an Updates link.</p>
+<h2>The markup, if you render it yourself</h2>
+<pre><code>&lt;a data-ov-shipped="latest" data-service="myservice" href="/updates" hidden&gt;&lt;/a&gt;
+&lt;div data-ov-shipped="list" data-service="myservice" data-limit="5" data-more="/updates" data-title="Recently shipped" hidden&gt;&lt;/div&gt;
+&lt;div data-ov-shipped="log" data-service="myservice" data-limit="50"&gt;&lt;/div&gt;</code></pre>
+<p><code>shipped.js</code> (served by every site from its pinned openvibe-shared) mounts every <code>[data-ov-shipped]</code> element: <code>latest</code> is the pill, <code>list</code> the recent changes, and <code>log</code> the full log with days, "Load more" and the Patch notes posts. Elements stay hidden until there is something to show.</p>
+<h2>In a browser app outside the network</h2>
+<pre><code>import { mountFrame } from 'openvibe-sdk/frame';
+await mountFrame({ service: 'myapp' });            // navbar and footer, with the shipped line
+await mountFrame({ service: 'myapp', shipped: false });   // without it</code></pre>
+<p>Live's <a href="https://openvibe.live/updates">/updates</a>, <a href="/updates">this site's</a> and <a href="https://openvibe.network/updates">the whole network's</a> are the same component.</p>`,
         });
     });
 
