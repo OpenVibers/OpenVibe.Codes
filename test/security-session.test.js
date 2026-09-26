@@ -38,6 +38,16 @@ const { signJwt } = require('./helpers/mocks');
         assert.strictEqual(me.status, 401);
     });
 
+    await check('/auth/me: a guest is signed out (200 { user: null }); a session cookie that fails is 401', async () => {
+        const guest = await s.get('/auth/me');
+        assert.strictEqual(guest.status, 200, 'no session cookie at all: not an error');
+        assert.deepStrictEqual(JSON.parse(guest.text), { user: null });
+        assert.strictEqual(guest.headers.get('cache-control'), 'private, no-store');
+        assert.strictEqual((await s.get('/auth/me', { cookie: 'codes_at=garbage' })).status, 401, 'a present but invalid access cookie');
+        assert.strictEqual((await s.get('/auth/me', { cookie: 'codes_rt=stale' })).status, 401, 'a refresh cookie alone is a session that did not resolve');
+        assert.strictEqual((await s.get('/auth/me', { as: staff })).status, 200);
+    });
+
     await check('a real Network session token still signs the staff member in', async () => {
         const page = await s.get('/staff', { as: staff });
         assert.strictEqual(page.status, 200, page.text.slice(0, 200));

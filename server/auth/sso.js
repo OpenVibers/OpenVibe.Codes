@@ -9,7 +9,7 @@ const { staff: staffMap } = require('openvibe-contracts');
  *                           (?silent=1 adds prompt=none; ?next= a same-site path)
  *   GET  /auth/callback   → state check, server-side code exchange (client secret + code_verifier)
  *   GET  /auth/logout     → clear cookies, revoke the refresh token (best effort)
- *   GET  /auth/me         → { user } for the shared navbar (it cannot read the httpOnly cookie)
+ *   GET  /auth/me         → { user } for the shared navbar (it cannot read the httpOnly cookie); { user: null } for a guest
  *
  * Codes calls the Network's /api/v1/projects API with the person's access token, so it keeps that
  * token — in an httpOnly cookie (codes_at) no script can read, unlike the navbar-readable ov_token
@@ -243,6 +243,11 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
 
         r.get('/me', (req, res) => {
             res.set('Cache-Control', 'private, no-store');
+            // No session at all (a guest: no access or refresh cookie) is signed out, not an error: the shared
+            // navbar asks this on every page view, and a 401 logged a console error on each (browser check,
+            // OpenVibe.Host). A session cookie that is present but invalid or expired still answers 401.
+            const c = req.cookies || {};
+            if (!c[ACCESS_COOKIE] && !c[REFRESH_COOKIE] && !req.get('authorization')) return res.json({ user: null });
             const v = req.viewer;
             if (!v || v.kind !== 'user') return res.status(401).json({ error: 'Not signed in' });
             res.json({ user: { username: v.username, display_name: v.displayName, subject_id: v.subject, role: v.role } });
