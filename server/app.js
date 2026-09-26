@@ -80,7 +80,8 @@ function createApp(opts = {}) {
                 styleSrc: ["'self'", "'unsafe-inline'", 'https://openvibe.network', 'https://fonts.googleapis.com', 'https://cdnjs.cloudflare.com'],
                 fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com'],
                 imgSrc: ["'self'", 'data:', 'https://openvibe.network', 'https://openvibe.media'],
-                connectSrc: ["'self'", 'https://openvibe.network', 'https://cloudflareinsights.com'],
+                // events.openvibe.network: release notifications (release-watch's EventSource, openvibe-shared 1.17).
+                connectSrc: ["'self'", 'https://openvibe.network', 'https://cloudflareinsights.com', 'https://events.openvibe.network'],
                 frameSrc: ["'self'", 'https://openvibe.network'],
                 frameAncestors: ["'none'"],
                 objectSrc: ["'none'"],
