@@ -271,7 +271,7 @@ ${signedIn ? releaseActions(req, rel) : ''}
         ].join('\n'));
     });
     r.get('/sitemap.xml', (req, res) => {
-        const urls = ['/', '/docs', '/docs/api', '/docs/updates', '/docs/contracts', '/docs/capabilities', '/docs/events', '/docs/services', '/docs/billing', '/docs/tools', '/docs/sdk', '/oauth', '/tools/webhooks', '/manifests/validate',
+        const urls = ['/', '/docs', '/docs/api', '/docs/updates', '/docs/contracts', '/docs/capabilities', '/docs/events', '/docs/services', '/docs/billing', '/docs/limits', '/docs/tools', '/docs/sdk', '/oauth', '/tools/webhooks', '/manifests/validate',
             '/policy', '/policy/rfc', '/policy/compatibility', '/policy/licensing', '/policy/transparency',
             ...governance.filter((g) => !g.draft).map((g) => `/policy/${g.slug}`),
             ...docs.contracts.map((c) => `/docs/contracts/${c.id}`), ...docs.capabilities.map((c) => `/docs/capabilities/${c.id}`),

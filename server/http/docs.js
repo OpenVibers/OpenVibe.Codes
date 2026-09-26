@@ -15,6 +15,7 @@
  *   /docs/events                event types from the service manifests
  *   /docs/services              the Network's registry with health as reported (never invented)
  *   /docs/billing               the billing policy as OpenVibe.Billing's /policy.json states it (never restated)
+ *   /docs/limits                limits and tiers: each service's /limits.json as it answers (never restated)
  *   /docs/sdk[/:module]         SDK reference from its .d.ts files
  *   /docs/adr/:id               ADRs as published in openvibe-contracts
  */
@@ -54,6 +55,7 @@ function createDocsRoutes(ctx) {
 <li><a href="/docs/services"><strong>Services</strong></a><span>the registry as OpenVibe.Network reports it, with health</span></li>
 <li><a href="/docs/tools"><strong>Tools API</strong></a><span>every OpenVibe tool you can call from code, from the live registry</span></li>
 <li><a href="/docs/billing"><strong>Billing policy</strong></a><span>prices, the creator split, fees, holds and cashouts, live from OpenVibe.Billing</span></li>
+<li><a href="/docs/limits"><strong>Limits and tiers</strong></a><span>what a project may do in sandbox and production, live from the services that enforce it</span></li>
 <li><a href="/docs/sdk"><strong>SDK</strong></a><span>${docs.sdk.length} modules of openvibe-sdk from their type definitions</span></li>
 <li><a href="/policy/rfc"><strong>Decisions</strong></a><span>${docs.adrs.length} architecture decision records</span></li>
 </ul>
@@ -404,6 +406,72 @@ ${table(['Rule', 'Value'], [
     ['Minimum cashout', `${n(p.cashout.min_vibes)} Vibes (${usd(p.cashout.min_cents)})`],
     ['Cashout hold, then review', `${n(p.cashout.hold_days)} days`],
 ])}`}`,
+        });
+    });
+
+    // ── Limits and tiers (live from the enforcing services, WS-N task 7) ──
+    // Each service that publishes a /limits.json (read from its running config) is shown as it
+    // answered; a service not answering shows a problem, never remembered numbers. Public
+    // capabilities whose owner publishes none are listed with their quota class and said so.
+    const LIMIT_SOURCES = [
+        { service: 'host', name: 'OpenVibe Host', internal: process.env.OV_HOST_INTERNAL_URL || 'http://127.0.0.1:4910', public: 'https://openvibe.host/limits.json' },
+        { service: 'events', name: 'OpenVibe Events', internal: process.env.OV_EVENTS_INTERNAL_URL || 'http://127.0.0.1:4300', public: 'https://events.openvibe.network/limits.json' },
+    ];
+    const limitsCache = new Map();
+    async function limitsOf(src) {
+        const hit = limitsCache.get(src.service);
+        if (hit && Date.now() - hit.at < 300_000) return { body: hit.body };
+        try {
+            const out = await fetch(`${src.internal.replace(/\/$/, '')}/limits.json`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(4000) });
+            if (!out.ok) throw new Error(`${src.name} answered ${out.status}`);
+            const body = await out.json();
+            if (!body || !Array.isArray(body.limits)) throw new Error(`${src.name} answered without a limits list`);
+            limitsCache.set(src.service, { at: Date.now(), body });
+            return { body };
+        } catch (err) {
+            return { problem: { code: 'codes.limits_unavailable', detail: err.message } };
+        }
+    }
+    const MB = 1024 * 1024;
+    const bytes = (n) => (n >= 1024 * MB ? `${+(n / 1024 / MB).toFixed(2)} GB` : n >= MB ? `${+(n / MB).toFixed(2)} MB` : n >= 1024 ? `${+(n / 1024).toFixed(1)} KB` : `${n} bytes`);
+    function amount(v, unit) {
+        if (v === null || v === undefined) return 'no limit';
+        if (v === 0) return 'none';
+        const n = Number(v).toLocaleString('en-US');
+        if (unit === 'bytes') return bytes(Number(v));
+        if (unit === 'per_minute') return `${n} a minute`;
+        if (unit === 'per_day') return `${n} in 24 hours`;
+        if (unit === 'days') return `${n} days`;
+        return n;
+    }
+    r.get('/limits', async (req, res) => {
+        const answers = await Promise.all(LIMIT_SOURCES.map(async (src) => ({ src, ...(await limitsOf(src)) })));
+        const covered = new Set(LIMIT_SOURCES.map((s) => s.service));
+        const rest = docs.capabilities.filter((c) => c.grantable && !covered.has(c.owner));
+        const owners = [...new Set(rest.map((c) => c.owner))].sort();
+        page(req, res, {
+            title: 'Limits and tiers',
+            description: 'What an OpenVibe project may do in sandbox and production, as the services that enforce it answer.',
+            crumbs: [{ label: 'Docs', href: '/docs' }, { label: 'Limits' }],
+            body: html`<h1>Limits and tiers</h1>
+<p>OpenVibe runs every project within limits it can keep paying for. Usage is metered per project and per environment, and each limit below is what the service that enforces it reports from its running configuration. Codes reads it every few minutes and never keeps its own copy.</p>
+<h2>How limits work</h2>
+<ul>
+<li><strong>Two environments.</strong> A project's <code>sandbox</code> is for building and testing: smaller limits, shorter retention, kept apart from production data. <code>production</code> is what people use.</li>
+<li><strong>Enforced at the capability.</strong> The service that owns a capability checks the token's grant and the project's limit in one place, before it does the work. Nothing else can grant more.</li>
+<li><strong>Past a limit</strong> the answer is a problem (<code>application/problem+json</code>) with a stable code: <code>429</code> for a rate or a count, <code>413</code> for a size. Rate limits say when to retry (<code>Retry-After</code> or <code>retry_after</code>).</li>
+<li><strong>Trust tiers</strong> (unreviewed, reviewed, first-party; <a href="/docs/adr/ADR-013">ADR-013</a>) change defaults and discovery, never the grant check. Every tier meets the same limits today.</li>
+<li><strong>Raising a limit</strong> is a per-project override staff set at the owning service; the numbers here are the defaults every project starts with.</li>
+</ul>
+${answers.map(({ src, body, problem }) => html`<h2 id="${src.service}">${src.name}</h2>
+${problem ? problemBox(problem, { title: `${src.name}'s limits could not be read` }) : html`<p class="muted small">From <a href="${src.public}"><code>${src.public.replace('https://', '')}</code></a>${body.scope ? html`: ${body.scope}` : ''}.</p>
+${table(['Limit', 'Capability', 'Sandbox', 'Production', 'Past it'], body.limits.map((l) => [
+    l.label, l.capability ? html`<a href="/docs/capabilities/${l.capability}"><code>${l.capability}</code></a>` : '—',
+    amount(l.sandbox, l.unit), amount(l.production, l.unit), l.exceeded ? code(l.exceeded) : '—',
+]))}`}`)}
+<h2>Other capabilities</h2>
+<p>These can be granted to apps, but their owners do not publish their limits yet. Each shows its quota class from <code>openvibe-contracts v${docs.contractsVersion}</code>.</p>
+${table(['Owner', 'Capabilities (quota class)'], owners.map((o) => [code(o), html`${rest.filter((c) => c.owner === o).map((c, i) => html`${i ? ', ' : ''}<a href="/docs/capabilities/${c.id}">${c.id}</a> (${c.quotaClass})`)}`]))}`,
         });
     });
 
