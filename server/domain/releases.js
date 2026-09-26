@@ -168,12 +168,22 @@ function createReleases({ store, outbox, trust }) {
         const why = String(reason || '').trim().slice(0, 500);
         if (!why) fail(422, 'release.invalid', 'say why the release is revoked');
         const wasPublic = r.status === 'published' || r.status === 'deprecated';
+        // Staff revoking a release their own project role would not let them manage is moderation
+        // (ADR-022): it goes to Network's audit log too. A member revoking their own release is not.
+        const byStaff = actor.kind === 'user' && actor.staff && !(actor.role && RANK[actor.role] >= RANK[manageRole(r.environment)]);
         let env = null;
         db.transaction(() => {
             db.prepare("UPDATE releases SET status = 'revoked', revoked_by = ?, revoked_at = ?, revocation_reason = ? WHERE id = ?").run(actor.label, store.iso(), why, r.id);
             writeLog(r.id, 'revoked', actor.label, { reason: why, was: r.status });
             // A draft was never public: nobody downstream knows it, so there is nothing to announce.
             if (wasPublic) env = event('codes.app.revoked', r, actor, { reason: why });
+            if (byStaff) {
+                const [ckind, cid] = String(r.created_by).split(':');
+                outbox.moderationAction({
+                    action: 'release.revoked', target: { type: 'release', id: r.id, owner_subject: ckind === 'user' ? cid : null },
+                    actorSubject: actor.subject, reason: why, details: { app_id: r.app_id, project_id: r.project_id, version: r.version, was: r.status },
+                }, { traceparent: actor.traceparent });
+            }
         })();
         return { release: get(r.id), event_id: env ? env.event_id : null };
     }
@@ -189,7 +199,7 @@ function createReleases({ store, outbox, trust }) {
      * revocation (compatibility policy), so each emits codes.app.revoked as any revocation does.
      * The caller has checked that the actor owns the project (or is staff).
      */
-    function retireProject({ actor, projectId, reason = 'project deleted by its owner' }) {
+    function retireProject({ actor, projectId, reason = actor.staff && actor.role !== 'owner' ? 'project deleted by OpenVibe staff' : 'project deleted by its owner' }) {
         const rows = db.prepare("SELECT * FROM releases WHERE project_id = ? AND status != 'revoked' ORDER BY created_at, id").all(String(projectId));
         const out = { revoked: [], deletedDrafts: [] };
         for (const r of rows.filter((x) => x.status !== 'draft')) {

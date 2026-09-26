@@ -16,7 +16,7 @@ A place where a developer outside the network goes from an OpenVibe account to a
 - **Release metadata** keyed to Network app ids: validated app and mod manifests, releases (`draft → published → deprecated → revoked`), an append-only release log.
 - **Trust tiers** per ADR-013 (`unreviewed`, `reviewed`, `first-party`) — **metadata only**: a tier changes defaults and discovery, never a grant check. Databases written with the earlier four names are migrated at boot (untrusted→unreviewed, verified/trusted→reviewed, platform-maintained→first-party), idempotently.
 - **Playground run logs** (who ran what, outcome, stage, problem code; never a credential).
-- The events `codes.app.published`, `codes.app.deprecated`, `codes.app.revoked` (through the openvibe-sdk transactional outbox).
+- The events `codes.app.published`, `codes.app.deprecated`, `codes.app.revoked`, and `codes.moderation.action` for staff revocations and trust tier changes (the network's moderation audit log), through the openvibe-sdk transactional outbox.
 - The generated reference (rendered from the pinned packages at boot; nothing hand-written that can drift) and the portal's pages.
 
 ## Does not own

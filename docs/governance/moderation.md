@@ -35,6 +35,7 @@ From mildest to most serious. Moderators pick the mildest step that fixes the pr
 
 - Revocation and deprecation reasons for releases are public on the release page, and changes to trust tiers are listed in the app's public trust history.
 - Network keeps an append-only audit log of changes to projects, apps, credentials and grants; project admins can read it for their own project, and can download it with the project export.
+- A release revoked by Codes staff who could not manage it as project members, and every trust tier change, are also reported as `codes.moderation.action` to the network's moderation audit log, which OpenVibe staff can read.
 - Reports and the identity of the people who report stay confidential.
 
 ## Appeals

@@ -6,12 +6,13 @@
  * METADATA ONLY. "A tier changes defaults and discovery, but never the grant check." Nothing in
  * Codes (or anywhere) reads a tier to allow an action; the tier is shown next to releases and
  * carried in codes.app.* event payloads. Every app starts unreviewed; Codes staff change it, with
- * a note, and every change is kept. Older names are migrated at boot (server/db.js).
+ * a note, and every change is kept and reported to Network's moderation audit log
+ * (codes.moderation.action app.trust_changed, ADR-022). Older names are migrated at boot (server/db.js).
  */
 const TIERS = ['unreviewed', 'reviewed', 'first-party'];
 const APP_ID_RE = /^app_[0-9A-HJKMNP-TV-Z]{26}$/;
 
-function createTrust({ store }) {
+function createTrust({ store, outbox = null }) {
     const { db } = store;
 
     function get(appId) {
@@ -33,6 +34,13 @@ function createTrust({ store }) {
                 .run(appId, tier, clean, actor.label, t);
             db.prepare('INSERT INTO trust_history (app_id, from_tier, to_tier, note, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?)')
                 .run(appId, before, tier, clean, actor.label, t);
+            if (outbox) {
+                const [kind, id] = String(actor.label).split(':');
+                outbox.moderationAction({
+                    action: 'app.trust_changed', target: { type: 'app', id: appId }, actorSubject: kind === 'user' ? id : null,
+                    reason: clean, details: { from: before, to: tier },
+                }, { traceparent: actor.traceparent });
+            }
         })();
         return get(appId);
     }

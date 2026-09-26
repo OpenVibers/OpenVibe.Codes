@@ -54,7 +54,7 @@ function createApp(opts = {}) {
     const sso = createSso({ config, keys, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log });
     const network = createNetworkClient({ config, fetchImpl, log });
     const outbox = createCodesOutbox({ db: store.db, config, fetchImpl, now: store.now, log });
-    const trust = createTrust({ store });
+    const trust = createTrust({ store, outbox });
     const releases = createReleases({ store, outbox, trust });
     const playground = createPlayground({ store, config, network, keys, fetchImpl, log });
 
