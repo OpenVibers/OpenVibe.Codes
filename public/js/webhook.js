@@ -1,10 +1,10 @@
 // OpenVibe.Codes — webhook signature checks computed in the browser (Web Crypto), so the secret
 // never leaves this page. Without JavaScript (or Web Crypto) the form posts to Codes instead,
-// which computes the same HMACs with openvibe-sdk and forgets the secret.
+// which computes the same HMAC with openvibe-sdk and forgets the secret.
 //
-// v1: X-OpenVibe-Signature    = sha256=<hex HMAC-SHA256 of the raw body>
 // v2: X-OpenVibe-Signature-V2 = t=<unix seconds>,v2=<hex HMAC-SHA256 of "<t>.<raw body>">
-// A receiver requiring v2 accepts only a matching v2 within ±300 s of its clock; v1 never decides.
+// A receiver requiring v2 accepts only a matching v2 within ±300 s of its clock. (The v1 header,
+// an HMAC of the body alone, was retired on 2026-09-28.)
 (function () {
     'use strict';
     var WINDOW_SEC = 300;
@@ -53,7 +53,6 @@
     form.addEventListener('submit', function (e) {
         e.preventDefault();
         var body = form.elements.body.value.replace(/\r\n/g, '\n');
-        var given1 = form.elements.signature.value.trim();
         var given2 = form.elements.signature_v2.value.trim();
         var stated = form.elements.timestamp.value.trim();
         var secret = form.elements.secret.value;
@@ -62,14 +61,9 @@
         var nowSec = Date.now() / 1000;
         crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
             .then(function (key) {
-                return Promise.all([
-                    crypto.subtle.sign('HMAC', key, enc.encode(body)),
-                    parsed ? crypto.subtle.sign('HMAC', key, enc.encode(parsed.t + '.' + body)) : null,
-                ]);
+                return parsed ? crypto.subtle.sign('HMAC', key, enc.encode(parsed.t + '.' + body)) : null;
             })
-            .then(function (sigs) {
-                var expected1 = 'sha256=' + hex(sigs[0]);
-                var ok1 = equal(given1, expected1);
+            .then(function (sig2) {
                 var lines = [];
                 var accepted = false, v2Line;
                 if (!given2) {
@@ -77,7 +71,7 @@
                 } else if (!parsed) {
                     v2Line = 'v2: malformed. It must look like t=<unix seconds>,v2=<64 lowercase hex characters>.';
                 } else {
-                    var hex2 = hex(sigs[1]);
+                    var hex2 = hex(sig2);
                     var sigOk = parsed.values.some(function (v) { return equal(v, hex2); });
                     var age = Math.floor(nowSec) - parsed.t;
                     var inside = Math.abs(nowSec - parsed.t) <= WINDOW_SEC;
@@ -90,7 +84,6 @@
                 }
                 lines.unshift(v2Line);
                 lines.unshift(accepted ? 'Accepted: v2 verifies and is inside the window.' : 'Refused: a receiver that requires v2 rejects this delivery.');
-                lines.push('v1 (reference only, never decides): ' + (given1 ? (ok1 ? 'valid' : 'NOT valid') : 'not given') + '. Expected ' + expected1);
                 lines.push('Computed in your browser; nothing was sent.');
                 show(accepted, lines);
             })

@@ -1,19 +1,21 @@
 'use strict';
 /**
- * Webhook signature verification, v1 and v2: correct against independent HMACs, rejects tampering,
- * wrong secrets, prefixes, lengths and malformed headers, applies the ±300 s v2 window exactly as
- * openvibe-sdk's parseDelivery(..., { requireV2: true }) does (v2 decides; v1 never rescues it),
- * compares in constant time (crypto.timingSafeEqual), and sample deliveries carry v1 and v2 that
- * the SDK receivers use accept. The no-JS path works through the server.
+ * Webhook signature verification, v2 only (v1 was retired on 2026-09-28, shim C-61): correct against
+ * independent HMACs, rejects tampering, wrong secrets, lengths and malformed headers, applies the
+ * ±300 s window exactly as openvibe-sdk's parseDelivery(..., { requireV2: true }) does, refuses a
+ * delivery that carries only the retired v1 header, compares in constant time
+ * (crypto.timingSafeEqual), and sample deliveries carry v2 only, which the SDK receiver accepts.
+ * The no-JS path works through the server and offers no v1 field.
  */
 const assert = require('assert');
 const crypto = require('crypto');
 const contracts = require('openvibe-contracts');
-const { verifyDelivery, verifyDeliveryV2, parseDelivery } = require('openvibe-sdk/events');
+const { verifyDeliveryV2, parseDelivery } = require('openvibe-sdk/events');
 const webhooks = require('../server/domain/webhooks');
 const { boot, check, done } = require('./helpers/boot');
 
-const hmac = (body, secret) => `sha256=${crypto.createHmac('sha256', secret).update(body).digest('hex')}`;
+/** A value in the retired v1 format (sha256=<HMAC of the body alone>): the tester must ignore it. */
+const hmacV1 = (body, secret) => `sha256=${crypto.createHmac('sha256', secret).update(body).digest('hex')}`;
 
 (async () => {
     const secret = 'whsec_' + crypto.randomBytes(16).toString('hex');
@@ -24,32 +26,8 @@ const hmac = (body, secret) => `sha256=${crypto.createHmac('sha256', secret).upd
     const nowMs = nowSec * 1000 + 700;
     const v2 = (b, sec, ts) => `t=${ts},v2=${crypto.createHmac('sha256', sec).update(`${ts}.${b}`).digest('hex')}`;
 
-    await check('v1: a correct signature verifies (independent HMAC-SHA256 of the raw body)', async () => {
-        const v = webhooks.inspect({ rawBody: body, signature: hmac(body, secret), secret });
-        assert.strictEqual(v.v1.valid, true);
-        assert.strictEqual(v.v1.expected, hmac(body, secret));
-        assert.strictEqual(v.parsed.event_type, 'network.app.created');
-        assert.strictEqual(v.parsed.seq, 7);
-    });
-
-    await check('v1: tampered body, wrong secret, missing prefix, wrong length, uppercase hex: all rejected', async () => {
-        const good = hmac(body, secret);
-        const v1 = (o) => webhooks.inspect({ rawBody: body, signature: good, secret, ...o }).v1;
-        assert.strictEqual(v1({ rawBody: body.replace('"seq":7', '"seq":8') }).valid, false);
-        assert.strictEqual(v1({ secret: secret + 'x' }).valid, false);
-        const noPrefix = v1({ signature: good.slice(7) });
-        assert.strictEqual(noPrefix.valid, false);
-        assert.match(noPrefix.reason, /sha256=/);
-        const short = v1({ signature: good.slice(0, -2) });
-        assert.strictEqual(short.valid, false);
-        assert.match(short.reason, /wrong length/);
-        assert.strictEqual(v1({ signature: good.toUpperCase().replace('SHA256=', 'sha256=') }).valid, false);
-        // Re-serialised JSON (same data, different bytes) must fail: verification is over raw bytes.
-        assert.strictEqual(v1({ rawBody: JSON.stringify(JSON.parse(body), null, 1) }).valid, false);
-    });
-
     await check('v2: a fresh, correct signature is accepted (independent HMAC of "<t>.<raw body>")', async () => {
-        const v = webhooks.inspect({ rawBody: body, signature: hmac(body, secret), signatureV2: v2(body, secret, nowSec), timestamp: String(nowSec), secret, now: nowMs });
+        const v = webhooks.inspect({ rawBody: body, signatureV2: v2(body, secret, nowSec), timestamp: String(nowSec), secret, now: nowMs });
         assert.strictEqual(v.accepted, true);
         assert.strictEqual(v.v2.valid, true);
         assert.strictEqual(v.v2.signatureValid, true);
@@ -58,7 +36,21 @@ const hmac = (body, secret) => `sha256=${crypto.createHmac('sha256', secret).upd
         assert.strictEqual(v.v2.timestamp, nowSec);
         assert.strictEqual(v.v2.expected, v2(body, secret, nowSec));
         assert.strictEqual(v.v2.windowSec, 300);
-        assert.strictEqual(v.v1.valid, true, 'v1 is still checked and shown');
+        assert.strictEqual(v.parsed.event_type, 'network.app.created');
+        assert.strictEqual(v.parsed.seq, 7);
+        assert.strictEqual(v.bodyBytes, Buffer.byteLength(body));
+    });
+
+    await check('the result is v2 only: { accepted, v2, bodyBytes, parsed }, with no v1 anywhere', async () => {
+        const v = webhooks.inspect({ rawBody: body, signature: hmacV1(body, secret), signatureV2: v2(body, secret, nowSec), secret, now: nowMs });
+        assert.deepStrictEqual(Object.keys(v).sort(), ['accepted', 'bodyBytes', 'parsed', 'v2']);
+        assert.strictEqual(v.v1, undefined);
+        assert.ok(!JSON.stringify(v).includes('sha256='), 'no v1 value is computed or echoed');
+        assert.ok(!/v1/i.test(Object.keys(v.v2).join(',')), 'the v2 check has no v1 fields');
+        const unusable = webhooks.inspect({ rawBody: '', signatureV2: v2(body, secret, nowSec), secret });
+        assert.deepStrictEqual(Object.keys(unusable).sort(), ['accepted', 'reason']);
+        assert.strictEqual(unusable.accepted, false);
+        assert.deepStrictEqual(Object.keys(webhooks.inspect({ rawBody: body, secret: '' })).sort(), ['accepted', 'reason']);
     });
 
     await check('v2: the ±300 s window, both directions, with the signature told apart from the time', async () => {
@@ -108,15 +100,16 @@ const hmac = (body, secret) => `sha256=${crypto.createHmac('sha256', secret).upd
         assert.match(mismatch.v2.reason, /X-OpenVibe-Timestamp \(\d+\) is not the t=/);
     });
 
-    await check('v2 decides: a valid v1 alone is refused, and a valid v1 never rescues a bad v2', async () => {
-        const v1Only = webhooks.inspect({ rawBody: body, signature: hmac(body, secret), secret, now: nowMs });
-        assert.strictEqual(v1Only.v1.valid, true);
-        assert.strictEqual(v1Only.v2.present, false);
+    await check('a delivery with only the retired v1 header is refused as having no X-OpenVibe-Signature-V2', async () => {
+        const v1Only = webhooks.inspect({ rawBody: body, signature: hmacV1(body, secret), secret, now: nowMs });
         assert.strictEqual(v1Only.accepted, false);
+        assert.strictEqual(v1Only.v2.present, false);
         assert.match(v1Only.v2.reason, /no X-OpenVibe-Signature-V2/);
-        const staleWithV1 = webhooks.inspect({ rawBody: body, signature: hmac(body, secret), signatureV2: v2(body, secret, nowSec - 3600), secret, now: nowMs });
-        assert.strictEqual(staleWithV1.v1.valid, true);
-        assert.strictEqual(staleWithV1.accepted, false);
+        assert.strictEqual(v1Only.v1, undefined);
+        // The SDK receiver every consumer runs refuses it too.
+        assert.strictEqual(parseDelivery(body, { 'x-openvibe-signature': hmacV1(body, secret) }, secret, { requireV2: true, now: nowMs }), null);
+        // A stale v2 stays refused whatever else the delivery carries.
+        assert.strictEqual(webhooks.inspect({ rawBody: body, signature: hmacV1(body, secret), signatureV2: v2(body, secret, nowSec - 3600), secret, now: nowMs }).accepted, false);
     });
 
     await check('the comparisons are constant-time (crypto.timingSafeEqual on equal-length buffers)', async () => {
@@ -124,20 +117,21 @@ const hmac = (body, secret) => `sha256=${crypto.createHmac('sha256', secret).upd
         let calls = 0;
         crypto.timingSafeEqual = (a, b) => { calls++; assert.strictEqual(a.length, b.length); return orig(a, b); };
         try {
-            webhooks.inspect({ rawBody: body, signature: hmac(body, secret), secret });
-            webhooks.inspect({ rawBody: body, signature: hmac(body, 'other'), secret });
-            assert.strictEqual(calls, 2, 'every equal-length v1 comparison goes through timingSafeEqual');
+            webhooks.inspect({ rawBody: body, signatureV2: v2(body, secret, nowSec), secret, now: nowMs });
+            assert.strictEqual(calls, 2, 'the signature alone and the receiver check both go through timingSafeEqual');
             calls = 0;
             webhooks.inspect({ rawBody: body, signatureV2: v2(body, 'other', nowSec), secret, now: nowMs });
-            assert.ok(calls >= 1, 'the v2 comparison goes through timingSafeEqual');
+            assert.strictEqual(calls, 2, 'a wrong v2 is compared in constant time too');
         } finally { crypto.timingSafeEqual = orig; }
     });
 
-    await check('a generated sample carries v1, X-OpenVibe-Timestamp and v2, and the SDK receiver requiring v2 accepts it', async () => {
+    await check('a generated sample carries X-OpenVibe-Timestamp and v2 only (no X-OpenVibe-Signature), and the SDK receiver requiring v2 accepts it', async () => {
         const s = webhooks.sample({ eventType: 'media.object.ready', secret, producer: 'media', now: nowMs });
         assert.strictEqual(s.envelopeValid, true, JSON.stringify(s.envelopeErrors));
         const headers = Object.fromEntries(Object.entries(s.headers).map(([k, v]) => [k.toLowerCase(), v]));
-        assert.strictEqual(verifyDelivery(s.body, headers['x-openvibe-signature'], secret), true);
+        assert.ok(!('x-openvibe-signature' in headers), 'no v1 header');
+        assert.deepStrictEqual(Object.keys(headers).filter((k) => /signature/.test(k)), ['x-openvibe-signature-v2']);
+        assert.ok(!Object.values(headers).some((v) => String(v).startsWith('sha256=')), 'no v1 value under any name');
         assert.strictEqual(headers['x-openvibe-timestamp'], String(nowSec));
         assert.strictEqual(headers['x-openvibe-signature-v2'], v2(s.body, secret, nowSec));
         assert.strictEqual(verifyDeliveryV2(s.body, headers, secret, { now: nowMs }), true);
@@ -146,31 +140,34 @@ const hmac = (body, secret) => `sha256=${crypto.createHmac('sha256', secret).upd
         assert.strictEqual(parsed.seq, 1);
         assert.strictEqual(contracts.validate('events.event-envelope@1', parsed.event).valid, true);
         assert.strictEqual(parseDelivery(s.body, headers, secret, { requireV2: true, now: nowMs + 301_000 }), null, 'the sample goes stale after 300 s');
-        assert.strictEqual(verifyDelivery(s.body, headers['x-openvibe-signature'], 'wrong'), false);
+        assert.strictEqual(parseDelivery(s.body, headers, 'wrong', { requireV2: true, now: nowMs }), null);
         assert.deepStrictEqual(JSON.parse(s.body).event.payload, {}, 'no invented payload');
         // What the tester says about its own sample.
-        const v = webhooks.inspect({ rawBody: s.body, signature: headers['x-openvibe-signature'], signatureV2: headers['x-openvibe-signature-v2'], timestamp: headers['x-openvibe-timestamp'], secret, now: nowMs });
+        const v = webhooks.inspect({ rawBody: s.body, signatureV2: headers['x-openvibe-signature-v2'], timestamp: headers['x-openvibe-timestamp'], secret, now: nowMs });
         assert.strictEqual(v.accepted, true);
     });
 
     const t = await boot();
 
-    await check('no-JS path: the server checks v2 and v1, shows the window, and says why a delivery is refused', async () => {
+    await check('no-JS path: the server checks v2, shows the window, and says why a delivery is refused', async () => {
         const ts = Math.floor(Date.now() / 1000);
-        const ok = await t.get('/tools/webhooks/verify', { form: { body, signature: hmac(body, secret), signature_v2: v2(body, secret, ts), timestamp: String(ts), secret } });
+        const ok = await t.get('/tools/webhooks/verify', { form: { body, signature_v2: v2(body, secret, ts), timestamp: String(ts), secret } });
         assert.strictEqual(ok.status, 200);
         assert.match(ok.text, /Accepted: v2 verifies and is inside the window\./);
         assert.match(ok.text, /badge ok">inside</);
-        assert.match(ok.text, /v1 \(X-OpenVibe-Signature\) <span class="badge ok">valid/);
-        const stale = await t.get('/tools/webhooks/verify', { form: { body, signature: hmac(body, secret), signature_v2: v2(body, secret, ts - 600), secret } });
+        assert.doesNotMatch(ok.text, /<h3>v1/);
+        const stale = await t.get('/tools/webhooks/verify', { form: { body, signature_v2: v2(body, secret, ts - 600), secret } });
         assert.strictEqual(stale.status, 422);
         assert.match(stale.text, /Refused: a receiver that requires v2 rejects this delivery\./);
         assert.match(stale.text, /badge warn">stale</);
         assert.match(stale.text, /badge bad">outside</);
-        const v1Only = await t.get('/tools/webhooks/verify', { form: { body, signature: hmac(body, secret), secret } });
+        // A request carrying only a v1 value (the old field) is refused for want of v2, and the v1 value is not echoed.
+        const v1Only = await t.get('/tools/webhooks/verify', { form: { body, signature: hmacV1(body, secret), secret } });
         assert.strictEqual(v1Only.status, 422);
         assert.match(v1Only.text, /no X-OpenVibe-Signature-V2 value given/);
-        const bad = await t.get('/tools/webhooks/verify', { form: { body, signature: hmac(body, 'nope'), signature_v2: v2(body, 'nope', ts), secret } });
+        assert.ok(!v1Only.text.includes(hmacV1(body, secret)));
+        assert.doesNotMatch(v1Only.text, /sha256=[0-9a-f]{64}/);
+        const bad = await t.get('/tools/webhooks/verify', { form: { body, signature_v2: v2(body, 'nope', ts), secret } });
         assert.strictEqual(bad.status, 422);
         assert.match(bad.text, /v2 \(X-OpenVibe-Signature-V2\) <span class="badge bad">NOT valid/);
         for (const r of [ok, stale, v1Only, bad]) {
@@ -180,14 +177,32 @@ const hmac = (body, secret) => `sha256=${crypto.createHmac('sha256', secret).upd
         assert.ok(ok.text.includes(`value="${v2(body, secret, ts)}"`), 'the v2 header comes back in the form');
     });
 
-    await check('no-JS path: sample generation for an event type from the contracts catalog', async () => {
+    await check('no-JS path: sample generation for an event type from the contracts catalog, v2 only', async () => {
         const r = await t.get('/tools/webhooks/sample', { form: { event_type: 'network.credential.rotated', secret } });
         assert.strictEqual(r.status, 200);
         assert.match(r.text, /X-OpenVibe-Signature-V2/);
         assert.match(r.text, /X-OpenVibe-Timestamp/);
+        assert.match(r.text, /<td><code>X-OpenVibe-Signature-V2<\/code><\/td>/);
+        assert.doesNotMatch(r.text, /<td><code>X-OpenVibe-Signature<\/code><\/td>/, 'no v1 header row in the sample');
+        assert.match(r.text, /X-OpenVibe-Signature-V2: t=\d+,v2=[0-9a-f]{64}/, 'the curl replay carries v2');
+        assert.doesNotMatch(r.text, /X-OpenVibe-Signature: /, 'no v1 header in the curl replay');
+        assert.doesNotMatch(r.text, /sha256=[0-9a-f]{64}/);
         assert.match(r.text, /The envelope validates/);
         const unknown = await t.get('/tools/webhooks/sample', { form: { event_type: 'made.up.event', secret } });
         assert.strictEqual(unknown.status, 422);
+    });
+
+    await check('the page has no v1 input and lists only the timestamp and v2 headers', async () => {
+        const r = await t.get('/tools/webhooks');
+        assert.strictEqual(r.status, 200);
+        assert.match(r.text, /<input name="signature_v2"/);
+        assert.match(r.text, /<input name="timestamp"/);
+        assert.doesNotMatch(r.text, /name="signature"/, 'no v1 field');
+        assert.doesNotMatch(r.text, /placeholder="sha256=/);
+        const headerList = r.text.slice(r.text.indexOf('<ul>'), r.text.indexOf('</ul>'));
+        assert.deepStrictEqual([...headerList.matchAll(/<code>(X-OpenVibe-[A-Za-z0-9-]+):/g)].map((m) => m[1]), ['X-OpenVibe-Timestamp', 'X-OpenVibe-Signature-V2']);
+        assert.match(r.text, /retired on 2026-09-28/);
+        assert.match(r.text, /300 seconds/);
     });
 
     await check('the page offers only event types some service manifest produces', async () => {

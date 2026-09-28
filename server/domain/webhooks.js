@@ -3,39 +3,25 @@
 /**
  * Webhook tester and signed-event inspector.
  *
- * OpenVibe.Events delivers `{ "event": <events.event-envelope@1>, "seq": <n> }` with two signatures
- * under the subscription secret:
- *   X-OpenVibe-Signature:    sha256=<hex HMAC-SHA256 of the RAW body>                       (v1)
+ * OpenVibe.Events delivers `{ "event": <events.event-envelope@1>, "seq": <n> }` signed under the
+ * subscription secret:
  *   X-OpenVibe-Timestamp:    <unix seconds this attempt was sent>
- *   X-OpenVibe-Signature-V2: t=<that timestamp>,v2=<hex HMAC-SHA256 of "<t>.<raw body>">    (v2)
+ *   X-OpenVibe-Signature-V2: t=<that timestamp>,v2=<hex HMAC-SHA256 of "<t>.<raw body>">
  * Every consumer requires v2 and refuses it more than 300 s from its own clock (replay window).
- * Verification here uses openvibe-sdk's own signDelivery/verifyDelivery and signDeliveryV2/
- * verifyDeliveryV2 (constant-time compare), so the tester agrees with what a receiver built on the
- * SDK does. The secret a developer types is used for one computation and dropped: never stored,
- * logged or rendered back.
+ * The v1 header (X-OpenVibe-Signature, an HMAC of the body alone) was retired on 2026-09-28.
+ * Verification here uses openvibe-sdk's own signDeliveryV2/verifyDeliveryV2 (constant-time
+ * compare), so the tester agrees with what a receiver built on the SDK does. The secret a
+ * developer types is used for one computation and dropped: never stored, logged or rendered back.
  */
 const crypto = require('crypto');
 const contracts = require('openvibe-contracts');
-const { signDelivery, verifyDelivery, signDeliveryV2, verifyDeliveryV2, signDeliveryHeaders } = require('openvibe-sdk/events');
+const { signDeliveryV2, verifyDeliveryV2, signDeliveryHeaders } = require('openvibe-sdk/events');
 
 const MAX_BODY = 256 * 1024;
 /** The replay window every Events consumer applies to v2 (openvibe-sdk's default). */
 const V2_WINDOW_SEC = 300;
 /** Wide enough to check the v2 HMAC alone, so a stale-but-correct signature is told apart from a wrong one. */
 const ANY_TIME = Number.MAX_SAFE_INTEGER;
-
-function checkV1(body, given, secret) {
-    const expected = signDelivery(body, secret);
-    const valid = verifyDelivery(body, given, secret);
-    let reason = null;
-    if (!valid) {
-        if (!given) reason = 'no X-OpenVibe-Signature value given';
-        else if (!given.startsWith('sha256=')) reason = 'the header value must start with sha256=';
-        else if (given.length !== expected.length) reason = 'wrong length: sha256= followed by 64 lowercase hex characters';
-        else reason = 'the signature does not match this body and secret (check the body was not re-serialised: whitespace and key order matter)';
-    }
-    return { present: !!given, valid, reason, expected, given };
-}
 
 /** t and the v2 values from `t=<ts>,v2=<hex>[,v2=<hex>]`, parsed as the SDK does; null when malformed. */
 function parseV2Header(header) {
@@ -90,19 +76,18 @@ function checkV2(body, given, stated, secret, now) {
 }
 
 /**
- * → { accepted, v1, v2, bodyBytes, parsed } or { accepted: false, reason } for unusable input.
+ * → { accepted, v2, bodyBytes, parsed } or { accepted: false, reason } for unusable input.
  *   accepted is what a receiver requiring v2 decides (parseDelivery(..., { requireV2: true })):
- *   v2 must verify and be within the window; v1 is shown but never decides.
- *   Each check carries `expected`, the signature the secret produces for this body (showing it
+ *   v2 must verify and be within the window.
+ *   The check carries `expected`, the signature the secret produces for this body (showing it
  *   does not reveal the secret, and it is what a developer needs to see why a comparison failed).
  */
-function inspect({ rawBody, signature, signatureV2, timestamp, secret, now = Date.now() }) {
+function inspect({ rawBody, signatureV2, timestamp, secret, now = Date.now() }) {
     const body = typeof rawBody === 'string' ? rawBody : '';
     const str = (v) => (typeof v === 'string' ? v.trim() : '');
     if (!body) return { accepted: false, reason: 'paste the raw request body exactly as received (byte for byte)' };
     if (Buffer.byteLength(body) > MAX_BODY) return { accepted: false, reason: 'body is larger than 256 KB' };
     if (!secret) return { accepted: false, reason: 'enter the subscription secret' };
-    const v1 = checkV1(body, str(signature), secret);
     const v2 = checkV2(body, str(signatureV2), str(timestamp), secret, now);
     let parsed = null;
     try {
@@ -114,11 +99,12 @@ function inspect({ rawBody, signature, signatureV2, timestamp, secret, now = Dat
             parsed = { note: 'JSON, but not an Events delivery ({ event, seq })' };
         }
     } catch { parsed = { note: 'not JSON' }; }
-    return { accepted: v2.valid, v1, v2, bodyBytes: Buffer.byteLength(body), parsed };
+    return { accepted: v2.valid, v2, bodyBytes: Buffer.byteLength(body), parsed };
 }
 
 /**
- * A sample delivery for an event type from the contracts catalog, signed with the given secret.
+ * A sample delivery for an event type from the contracts catalog, signed with the given secret
+ * (v2 only, as Events sends it: openvibe-sdk's signDeliveryHeaders).
  * The envelope is valid events.event-envelope@1. Contracts define no per-event payload schemas yet,
  * so the payload is empty and the page says so rather than inventing fields.
  */

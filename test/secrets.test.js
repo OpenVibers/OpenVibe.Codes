@@ -86,7 +86,7 @@ const { boot, check, done } = require('./helpers/boot');
     await check('webhook tester secrets are not echoed', async () => {
         const hook = 'whsec_test_' + 'y'.repeat(40);
         secrets.push(hook);
-        const r1 = record(await t.get('/tools/webhooks/verify', { form: { body: '{"event":{},"seq":1}', signature: 'sha256=00', secret: hook } }));
+        const r1 = record(await t.get('/tools/webhooks/verify', { form: { body: '{"event":{},"seq":1}', signature_v2: 't=1,v2=00', secret: hook } }));
         assert.strictEqual(r1.status, 422);
         const r2 = record(await t.get('/tools/webhooks/sample', { form: { event_type: 'network.app.created', secret: hook } }));
         assert.strictEqual(r2.status, 200);

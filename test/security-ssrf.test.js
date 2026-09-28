@@ -43,7 +43,7 @@ const INTERNAL = [`http://127.0.0.1:3000${PROBE}`, `http://2130706433${PROBE}`, 
             await t.get('/manifests/validate', { form: { kind: 'app', manifest } });
             await t.get(`${base}/redirects`, { as: dev, form: { redirect_uris: u } });
             await t.get('/tools/webhooks/sample', { form: { url: u, endpoint: u, secret: 'sample-not-a-secret', event_type: 'codes.app.published' } });
-            await t.get('/tools/webhooks/verify', { form: { url: u, endpoint: u, secret: 'sample-not-a-secret', body: '{}', signature: 't=1,v1=00' } });
+            await t.get('/tools/webhooks/verify', { form: { url: u, endpoint: u, secret: 'sample-not-a-secret', body: '{}', signature_v2: 't=1,v2=00' } });
             await t.get(`/tools/webhooks?url=${encodeURIComponent(u)}`);
         }
         const hit = outbound.filter((u) => u.includes(PROBE));
