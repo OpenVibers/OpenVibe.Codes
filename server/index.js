@@ -7,11 +7,12 @@
  */
 const { createApp } = require('./app');
 
-const { app, ctx } = createApp();
+(async () => {
+const { app, ctx } = await createApp();
 const { config } = ctx;
 
 const server = app.listen(config.port, config.host, () => {
-    console.log(`[Codes] ${config.nodeEnv} on http://${config.host}:${config.port} → ${config.baseUrl} (db ${config.dbPath})`);
+    console.log(`[Codes] ${config.nodeEnv} on http://${config.host}:${config.port} → ${config.baseUrl} (db ${ctx.store.db.store})`);
     console.log(`[Codes] docs from openvibe-contracts v${ctx.docs.contractsVersion} and openvibe-sdk v${ctx.docs.sdkVersion}; events relay ${ctx.outbox.enabled ? `on → ${config.events.url}` : 'off (events wait in event_outbox)'}`);
 });
 server.keepAliveTimeout = 65_000;
@@ -22,10 +23,11 @@ function shutdown(signal) {
     console.log(`[Codes] ${signal}: closing`);
     server.close(async () => {
         try { await ctx.outbox.stop(); } catch { /* best effort */ }
-        try { ctx.store.close(); } catch { /* already closed */ }
+        try { await ctx.store.close(); } catch { /* already closed */ }
         process.exit(0);
     });
     setTimeout(() => process.exit(0), 5000).unref();
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+})().catch((err) => { console.error('[Codes] failed to start:', err); process.exit(1); });

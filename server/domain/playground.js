@@ -67,19 +67,19 @@ function grantAdvice(capability) {
 function createPlayground({ store, config, network, keys, fetchImpl, log = console }) {
     const { db } = store;
 
-    function record(run) {
+    async function record(run) {
         const id = store.newId('run');
-        db.prepare(`INSERT INTO playground_runs (id, at, actor, project_id, app_id, kind, capability, credential, outcome, stage, http_status, code, detail, ref)
+        await db.prepare(`INSERT INTO playground_runs (id, at, actor, project_id, app_id, kind, capability, credential, outcome, stage, http_status, code, detail, ref)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
             .run(id, store.iso(), run.actor, run.project_id, run.app_id, run.kind, run.capability, run.credential, run.outcome, run.stage,
                 run.http_status || null, run.code || null, run.detail || '', run.ref || null);
         return id;
     }
 
-    const runsFor = (appId, limit = 20) => db.prepare('SELECT id, at, actor, kind, capability, credential, outcome, stage, http_status, code, detail, ref FROM playground_runs WHERE app_id = ? ORDER BY at DESC, id DESC LIMIT ?').all(String(appId), limit);
-    const runsForProject = (projectId) => db.prepare('SELECT id, at, actor, app_id, kind, capability, credential, outcome, stage, http_status, code, detail, ref FROM playground_runs WHERE project_id = ? ORDER BY at, id').all(String(projectId));
-    const deleteRunsForProject = (projectId) => db.prepare('DELETE FROM playground_runs WHERE project_id = ?').run(String(projectId)).changes;
-    const recentCount = (actor) => db.prepare('SELECT COUNT(*) AS n FROM playground_runs WHERE actor = ? AND at > ?').get(actor, new Date(store.now() - 3600_000).toISOString()).n;
+    const runsFor = async (appId, limit = 20) => await db.prepare('SELECT id, at, actor, kind, capability, credential, outcome, stage, http_status, code, detail, ref FROM playground_runs WHERE app_id = ? ORDER BY at DESC, id DESC LIMIT ?').all(String(appId), limit);
+    const runsForProject = async (projectId) => await db.prepare('SELECT id, at, actor, app_id, kind, capability, credential, outcome, stage, http_status, code, detail, ref FROM playground_runs WHERE project_id = ? ORDER BY at, id').all(String(projectId));
+    const deleteRunsForProject = async (projectId) => (await db.prepare('DELETE FROM playground_runs WHERE project_id = ?').run(String(projectId))).changes;
+    const recentCount = async (actor) => (await db.prepare('SELECT COUNT(*) AS n FROM playground_runs WHERE actor = ? AND at > ?').get(actor, new Date(store.now() - 3600_000).toISOString())).n;
 
     /** Steps 1–2 only: may this app run this playground at all? */
     function precheck(app, kind) {
@@ -161,54 +161,54 @@ function createPlayground({ store, config, network, keys, fetchImpl, log = conso
         const k = KINDS[kind];
         const secrets = [credential && credential.value].filter(Boolean);
         const base = { actor, project_id: app.project_id, app_id: app.id, kind, capability: k ? k.needs : String(kind), credential: 'none' };
-        const finish = (out) => {
+        const finish = async (out) => {
             const safe = { ...out, detail: scrub(out.detail, secrets) };
-            const runId = record({ ...base, ...safe });
+            const runId = await record({ ...base, ...safe });
             return { ...safe, runId };
         };
 
-        if (recentCount(actor) >= config.playground.runsPerHour) {
+        if (await recentCount(actor) >= config.playground.runsPerHour) {
             return { outcome: 'refused', stage: 'rate', code: 'playground.rate_limited', detail: `at most ${config.playground.runsPerHour} playground runs an hour` };
         }
         const pre = precheck(app, kind);
-        if (!pre.ok) return { ...finish({ outcome: 'refused', stage: pre.stage, code: pre.code, detail: pre.detail }), missing: pre.missing, grantable: pre.grantable };
+        if (!pre.ok) return { ...await finish({ outcome: 'refused', stage: pre.stage, code: pre.code, detail: pre.detail }), missing: pre.missing, grantable: pre.grantable };
 
         let envelope = null;
         if (kind === 'events') {
             const e = eventInput({ ...input, appId: app.id, projectId: app.project_id });
-            if (e.error) return finish({ outcome: 'refused', stage: 'input', code: 'playground.invalid_input', detail: e.error });
+            if (e.error) return await finish({ outcome: 'refused', stage: 'input', code: 'playground.invalid_input', detail: e.error });
             envelope = e.envelope;
         } else {
-            if (!file || !file.buffer || !file.buffer.length) return finish({ outcome: 'refused', stage: 'input', code: 'playground.invalid_input', detail: 'choose a file' });
-            if (file.buffer.length > config.playground.maxUploadBytes) return finish({ outcome: 'refused', stage: 'input', code: 'playground.invalid_input', detail: `playground uploads are at most ${config.playground.maxUploadBytes} bytes` });
+            if (!file || !file.buffer || !file.buffer.length) return await finish({ outcome: 'refused', stage: 'input', code: 'playground.invalid_input', detail: 'choose a file' });
+            if (file.buffer.length > config.playground.maxUploadBytes) return await finish({ outcome: 'refused', stage: 'input', code: 'playground.invalid_input', detail: `playground uploads are at most ${config.playground.maxUploadBytes} bytes` });
         }
 
         if (!credential || !credential.value || !['client_secret', 'access_token'].includes(credential.type)) {
-            return finish({ outcome: 'refused', stage: 'token', code: 'playground.no_credential', detail: 'enter the app\'s client secret (used once, never stored) or an access token you minted for it' });
+            return await finish({ outcome: 'refused', stage: 'token', code: 'playground.no_credential', detail: 'enter the app\'s client secret (used once, never stored) or an access token you minted for it' });
         }
         base.credential = credential.type;
         const tok = await appToken(app, k, credential);
-        if (!tok.ok) return finish({ outcome: 'refused', stage: 'token', code: tok.code, detail: tok.detail, http_status: tok.http_status });
+        if (!tok.ok) return await finish({ outcome: 'refused', stage: 'token', code: tok.code, detail: tok.detail, http_status: tok.http_status });
 
         const client = sdkClient(tok.token);
         try {
             if (kind === 'events') {
                 const events = createEventsClient(client, { source: envelope.source, baseUrl: config.playground.eventsUrl });
                 const out = await events.publish(envelope);
-                return { ...finish({ outcome: 'ok', stage: 'done', http_status: 200, detail: out.duplicate ? 'accepted (duplicate event_id)' : `accepted as seq ${out.seq}`, ref: out.event_id }), result: { event_id: out.event_id, seq: out.seq, duplicate: out.duplicate } };
+                return { ...await finish({ outcome: 'ok', stage: 'done', http_status: 200, detail: out.duplicate ? 'accepted (duplicate event_id)' : `accepted as seq ${out.seq}`, ref: out.event_id }), result: { event_id: out.event_id, seq: out.seq, duplicate: out.duplicate } };
             }
             const media = createMediaClient(client, { app: app.project_id, baseUrl: config.playground.mediaUrl, publicOrigin: config.playground.mediaUrl });
             const out = await media.files.upload(file.buffer, { filename: file.filename, contentType: file.mimeType });
-            return { ...finish({ outcome: 'ok', stage: 'done', http_status: 201, detail: `stored ${out.size} bytes`, ref: out.key }), result: { key: out.key, public_url: out.public_url, size: out.size, mime: out.mime, sha256: out.sha256 } };
+            return { ...await finish({ outcome: 'ok', stage: 'done', http_status: 201, detail: `stored ${out.size} bytes`, ref: out.key }), result: { key: out.key, public_url: out.public_url, size: out.size, mime: out.mime, sha256: out.sha256 } };
         } catch (err) {
             if (isOpenVibeError(err)) {
                 const service = kind === 'events' ? 'OpenVibe.Events' : 'OpenVibe.Media';
                 const unreachable = !err.status;
-                return finish({ outcome: 'failed', stage: 'call', http_status: err.status || null, code: err.code,
+                return await finish({ outcome: 'failed', stage: 'call', http_status: err.status || null, code: err.code,
                     detail: unreachable ? `${service} did not answer (${err.code})` : `${service} answered ${err.status}: ${err.detail || err.title || err.code}` });
             }
             log.error('[Codes] playground error:', scrub(err && err.message, secrets));
-            return finish({ outcome: 'failed', stage: 'call', code: 'playground.error', detail: 'unexpected error calling the service' });
+            return await finish({ outcome: 'failed', stage: 'call', code: 'playground.error', detail: 'unexpected error calling the service' });
         }
     }
 

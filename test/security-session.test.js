@@ -29,7 +29,7 @@ const { signJwt } = require('./helpers/mocks');
         const body = new URLSearchParams({ app_id: APP, tier: 'first-party', note: 'pwned', csrf: s.csrf(staff) }).toString();
         const r = await s.get('/staff/trust', { cookie, body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
         assert.notStrictEqual(r.status, 303, 'the trust tier must not be set');
-        assert.strictEqual(s.ctx.trust.get(APP).tier, 'unreviewed');
+        assert.strictEqual((await s.ctx.trust.get(APP)).tier, 'unreviewed');
     });
 
     await check('an app token is not a Codes session', async () => {
@@ -53,7 +53,7 @@ const { signJwt } = require('./helpers/mocks');
         assert.strictEqual(page.status, 200, page.text.slice(0, 200));
         const r = await s.get('/staff/trust', { as: staff, form: { app_id: APP, tier: 'reviewed', note: 'checked' } });
         assert.strictEqual(r.status, 303);
-        assert.strictEqual(s.ctx.trust.get(APP).tier, 'reviewed');
+        assert.strictEqual((await s.ctx.trust.get(APP)).tier, 'reviewed');
     });
 
     await check('another site cannot sign a person out; this site can', async () => {

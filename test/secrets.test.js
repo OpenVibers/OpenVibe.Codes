@@ -100,7 +100,7 @@ const { boot, check, done } = require('./helpers/boot');
     });
 
     await check('no secret or token anywhere: database, logs, later responses', async () => {
-        const dump = t.dbDump();
+        const dump = await t.dbDump();
         const logs = t.logs();
         assert.ok(secrets.length >= 5);
         for (const s of secrets) {

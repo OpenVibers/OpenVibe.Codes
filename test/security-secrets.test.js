@@ -15,7 +15,7 @@ const assert = require('assert');
 const appModule = require('../server/app');
 let capturedApp = null;
 const realCreate = appModule.createApp;
-appModule.createApp = (...a) => { const built = realCreate(...a); capturedApp = built.app; return built; };
+appModule.createApp = async (...a) => { const built = await realCreate(...a); capturedApp = built.app; return built; };
 const { boot, check, done } = require('./helpers/boot');
 const { getPaths, crawl, listRoutes, expand, leaks, nextAddress } = require('./security-crawl');
 
@@ -56,8 +56,8 @@ const SECRETS = { OV_OAUTH_CLIENT_SECRET: 'sentinel-not-a-secret-codes-oauth-cli
         assert.deepStrictEqual(found, []);
     });
 
-    await check('the outbox and the captured log lines carry no sentinel', () => {
-        const text = t.dbDump() + t.logs();
+    await check('the outbox and the captured log lines carry no sentinel', async () => {
+        const text = await t.dbDump() + t.logs();
         for (const [k, v] of Object.entries(SECRETS)) assert.ok(!text.includes(v), `${k} in the database or the logs`);
     });
 

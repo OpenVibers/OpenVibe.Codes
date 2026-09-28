@@ -36,11 +36,11 @@ const { boot, check, done } = require('./helpers/boot');
     const published = await draft('1.0.0');
     assert.strictEqual((await t.get(`/releases/${published}/publish`, { as: owner, form: {} })).status, 303);
     const drafted = await draft('1.1.0');
-    const draftManifest = db.prepare('SELECT manifest_id FROM releases WHERE id = ?').get(drafted).manifest_id;
-    db.prepare(`INSERT INTO playground_runs (id, at, actor, project_id, app_id, kind, capability, credential, outcome, stage, detail)
+    const draftManifest = (await db.prepare('SELECT manifest_id FROM releases WHERE id = ?').get(drafted)).manifest_id;
+    await db.prepare(`INSERT INTO playground_runs (id, at, actor, project_id, app_id, kind, capability, credential, outcome, stage, detail)
                 VALUES ('run_01JTEST00000000000000000000', ?, ?, ?, ?, 'media', 'media.object.upload', 'client_secret', 'ok', 'done', 'stored 5 bytes')`)
         .run(new Date().toISOString(), `user:${owner.subject}`, projectId, app.id);
-    const count = (sql, ...a) => db.prepare(sql).get(...a).n;
+    const count = async (sql, ...a) => (await db.prepare(sql).get(...a)).n;
     const exportPath = `/projects/${projectId}/export`;
 
     await check('the owner exports everything Network and Codes hold for the project, as a JSON download', async () => {
@@ -109,11 +109,11 @@ const { boot, check, done } = require('./helpers/boot');
         } finally { t.ctx.network.projects.quotas = orig; }
     });
 
-    const unchanged = () => {
+    const unchanged = async () => {
         assert.strictEqual(t.network.state.projects.get(projectId).archived_at, null, 'not archived in Network');
-        assert.strictEqual(count('SELECT COUNT(*) AS n FROM releases WHERE project_id = ?', projectId), 2);
-        assert.strictEqual(count("SELECT COUNT(*) AS n FROM releases WHERE status = 'published' AND id = ?", published), 1);
-        assert.strictEqual(count('SELECT COUNT(*) AS n FROM playground_runs WHERE project_id = ?', projectId), 1);
+        assert.strictEqual(await count('SELECT COUNT(*) AS n FROM releases WHERE project_id = ?', projectId), 2);
+        assert.strictEqual(await count("SELECT COUNT(*) AS n FROM releases WHERE status = 'published' AND id = ?", published), 1);
+        assert.strictEqual(await count('SELECT COUNT(*) AS n FROM playground_runs WHERE project_id = ?', projectId), 1);
     };
     const del = `/projects/${projectId}/delete`;
 
@@ -121,7 +121,7 @@ const { boot, check, done } = require('./helpers/boot');
         const r = await t.get(del, { as: dev, form: { confirm_name: 'Exportable' } });
         assert.strictEqual(r.status, 403);
         assert.match(r.text, /only the project owner/);
-        unchanged();
+        await unchanged();
     });
 
     await check('delete: the wrong name, or no form token, changes nothing and calls no Network write', async () => {
@@ -132,7 +132,7 @@ const { boot, check, done } = require('./helpers/boot');
         const noCsrf = await t.get(del, { as: owner, form: { confirm_name: 'Exportable', csrf: 'forged' } });
         assert.strictEqual(noCsrf.status, 403);
         assert.strictEqual(t.network.requests.filter((q) => q.method === 'POST').length, before);
-        unchanged();
+        await unchanged();
     });
 
     await check('delete: when Network refuses to archive, Codes keeps everything', async () => {
@@ -142,7 +142,7 @@ const { boot, check, done } = require('./helpers/boot');
             const r = await t.get(del, { as: owner, form: { confirm_name: 'Exportable' } });
             assert.notStrictEqual(r.status, 303);
         } finally { t.ctx.network.projects.archive = orig; }
-        unchanged();
+        await unchanged();
     });
 
     await check('delete by the owner: archived in Network, drafts and runs removed, public releases revoked with an event', async () => {
@@ -154,15 +154,15 @@ const { boot, check, done } = require('./helpers/boot');
         const p = t.network.state.projects.get(projectId);
         assert.ok(p.archived_at, 'archived in Network');
         assert.ok(t.network.state.apps.get(app.id).revoked_at, 'Network revoked the app');
-        assert.strictEqual(count('SELECT COUNT(*) AS n FROM releases WHERE id = ?', drafted), 0, 'draft deleted');
-        assert.strictEqual(count('SELECT COUNT(*) AS n FROM manifests WHERE id = ?', draftManifest), 0, 'its manifest deleted');
-        assert.strictEqual(db.prepare('SELECT status, revocation_reason FROM releases WHERE id = ?').get(published).status, 'revoked');
-        assert.strictEqual(count('SELECT COUNT(*) AS n FROM playground_runs WHERE project_id = ?', projectId), 0);
-        const ev = db.prepare('SELECT envelope FROM event_outbox ORDER BY id').all().map((x) => JSON.parse(x.envelope));
+        assert.strictEqual(await count('SELECT COUNT(*) AS n FROM releases WHERE id = ?', drafted), 0, 'draft deleted');
+        assert.strictEqual(await count('SELECT COUNT(*) AS n FROM manifests WHERE id = ?', draftManifest), 0, 'its manifest deleted');
+        assert.strictEqual((await db.prepare('SELECT status, revocation_reason FROM releases WHERE id = ?').get(published)).status, 'revoked');
+        assert.strictEqual(await count('SELECT COUNT(*) AS n FROM playground_runs WHERE project_id = ?', projectId), 0);
+        const ev = (await db.prepare('SELECT envelope FROM event_outbox ORDER BY id').all()).map((x) => (typeof x.envelope === 'string' ? JSON.parse(x.envelope) : x.envelope));
         const revoked = ev.filter((e) => e.event_type === 'codes.app.revoked');
         assert.strictEqual(revoked.length, 1);
         assert.strictEqual(revoked[0].payload.release_id, published);
-        assert.deepStrictEqual(db.prepare('SELECT action FROM release_log WHERE release_id = ? ORDER BY id').all(drafted).map((l) => l.action), ['created', 'deleted'], 'the append-only log records the deletion');
+        assert.deepStrictEqual((await db.prepare('SELECT action FROM release_log WHERE release_id = ? ORDER BY id').all(drafted)).map((l) => l.action), ['created', 'deleted'], 'the append-only log records the deletion');
         // The public release page now says revoked.
         assert.match((await t.get(`/releases/${published}`)).text, /revoked/i);
     });

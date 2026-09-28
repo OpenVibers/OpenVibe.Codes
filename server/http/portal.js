@@ -114,10 +114,10 @@ ${table(['Project', 'Your role', 'Environments', 'Apps', 'Created'], list.map((p
 <p class="muted small">New projects are sandbox-only. OpenVibe staff enable production and set which capabilities a project's apps may hold (its allowance).</p>`,
         }, status);
     }
-    r.get('/', (req, res) => projectsPage(req, res));
+    r.get('/', async (req, res) => await projectsPage(req, res));
     r.post('/', B('codes.project.create'), form, guard, async (req, res) => {
         const got = await net(req, res, (t) => network.projects.create(t, { name: String(req.body.name || '') }));
-        if (!got.ok) return projectsPage(req, res, { problem: got.problem, status: got.problem.status });
+        if (!got.ok) return await projectsPage(req, res, { problem: got.problem, status: got.problem.status });
         res.redirect(303, `/projects/${got.data.id}`);
     });
 
@@ -301,8 +301,8 @@ ${canChange || self ? html`<form method="post" action="/projects/${project.id}/m
             if (!got.ok) return problemPage(req, res, got.problem, { title: 'Delete project', back: back(req) });
         }
         const actor = { kind: 'user', label: `user:${req.viewer.subject}`, subject: req.viewer.subject, role: project.role, staff: req.viewer.staff, traceparent: req.ov.traceparent };
-        const retired = releases.retireProject({ actor, projectId: project.id });
-        const runs = playground.deleteRunsForProject(project.id);
+        const retired = await releases.retireProject({ actor, projectId: project.id });
+        const runs = await playground.deleteRunsForProject(project.id);
         log.info(`[Codes] project ${project.id} deleted by ${actor.label}: archived in Network, ${retired.revoked.length} releases revoked, ${retired.deletedDrafts.length} drafts and ${runs} playground runs deleted`);
         res.redirect(303, `${back(req)}?done=${encodeURIComponent(`Deleted: ${retired.revoked.length} revoked, ${retired.deletedDrafts.length} drafts and ${runs} runs removed`)}`);
     });
@@ -427,8 +427,8 @@ const client = sdk.createClient({
         const grantRows = grants.ok ? (grants.data.grants || []) : [];
         const byCap = new Map(grantRows.map((g) => [g.capability, g]));
         const offer = catalog.ok ? offered(catalog.data, project) : [];
-        const t = trust.get(app.id);
-        const rels = releases.listForApp(app.id, { includeDrafts: true });
+        const t = await trust.get(app.id);
+        const rels = await releases.listForApp(app.id, { includeDrafts: true });
         page(req, res, {
             title: app.name, scripts: ['js/copy.js'],
             crumbs: [{ label: 'Projects', href: '/projects' }, { label: project.name, href: `/projects/${project.id}` }, { label: app.name }],
@@ -562,7 +562,7 @@ ${manage ? html`<h2>Revoke this app</h2><form method="post" action="${base}/revo
 <label><input type="radio" name="credential_type" value="access_token"> access token you minted for this app</label>
 <input type="password" name="credential" value="" autocomplete="off" required aria-label="Credential"></fieldset>`;
         const pre = (p) => (p.ok ? '' : html`<div class="notice ${p.stage === 'grant' ? 'warn' : 'bad'}"><strong>Cannot run:</strong> ${p.detail}${p.missing && p.grantable ? html` <a href="${base}#request">Request it</a>.` : ''}</div>`);
-        const runs = playground.runsFor(app.id);
+        const runs = await playground.runsFor(app.id);
         page(req, res, {
             title: `Playground · ${app.name}`,
             crumbs: [{ label: 'Projects', href: '/projects' }, { label: project.name, href: `/projects/${project.id}` }, { label: app.name, href: base }, { label: 'Playground' }],
@@ -596,7 +596,7 @@ ${r.result ? html`<pre><code>${JSON.stringify(r.result, null, 2)}</code></pre>` 
 
     const statusFor = (out) => (out.outcome === 'ok' ? 200 : (out.stage === 'grant' || out.stage === 'app' ? 403 : (out.stage === 'input' ? 422 : (out.stage === 'rate' ? 429 : (out.stage === 'token' ? (out.http_status && out.http_status >= 400 ? out.http_status : 401) : 502)))));
 
-    r.get('/:project/apps/:app/playground', idParams, (req, res) => playgroundPage(req, res));
+    r.get('/:project/apps/:app/playground', idParams, async (req, res) => await playgroundPage(req, res));
 
     r.post('/:project/apps/:app/playground/events', idParams, B('codes.playground.run'), form, guard, async (req, res) => {
         const got = await net(req, res, (t) => network.projects.app(t, req.params.project, req.params.app));
@@ -608,7 +608,7 @@ ${r.result ? html`<pre><code>${JSON.stringify(r.result, null, 2)}</code></pre>` 
             input: { event_type: b.event_type, subject_type: b.subject_type, subject_id: b.subject_id, payload: b.payload },
         });
         // The credential is NOT passed back: the form comes back with it empty.
-        return playgroundPage(req, res, { result: out, values: { event_type: b.event_type, subject_type: b.subject_type, subject_id: b.subject_id, payload: b.payload }, status: statusFor(out) });
+        return await playgroundPage(req, res, { result: out, values: { event_type: b.event_type, subject_type: b.subject_type, subject_id: b.subject_id, payload: b.payload }, status: statusFor(out) });
     });
 
     r.post('/:project/apps/:app/playground/media', idParams, B('codes.playground.run'), async (req, res) => {
@@ -625,7 +625,7 @@ ${r.result ? html`<pre><code>${JSON.stringify(r.result, null, 2)}</code></pre>` 
             credential: { type: parsed.fields.credential_type === 'access_token' ? 'access_token' : 'client_secret', value: String(parsed.fields.credential || '').trim() },
             file: parsed.file,
         });
-        return playgroundPage(req, res, { result: out, status: statusFor(out) });
+        return await playgroundPage(req, res, { result: out, status: statusFor(out) });
     });
 
     // ── Releases (Codes-owned) ──────────────────────────────
@@ -651,12 +651,12 @@ ${problem ? problemBox(problem, { title: 'Not created' }) : ''}${parseError ? no
         }, status);
     }
 
-    r.get('/:project/apps/:app/releases/new', idParams, (req, res) => editorPage(req, res, { kind: req.query.kind }));
+    r.get('/:project/apps/:app/releases/new', idParams, async (req, res) => await editorPage(req, res, { kind: req.query.kind }));
     r.post('/:project/apps/:app/releases', idParams, B('codes.release.create'), form, guard, async (req, res) => {
         const b = req.body || {};
         const kind = b.kind === 'mod' ? 'mod' : 'app';
         const p = manifestsLib.parse(b.manifest);
-        if (p.error) return editorPage(req, res, { status: 422, kind, text: b.manifest || '', notes: b.notes, parseError: p.error });
+        if (p.error) return await editorPage(req, res, { status: 422, kind, text: b.manifest || '', notes: b.notes, parseError: p.error });
         const [project, app] = await Promise.all([
             net(req, res, (t) => network.projects.get(t, req.params.project)),
             net(req, res, (t) => network.projects.app(t, req.params.project, req.params.app)),
@@ -664,17 +664,17 @@ ${problem ? problemBox(problem, { title: 'Not created' }) : ''}${parseError ? no
         if (!project.ok || !app.ok) return problemPage(req, res, (project.ok ? app : project).problem, { back: appBase(req) });
         if (b.intent !== 'create') {
             const v = manifestsLib.validate(kind, p.manifest, { app: app.data, viewerSubject: req.viewer.subject, eventTypes: docs.eventTypes });
-            return editorPage(req, res, { status: v.valid ? 200 : 422, kind, text: b.manifest, notes: b.notes, validation: v });
+            return await editorPage(req, res, { status: v.valid ? 200 : 422, kind, text: b.manifest, notes: b.notes, validation: v });
         }
         try {
-            const out = releases.createDraft({
+            const out = await releases.createDraft({
                 actor: { kind: 'user', label: `user:${req.viewer.subject}`, subject: req.viewer.subject, role: project.data.role, staff: req.viewer.staff, traceparent: req.ov.traceparent },
                 app: app.data, kind, manifest: p.manifest, notes: b.notes, eventTypes: docs.eventTypes,
             });
             res.redirect(303, `/releases/${out.release.id}`);
         } catch (err) {
             if (!(err instanceof ReleaseError)) return unexpected(req, res, err);
-            return editorPage(req, res, { status: err.status, kind, text: b.manifest, notes: b.notes, validation: err.validation || null, problem: err.validation ? null : { status: err.status, code: err.code, detail: err.detail } });
+            return await editorPage(req, res, { status: err.status, kind, text: b.manifest, notes: b.notes, validation: err.validation || null, problem: err.validation ? null : { status: err.status, code: err.code, detail: err.detail } });
         }
     });
 
@@ -698,7 +698,7 @@ function createReleaseActionRoutes(ctx) {
             if (req.viewer.kind !== 'user' || !req.viewer.subject) return page(req, res, { title: 'Sign in', body: html`<h1>Sign in first</h1>` }, 401);
             if (!sameOrigin(config, req) || !checkCsrf(config, req.viewer, req.body && req.body.csrf)) return page(req, res, { title: 'Form expired', body: html`<h1>This form has expired</h1>` }, 403);
             if (!REL_RE.test(req.params.id)) return page(req, res, { title: 'Not found', body: html`<h1>Not found</h1>` }, 404);
-            const rel = releases.get(req.params.id);
+            const rel = await releases.get(req.params.id);
             if (!rel) return page(req, res, { title: 'Not found', body: html`<h1>Not found</h1>` }, 404);
             let project = null;
             let app = null;
@@ -717,11 +717,11 @@ function createReleaseActionRoutes(ctx) {
             }
             const actor = { kind: 'user', label: `user:${req.viewer.subject}`, subject: req.viewer.subject, role: project ? project.role : null, staff: req.viewer.staff, traceparent: req.ov.traceparent };
             try {
-                if (action === 'publish') releases.publish({ actor, releaseId: rel.id, app });
-                else if (action === 'deprecate') releases.deprecate({ actor, releaseId: rel.id, app, reason: req.body.reason, replacement: req.body.replacement || null });
+                if (action === 'publish') await releases.publish({ actor, releaseId: rel.id, app });
+                else if (action === 'deprecate') await releases.deprecate({ actor, releaseId: rel.id, app, reason: req.body.reason, replacement: req.body.replacement || null });
                 else {
                     if (req.body.confirm !== '1') throw new ReleaseError(422, 'codes.confirm', 'tick the box to confirm');
-                    releases.revoke({ actor, releaseId: rel.id, app, reason: req.body.reason });
+                    await releases.revoke({ actor, releaseId: rel.id, app, reason: req.body.reason });
                 }
                 res.redirect(303, `/releases/${rel.id}?done=${action === 'publish' ? 'published' : (action === 'deprecate' ? 'deprecated' : 'revoked')}`);
             } catch (err) {

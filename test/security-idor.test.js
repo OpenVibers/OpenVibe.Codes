@@ -32,7 +32,7 @@ const { boot, check, done } = require('./helpers/boot');
     const annRelease = made.headers.get('location').split('/').pop();
 
     const networkState = () => JSON.stringify([[...t.network.state.projects.entries()], [...t.network.state.members.entries()], [...t.network.state.apps.entries()], [...t.network.state.creds.entries()]]);
-    const snapshot = () => networkState() + t.dbDump();
+    const snapshot = async () => networkState() + await t.dbDump();
     const HERS = ['Ann Hidden App', 'ann-draft-notes', ...(annApp.secret ? [annApp.secret] : [])];
     const refused = (r, what) => {
         assert.ok([401, 403, 404].includes(r.status) || (r.status === 303 && /\/login|\/auth/.test(r.headers.get('location') || '')), `${what}: ${r.status} ${r.text.slice(0, 160)}`);
@@ -51,7 +51,7 @@ const { boot, check, done } = require('./helpers/boot');
     });
 
     await check('forms: Bob cannot change Ann\'s project, apps, members, credentials, grants or releases', async () => {
-        const before = snapshot();
+        const before = await snapshot();
         const P = `/projects/${annProject}`;
         const A = `${P}/apps/${annApp.id}`;
         for (const [p, form] of [
@@ -71,7 +71,7 @@ const { boot, check, done } = require('./helpers/boot');
         ]) {
             refused(await t.get(p, { as: bob, form }), `POST ${p}`);
         }
-        assert.strictEqual(snapshot(), before, 'something of Ann\'s changed');
+        assert.strictEqual(await snapshot(), before, 'something of Ann\'s changed');
     });
 
     await check('controls: Ann reads her project and publishes her release', async () => {

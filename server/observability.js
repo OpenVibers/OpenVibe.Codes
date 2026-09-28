@@ -14,7 +14,7 @@
 const { createReadiness } = require('openvibe-shared/ready');
 const { TABLES } = require('./db');
 
-function createCodesReadiness({ store, keys, network, outbox, docs, config, release = null }) {
+function createCodesReadiness({ store, keys, network, outbox, docs, config, valkey = null, release = null }) {
     const { db } = store;
     return createReadiness({
         service: 'codes',
@@ -22,8 +22,8 @@ function createCodesReadiness({ store, keys, network, outbox, docs, config, rele
         checks: [
             {
                 name: 'db', required: true,
-                check: () => {
-                    const names = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
+                check: async () => {
+                    const names = new Set((await db.prepare("SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema()").all()).map((r) => r.name));
                     const missing = TABLES.filter((t) => !names.has(t));
                     return missing.length ? `missing ${missing.join(', ')}` : true;
                 },
@@ -34,6 +34,7 @@ function createCodesReadiness({ store, keys, network, outbox, docs, config, rele
                     ? { ok: true, detail: { contracts: docs.contractsVersion, sdk: docs.sdkVersion } }
                     : 'reference docs were not generated'),
             },
+            { name: 'valkey', required: false, check: async () => (valkey ? valkey.ready() : { skipped: 'VALKEY_URL not set: per-actor limits count in this process only' }) },
             {
                 name: 'network_jwks', required: false,
                 check: () => {
@@ -54,8 +55,8 @@ function createCodesReadiness({ store, keys, network, outbox, docs, config, rele
             },
             {
                 name: 'events_relay', required: false,
-                check: () => {
-                    const s = outbox.status();
+                check: async () => {
+                    const s = await outbox.status();
                     if (!s.enabled) return `relay off (EVENTS_URL or OV_OAUTH_CLIENT_SECRET unset); ${s.pending} events waiting`;
                     if (s.rejected) return `${s.rejected} events rejected by OpenVibe.Events`;
                     return { ok: true, detail: { pending: s.pending } };

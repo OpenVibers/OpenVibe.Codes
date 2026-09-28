@@ -93,8 +93,8 @@ function createNetworkClient({ config, fetchImpl, log = console }) {
         return value;
     }
     const registry = {
-        services: () => cached('services', () => registryClient.services()),
-        descriptor: () => cached('descriptor', () => client.json({ baseUrl: base, path: '/.well-known/openvibe', auth: false })),
+        services: async () => await cached('services', () => registryClient.services()),
+        descriptor: async () => await cached('descriptor', () => client.json({ baseUrl: base, path: '/.well-known/openvibe', auth: false })),
     };
 
     /**

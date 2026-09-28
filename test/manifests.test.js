@@ -94,7 +94,7 @@ const PRJ = 'prj_01JABCDEFGHJKMNPQRSTVWXYZ0';
         assert.strictEqual(api.status, 422);
         assert.strictEqual(api.json().valid, false);
         assert.strictEqual(api.json().contracts_version, require('openvibe-contracts/package.json').version);
-        assert.strictEqual(t.ctx.store.db.prepare('SELECT COUNT(*) AS n FROM manifests').get().n, 0);
+        assert.strictEqual((await t.ctx.store.db.prepare('SELECT COUNT(*) AS n FROM manifests').get()).n, 0);
     });
     await t.close();
     done();

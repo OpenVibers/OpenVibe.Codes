@@ -118,8 +118,8 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
     }
 
     /** One refresh per request, however many Network calls in it see a 401 (refresh tokens rotate). */
-    function refresh(req, res) {
-        if (!req.codesRefresh) req.codesRefresh = doRefresh(req, res);
+    async function refresh(req, res) {
+        if (!req.codesRefresh) req.codesRefresh = await doRefresh(req, res);
         return req.codesRefresh;
     }
 

@@ -43,7 +43,7 @@ const { actor } = require('../server/http/actor-limits');
         assert.deepStrictEqual([r.status, r.json().code], [429, 'rate_limited']);
         const theirs = t.network.mintApp(other.id, 'openvibe.codes', ['codes.release.read']);
         assert.strictEqual((await t.get(path, { headers: { authorization: `Bearer ${theirs}` } })).status, 200, 'another app still passes');
-        const from = (ip) => t.get(path, { headers: { 'X-Forwarded-For': ip } });
+        const from = async (ip) => await t.get(path, { headers: { 'X-Forwarded-For': ip } });
         for (let i = 0; i < 3; i++) assert.strictEqual((await from('203.0.113.7')).status, 200);
         assert.strictEqual((await from('203.0.113.7')).status, 429);
         assert.strictEqual((await from('203.0.113.8')).status, 200, 'another address still passes');

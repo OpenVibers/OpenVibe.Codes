@@ -47,7 +47,8 @@ Everything is server-rendered and usable without JavaScript. The only scripts of
 - **OpenVibe.Network** — SSO (OAuth client `codes`, PKCE S256), JWKS, `/api/v1/projects` (called server-side with the person's Network access token), the registry (`/api/v1/registry/services`, `/.well-known/openvibe`), client-credentials tokens (Codes' own for the events relay; the app's own in playgrounds).
 - **OpenVibe.Events** — the outbox relay publishes `codes.app.*` with Codes' service token (`events.event.publish`); the Events playground calls it with the app's token (`events.app.publish`); the project archive pulls the project's app events with a Network export token (`events.app.read`).
 - **OpenVibe.Media** — the Media playground uploads with the app's token into the project's namespace; the project archive lists the project's objects, namespaces and download URLs with a Network export token (`media.object.list`, `media.object.read`).
-- **openvibe-contracts** v0.53.0, **openvibe-sdk v0.13.0**, **openvibe-shared v1.25.0** (pinned tag tarballs; the docs show the tag and the package version, and say so when they differ).
+- **PostgreSQL 18 and Valkey 9** (OpenVibe.Host `roles/data/`, ADR-035): every read and write is async through `openvibe-sdk/db`; Valkey holds the per-actor limit counters (optional).
+- **openvibe-contracts** v0.76.0, **openvibe-sdk v0.20.1**, **openvibe-shared v1.27.0** (pinned tag tarballs; the docs show the tag and the package version, and say so when they differ).
 
 No path in Codes sends or accepts a shared loopback key (tested by grep and at runtime).
 
@@ -110,7 +111,11 @@ as they raise the per-address limit.
 
 Production deploys with `sudo ovhost deploy codes` on the host (strategy `git-checkout`: fetch,
 fast-forward `/opt/openvibe.codes`, install on a lockfile change, restart, wait for `/api/ready`).
-The unit is `openvibe-codes.service` on `127.0.0.1:4900`, the env file `/etc/openvibe/codes.env`. State lives in
+The unit is `openvibe-codes.service` on `127.0.0.1:4900`, the env file `/etc/openvibe/codes.env`. The database is
+`ov_codes` on the host's data role (`sudo /opt/openvibe.host/roles/data/add-service.sh codes` writes its settings); the
+release migrates it at boot. The one-time move from SQLite is `scripts/migrate-to-postgres.js` (openvibe-sdk
+`runSqliteMigration`, with a `--pglite` rehearsal mode), run while the service is stopped; the old
+`/var/lib/openvibe-codes/codes.db` stays read-only for 7 days as the rollback. State lives in
 `/var/lib/openvibe-codes`; nginx serves `openvibe.codes` from
 [deploy/nginx/openvibe.codes.conf](deploy/nginx/openvibe.codes.conf).
 Rollback: ovhost puts the previous sha back by itself when `/api/ready` does not answer 2xx after the

@@ -17,7 +17,7 @@
  */
 const { createClient } = require('openvibe-sdk/core');
 const { createServiceTokenClient } = require('openvibe-sdk/auth');
-const { createEventsClient, createOutbox } = require('openvibe-sdk/events');
+const { createEventsClient, createPgOutbox } = require('openvibe-sdk/events');
 
 const EVENT_TYPES = ['codes.app.published', 'codes.app.deprecated', 'codes.app.revoked', 'codes.moderation.action'];
 
@@ -35,7 +35,9 @@ function createCodesOutbox({ db, config, fetchImpl, now, log = console }) {
     }
     const events = createEventsClient(createClient(clientOpts), { source: 'codes' });
     let lastError = null;
-    const outbox = createOutbox(db, {
+    // The PostgreSQL outbox: rows are written in the change's own transaction (enqueue(db, …) joins the ambient
+    // transaction); several processes relay one table safely (leases).
+    const outbox = createPgOutbox(db, {
         events,
         intervalMs: config.events.intervalMs,
         now,
@@ -45,21 +47,20 @@ function createCodesOutbox({ db, config, fetchImpl, now, log = console }) {
             lastError = msg;
         },
     });
-    outbox.ensureSchema();
 
     /** Inside the caller's transaction. Returns the complete envelope (with its event_id). */
-    function emit(envelope, { traceparent } = {}) {
+    async function emit(envelope, { traceparent } = {}) {
         if (!EVENT_TYPES.includes(envelope.event_type)) throw new Error(`Codes does not produce ${envelope.event_type}`);
-        return outbox.enqueue(envelope, { traceparent });
+        return await outbox.enqueue(db, envelope, { traceparent });
     }
 
     /**
      * codes.moderation.action (common.moderation-action@1), inside the caller's transaction. actor:
      * the staff member's subject; target: { type, id, owner_subject? }. Never the content.
      */
-    function moderationAction({ action, target, actorSubject, reason = null, details = {} }, { traceparent } = {}) {
+    async function moderationAction({ action, target, actorSubject, reason = null, details = {} }, { traceparent } = {}) {
         const t = { type: target.type, id: String(target.id).slice(0, 200), owner_subject: target.owner_subject || null };
-        return emit({
+        return await emit({
             event_type: 'codes.moderation.action',
             actor: actorSubject ? { type: 'user', id: actorSubject } : { type: 'service', id: 'codes' },
             subject: { type: 'moderation_action', id: `${t.type}:${t.id}`.slice(0, 200) },
@@ -75,7 +76,7 @@ function createCodesOutbox({ db, config, fetchImpl, now, log = console }) {
         enabled,
         start() { if (enabled) outbox.start(); },
         stop: () => outbox.stop(),
-        status: () => ({ enabled, pending: outbox.pending(), rejected: outbox.rejected(), last_error: lastError }),
+        status: async () => ({ enabled, pending: await outbox.pending(), rejected: await outbox.rejected(), last_error: lastError }),
     };
 }
 

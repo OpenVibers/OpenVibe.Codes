@@ -49,11 +49,12 @@ const VERSION = require('../package.json').version;
  * opts: config, store | dbPath, now (clock), fetchImpl, log, limitsNow (the per-actor limiter's clock,
  * tests), actorLimits (false: count nobody, tests only)
  */
-function createApp(opts = {}) {
+async function createApp(opts = {}) {
     const config = opts.config || configLib.load();
     const log = opts.log || console;
     const fetchImpl = opts.fetchImpl;
-    const store = opts.store || openStore(opts.dbPath || config.dbPath, { now: opts.now });
+    // PostgreSQL (ADR-035): opened and migrated here unless the caller (a test, a script) hands in a store.
+    const store = opts.store || await openStore(config, { now: opts.now, log });
 
     const docs = generate({ now: store.now });
     const keys = createKeyStore({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -78,7 +79,10 @@ function createApp(opts = {}) {
     app.locals.ctx = ctx;
     // Per-actor limits (http/actor-limits.js) at /api/v1, the portal, release actions and the tools'
     // forms, counted once the caller is known; the per-address limits below stay.
-    ctx.actorLimits = createActorLimits({ config, now: opts.limitsNow || (() => Date.now()), registry: metrics.registry, log, enabled: opts.actorLimits !== false });
+    // Valkey (ADR-035): shared, never-authoritative state (per-actor limit counters). Optional.
+    const valkey = opts.valkey !== undefined ? opts.valkey : (config.valkey.url ? require('openvibe-sdk/valkey').createValkey({ url: config.valkey.url, prefix: config.valkey.prefix, log }) : null);
+    ctx.valkey = valkey;
+    ctx.actorLimits = createActorLimits({ config, now: opts.limitsNow || (() => Date.now()), registry: metrics.registry, log, enabled: opts.actorLimits !== false, valkey });
 
     app.use(contracts.http.middleware());
     app.use(helmet({
@@ -112,7 +116,7 @@ function createApp(opts = {}) {
     app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'openvibe-codes', version: VERSION }));
     // GET /release.json (ADR-016) and POST /release-metrics: open tabs' update reports into /metrics.
     release.mount(app, { registry: metrics.registry });
-    const readiness = createCodesReadiness({ store, keys, network, outbox, docs, config, release: release.release });
+    const readiness = createCodesReadiness({ store, keys, network, outbox, docs, config, release: release.release, valkey: ctx.valkey });
     app.get('/api/ready', readiness.handler);
 
     // ── Who is asking (verified offline; refreshed when expired) ──

@@ -58,7 +58,7 @@ const { boot, check, done } = require('./helpers/boot');
     }
 
     const archivePath = `/projects/${projectId}/export/archive`;
-    const exportAs = (who, form = {}) => t.get(archivePath, { as: who, form });
+    const exportAs = async (who, form = {}) => await t.get(archivePath, { as: who, form });
     const minted = () => t.network.state.exportTokens;
     const lines = (buf) => buf.toString('utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
     let files = null;
@@ -156,7 +156,7 @@ const { boot, check, done } = require('./helpers/boot');
         for (const x of minted()) {
             const sig = x.token.split('.')[2];
             assert.ok(!everything.includes(sig), 'an export token in the archive');
-            assert.ok(!t.dbDump().includes(sig), 'an export token in Codes\' database');
+            assert.ok(!(await t.dbDump()).includes(sig), 'an export token in Codes\' database');
             assert.ok(!t.logs().includes(sig), 'an export token in the logs');
         }
         assert.ok(!/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(everything), 'no JWT at all');

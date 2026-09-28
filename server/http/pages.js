@@ -56,8 +56,8 @@ function createPageRoutes(ctx) {
     const governance = loadGovernance();
     const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, ...o });
 
-    r.get('/', (req, res) => {
-        const recent = releases.recentPublic(10);
+    r.get('/', async (req, res) => {
+        const recent = await releases.recentPublic(10);
         page(req, res, {
             index: true, cache: PUBLIC_CACHE,
             body: html`<h1>Build on OpenVibe</h1>
@@ -178,11 +178,11 @@ ${Array.isArray(status.notYet) ? html`<h3>Not yet</h3><ul>${status.notYet.map((w
 
     // ── Public release pages ────────────────────────────────
     const APP_ID_RE = /^app_[0-9A-HJKMNP-TV-Z]{26}$/;
-    r.get('/apps/:app', (req, res, next) => {
+    r.get('/apps/:app', async (req, res, next) => {
         if (!APP_ID_RE.test(req.params.app)) return next();
-        const list = releases.listForApp(req.params.app);
-        const t = trust.get(req.params.app);
-        const hist = trust.history(req.params.app);
+        const list = await releases.listForApp(req.params.app);
+        const t = await trust.get(req.params.app);
+        const hist = await trust.history(req.params.app);
         page(req, res, {
             index: list.length > 0, cache: PUBLIC_CACHE, title: list[0] ? list[0].name : req.params.app,
             crumbs: [{ label: 'Apps' }, { label: req.params.app }],
@@ -199,7 +199,7 @@ ${hist.length ? html`<h2>Trust history</h2>${table(['When', 'Change', 'Note'], h
     });
 
     r.get('/releases/:id', async (req, res, next) => {
-        const rel = releases.get(req.params.id);
+        const rel = await releases.get(req.params.id);
         if (!rel) return next();
         if (rel.status === 'draft') {
             // Drafts are visible to members of the app's project only — as Network reports it.
@@ -209,7 +209,7 @@ ${hist.length ? html`<h2>Trust history</h2>${table(['When', 'Change', 'Note'], h
             }
             if (!member) return next();
         }
-        const m = releases.manifestOf(rel.manifest_id);
+        const m = await releases.manifestOf(rel.manifest_id);
         const signedIn = req.viewer.kind === 'user';
         page(req, res, {
             index: rel.status === 'published', cache: rel.status === 'draft' ? null : PUBLIC_CACHE, title: `${rel.name} ${rel.version}`,
@@ -225,7 +225,7 @@ ${rel.revoked_at ? html`<dt>Revoked</dt><dd>${time(rel.revoked_at)}: ${rel.revoc
 ${rel.notes ? html`<h2>Notes</h2><p>${rel.notes}</p>` : ''}
 <h2>Manifest</h2><p class="muted small">Validated with openvibe-contracts ${m ? m.contracts_version : '?'}.</p><pre><code>${m ? JSON.stringify(m.body, null, 2) : ''}</code></pre>
 ${signedIn ? releaseActions(req, rel) : ''}
-<h2>History</h2>${table(['When', 'Action', 'By'], releases.log(rel.id).map((l) => [time(l.at), l.action, l.actor]))}`,
+<h2>History</h2>${table(['When', 'Action', 'By'], (await releases.log(rel.id)).map((l) => [time(l.at), l.action, l.actor]))}`,
         });
     });
 
@@ -240,7 +240,7 @@ ${signedIn ? releaseActions(req, rel) : ''}
     }
 
     // ── Staff: trust tiers (metadata) ───────────────────────
-    r.get('/staff', (req, res) => {
+    r.get('/staff', async (req, res) => {
         if (!req.viewer.staff) return page(req, res, { title: 'Staff', body: html`<h1>Staff only</h1><p>Trust tiers are set by Codes staff.</p>` }, req.viewer.kind === 'user' ? 403 : 401);
         page(req, res, {
             title: 'Staff: trust tiers', crumbs: [{ label: 'Staff' }],
@@ -250,14 +250,14 @@ ${signedIn ? releaseActions(req, rel) : ''}
 <label>App id <input name="app_id" required pattern="app_[0-9A-HJKMNP-TV-Z]{26}"></label>
 <label>Tier <select name="tier">${trust.TIERS.map((t) => html`<option>${t}</option>`)}</select></label>
 <label>Note (public) <input name="note" required maxlength="500"></label><button type="submit">Set tier</button></form>
-<h2>Set tiers</h2>${table(['App', 'Tier', 'Note', 'By', 'When'], trust.listSet().map((t) => [html`<a href="/apps/${t.app_id}">${t.app_id}</a>`, t.tier, t.note, t.set_by, time(t.set_at)]))}`,
+<h2>Set tiers</h2>${table(['App', 'Tier', 'Note', 'By', 'When'], (await trust.listSet()).map((t) => [html`<a href="/apps/${t.app_id}">${t.app_id}</a>`, t.tier, t.note, t.set_by, time(t.set_at)]))}`,
         });
     });
     // Per-actor limit (http/actor-limits.js) before the form is read.
-    r.post('/staff/trust', ctx.actorLimits.budget('codes.trust.set'), form, (req, res) => {
+    r.post('/staff/trust', ctx.actorLimits.budget('codes.trust.set'), form, async (req, res) => {
         if (!req.viewer.staff || !sameOrigin(config, req) || !checkCsrf(config, req.viewer, req.body && req.body.csrf)) return page(req, res, { title: 'Forbidden', body: html`<h1>Forbidden</h1>` }, 403);
         try {
-            trust.set({ appId: req.body.app_id, tier: req.body.tier, note: req.body.note, actor: { staff: true, label: `user:${req.viewer.subject}` } });
+            await trust.set({ appId: req.body.app_id, tier: req.body.tier, note: req.body.note, actor: { staff: true, label: `user:${req.viewer.subject}` } });
             res.redirect(303, '/staff?done=1');
         } catch (err) {
             page(req, res, { title: 'Staff', body: problemBox({ status: err.status || 422, code: err.code || 'trust.invalid', detail: err.message }) }, err.status || 422);

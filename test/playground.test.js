@@ -19,7 +19,7 @@ const { boot, check, done } = require('./helpers/boot');
     const app = await t.app(owner, projectId);
     const base = `/projects/${projectId}/apps/${app.id}`;
     const key = `p${projectId.replace(/^prj_/, '').toLowerCase()}`;
-    const media = (fields, file = { name: 'a.txt', content: 'hello' }) => t.get(`${base}/playground/media`, { as: owner, multipart: { fields, file } });
+    const media = async (fields, file = { name: 'a.txt', content: 'hello' }) => await t.get(`${base}/playground/media`, { as: owner, multipart: { fields, file } });
     const outside = () => ({
         token: t.network.tokenRequests.filter((x) => x.client_id === app.id).length,
         media: t.media.requests.length,
@@ -132,7 +132,7 @@ const { boot, check, done } = require('./helpers/boot');
     });
 
     await check('the run log records outcomes and codes, never the credential', async () => {
-        const rows = t.ctx.store.db.prepare('SELECT * FROM playground_runs WHERE app_id = ? ORDER BY at').all(app.id);
+        const rows = await t.ctx.store.db.prepare('SELECT * FROM playground_runs WHERE app_id = ? ORDER BY at').all(app.id);
         assert.ok(rows.length >= 6);
         assert.ok(rows.some((x) => x.outcome === 'ok' && x.ref));
         assert.ok(rows.some((x) => x.stage === 'grant' && x.code === 'playground.grant_missing'));

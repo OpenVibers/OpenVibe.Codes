@@ -19,8 +19,8 @@ const { boot, check, done } = require('./helpers/boot');
     const app = await t.app(owner, projectId, { name: 'Moderated' });
     const base = `/projects/${projectId}/apps/${app.id}`;
     const manifest = (version) => JSON.stringify({ ...manifests.template('app', { appId: app.id, projectId, environment: 'sandbox', name: 'Moderated' }), version });
-    const moderation = () => t.ctx.store.db.prepare('SELECT envelope FROM event_outbox ORDER BY id').all()
-        .map((r) => JSON.parse(r.envelope)).filter((e) => e.event_type === 'codes.moderation.action');
+    const moderation = async () => (await t.ctx.store.db.prepare('SELECT envelope FROM event_outbox ORDER BY id').all())
+        .map((r) => (typeof r.envelope === 'string' ? JSON.parse(r.envelope) : r.envelope)).filter((e) => e.event_type === 'codes.moderation.action');
     const published = async (version) => {
         const r = await t.get(`${base}/releases`, { as: owner, form: { kind: 'app', manifest: manifest(version), intent: 'create' } });
         const id = r.headers.get('location').split('/').pop();
@@ -40,14 +40,14 @@ const { boot, check, done } = require('./helpers/boot');
         const id = await published('1.0.0');
         const r = await t.get(`/releases/${id}/revoke`, { as: owner, form: { reason: 'Mine to pull', confirm: '1' } });
         assert.strictEqual(r.status, 303);
-        assert.strictEqual(moderation().length, 0);
+        assert.strictEqual((await moderation()).length, 0);
     });
 
     await check('staff revoking someone else\'s release: exactly one valid codes.moderation.action', async () => {
         const id = await published('1.1.0');
         const r = await t.get(`/releases/${id}/revoke`, { as: staff, form: { reason: 'Malware in the bundle', confirm: '1' } });
         assert.strictEqual(r.status, 303, r.text.slice(0, 300));
-        const ev = moderation();
+        const ev = await moderation();
         assert.strictEqual(ev.length, 1);
         valid(ev[0]);
         assert.deepStrictEqual(ev[0].subject, { type: 'moderation_action', id: `release:${id}` });
@@ -60,10 +60,10 @@ const { boot, check, done } = require('./helpers/boot');
 
     await check('staff setting a trust tier: exactly one event; a refused change: none', async () => {
         assert.strictEqual((await t.get('/staff/trust', { as: owner, form: { app_id: app.id, tier: 'reviewed', note: 'me' } })).status, 403);
-        assert.strictEqual(moderation().length, 1);
+        assert.strictEqual((await moderation()).length, 1);
         const r = await t.get('/staff/trust', { as: staff, form: { app_id: app.id, tier: 'reviewed', note: 'Read the source' } });
         assert.strictEqual(r.status, 303);
-        const ev = moderation();
+        const ev = await moderation();
         assert.strictEqual(ev.length, 2);
         const e = ev[1];
         valid(e);

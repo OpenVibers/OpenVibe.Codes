@@ -22,7 +22,7 @@ const { boot, check, done } = require('./helpers/boot');
     const app = await t.app(owner, projectId, { name: 'Releaser' });
     const base = `/projects/${projectId}/apps/${app.id}`;
     const manifest = (version, extra = {}) => JSON.stringify({ ...manifests.template('app', { appId: app.id, projectId, environment: 'sandbox', name: 'Releaser' }), version, ...extra });
-    const outbox = () => t.ctx.store.db.prepare('SELECT envelope FROM event_outbox ORDER BY id').all().map((r) => JSON.parse(r.envelope));
+    const outbox = async () => (await t.ctx.store.db.prepare('SELECT envelope FROM event_outbox ORDER BY id').all()).map((r) => (typeof r.envelope === 'string' ? JSON.parse(r.envelope) : r.envelope));
     let rel1;
     let rel2;
 
@@ -30,14 +30,14 @@ const { boot, check, done } = require('./helpers/boot');
         const r = await t.get(`${base}/releases`, { as: owner, form: { kind: 'app', manifest: manifest('1.0.0'), intent: 'validate' } });
         assert.strictEqual(r.status, 200);
         assert.match(r.text, /Valid\./);
-        assert.strictEqual(t.ctx.store.db.prepare('SELECT COUNT(*) AS n FROM releases').get().n, 0);
+        assert.strictEqual((await t.ctx.store.db.prepare('SELECT COUNT(*) AS n FROM releases').get()).n, 0);
     });
 
     await check('an invalid manifest creates nothing and shows the errors', async () => {
         const r = await t.get(`${base}/releases`, { as: owner, form: { kind: 'app', manifest: manifest('1.0.0', { id: 'app_01JZZZZZZZZZZZZZZZZZZZZZZZ' }), intent: 'create' } });
         assert.strictEqual(r.status, 422);
         assert.match(r.text, /must be this app&#39;s id/);
-        assert.strictEqual(t.ctx.store.db.prepare('SELECT COUNT(*) AS n FROM releases').get().n, 0);
+        assert.strictEqual((await t.ctx.store.db.prepare('SELECT COUNT(*) AS n FROM releases').get()).n, 0);
     });
 
     await check('a draft is created, visible to members only, and emits nothing', async () => {
@@ -48,7 +48,7 @@ const { boot, check, done } = require('./helpers/boot');
         assert.strictEqual((await t.get(`/releases/${rel1}`)).status, 404, 'anonymous cannot see a draft');
         assert.strictEqual((await t.get(`/releases/${rel1}`, { as: owner })).status, 200);
         assert.strictEqual((await t.get(`/api/v1/releases/${rel1}`)).status, 404);
-        assert.strictEqual(outbox().length, 0);
+        assert.strictEqual((await outbox()).length, 0);
     });
 
     await check('versions are immutable: the same version again is 409', async () => {
@@ -66,7 +66,7 @@ const { boot, check, done } = require('./helpers/boot');
     await check('publishing emits codes.app.published (valid envelope, 3 segments, public)', async () => {
         const r = await t.get(`/releases/${rel1}/publish`, { as: owner, form: {} });
         assert.strictEqual(r.status, 303);
-        const ev = outbox();
+        const ev = await outbox();
         assert.strictEqual(ev.length, 1);
         const e = ev[0];
         assert.strictEqual(e.event_type, 'codes.app.published');
@@ -94,7 +94,7 @@ const { boot, check, done } = require('./helpers/boot');
         await t.get(`/releases/${rel2}/publish`, { as: owner, form: {} });
         const ok = await t.get(`/releases/${rel1}/deprecate`, { as: owner, form: { reason: 'Use 1.1.0', replacement: rel2 } });
         assert.strictEqual(ok.status, 303);
-        const e = outbox().pop();
+        const e = (await outbox()).pop();
         assert.strictEqual(e.event_type, 'codes.app.deprecated');
         assert.strictEqual(e.payload.replacement, rel2);
     });
@@ -104,7 +104,7 @@ const { boot, check, done } = require('./helpers/boot');
         assert.strictEqual(unconfirmed.status, 422);
         const ok = await t.get(`/releases/${rel1}/revoke`, { as: owner, form: { reason: 'Security issue', confirm: '1' } });
         assert.strictEqual(ok.status, 303);
-        assert.strictEqual(outbox().pop().event_type, 'codes.app.revoked');
+        assert.strictEqual((await outbox()).pop().event_type, 'codes.app.revoked');
         const again = await t.get(`/releases/${rel1}/revoke`, { as: owner, form: { reason: 'x', confirm: '1' } });
         assert.strictEqual(again.status, 409);
     });
@@ -112,13 +112,13 @@ const { boot, check, done } = require('./helpers/boot');
     await check('revoking a draft announces nothing (it was never public)', async () => {
         const r = await t.get(`${base}/releases`, { as: owner, form: { kind: 'app', manifest: manifest('2.0.0-rc.1'), intent: 'create' } });
         const id = r.headers.get('location').split('/').pop();
-        const n = outbox().length;
+        const n = (await outbox()).length;
         await t.get(`/releases/${id}/revoke`, { as: owner, form: { reason: 'abandoned', confirm: '1' } });
-        assert.strictEqual(outbox().length, n);
+        assert.strictEqual((await outbox()).length, n);
     });
 
     await check('only the three codes.app.* types are ever produced', async () => {
-        const types = new Set(outbox().map((e) => e.event_type));
+        const types = new Set((await outbox()).map((e) => e.event_type));
         for (const x of types) assert.ok(['codes.app.published', 'codes.app.deprecated', 'codes.app.revoked'].includes(x), x);
     });
 
@@ -147,7 +147,7 @@ const { boot, check, done } = require('./helpers/boot');
         const mod = { ...manifests.template('mod', { appId: app.id }), id: contracts.ids.newId('mod'), version: '0.1.0' };
         const r = await t.get(`${base}/releases`, { as: owner, form: { kind: 'mod', manifest: JSON.stringify(mod), intent: 'create' } });
         assert.strictEqual(r.status, 303, r.text.slice(0, 300));
-        const rel = t.ctx.releases.get(r.headers.get('location').split('/').pop());
+        const rel = await t.ctx.releases.get(r.headers.get('location').split('/').pop());
         assert.strictEqual(rel.kind, 'mod');
         assert.strictEqual(rel.subject_id, mod.id);
     });
@@ -158,7 +158,7 @@ const { boot, check, done } = require('./helpers/boot');
         const r = await t.get(`/api/v1/apps/${app.id}/releases`, { headers: { authorization: `Bearer ${token}` }, json: { kind: 'app', manifest: JSON.parse(manifest('4.0.0', { publisher: { type: 'app', id: app.id } })), publish: true } });
         assert.strictEqual(r.status, 201, r.text);
         assert.strictEqual(r.json().release.status, 'published');
-        const e = outbox().pop();
+        const e = (await outbox()).pop();
         assert.deepStrictEqual(e.actor, { type: 'app', id: app.id });
     });
 

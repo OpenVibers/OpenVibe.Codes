@@ -16,7 +16,7 @@ const manifests = require('../server/domain/manifests');
 const appModule = require('../server/app');
 let capturedApp = null;
 const realCreate = appModule.createApp;
-appModule.createApp = (...a) => { const built = realCreate(...a); capturedApp = built.app; return built; };
+appModule.createApp = async (...a) => { const built = await realCreate(...a); capturedApp = built.app; return built; };
 const { boot, check, done } = require('./helpers/boot');
 const { getPaths, crawl } = require('./security-crawl');
 
@@ -62,8 +62,8 @@ const { getPaths, crawl } = require('./security-crawl');
         assert.deepStrictEqual(r.found, []);
     });
 
-    await check('the events outbox carries nothing of the draft (drafts emit nothing)', () => {
-        const text = JSON.stringify(t.ctx.store.db.prepare('SELECT envelope FROM event_outbox').all());
+    await check('the events outbox carries nothing of the draft (drafts emit nothing)', async () => {
+        const text = JSON.stringify(await t.ctx.store.db.prepare('SELECT envelope FROM event_outbox').all());
         assert.ok(!text.includes('ann-draft-notes') && !text.includes(release));
     });
 

@@ -311,7 +311,7 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
             if (!u) return problem(json, 401, 'auth.required', 'send Authorization: Bearer <Network access token>');
             if (req.headers['x-internal-key']) return problem(json, 400, 'test.internal_key_seen', 'X-Internal-Key must never be sent');
             const parts = url.pathname.replace(/^\/api\/v1\/projects\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
-            return projectsApi(req, raw, json, u, parts, url.searchParams);
+            return await projectsApi(req, raw, json, u, parts, url.searchParams);
         }
         return json(404, { error: 'not found' });
     });

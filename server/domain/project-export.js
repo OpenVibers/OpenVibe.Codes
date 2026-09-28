@@ -57,9 +57,9 @@ async function buildExport({ network, token, project, includeAudit, releases, pl
         quotas: quotas.quotas || [],
         audit: audit || { entries: null, note: 'the audit log needs the admin role in this project' },
         codes: {
-            releases: releases.listForProject(project.id),
-            trust: appIds.map((id) => ({ app_id: id, ...trust.get(id), history: trust.history(id) })),
-            playground_runs: playground.runsForProject(project.id),
+            releases: await releases.listForProject(project.id),
+            trust: (await Promise.all(appIds.map(async (id) => ({ app_id: id, ...await trust.get(id), history: await trust.history(id) })))),
+            playground_runs: await playground.runsForProject(project.id),
         },
     };
 }

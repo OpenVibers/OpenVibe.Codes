@@ -66,21 +66,21 @@ function createApi(ctx) {
     const manageAccess = [loadKey, (req, res, next) => (bearer(req) ? manageGuard(req, res, next)
         : problem(req, res, 401, 'auth.required', 'send Authorization: Bearer <app token for audience openvibe.codes>'))];
 
-    r.get('/apps/:app/releases', ...readAccess, reads, (req, res) => {
+    r.get('/apps/:app/releases', ...readAccess, reads, async (req, res) => {
         if (!APP_RE.test(req.params.app)) return problem(req, res, 404, 'app.not_found', 'not an app id');
         res.set('Cache-Control', 'public, max-age=60');
-        res.json({ app_id: req.params.app, trust: trust.get(req.params.app), releases: releases.listForApp(req.params.app) });
+        res.json({ app_id: req.params.app, trust: await trust.get(req.params.app), releases: await releases.listForApp(req.params.app) });
     });
-    r.get('/apps/:app/trust', ...readAccess, reads, (req, res) => {
+    r.get('/apps/:app/trust', ...readAccess, reads, async (req, res) => {
         if (!APP_RE.test(req.params.app)) return problem(req, res, 404, 'app.not_found', 'not an app id');
         res.set('Cache-Control', 'public, max-age=60');
-        res.json({ app_id: req.params.app, ...trust.get(req.params.app), note_on_authority: 'metadata only; grants in OpenVibe.Network are the authority' });
+        res.json({ app_id: req.params.app, ...await trust.get(req.params.app), note_on_authority: 'metadata only; grants in OpenVibe.Network are the authority' });
     });
-    r.get('/releases/:id', ...readAccess, reads, (req, res) => {
-        const rel = REL_RE.test(req.params.id) ? releases.get(req.params.id) : null;
+    r.get('/releases/:id', ...readAccess, reads, async (req, res) => {
+        const rel = REL_RE.test(req.params.id) ? await releases.get(req.params.id) : null;
         if (!rel || rel.status === 'draft') return problem(req, res, 404, 'release.not_found', 'no such release');
         res.set('Cache-Control', 'public, max-age=60');
-        const m = releases.manifestOf(rel.manifest_id);
+        const m = await releases.manifestOf(rel.manifest_id);
         res.json({ release: rel, manifest: m ? m.body : null });
     });
 
@@ -108,7 +108,7 @@ function createApi(ctx) {
         return problem(req, res, 500, 'internal.error', 'Internal error');
     };
 
-    r.post('/apps/:app/releases', limiter, ...manageAccess, B('codes.release.create'), json, (req, res) => {
+    r.post('/apps/:app/releases', limiter, ...manageAccess, B('codes.release.create'), json, async (req, res) => {
         if (!APP_RE.test(req.params.app)) return problem(req, res, 404, 'app.not_found', 'not an app id');
         const p = appPrincipal(req, res, req.params.app);
         if (!p) return;
@@ -116,24 +116,24 @@ function createApi(ctx) {
         const b = req.body || {};
         try {
             const kind = b.kind === 'mod' ? 'mod' : 'app';
-            const out = releases.createDraft({ actor: p.actor, app: p.app, kind, manifest: b.manifest, notes: b.notes, eventTypes: docs.eventTypes });
+            const out = await releases.createDraft({ actor: p.actor, app: p.app, kind, manifest: b.manifest, notes: b.notes, eventTypes: docs.eventTypes });
             let release = out.release;
-            if (b.publish === true) release = releases.publish({ actor: p.actor, releaseId: release.id, app: p.app }).release;
+            if (b.publish === true) release = (await releases.publish({ actor: p.actor, releaseId: release.id, app: p.app })).release;
             res.status(201).json({ release, warnings: out.validation.warnings });
         } catch (err) { fail(req, res, err); }
     });
 
     for (const action of ['publish', 'deprecate', 'revoke']) {
-        r.post(`/releases/:id/${action}`, limiter, ...manageAccess, B('codes.release.manage'), json, (req, res) => {
-            const rel = REL_RE.test(req.params.id) ? releases.get(req.params.id) : null;
+        r.post(`/releases/:id/${action}`, limiter, ...manageAccess, B('codes.release.manage'), json, async (req, res) => {
+            const rel = REL_RE.test(req.params.id) ? await releases.get(req.params.id) : null;
             if (!rel) return problem(req, res, 404, 'release.not_found', 'no such release');
             const p = appPrincipal(req, res, rel.app_id);
             if (!p) return;
             const b = req.body || {};
             try {
-                const out = action === 'publish' ? releases.publish({ actor: p.actor, releaseId: rel.id, app: p.app })
-                    : action === 'deprecate' ? releases.deprecate({ actor: p.actor, releaseId: rel.id, app: p.app, reason: b.reason, replacement: b.replacement })
-                        : releases.revoke({ actor: p.actor, releaseId: rel.id, app: p.app, reason: b.reason });
+                const out = action === 'publish' ? await releases.publish({ actor: p.actor, releaseId: rel.id, app: p.app })
+                    : action === 'deprecate' ? await releases.deprecate({ actor: p.actor, releaseId: rel.id, app: p.app, reason: b.reason, replacement: b.replacement })
+                        : await releases.revoke({ actor: p.actor, releaseId: rel.id, app: p.app, reason: b.reason });
                 res.json(out);
             } catch (err) { fail(req, res, err); }
         });

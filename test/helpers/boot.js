@@ -47,7 +47,10 @@ async function boot(opts = {}) {
     const log = { log: (...a) => captured.push(a.map(String).join(' ')), warn: (...a) => captured.push(a.map(String).join(' ')), error: (...a) => captured.push(a.map(String).join(' ')), info: (...a) => captured.push(a.map(String).join(' ')) };
 
     const config = configLib.load(env);
-    const built = createApp({ config, log, limitsNow: opts.limitsNow, actorLimits: opts.actorLimits === true });
+    const { createStore } = require('../../server/db');
+    // One database per boot (PGlite, or CODES_TEST_STORE=pg: the containers), dropped when the boot closes.
+    const testdb = await require('./db').testDb();
+    const built = await createApp({ config, store: createStore(testdb.db), log, limitsNow: opts.limitsNow, actorLimits: opts.actorLimits === true });
     await built.ctx.keys.ensure();
     if (opts.relay) built.ctx.outbox.start();
     const server = await new Promise((resolve) => { const s = http.createServer(built.app); s.listen(0, '127.0.0.1', () => resolve(s)); });
@@ -83,10 +86,10 @@ async function boot(opts = {}) {
     }
 
     /** Every value in every table of Codes' database, as one string. */
-    function dbDump() {
+    async function dbDump() {
         const db = built.ctx.store.db;
-        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
-        return tables.map((tname) => JSON.stringify(db.prepare(`SELECT * FROM "${tname}"`).all())).join('\n');
+        const tables = (await db.prepare("SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema()").all()).map((r) => r.name);
+        return (await Promise.all(tables.map(async (tname) => JSON.stringify(await db.prepare(`SELECT * FROM "${tname}"`).all())))).join('\n');
     }
 
     async function project(user, name = 'Test project') {
@@ -116,7 +119,7 @@ async function boot(opts = {}) {
         async close() {
             await new Promise((r) => server.close(r));
             await built.ctx.outbox.stop();
-            built.ctx.store.close();
+            await testdb.close();
             await network.close(); await events.close(); await media.close();
             fs.rmSync(dir, { recursive: true, force: true });
         },
