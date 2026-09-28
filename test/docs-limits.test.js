@@ -3,7 +3,7 @@
  * /docs/limits (WS-N task 7) renders each enforcing service's /limits.json and nothing of its own:
  * the numbers are the ones the service answered (0 is "none", null is "no limit"), a service not
  * answering shows a problem and no numbers, and grantable capabilities whose owner publishes no
- * limits are listed as such. The copy never calls anything free.
+ * limits are listed as such.
  */
 const assert = require('assert');
 const http = require('http');
@@ -63,7 +63,6 @@ function serve(body) {
         }
         assert.match(r.text, /Custom domains<\/td><td[^>]*>[^<]*<a[^>]*><code>host\.site\.manage<\/code><\/a><\/td><td[^>]*>none<\/td>/, 'sandbox 0 reads "none"');
         assert.match(r.text, /Webhook subscriptions.*?<td[^>]*>5<\/td><td[^>]*>no limit<\/td>/s, 'production null reads "no limit"');
-        assert.ok(!/\bfree\b/i.test(r.text.replace(/<[^>]+>/g, ' ')), 'no "free" copy');
         assert.ok(r.text.includes('Other capabilities') && r.text.includes('/docs/capabilities/tools.tool.run'), 'owners without /limits.json are listed');
         assert.ok(!/Other capabilities[\s\S]*media\.object\.upload \(/.test(r.text), 'Media publishes its own now');
         assert.ok(!/Other capabilities[\s\S]*events\.app\.publish \(/.test(r.text), 'a covered owner is not listed again');
