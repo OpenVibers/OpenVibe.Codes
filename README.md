@@ -47,18 +47,28 @@ Everything is server-rendered and usable without JavaScript. The only scripts of
 - **OpenVibe.Network** — SSO (OAuth client `codes`, PKCE S256), JWKS, `/api/v1/projects` (called server-side with the person's Network access token), the registry (`/api/v1/registry/services`, `/.well-known/openvibe`), client-credentials tokens (Codes' own for the events relay; the app's own in playgrounds).
 - **OpenVibe.Events** — the outbox relay publishes `codes.app.*` with Codes' service token (`events.event.publish`); the Events playground calls it with the app's token (`events.app.publish`); the project archive pulls the project's app events with a Network export token (`events.app.read`).
 - **OpenVibe.Media** — the Media playground uploads with the app's token into the project's namespace; the project archive lists the project's objects, namespaces and download URLs with a Network export token (`media.object.list`, `media.object.read`).
-- **openvibe-contracts** v0.33.0, **openvibe-sdk v0.5.0**, **openvibe-shared v1.5.1** (pinned tag tarballs; the docs show the tag and the package version, and say so when they differ).
+- **openvibe-contracts** v0.53.0, **openvibe-sdk v0.12.0**, **openvibe-shared v1.22.0** (pinned tag tarballs; the docs show the tag and the package version, and say so when they differ).
 
 No path in Codes sends or accepts a shared loopback key (tested by grep and at runtime).
 
 ## Grants and registration the lead must add
+
+Implemented here (the service manifest's `capabilities`): `codes.release.read` (public release reads;
+no token needed, a presented token must hold it) and `codes.release.manage` (release management by an
+app with its own token), both guarded with openvibe-contracts `requireCapability`.
+
+Called elsewhere: as the service principal `codes`, `events.event.publish` at Events (the outbox relay);
+as the signed-in person, with their own Network token, Network's `/api/v1/projects`; as the app, with
+its own token, `media.object.upload` (Media) and `events.app.publish` (Events) in the playgrounds; and,
+for the project archive, Network's read-only export tokens holding `events.app.read`,
+`media.object.list` and `media.object.read`.
 
 In Network (`server/identity/principals.js` / `server/db/database.js`, as for coupons and host):
 
 - OAuth client `codes`, name `OpenVibe.Codes`, redirect URI `https://openvibe.codes/auth/callback`.
 - Service grant `['codes', 'events.event.publish', 'openvibe.events', []]` (the outbox relay).
 
-The Codes service manifest, `codes.release.manage|read` and `codes.app-manifest@1` are released in openvibe-contracts (tag v0.27.0; this repository pins v0.33.0); the CI contracts check is blocking.
+The Codes service manifest, `codes.release.manage|read` and `codes.app-manifest@1` are released in openvibe-contracts (tag v0.27.0; this repository pins v0.53.0); the CI contracts check is blocking.
 
 For the playgrounds to succeed end to end (not Codes' code; configuration elsewhere): Network `DEV_SANDBOX_AUDIENCES` including `openvibe.media` and `openvibe.events`, a staff-set allowance containing `media.object.upload` and `events.app.publish` for the project, a Media tenant keyed by the project id, and OpenVibe.Events serving `events.app.publish` for app tokens. On 2026-09-23 these were in place on production: a sandbox app uploaded to Media (tenant `prj_…-sandbox`) and published and read app events through public endpoints. That run used curl, not the Codes playgrounds, and it is not yet a committed, repeatable check.
 
@@ -98,12 +108,23 @@ as they raise the per-address limit.
 
 ## Deploy (for the lead)
 
+Production deploys with `sudo ovhost deploy codes` on the host (strategy `git-checkout`: fetch,
+fast-forward `/opt/openvibe.codes`, install on a lockfile change, restart, wait for `/api/ready`).
+The unit is `openvibe-codes.service` on `127.0.0.1:4900`, the env file `/etc/openvibe/codes.env`. State lives in
+`/var/lib/openvibe-codes`; nginx serves `openvibe.codes` from
+[deploy/nginx/openvibe.codes.conf](deploy/nginx/openvibe.codes.conf).
+Rollback: ovhost puts the previous sha back by itself when `/api/ready` does not answer 2xx after the
+restart; afterwards `sudo ovhost rollback codes --to <sha>`. One blocker: the trust table was rebuilt
+once to the ADR-013 tier names, so a release from before that change expects the old names.
+
+First install (done once; kept for a rebuild):
+
 1. `git clone` to `/opt/openvibe.codes`; `npm ci --omit=dev` with Node 22.
 2. `/etc/openvibe/codes.env` from `.env.example` (secrets from the Network client registration).
 3. `deploy/systemd/openvibe-codes.service` → `/etc/systemd/system/`; `systemctl enable --now openvibe-codes`. State lives in `/var/lib/openvibe-codes`.
 4. `deploy/nginx/openvibe.codes.conf` → `/etc/nginx/sites-available/`, certificate for `openvibe.codes` + `www`, reload nginx.
 5. Check `curl -s http://127.0.0.1:4900/api/ready`.
-6. Only when the launch rule below holds: remove `openvibe.codes` from `OpenVibe.Sites/sites.json` and switch routing.
+6. Only when the launch rule below holds: remove `openvibe.codes` from `OpenVibe.Sites/sites.json` and switch routing (done on 2026-09-23).
 
 ## Development
 
@@ -127,7 +148,9 @@ Tests: ADR-013 trust-tier migration; secrets never persisted or re-displayed; Ne
 
 The domain keeps its placeholder page on [OpenVibers/OpenVibe.Sites](https://github.com/OpenVibers/OpenVibe.Sites) until all of the following exist (plan §12.12). **Codes left Sites on 2026-09-23 and serves `openvibe.codes`.** The items: an owning runtime with health/readiness and observability (**done**); canonical identity/auth integration (**done; the OAuth client `codes` is registered**); server-rendered public routes useful without JavaScript (**done**); real persistence and end-to-end workflows (**persistence done; the external-developer path ran once on production with curl, not yet through the portal**); capability and event registration against OpenVibe.Contracts (**released**); a migration/seed strategy (none needed: no data is imported; raw old developer keys are never imported), a security review and sitemap/robots behaviour (**sitemap and robots done; the security review is the threat notes below, self-authored**); acceptance tests proving the advertised functionality (**against stand-ins**). Roadmap binding: do not launch Codes as a developer portal while these paths are mocked.
 
-### Threat notes
+## Security (threat notes)
+
+Reporting a vulnerability: [SECURITY.md](SECURITY.md).
 
 - Session tokens are httpOnly (unlike the navbar-readable `ov_token` elsewhere) because this site displays secrets; forms carry an HMAC form token and require a same-site `Origin`.
 - Secrets never reach logs: errors are logged without request bodies; playground failure details are scrubbed of the credential before they are stored or shown.
