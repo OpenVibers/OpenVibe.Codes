@@ -47,7 +47,7 @@ Everything is server-rendered and usable without JavaScript. The only scripts of
 - **OpenVibe.Network** — SSO (OAuth client `codes`, PKCE S256), JWKS, `/api/v1/projects` (called server-side with the person's Network access token), the registry (`/api/v1/registry/services`, `/.well-known/openvibe`), client-credentials tokens (Codes' own for the events relay; the app's own in playgrounds).
 - **OpenVibe.Events** — the outbox relay publishes `codes.app.*` with Codes' service token (`events.event.publish`); the Events playground calls it with the app's token (`events.app.publish`); the project archive pulls the project's app events with a Network export token (`events.app.read`).
 - **OpenVibe.Media** — the Media playground uploads with the app's token into the project's namespace; the project archive lists the project's objects, namespaces and download URLs with a Network export token (`media.object.list`, `media.object.read`).
-- **openvibe-contracts** v0.53.0, **openvibe-sdk v0.13.0**, **openvibe-shared v1.22.0** (pinned tag tarballs; the docs show the tag and the package version, and say so when they differ).
+- **openvibe-contracts** v0.53.0, **openvibe-sdk v0.13.0**, **openvibe-shared v1.25.0** (pinned tag tarballs; the docs show the tag and the package version, and say so when they differ).
 
 No path in Codes sends or accepts a shared loopback key (tested by grep and at runtime).
 
