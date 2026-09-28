@@ -64,7 +64,37 @@ For the playgrounds to succeed end to end (not Codes' code; configuration elsewh
 
 ## Configuration
 
-See [.env.example](.env.example). Required in production: `OV_OAUTH_CLIENT_SECRET`, `CODES_FORM_SECRET`, `BASE_URL`, `CODES_DB_PATH`. Optional: `EVENTS_URL` (relay), `CODES_STAFF_SUBJECTS`, `CODES_PLAYGROUND_*`, `CODES_REGISTRY_TTL_MS`.
+See [.env.example](.env.example). Required in production: `OV_OAUTH_CLIENT_SECRET`, `CODES_FORM_SECRET`, `BASE_URL`, `CODES_DB_PATH`. Optional: `EVENTS_URL` (relay), `CODES_STAFF_SUBJECTS`, `CODES_PLAYGROUND_*`, `CODES_REGISTRY_TTL_MS`, `CODES_LIMITS_MINUTE` / `CODES_LIMITS_HOUR`.
+
+### Per-actor limits
+
+`/api/v1`, the portal (`/projects`), release actions, the tools' forms and the staff trust form also
+limit who calls them, once the caller is known and before any work (before a form or upload is read,
+before Network is asked): `server/http/actor-limits.js`, openvibe-sdk/limits, roadmap WS-R task 4. An
+app token counts as its app (`app:app_…`), a signed-in person as `user:usr_…`, anyone else by address.
+Past a limit: `429` problem+json `rate_limited` with `Retry-After`, one `[Limits]` log line and
+`codes_rate_limited_total{limit,window}`. The per-address limits (pages 300 a minute, portal writes 60,
+tools 30, API writes 60, sign-in) and the playground's runs an hour stay. Codes hosts no git remotes, so
+there are no clone or push routes to leave out.
+
+| Routes | Per caller, a minute / an hour |
+|---|---|
+| API reads; portal pages (each asks Network with the person's token) | `CODES_LIMITS_MINUTE` / `CODES_LIMITS_HOUR` (120 / 3000) |
+| Project create | 5 / 30 |
+| Members, roles, archive, delete | 20 / 200 |
+| Project export (JSON and the full archive) | 3 / 20 |
+| App create | 10 / 60 |
+| Redirect URIs, grants, app revoke | 30 / 300 |
+| Credential rotate and revoke | 10 / 60 |
+| Playground runs (above the 60 an hour per person) | 10 / 120 |
+| Release create and "validate only" (portal and API) | 20 / 200 |
+| Release publish, deprecate, revoke (portal and API) | 20 / 200 |
+| Manifest validate (form and API); webhook verify and sample | 30 / 600 each |
+| Staff trust tier | 30 / 300 |
+
+Never limited per actor: `/api/health`, `/api/ready`, `/release.json`, `/metrics`, sign-in, and the
+public pages and docs. `test/actor-limits.test.js`; the other tests boot with the per-actor limits off,
+as they raise the per-address limit.
 
 ## Deploy (for the lead)
 

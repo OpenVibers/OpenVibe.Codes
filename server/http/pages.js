@@ -253,7 +253,8 @@ ${signedIn ? releaseActions(req, rel) : ''}
 <h2>Set tiers</h2>${table(['App', 'Tier', 'Note', 'By', 'When'], trust.listSet().map((t) => [html`<a href="/apps/${t.app_id}">${t.app_id}</a>`, t.tier, t.note, t.set_by, time(t.set_at)]))}`,
         });
     });
-    r.post('/staff/trust', form, (req, res) => {
+    // Per-actor limit (http/actor-limits.js) before the form is read.
+    r.post('/staff/trust', ctx.actorLimits.budget('codes.trust.set'), form, (req, res) => {
         if (!req.viewer.staff || !sameOrigin(config, req) || !checkCsrf(config, req.viewer, req.body && req.body.csrf)) return page(req, res, { title: 'Forbidden', body: html`<h1>Forbidden</h1>` }, 403);
         try {
             trust.set({ appId: req.body.app_id, tier: req.body.tier, note: req.body.note, actor: { staff: true, label: `user:${req.viewer.subject}` } });

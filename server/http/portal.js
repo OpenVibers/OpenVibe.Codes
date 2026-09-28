@@ -41,8 +41,9 @@ const REL_RE = /^rel_[0-9A-HJKMNP-TV-Z]{26}$/;
 const atLeast = (role, need) => Boolean(role) && RANK[role] >= RANK[need];
 
 function createPortalRoutes(ctx) {
-    const { config, docs, network, sso, releases, trust, playground, archiver, limits, log } = ctx;
+    const { config, docs, network, sso, releases, trust, playground, archiver, limits, actorLimits, log } = ctx;
     const r = asyncRouter();
+    const B = (name) => actorLimits.budget(name);
     const form = express.urlencoded({ extended: false, limit: '96kb' });
 
     const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, ...o });
@@ -79,6 +80,9 @@ ${back ? html`<p><a href="${back}">Back</a></p>` : ''}`,
         if (!req.viewer.subject) return page(req, res, { title: 'Account', body: html`<h1>Your account has no subject id yet</h1><p>Sign out and in again; Network assigns one on sign-in.</p>` }, 409);
         next();
     });
+    // Per-actor limits (http/actor-limits.js), for the signed-in person: every page asks Network with their
+    // token, so reads take the defaults; each write names its budget before its form is read.
+    r.use(actorLimits.reads('codes.portal.read'));
     // Every state change: same-origin and a valid form token.
     const guard = (req, res, next) => {
         if (!sameOrigin(config, req) || !checkCsrf(config, req.viewer, req.body && req.body.csrf)) {
@@ -111,7 +115,7 @@ ${table(['Project', 'Your role', 'Environments', 'Apps', 'Created'], list.map((p
         }, status);
     }
     r.get('/', (req, res) => projectsPage(req, res));
-    r.post('/', form, guard, async (req, res) => {
+    r.post('/', B('codes.project.create'), form, guard, async (req, res) => {
         const got = await net(req, res, (t) => network.projects.create(t, { name: String(req.body.name || '') }));
         if (!got.ok) return projectsPage(req, res, { problem: got.problem, status: got.problem.status });
         res.redirect(303, `/projects/${got.data.id}`);
@@ -213,30 +217,30 @@ ${canChange || self ? html`<form method="post" action="/projects/${project.id}/m
         res.redirect(303, `${target}?done=${encodeURIComponent(done)}`);
     };
 
-    r.post('/:project/members', idParams, form, guard, async (req, res) => {
+    r.post('/:project/members', idParams, B('codes.project.manage'), form, guard, async (req, res) => {
         const username = String(req.body.username || '').trim().replace(/^@/, '');
         const got = await net(req, res, (t) => network.projects.addMember(t, req.params.project, { username, role: String(req.body.role || 'viewer') }));
         after(req, res, got, back(req), `Added ${username}`);
     });
-    r.post('/:project/members/:subject/role', idParams, form, guard, async (req, res) => {
+    r.post('/:project/members/:subject/role', idParams, B('codes.project.manage'), form, guard, async (req, res) => {
         if (!USR_RE.test(req.params.subject)) return problemPage(req, res, { status: 422, code: 'codes.invalid', detail: 'not a member subject' }, { back: back(req) });
         const got = await net(req, res, (t) => network.projects.updateMember(t, req.params.project, req.params.subject, { role: String(req.body.role || '') }));
         after(req, res, got, back(req), 'Role changed');
     });
-    r.post('/:project/members/:subject/remove', idParams, form, guard, async (req, res) => {
+    r.post('/:project/members/:subject/remove', idParams, B('codes.project.manage'), form, guard, async (req, res) => {
         if (!USR_RE.test(req.params.subject)) return problemPage(req, res, { status: 422, code: 'codes.invalid', detail: 'not a member subject' }, { back: back(req) });
         const self = req.params.subject === req.viewer.subject;
         const got = await net(req, res, (t) => network.projects.removeMember(t, req.params.project, req.params.subject));
         if (got.ok && self) return res.redirect(303, '/projects');
         after(req, res, got, back(req), 'Member removed');
     });
-    r.post('/:project/archive', idParams, form, guard, async (req, res) => {
+    r.post('/:project/archive', idParams, B('codes.project.manage'), form, guard, async (req, res) => {
         if (req.body.confirm !== '1') return problemPage(req, res, { status: 422, code: 'codes.confirm', detail: 'tick the box to confirm' }, { back: back(req) });
         const got = await net(req, res, (t) => network.projects.archive(t, req.params.project));
         after(req, res, got, back(req), 'Project archived');
     });
 
-    r.get('/:project/export', idParams, async (req, res) => {
+    r.get('/:project/export', idParams, B('codes.project.export'), async (req, res) => {
         const project = await loadProject(req, res);
         if (!project) return;
         const got = await net(req, res, (t) => buildExport({
@@ -252,7 +256,7 @@ ${canChange || self ? html`<form method="post" action="/projects/${project.id}/m
     // The full archive (owner/admin; Network checks the role again when it mints the export tokens).
     // One at a time per project: it reads every object and event the project holds.
     const exporting = new Set();
-    r.post('/:project/export/archive', idParams, form, guard, async (req, res) => {
+    r.post('/:project/export/archive', idParams, B('codes.project.export'), form, guard, async (req, res) => {
         const project = await loadProject(req, res);
         if (!project) return;
         if (!atLeast(project.role, 'admin')) return problemPage(req, res, { status: 403, code: 'project.forbidden', detail: 'only the project owner or an admin can download the full archive' }, { title: 'Export', back: back(req) });
@@ -286,7 +290,7 @@ ${canChange || self ? html`<form method="post" action="/projects/${project.id}/m
         }
     });
 
-    r.post('/:project/delete', idParams, form, guard, async (req, res) => {
+    r.post('/:project/delete', idParams, B('codes.project.manage'), form, guard, async (req, res) => {
         const project = await loadProject(req, res);
         if (!project) return;
         if (project.role !== 'owner' && !req.viewer.staff) return problemPage(req, res, { status: 403, code: 'project.forbidden', detail: 'only the project owner can delete it' }, { back: back(req) });
@@ -363,7 +367,7 @@ const client = sdk.createClient({
         });
     }
 
-    r.post('/:project/apps', idParams, form, guard, async (req, res) => {
+    r.post('/:project/apps', idParams, B('codes.app.create'), form, guard, async (req, res) => {
         const body = {
             name: String(req.body.name || ''), environment: String(req.body.environment || 'sandbox'),
             type: String(req.body.type || 'confidential'), redirect_uris: redirectList(req.body.redirect_uris),
@@ -495,16 +499,16 @@ ${manage ? html`<h2>Revoke this app</h2><form method="post" action="${base}/revo
     }
 
     const appBase = (req) => `/projects/${req.params.project}/apps/${req.params.app}`;
-    r.post('/:project/apps/:app/redirects', idParams, form, guard, async (req, res) => {
+    r.post('/:project/apps/:app/redirects', idParams, B('codes.app.manage'), form, guard, async (req, res) => {
         const got = await net(req, res, (t) => network.projects.updateApp(t, req.params.project, req.params.app, { redirect_uris: redirectList(req.body.redirect_uris) }));
         after(req, res, got, appBase(req), 'Redirect URIs saved');
     });
-    r.post('/:project/apps/:app/revoke', idParams, form, guard, async (req, res) => {
+    r.post('/:project/apps/:app/revoke', idParams, B('codes.app.manage'), form, guard, async (req, res) => {
         if (req.body.confirm !== '1') return problemPage(req, res, { status: 422, code: 'codes.confirm', detail: 'tick the box to confirm' }, { back: appBase(req) });
         const got = await net(req, res, (t) => network.projects.revokeApp(t, req.params.project, req.params.app));
         after(req, res, got, appBase(req), 'App revoked');
     });
-    r.post('/:project/apps/:app/credentials/rotate', idParams, form, guard, async (req, res) => {
+    r.post('/:project/apps/:app/credentials/rotate', idParams, B('codes.app.credential'), form, guard, async (req, res) => {
         const n = Number(req.body.overlap_seconds);
         const body = Number.isInteger(n) && n >= 0 && n <= 604800 ? { overlap_seconds: n } : {};
         const got = await net(req, res, (t) => network.projects.rotate(t, req.params.project, req.params.app, body));
@@ -515,13 +519,13 @@ ${manage ? html`<h2>Revoke this app</h2><form method="post" action="${base}/revo
             credential: got.data.credential, rotated: true, previous: got.data.previous || [],
         });
     });
-    r.post('/:project/apps/:app/credentials/:credential/revoke', idParams, form, guard, async (req, res) => {
+    r.post('/:project/apps/:app/credentials/:credential/revoke', idParams, B('codes.app.credential'), form, guard, async (req, res) => {
         if (!CRD_RE.test(req.params.credential)) return problemPage(req, res, { status: 404, code: 'credential.not_found', detail: 'no such credential' }, { back: appBase(req) });
         const got = await net(req, res, (t) => network.projects.revokeCredential(t, req.params.project, req.params.app, req.params.credential));
         after(req, res, got, appBase(req), 'Credential revoked');
     });
 
-    r.post('/:project/apps/:app/grants', idParams, form, guard, async (req, res) => {
+    r.post('/:project/apps/:app/grants', idParams, B('codes.app.manage'), form, guard, async (req, res) => {
         const capability = String(req.body.capability || '');
         // Re-derive what the scope editor offers and refuse anything else before Network sees it.
         const [project, catalog] = await Promise.all([
@@ -537,7 +541,7 @@ ${manage ? html`<h2>Revoke this app</h2><form method="post" action="${base}/revo
         after(req, res, got, appBase(req), got.ok ? `${capability}: ${got.data.status}` : '');
     });
     for (const [action, decision] of [['approve', 'approved'], ['deny', 'denied'], ['revoke', 'revoked']]) {
-        r.post(`/:project/apps/:app/grants/:capability/${action}`, idParams, form, guard, async (req, res) => {
+        r.post(`/:project/apps/:app/grants/:capability/${action}`, idParams, B('codes.app.manage'), form, guard, async (req, res) => {
             if (!CAP_RE.test(req.params.capability)) return problemPage(req, res, { status: 404, code: 'grant.not_found', detail: 'no such grant' }, { back: appBase(req) });
             const got = await net(req, res, (t) => network.projects.decideGrant(t, req.params.project, req.params.app, req.params.capability, decision));
             after(req, res, got, appBase(req), `${req.params.capability}: ${decision}`);
@@ -594,7 +598,7 @@ ${r.result ? html`<pre><code>${JSON.stringify(r.result, null, 2)}</code></pre>` 
 
     r.get('/:project/apps/:app/playground', idParams, (req, res) => playgroundPage(req, res));
 
-    r.post('/:project/apps/:app/playground/events', idParams, form, guard, async (req, res) => {
+    r.post('/:project/apps/:app/playground/events', idParams, B('codes.playground.run'), form, guard, async (req, res) => {
         const got = await net(req, res, (t) => network.projects.app(t, req.params.project, req.params.app));
         if (!got.ok) return problemPage(req, res, got.problem, { back: appBase(req) });
         const b = req.body || {};
@@ -607,7 +611,7 @@ ${r.result ? html`<pre><code>${JSON.stringify(r.result, null, 2)}</code></pre>` 
         return playgroundPage(req, res, { result: out, values: { event_type: b.event_type, subject_type: b.subject_type, subject_id: b.subject_id, payload: b.payload }, status: statusFor(out) });
     });
 
-    r.post('/:project/apps/:app/playground/media', idParams, async (req, res) => {
+    r.post('/:project/apps/:app/playground/media', idParams, B('codes.playground.run'), async (req, res) => {
         if (!sameOrigin(config, req)) return page(req, res, { title: 'Forbidden', body: html`<h1>Forbidden</h1>` }, 403);
         let parsed;
         try { parsed = await readMultipart(req, config.playground.maxUploadBytes); } catch (err) {
@@ -648,7 +652,7 @@ ${problem ? problemBox(problem, { title: 'Not created' }) : ''}${parseError ? no
     }
 
     r.get('/:project/apps/:app/releases/new', idParams, (req, res) => editorPage(req, res, { kind: req.query.kind }));
-    r.post('/:project/apps/:app/releases', idParams, form, guard, async (req, res) => {
+    r.post('/:project/apps/:app/releases', idParams, B('codes.release.create'), form, guard, async (req, res) => {
         const b = req.body || {};
         const kind = b.kind === 'mod' ? 'mod' : 'app';
         const p = manifestsLib.parse(b.manifest);
@@ -682,13 +686,15 @@ ${problem ? problemBox(problem, { title: 'Not created' }) : ''}${parseError ? no
  * asked with the actor's own token for the release's project and app.
  */
 function createReleaseActionRoutes(ctx) {
-    const { config, network, sso, releases, log } = ctx;
+    const { config, network, sso, releases, log, actorLimits } = ctx;
     const r = asyncRouter();
     const form = express.urlencoded({ extended: false, limit: '16kb' });
+    // Per-actor limit (http/actor-limits.js) before the form is read; the API's release actions share it.
+    const manage = actorLimits.budget('codes.release.manage');
     const page = (req, res, o, status) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, ...o });
 
     for (const action of ['publish', 'deprecate', 'revoke']) {
-        r.post(`/:id/${action}`, form, async (req, res) => {
+        r.post(`/:id/${action}`, manage, form, async (req, res) => {
             if (req.viewer.kind !== 'user' || !req.viewer.subject) return page(req, res, { title: 'Sign in', body: html`<h1>Sign in first</h1>` }, 401);
             if (!sameOrigin(config, req) || !checkCsrf(config, req.viewer, req.body && req.body.csrf)) return page(req, res, { title: 'Form expired', body: html`<h1>This form has expired</h1>` }, 403);
             if (!REL_RE.test(req.params.id)) return page(req, res, { title: 'Not found', body: html`<h1>Not found</h1>` }, 404);

@@ -32,18 +32,22 @@ const MANAGE = 'codes.release.manage';
 const READ = 'codes.release.read';
 
 function createApi(ctx) {
-    const { config, docs, releases, trust, keys } = ctx;
+    const { config, docs, releases, trust, keys, actorLimits } = ctx;
     const r = asyncRouter();
+    // Per-actor limits (http/actor-limits.js): reads take the defaults once the token (if any) is checked;
+    // writes name their budget after the guard and before the body is read.
+    const reads = actorLimits.reads('codes.read');
+    const B = (name) => actorLimits.budget(name);
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
     const json = express.json({ limit: '96kb' });
     const limiter = rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true, legacyHeaders: false });
     const problem = (req, res, status, code, detail, extra) => http.sendProblem(res, status, code, { detail, ctx: req.ov, extra });
 
-    r.get('/docs/versions', (req, res) => {
+    r.get('/docs/versions', reads, (req, res) => {
         res.json({ contracts: docs.contractsVersion, contracts_tag: docs.contractsTag, sdk: docs.sdkVersion, sdk_tag: docs.sdkTag, generated_at: docs.generatedAt, contracts_count: docs.contracts.length, capabilities_count: docs.capabilities.length });
     });
 
-    r.post('/manifests/validate', limiter, json, (req, res) => {
+    r.post('/manifests/validate', limiter, B('codes.manifest.validate'), json, (req, res) => {
         const b = req.body || {};
         const kind = b.kind === 'mod' ? 'mod' : (b.kind === 'app' ? 'app' : null);
         if (!kind) return problem(req, res, 422, 'manifest.kind', 'kind is app or mod');
@@ -62,17 +66,17 @@ function createApi(ctx) {
     const manageAccess = [loadKey, (req, res, next) => (bearer(req) ? manageGuard(req, res, next)
         : problem(req, res, 401, 'auth.required', 'send Authorization: Bearer <app token for audience openvibe.codes>'))];
 
-    r.get('/apps/:app/releases', ...readAccess, (req, res) => {
+    r.get('/apps/:app/releases', ...readAccess, reads, (req, res) => {
         if (!APP_RE.test(req.params.app)) return problem(req, res, 404, 'app.not_found', 'not an app id');
         res.set('Cache-Control', 'public, max-age=60');
         res.json({ app_id: req.params.app, trust: trust.get(req.params.app), releases: releases.listForApp(req.params.app) });
     });
-    r.get('/apps/:app/trust', ...readAccess, (req, res) => {
+    r.get('/apps/:app/trust', ...readAccess, reads, (req, res) => {
         if (!APP_RE.test(req.params.app)) return problem(req, res, 404, 'app.not_found', 'not an app id');
         res.set('Cache-Control', 'public, max-age=60');
         res.json({ app_id: req.params.app, ...trust.get(req.params.app), note_on_authority: 'metadata only; grants in OpenVibe.Network are the authority' });
     });
-    r.get('/releases/:id', ...readAccess, (req, res) => {
+    r.get('/releases/:id', ...readAccess, reads, (req, res) => {
         const rel = REL_RE.test(req.params.id) ? releases.get(req.params.id) : null;
         if (!rel || rel.status === 'draft') return problem(req, res, 404, 'release.not_found', 'no such release');
         res.set('Cache-Control', 'public, max-age=60');
@@ -104,7 +108,7 @@ function createApi(ctx) {
         return problem(req, res, 500, 'internal.error', 'Internal error');
     };
 
-    r.post('/apps/:app/releases', limiter, ...manageAccess, json, (req, res) => {
+    r.post('/apps/:app/releases', limiter, ...manageAccess, B('codes.release.create'), json, (req, res) => {
         if (!APP_RE.test(req.params.app)) return problem(req, res, 404, 'app.not_found', 'not an app id');
         const p = appPrincipal(req, res, req.params.app);
         if (!p) return;
@@ -120,7 +124,7 @@ function createApi(ctx) {
     });
 
     for (const action of ['publish', 'deprecate', 'revoke']) {
-        r.post(`/releases/:id/${action}`, limiter, ...manageAccess, json, (req, res) => {
+        r.post(`/releases/:id/${action}`, limiter, ...manageAccess, B('codes.release.manage'), json, (req, res) => {
             const rel = REL_RE.test(req.params.id) ? releases.get(req.params.id) : null;
             if (!rel) return problem(req, res, 404, 'release.not_found', 'no such release');
             const p = appPrincipal(req, res, rel.app_id);

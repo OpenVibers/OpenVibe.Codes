@@ -1,6 +1,8 @@
 'use strict';
 // The docs tests fetch one page per contract (hundreds); the per-address limit would answer 429 part-way.
 process.env.CODES_RATE_LIMIT_PER_MIN = process.env.CODES_RATE_LIMIT_PER_MIN || '100000';
+// For the same reason the per-actor limits (server/http/actor-limits.js) count nobody unless a test
+// asks for them: boot({ actorLimits: true, limitsNow }) (test/actor-limits.test.js).
 /**
  * Boots Codes on a temp database with mocks of Network, Events and Media, captures every log line
  * (the app's logger AND console), and returns a small HTTP client. Every test file gets its own.
@@ -45,7 +47,7 @@ async function boot(opts = {}) {
     const log = { log: (...a) => captured.push(a.map(String).join(' ')), warn: (...a) => captured.push(a.map(String).join(' ')), error: (...a) => captured.push(a.map(String).join(' ')), info: (...a) => captured.push(a.map(String).join(' ')) };
 
     const config = configLib.load(env);
-    const built = createApp({ config, log });
+    const built = createApp({ config, log, limitsNow: opts.limitsNow, actorLimits: opts.actorLimits === true });
     await built.ctx.keys.ensure();
     if (opts.relay) built.ctx.outbox.start();
     const server = await new Promise((resolve) => { const s = http.createServer(built.app); s.listen(0, '127.0.0.1', () => resolve(s)); });

@@ -33,6 +33,12 @@ function load(env = process.env) {
         isProduction,
         baseUrl,
         trustProxy: env.TRUST_PROXY != null ? Number(env.TRUST_PROXY) : 2,
+        // Per-actor limits (server/http/actor-limits.js, roadmap WS-R task 4): the reads one caller (an
+        // app, a person, else an address) may make per minute and per hour. Writes set tighter numbers there.
+        limits: {
+            minute: Math.max(1, int(env.CODES_LIMITS_MINUTE, 120)),
+            hour: Math.max(1, int(env.CODES_LIMITS_HOUR, 3000)),
+        },
 
         dbPath: env.CODES_DB_PATH || './data/codes.db',
 

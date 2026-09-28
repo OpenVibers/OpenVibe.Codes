@@ -19,7 +19,10 @@ const manifests = require('../domain/manifests');
 const { pkcePair } = require('../auth/sso');
 
 function createToolRoutes(ctx) {
-    const { config, docs } = ctx;
+    const { config, docs, actorLimits } = ctx;
+    // Per-actor limits (http/actor-limits.js) after the per-address limiter, before the form is read.
+    const webhookLimit = actorLimits.budget('codes.webhook.tool');
+    const validateLimit = actorLimits.budget('codes.manifest.validate');
     const r = asyncRouter();
     const form = express.urlencoded({ extended: false, limit: '300kb' });
     const limiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
@@ -141,12 +144,12 @@ ${v.parsed && v.parsed.note ? html`<dt>Shape</dt><dd>${v.parsed.note}</dd>` : ''
     }
 
     r.get('/tools/webhooks', (req, res) => webhookPage(req, res));
-    r.post('/tools/webhooks/verify', limiter, form, (req, res) => {
+    r.post('/tools/webhooks/verify', limiter, webhookLimit, form, (req, res) => {
         const b = req.body || {};
         const v = webhooks.inspect({ rawBody: typeof b.body === 'string' ? b.body.replace(/\r\n/g, '\n') : '', signature: b.signature, signatureV2: b.signature_v2, timestamp: b.timestamp, secret: typeof b.secret === 'string' ? b.secret : '' });
         webhookPage(req, res, { status: v.accepted ? 200 : 422, verify: v, values: { body: b.body, signature: b.signature, signature_v2: b.signature_v2, timestamp: b.timestamp } });
     });
-    r.post('/tools/webhooks/sample', limiter, form, (req, res) => {
+    r.post('/tools/webhooks/sample', limiter, webhookLimit, form, (req, res) => {
         const b = req.body || {};
         const type = eventTypes.includes(b.event_type) ? b.event_type : null;
         if (!type || !b.secret) return webhookPage(req, res, { status: 422, values: { event_type: b.event_type } });
@@ -170,7 +173,7 @@ ${result ? validationResult(result) : ''}`,
     });
 
     r.get('/manifests/validate', (req, res) => validatorPage(req, res, { kind: req.query.kind === 'mod' ? 'mod' : 'app' }));
-    r.post('/manifests/validate', limiter, form, (req, res) => {
+    r.post('/manifests/validate', limiter, validateLimit, form, (req, res) => {
         const b = req.body || {};
         const kind = b.kind === 'mod' ? 'mod' : 'app';
         const p = manifests.parse(b.manifest);

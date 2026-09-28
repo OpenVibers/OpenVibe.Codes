@@ -38,13 +38,17 @@ const { createPageRoutes } = require('./http/pages');
 const { createPortalRoutes, createReleaseActionRoutes } = require('./http/portal');
 const { createApi } = require('./http/api');
 const { createCodesReadiness } = require('./observability');
+const { createActorLimits } = require('./http/actor-limits');
 const { assetVersion, send } = require('./render/layout');
 const { html } = require('./render/html');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const VERSION = require('../package.json').version;
 
-/** opts: config, store | dbPath, now (clock), fetchImpl, log */
+/**
+ * opts: config, store | dbPath, now (clock), fetchImpl, log, limitsNow (the per-actor limiter's clock,
+ * tests), actorLimits (false: count nobody, tests only)
+ */
 function createApp(opts = {}) {
     const config = opts.config || configLib.load();
     const log = opts.log || console;
@@ -72,6 +76,9 @@ function createApp(opts = {}) {
     const metrics = require('openvibe-shared/metrics').instrument(app, { service: 'codes', release: release.release });
     app.locals.metrics = metrics.registry;
     app.locals.ctx = ctx;
+    // Per-actor limits (http/actor-limits.js) at /api/v1, the portal, release actions and the tools'
+    // forms, counted once the caller is known; the per-address limits below stay.
+    ctx.actorLimits = createActorLimits({ config, now: opts.limitsNow || (() => Date.now()), registry: metrics.registry, log, enabled: opts.actorLimits !== false });
 
     app.use(contracts.http.middleware());
     app.use(helmet({
