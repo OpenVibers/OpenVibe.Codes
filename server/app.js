@@ -46,7 +46,7 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const VERSION = require('../package.json').version;
 
 /**
- * opts: config, store | dbPath, now (clock), fetchImpl, log, limitsNow (the per-actor limiter's clock,
+ * opts: config, store, now (clock), fetchImpl, log, limitsNow (the per-actor limiter's clock,
  * tests), actorLimits (false: count nobody, tests only)
  */
 async function createApp(opts = {}) {

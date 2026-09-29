@@ -10,7 +10,7 @@
  *                          could not manage as a member, or set a trust tier (ADR-022, for
  *                          Network's moderation audit log; subject { type: 'moderation_action' })
  *
- * emit() runs inside the SQLite transaction that makes the change, so an event exists if and only
+ * emit() runs inside the PostgreSQL transaction that makes the change, so an event exists if and only
  * if its change committed. The relay publishes with Codes' OWN service token (events.event.publish,
  * audience openvibe.events) only when EVENTS_URL and OV_OAUTH_CLIENT_SECRET are set; otherwise rows
  * wait in event_outbox and /api/ready reports the relay as off. Payloads never carry a secret.

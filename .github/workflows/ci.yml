@@ -8,7 +8,7 @@ jobs:
   test:
     uses: OpenVibers/OpenVibe.Shared/.github/workflows/test.yml@423fe519b5fe9594cc81b670e5ba5cb9f21f6176
     with:
-      syntax-dirs: server public/js test scripts
+      syntax-dirs: server public/js test
       contracts-service: codes
       # ADR-035: PostgreSQL 18 + PgBouncer (transaction mode) + Valkey 9 containers (openvibe-sdk
       # scripts/test-services.sh). npm test runs every file on PGlite; test:pg runs them all through PgBouncer.

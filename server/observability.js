@@ -2,7 +2,7 @@
 /**
  * Truthful readiness for GET /api/ready (openvibe-shared/ready, Track O).
  *
- *   db              required  a real query on Codes' SQLite: every Codes table answers
+ *   db              required  a real query on Codes' PostgreSQL store: every Codes table answers
  *   docs            required  the reference was generated at boot from the pinned packages
  *   network_jwks    optional  the Network signing key is loaded; without it nobody can sign in and
  *                             app tokens cannot be verified (docs and tools still serve)

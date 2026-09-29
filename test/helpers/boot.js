@@ -12,9 +12,6 @@ process.env.CODES_RATE_LIMIT_PER_MIN = process.env.CODES_RATE_LIMIT_PER_MIN || '
  *   t.signIn(user) → cookie header value (codes_at = a Network user token, as after /auth/callback)
  *   t.csrf(user), t.logs(), t.dbDump(), t.project(user, name), t.app(user, projectId, body)
  */
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const http = require('http');
 const { startNetwork, startEvents, startMedia } = require('./mocks');
 
@@ -28,11 +25,8 @@ async function boot(opts = {}) {
     const network = await startNetwork(opts.network || {});
     const events = await startEvents(network);
     const media = await startMedia(network);
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ov-codes-test-'));
-    const dbPath = path.join(dir, 'codes.db');
     const env = {
         NODE_ENV: 'test', PORT: '0', BASE_URL: 'https://openvibe.codes', TRUST_PROXY: '1',
-        CODES_DB_PATH: dbPath,
         OV_NETWORK_URL: network.url, OV_NETWORK_INTERNAL_URL: network.url,
         OV_OAUTH_CLIENT_ID: 'codes', OV_OAUTH_CLIENT_SECRET: 'codes-secret', COOKIE_SECURE: 'false',
         CODES_FORM_SECRET: 'test-form-secret',
@@ -114,14 +108,13 @@ async function boot(opts = {}) {
     }
 
     const t = {
-        base, network, events, media, config, ctx: built.ctx, dbPath, get, signIn, csrf, dbDump, project, app, grant,
+        base, network, events, media, config, ctx: built.ctx, get, signIn, csrf, dbDump, project, app, grant,
         logs: () => captured.join('\n'),
         async close() {
             await new Promise((r) => server.close(r));
             await built.ctx.outbox.stop();
             await testdb.close();
             await network.close(); await events.close(); await media.close();
-            fs.rmSync(dir, { recursive: true, force: true });
         },
     };
     return t;

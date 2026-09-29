@@ -24,9 +24,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-# Codes' own database lives in /var/lib/openvibe-codes; the code tree stays read-only.
-StateDirectory=openvibe-codes
-Environment=CODES_DB_PATH=/var/lib/openvibe-codes/codes.db
+# Codes' own database is PostgreSQL on the host's data role; the code tree stays read-only.
 
 [Install]
 WantedBy=multi-user.target

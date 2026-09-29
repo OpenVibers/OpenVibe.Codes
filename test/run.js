@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Runs every test/*.test.js in its own process and fails if any fails. They use temp SQLite
+ * Runs every test/*.test.js in its own process and fails if any fails. They use temp PGlite
  * databases and in-process mocks of OpenVibe.Network, Events and Media; none needs the
  * network or a running site.
  *

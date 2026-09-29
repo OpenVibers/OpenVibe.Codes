@@ -75,7 +75,7 @@ For the playgrounds to succeed end to end (not Codes' code; configuration elsewh
 
 ## Configuration
 
-See [.env.example](.env.example). Required in production: `OV_OAUTH_CLIENT_SECRET`, `CODES_FORM_SECRET`, `BASE_URL`, `CODES_DB_PATH`. Optional: `EVENTS_URL` (relay), `CODES_STAFF_SUBJECTS`, `CODES_PLAYGROUND_*`, `CODES_REGISTRY_TTL_MS`, `CODES_LIMITS_MINUTE` / `CODES_LIMITS_HOUR`.
+See [.env.example](.env.example). Required in production: `OV_OAUTH_CLIENT_SECRET`, `CODES_FORM_SECRET`, `BASE_URL`, `DATABASE_URL` (and `DATABASE_DIRECT_URL` for the boot migrations, run as the owner). Optional: `EVENTS_URL` (relay), `CODES_STAFF_SUBJECTS`, `CODES_PLAYGROUND_*`, `CODES_REGISTRY_TTL_MS`, `CODES_LIMITS_MINUTE` / `CODES_LIMITS_HOUR`.
 
 ### Per-actor limits
 
@@ -113,10 +113,7 @@ Production deploys with `sudo ovhost deploy codes` on the host (strategy `git-ch
 fast-forward `/opt/openvibe.codes`, install on a lockfile change, restart, wait for `/api/ready`).
 The unit is `openvibe-codes.service` on `127.0.0.1:4900`, the env file `/etc/openvibe/codes.env`. The database is
 `ov_codes` on the host's data role (`sudo /opt/openvibe.host/roles/data/add-service.sh codes` writes its settings); the
-release migrates it at boot. The one-time move from SQLite is `scripts/migrate-to-postgres.js` (openvibe-sdk
-`runSqliteMigration`, with a `--pglite` rehearsal mode), run while the service is stopped; the old
-`/var/lib/openvibe-codes/codes.db` stays read-only for 7 days as the rollback. State lives in
-`/var/lib/openvibe-codes`; nginx serves `openvibe.codes` from
+release migrates it at boot. nginx serves `openvibe.codes` from
 [deploy/nginx/openvibe.codes.conf](deploy/nginx/openvibe.codes.conf).
 Rollback: ovhost puts the previous sha back by itself when `/api/ready` does not answer 2xx after the
 restart; afterwards `sudo ovhost rollback codes --to <sha>`. One blocker: the trust table was rebuilt
@@ -126,7 +123,7 @@ First install (done once; kept for a rebuild):
 
 1. `git clone` to `/opt/openvibe.codes`; `npm ci --omit=dev` with Node 22.
 2. `/etc/openvibe/codes.env` from `.env.example` (secrets from the Network client registration).
-3. `deploy/systemd/openvibe-codes.service` → `/etc/systemd/system/`; `systemctl enable --now openvibe-codes`. State lives in `/var/lib/openvibe-codes`.
+3. `deploy/systemd/openvibe-codes.service` → `/etc/systemd/system/`; `systemctl enable --now openvibe-codes`.
 4. `deploy/nginx/openvibe.codes.conf` → `/etc/nginx/sites-available/`, certificate for `openvibe.codes` + `www`, reload nginx.
 5. Check `curl -s http://127.0.0.1:4900/api/ready`.
 6. Only when the launch rule below holds: remove `openvibe.codes` from `OpenVibe.Sites/sites.json` and switch routing (done on 2026-09-23).
@@ -135,7 +132,7 @@ First install (done once; kept for a rebuild):
 
 ```bash
 npm install
-fnm exec --using=22.22.1 npm test          # every test/*.test.js on temp databases with mock Network, Events, Media
+fnm exec --using=22.22.1 npm test          # every test/*.test.js on temp PGlite databases with mock Network, Events, Media
 fnm exec --using=22.22.1 npm run dev       # http://localhost:4900
 npx openvibe-contracts-check --service codes --src server
 ```

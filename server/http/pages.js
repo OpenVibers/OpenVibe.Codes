@@ -157,7 +157,7 @@ ${table(['Package', 'Version', 'License'], [[code(own.name || 'openvibe-codes'),
             index: true, cache: PUBLIC_CACHE, title: 'Transparency', crumbs: [{ label: 'Policy', href: '/policy' }, { label: 'Transparency' }],
             body: html`<h1>Transparency</h1>
 <h2>What Codes stores</h2>
-<p>Its own SQLite database has these tables and nothing else: ${TABLES.map((t, i) => html`${i ? ', ' : ''}<code>${t}</code>`)}, plus the event outbox. That is release metadata keyed to Network app ids, trust tiers (metadata), validated manifests, and a log of playground runs (who ran what, the outcome and the problem code).</p>
+<p>Its own PostgreSQL database has these tables and nothing else: ${TABLES.map((t, i) => html`${i ? ', ' : ''}<code>${t}</code>`)}, plus the event outbox. That is release metadata keyed to Network app ids, trust tiers (metadata), validated manifests, and a log of playground runs (who ran what, the outcome and the problem code).</p>
 <h2>What Codes does not store</h2>
 <ul><li>Projects, members, apps, credentials, grants and quotas: OpenVibe.Network owns them; Codes shows what Network answers for the signed-in person.</li>
 <li>Client secrets: Network returns a new secret once, Codes shows it in that response and keeps no copy. Network itself stores only a hash.</li>
