@@ -243,7 +243,7 @@ ${canChange || self ? html`<form method="post" action="/projects/${project.id}/m
     r.get('/:project/export', idParams, B('codes.project.export'), async (req, res) => {
         const project = await loadProject(req, res);
         if (!project) return;
-        const got = await net(req, res, (t) => buildExport({
+        const got = await net(req, res, async (t) => await buildExport({
             network, token: t, project, includeAudit: atLeast(project.role, 'admin') || req.viewer.staff, releases, playground, trust,
             meta: { now: new Date().toISOString(), subject: req.viewer.subject, networkUrl: config.networkUrl, baseUrl: config.baseUrl },
         }));
@@ -264,7 +264,7 @@ ${canChange || self ? html`<form method="post" action="/projects/${project.id}/m
         exporting.add(project.id);
         try {
             const meta = { now: new Date().toISOString(), subject: req.viewer.subject, networkUrl: config.networkUrl, baseUrl: config.baseUrl };
-            const metadata = await net(req, res, (t) => buildExport({ network, token: t, project, includeAudit: true, releases, playground, trust, meta }));
+            const metadata = await net(req, res, async (t) => await buildExport({ network, token: t, project, includeAudit: true, releases, playground, trust, meta }));
             if (!metadata.ok) return problemPage(req, res, metadata.problem, { title: 'Export', back: back(req) });
             const mintToken = async (audience, env) => {
                 const got = await net(req, res, (t) => network.projects.exportToken(t, project.id, { audience, env }));
