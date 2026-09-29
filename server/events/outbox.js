@@ -15,69 +15,26 @@
  * audience openvibe.events) only when EVENTS_URL and OV_OAUTH_CLIENT_SECRET are set; otherwise rows
  * wait in event_outbox and /api/ready reports the relay as off. Payloads never carry a secret.
  */
-const { createClient } = require('openvibe-sdk/core');
-const { createServiceTokenClient } = require('openvibe-sdk/auth');
-const { createEventsClient, createPgOutbox } = require('openvibe-sdk/events');
+const { createServiceOutbox } = require('openvibe-sdk/events');
 
 const EVENT_TYPES = ['codes.app.published', 'codes.app.deprecated', 'codes.app.revoked', 'codes.moderation.action'];
 
+/** Codes' wiring of the SDK's shared outbox (plan T1). */
 function createCodesOutbox({ db, config, fetchImpl, now, log = console }) {
-    const enabled = Boolean(config.events.url && config.oauth.clientSecret);
-    const clientOpts = { baseUrls: { events: config.events.url || 'http://127.0.0.1:4300' }, retries: 0, autoDiscover: false };
-    if (fetchImpl) clientOpts.fetch = fetchImpl;
-    if (enabled) {
-        clientOpts.tokenProvider = createServiceTokenClient({
-            tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
-            scope: { 'openvibe.events': 'events.event.publish' }, ...(fetchImpl ? { fetch: fetchImpl } : {}),
-        });
-    } else {
-        clientOpts.getToken = async () => { throw new Error('events relay disabled (EVENTS_URL / OV_OAUTH_CLIENT_SECRET unset)'); };
-    }
-    const events = createEventsClient(createClient(clientOpts), { source: 'codes' });
-    let lastError = null;
-    // The PostgreSQL outbox: rows are written in the change's own transaction (enqueue(db, …) joins the ambient
-    // transaction); several processes relay one table safely (leases).
-    const outbox = createPgOutbox(db, {
-        events,
+    return createServiceOutbox({
+        db,
+        source: 'codes',
+        eventsUrl: config.events.url,
+        networkInternalUrl: config.networkInternalUrl,
+        clientId: config.oauth.clientId,
+        clientSecret: config.oauth.clientSecret,
         intervalMs: config.events.intervalMs,
-        now,
-        onError: (err) => {
-            const msg = err && err.message;
-            if (msg !== lastError) log.warn('[Codes] event publish failed (will retry):', msg);
-            lastError = msg;
-        },
+        log,
+        eventTypes: EVENT_TYPES,
+        autoDiscover: false,
+        ...(fetchImpl ? { fetch: fetchImpl } : {}),
+        ...(now ? { now } : {}),
     });
-
-    /** Inside the caller's transaction. Returns the complete envelope (with its event_id). */
-    async function emit(envelope, { traceparent } = {}) {
-        if (!EVENT_TYPES.includes(envelope.event_type)) throw new Error(`Codes does not produce ${envelope.event_type}`);
-        return await outbox.enqueue(db, envelope, { traceparent });
-    }
-
-    /**
-     * codes.moderation.action (common.moderation-action@1), inside the caller's transaction. actor:
-     * the staff member's subject; target: { type, id, owner_subject? }. Never the content.
-     */
-    async function moderationAction({ action, target, actorSubject, reason = null, details = {} }, { traceparent } = {}) {
-        const t = { type: target.type, id: String(target.id).slice(0, 200), owner_subject: target.owner_subject || null };
-        return await emit({
-            event_type: 'codes.moderation.action',
-            actor: actorSubject ? { type: 'user', id: actorSubject } : { type: 'service', id: 'codes' },
-            subject: { type: 'moderation_action', id: `${t.type}:${t.id}`.slice(0, 200) },
-            visibility: 'internal',
-            payload: { action, target: t, actor_subject: actorSubject || null, reason: reason ? String(reason).slice(0, 500) : null, details: details || {} },
-        }, { traceparent });
-    }
-
-    return {
-        emit,
-        moderationAction,
-        outbox,
-        enabled,
-        start() { if (enabled) outbox.start(); },
-        stop: () => outbox.stop(),
-        status: async () => ({ enabled, pending: await outbox.pending(), rejected: await outbox.rejected(), last_error: lastError }),
-    };
 }
 
 module.exports = { createCodesOutbox, EVENT_TYPES };
