@@ -34,8 +34,10 @@ const { check, done } = require('./helpers/boot');
             assert.strictEqual(c.status, 'active');
         }
         const api = fs.readFileSync(path.join(__dirname, '..', 'server', 'http', 'api.js'), 'utf8');
-        assert.match(api, /requireCapability\('codes\.release\.manage'/);
-        assert.match(api, /requireCapability\('codes\.release\.read'/);
+        // The guards are serviceAuth.requireCapability built per request with the key the token names (guardFor).
+        assert.match(api, /serviceAuth\.requireCapability\(cap,/);
+        assert.match(api, /guardFor\('codes\.release\.manage'\)/);
+        assert.match(api, /guardFor\('codes\.release\.read'\)/);
     });
 
     await check('no proposal left behind: everything proposed is released', async () => {

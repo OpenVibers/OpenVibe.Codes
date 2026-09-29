@@ -17,7 +17,9 @@ const server = app.listen(config.port, config.host, () => {
 });
 server.keepAliveTimeout = 65_000;
 ctx.outbox.start();
-ctx.keys.ensure().catch(() => {});
+// Keep the JWKS cache fresh in the background (openvibe-sdk/auth): one client per URL, the last
+// good keys through outages, exponential backoff, unknown-kid floods throttled, an unref'd timer.
+ctx.keys.client.start();
 
 function shutdown(signal) {
     console.log(`[Codes] ${signal}: closing`);

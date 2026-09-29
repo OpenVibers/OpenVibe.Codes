@@ -4,17 +4,20 @@
  *
  *   db              required  a real query on Codes' PostgreSQL store: every Codes table answers
  *   docs            required  the reference was generated at boot from the pinned packages
- *   network_jwks    optional  the Network signing key is loaded; without it nobody can sign in and
- *                             app tokens cannot be verified (docs and tools still serve)
+ *   jwks            optional  openvibe-sdk/auth's JWKS cache has the Network signing key; without
+ *                             it nobody can sign in and app tokens cannot be verified (docs and
+ *                             tools still serve). The SDK keeps one client per URL and reports
+ *                             readiness, staleness, failures and the next try for us.
  *   network         optional  the Network answers (its /.well-known/openvibe descriptor); without
  *                             it the portal shows Network's failure on every project page
  *   oauth_client    optional  OV_OAUTH_CLIENT_SECRET is set (sign-in and the events relay need it)
  *   events_relay    optional  the outbox relay is configured and has no rejected rows
  */
+const { jwksStatus } = require('openvibe-sdk/auth');
 const { createReadiness } = require('openvibe-shared/ready');
 const { TABLES } = require('./db');
 
-function createCodesReadiness({ store, keys, network, outbox, docs, config, valkey = null, release = null }) {
+function createCodesReadiness({ store, network, outbox, docs, config, valkey = null, release = null }) {
     const { db } = store;
     return createReadiness({
         service: 'codes',
@@ -40,10 +43,14 @@ function createCodesReadiness({ store, keys, network, outbox, docs, config, valk
             { name: 'valkey', required: false, check: async () => (valkey ? valkey.ready() : { skipped: 'VALKEY_URL not set: per-actor limits count in this process only' }) },
             {
                 name: 'network_jwks', required: false,
+                // Public: counts and times only. Never the internal JWKS URL and never the SDK's
+                // lastError (it names both) — the SDK logs the real error server-side.
                 check: () => {
-                    if (keys.loaded()) return true;
-                    keys.ensure().catch(() => {});
-                    return 'Network signing key not loaded yet: sign-in and token checks are unavailable';
+                    const statuses = jwksStatus();
+                    if (!statuses.length) return 'no JWKS clients (misconfigured)';
+                    const first = statuses[0];
+                    if (!first.ready) return 'Network signing key not loaded yet: sign-in and token checks are unavailable';
+                    return { ok: true, detail: { keys: first.keys, failures: first.failures, stale: first.stale, fetched_at: first.fetchedAt } };
                 },
             },
             {

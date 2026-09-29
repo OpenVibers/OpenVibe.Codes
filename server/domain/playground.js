@@ -28,7 +28,6 @@ const contracts = require('openvibe-contracts');
 const { createClient, isOpenVibeError } = require('openvibe-sdk/core');
 const { createEventsClient } = require('openvibe-sdk/events');
 const { createMediaClient } = require('openvibe-sdk/media');
-const { verifyJwt } = require('../auth/keys');
 const { GRANTABLE_VISIBILITIES } = require('../docs/generate');
 
 const contractsVersion = require('openvibe-contracts/package.json').version;
@@ -133,7 +132,7 @@ function createPlayground({ store, config, network, keys, fetchImpl, log = conso
             token = credential.value;
         }
         await keys.ensure();
-        const v = verifyJwt(token, { publicKey: keys.get(), issuer: config.networkIssuer, audience: k.audience, now: store.now() });
+        const v = await keys.verifyApp(token, { issuer: config.networkIssuer, audience: k.audience, acceptSandbox: true, now: store.now() });
         if (!v.ok) return { ok: false, code: 'playground.token_invalid', detail: `the token is not usable: ${v.reason}` };
         const c = v.claims;
         const problems = [];

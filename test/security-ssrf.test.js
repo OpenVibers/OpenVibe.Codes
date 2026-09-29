@@ -52,7 +52,7 @@ const INTERNAL = [`http://127.0.0.1:3000${PROBE}`, `http://2130706433${PROBE}`, 
 
     await check('ratchet: every file that makes an outbound request itself is reviewed', () => {
         const REVIEWED = {
-            'server/auth/keys.js': 'Network JWKS (configured)',
+            'server/auth/keys.js': 'no request itself; openvibe-sdk/auth fetches the JWKS',
             'server/auth/sso.js': 'Network OAuth token and revoke (configured)',
             'server/domain/limits.js': 'the services\' /limits.json (configured internal URLs)',
             'server/domain/project-archive.js': 'no request: a shell snippet in the archive\'s README text',

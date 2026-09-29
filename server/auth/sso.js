@@ -19,7 +19,6 @@ const { staff: staffMap } = require('openvibe-contracts');
  */
 const crypto = require('crypto');
 const express = require('express');
-const { verifyJwt } = require('./keys');
 
 const ACCESS_COOKIE = 'codes_at';
 const REFRESH_COOKIE = 'codes_rt';
@@ -94,8 +93,8 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
      * signs FedCM assertions (audience = any owned-zone origin that asked), app/service tokens and
      * internal tokens with the same key and issuer; none of them may become a session here.
      */
-    function verifySession(token) {
-        const v = verifyJwt(token, { publicKey: keys.get(), issuer: config.networkIssuer, audience: config.oauth.sessionAudience, now: now() });
+    async function verifySession(token) {
+        const v = await keys.verifyUser(token, { issuer: config.networkIssuer, audience: config.oauth.sessionAudience, now: now() });
         const c = v.claims;
         if (c && (c.typ === 'fedcm' || c.actor_type !== undefined)) return { ok: false, reason: 'not a session token' };
         return v;
@@ -129,7 +128,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
         try {
             const data = await tokenGrant({ grant_type: 'refresh_token', refresh_token: rt });
             setSession(res, data);
-            const v = verifySession(data.access_token);
+            const v = await verifySession(data.access_token);
             return v.ok ? viewerFromClaims(v.claims, data.access_token) : null;
         } catch (err) {
             if (err.status && err.status < 500) clearSession(res);
@@ -144,7 +143,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             const token = req.cookies && req.cookies[ACCESS_COOKIE];
             if (!token) return next();
             await keys.ensure();
-            const v = verifySession(token);
+            const v = await verifySession(token);
             if (v.ok) { req.viewer = viewerFromClaims(v.claims, token); return next(); }
             if (v.expired) {
                 const fresh = await refresh(req, res);

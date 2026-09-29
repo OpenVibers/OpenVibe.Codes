@@ -1,74 +1,102 @@
 'use strict';
 
 /**
- * The Network's RS256 signing key, fetched from GET /api/.well-known/jwks (internal URL first, then
- * the public one) and cached. Tokens are verified offline against it: the person's access token
- * (sign-in) and, in playgrounds, the app token a developer brings.
+ * The Network's RS256 signing key, fetched once from GET /api/.well-known/jwks on the configured
+ * internal URL and kept fresh by openvibe-sdk/auth's JWKS client. Tokens are verified offline
+ * against it: the person's session token (sign-in) and, in playgrounds, the app token a developer
+ * brings.
+ *
+ * The SDK keeps one client per URL: the last good keys through outages, exponential backoff, a
+ * rotation honoured at once, unknown-kid floods throttled, the refresh timer unref'd. This module
+ * is a thin shim so the rest of Codes (the contracts-based requireCapability guard, the readiness
+ * check, the SSO middleware) can keep talking to `keys.get()` / `keys.ensure()` / `keys.loaded()`,
+ * while verification goes through the SDK's verifyUserToken / verifyAppToken with `jwks: <url>`.
+ *
+ * Nothing the SDK says about a failed key fetch leaves this module: its message names the internal
+ * JWKS URL and the fetch error. Every failure gets a fixed, public reason ('signing key not loaded
+ * yet' for token.no_key, 'token does not verify' otherwise) and the real error is logged.
  */
-const crypto = require('crypto');
+const sdk = require('openvibe-sdk/auth');
 
-function createKeyStore({ config, fetchImpl = globalThis.fetch, log = console }) {
-    let publicKey = null;
-    let lastFetch = 0;
-    let inflight = null;
+/** Public reasons. The SDK's own text (the JWKS URL, the fetch error) never goes over the wire. */
+const KEY_UNAVAILABLE = 'signing key not loaded yet';
+const DOES_NOT_VERIFY = 'token does not verify';
 
-    async function fetchKey() {
-        for (const base of [config.networkInternalUrl, config.networkUrl]) {
-            if (!base) continue;
-            try {
-                const res = await fetchImpl(`${base}/api/.well-known/jwks`, { signal: AbortSignal.timeout(5000) });
-                if (!res.ok) continue;
-                const jwks = await res.json();
-                if (jwks && typeof jwks.public_key === 'string') { publicKey = jwks.public_key; return publicKey; }
-                const jwk = jwks && Array.isArray(jwks.keys) ? jwks.keys.find((k) => k.kty === 'RSA') : null;
-                if (jwk) { publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' }).export({ type: 'spki', format: 'pem' }); return publicKey; }
-            } catch (err) {
-                log.warn(`[Codes] JWKS fetch failed from ${base}: ${err && err.name === 'TimeoutError' ? 'timeout' : (err && err.message)}`);
-            }
-        }
-        return null;
-    }
-
-    async function ensure() {
-        if (publicKey) return publicKey;
-        if (inflight) return inflight;
-        if (Date.now() - lastFetch < 30_000) return null;   // don't hammer a Network that is down
-        lastFetch = Date.now();
-        inflight = fetchKey().finally(() => { inflight = null; });
-        return inflight;
-    }
-
-    return { ensure, get: () => publicKey, loaded: () => Boolean(publicKey) };
+/** Resolve the JWKS URL for the configured Network (internal first, then public). */
+function jwksUrl(config) {
+    return (config.networkInternalUrl || config.networkUrl) + '/api/.well-known/jwks';
 }
-
-const b64json = (s) => JSON.parse(Buffer.from(String(s), 'base64url').toString('utf8'));
 
 /**
- * Verify an RS256 JWT signed by the Network. Returns { ok, claims } or { ok: false, reason, expired }.
- * `audience` is optional (Network user tokens are checked by issuer, like every OpenVibe site).
+ * `keys` is what app.js hands the rest of the service: a facade over the SDK's jwksClient. The
+ * contracts-based requireCapability wants a synchronous PEM, so we mirror the cached first key as
+ * PEM — refreshed every time the SDK gives us keys (ensure(), verifyUser(), verifyApp()).
  */
-function verifyJwt(token, { publicKey, issuer, audience, now = Date.now(), skewSec = 30 }) {
-    const fail = (reason, extra = {}) => ({ ok: false, reason, ...extra });
-    if (!publicKey) return fail('signing key not loaded');
-    const parts = typeof token === 'string' ? token.split('.') : [];
-    if (parts.length !== 3) return fail('not a JWT');
-    let header, claims;
-    try { header = b64json(parts[0]); claims = b64json(parts[1]); } catch { return fail('undecodable token'); }
-    if (!header || header.alg !== 'RS256') return fail('only RS256 tokens are accepted');
-    let good = false;
-    try { good = crypto.verify('RSA-SHA256', Buffer.from(`${parts[0]}.${parts[1]}`), publicKey, Buffer.from(parts[2], 'base64url')); } catch { good = false; }
-    if (!good) return fail('signature does not verify');
-    if (!claims || typeof claims !== 'object') return fail('no claims');
-    if (issuer && claims.iss !== issuer) return fail('wrong issuer');
-    if (audience) {
-        const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-        if (!aud.includes(audience)) return fail(`token is not for ${audience}`);
+function createKeyStore({ config, fetchImpl = globalThis.fetch, log = console }) {
+    const url = jwksUrl(config);
+    const client = sdk.jwksClient(url, { fetch: fetchImpl, log });
+    let mirror = null;        // { pem, count } — the first cached key as PEM
+
+    async function refreshMirror() {
+        try {
+            const ks = await client.keys();
+            const first = ks && ks[0];
+            mirror = first ? { pem: first.key.export({ type: 'spki', format: 'pem' }), count: ks.length } : null;
+        } catch (err) { log.warn(`[Codes] JWKS mirror refresh failed: ${err && err.message || err}`); mirror = null; }
     }
-    const t = Math.floor(now / 1000);
-    if (typeof claims.iat === 'number' && claims.iat - skewSec > t) return fail('issued in the future');
-    if (typeof claims.exp !== 'number') return fail('no expiry');
-    if (claims.exp + skewSec < t) return fail('expired', { expired: true, claims });
-    return { ok: true, claims };
+    /** First fetch (or wait out the backoff window). Refreshes the mirror. */
+    async function ensure() { await refreshMirror(); }
+    /** Cached public key as PEM — for openvibe-contracts' verifyServiceToken (synchronous). */
+    function get() { return mirror ? mirror.pem : null; }
+    function loaded() { return Boolean(mirror); }
+
+    /** The SDK's `now` is a NUMBER of milliseconds (it does Math.floor(now / 1000)); a function disables every expiry check. */
+    const asMs = (v) => (typeof v === 'function' ? v() : (typeof v === 'number' ? v : Date.now()));
+
+    // Verify a user (session) token via the SDK. Returns { ok, claims } | { ok: false, reason, code, expired }.
+    // `reason` is one of the two fixed public strings; the SDK's text is logged, never returned.
+    async function verifyUser(token, { issuer, audience, now = Date.now() } = {}) {
+        try {
+            const claims = await sdk.verifyUserToken(token, { jwks: url, issuer, audience, now: asMs(now), log });
+            await refreshMirror();
+            return { ok: true, claims };
+        } catch (err) {
+            await refreshMirror();
+            const code = err && err.code;
+            log.warn(`[Codes] user token rejected (${code || 'error'}):`, (err && err.message) || err);
+            return { ok: false, reason: code === 'token.no_key' ? KEY_UNAVAILABLE : DOES_NOT_VERIFY, code, expired: code === 'token.expired' };
+        }
+    }
+    // Verify an app token. Same shape and same fixed reasons. The playground reads v.reason for its detail.
+    async function verifyApp(token, { issuer, audience, acceptSandbox = true, now = Date.now() } = {}) {
+        try {
+            const claims = await sdk.verifyAppToken(token, { jwks: url, issuer, audience, acceptSandbox, now: asMs(now), log });
+            await refreshMirror();
+            return { ok: true, claims };
+        } catch (err) {
+            await refreshMirror();
+            const code = err && err.code;
+            log.warn(`[Codes] app token rejected (${code || 'error'}):`, (err && err.message) || err);
+            return { ok: false, reason: code === 'token.no_key' ? KEY_UNAVAILABLE : DOES_NOT_VERIFY, code };
+        }
+    }
+
+    /**
+     * The PEM for the key a token's header names (a rotation publishes two keys: the first one is not always it), for
+     * openvibe-contracts' synchronous guard. The SDK refetches for an unknown kid (at most every 30 s). Null when no
+     * key is loaded; a token that names no kid gets the first key.
+     */
+    async function pemForToken(token) {
+        let kid = null;
+        try { kid = JSON.parse(Buffer.from(String(token).split('.')[0], 'base64url').toString('utf8')).kid || null; } catch { /* the guard refuses it */ }
+        try {
+            const ks = await client.keysForKid(kid);
+            const k = (kid && ks.find((x) => x.kid === kid)) || ks[0];
+            return k ? k.key.export({ type: 'spki', format: 'pem' }) : null;
+        } catch { return null; }
+    }
+
+    return { ensure, get, loaded, status: client.status, verifyUser, verifyApp, pemForToken, client };
 }
 
-module.exports = { createKeyStore, verifyJwt };
+module.exports = { createKeyStore, jwksUrl };

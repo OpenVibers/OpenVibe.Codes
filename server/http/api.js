@@ -55,11 +55,14 @@ function createApi(ctx) {
         res.status(v.valid ? 200 : 422).json({ ...v, contracts_version: docs.contractsVersion });
     });
 
-    // Guards (the Network key is fetched before the synchronous guard runs).
-    const guardOpts = { getPublicKey: () => keys.get(), issuer: config.networkIssuer, audience: 'openvibe.codes', acceptSandbox: true };
-    const loadKey = (req, res, next) => { keys.ensure().then(() => next(), () => next()); };
-    const manageGuard = serviceAuth.requireCapability('codes.release.manage', guardOpts);
-    const readGuard = serviceAuth.requireCapability('codes.release.read', guardOpts);
+    // Guards: the key the token names is looked up first (the SDK's JWKS client), then the synchronous contracts guard
+    // runs against it.
+    const guardOpts = { issuer: config.networkIssuer, audience: 'openvibe.codes', acceptSandbox: true };
+    const bearerToken = (req) => String(req.headers.authorization || '').replace(/^Bearer\s+/, '');
+    const loadKey = (req, res, next) => { keys.pemForToken(bearerToken(req)).then((pem) => { req.ovNetworkKey = pem; next(); }, () => next()); };
+    const guardFor = (cap) => (req, res, next) => serviceAuth.requireCapability(cap, { ...guardOpts, getPublicKey: () => req.ovNetworkKey || null })(req, res, next);
+    const manageGuard = guardFor('codes.release.manage');
+    const readGuard = guardFor('codes.release.read');
     const bearer = (req) => String(req.headers.authorization || '').startsWith('Bearer ');
     // Public reads: anonymous callers pass; a presented token must be valid and hold codes.release.read.
     const readAccess = [loadKey, (req, res, next) => (bearer(req) ? readGuard(req, res, next) : next())];
