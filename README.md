@@ -75,7 +75,18 @@ For the playgrounds to succeed end to end (not Codes' code; configuration elsewh
 
 ## Configuration
 
-See [.env.example](.env.example). Required in production: `OV_OAUTH_CLIENT_SECRET`, `CODES_FORM_SECRET`, `BASE_URL`, `DATABASE_URL` (and `DATABASE_DIRECT_URL` for the boot migrations, run as the owner). Optional: `EVENTS_URL` (relay), `CODES_STAFF_SUBJECTS`, `CODES_PLAYGROUND_*`, `CODES_REGISTRY_TTL_MS`, `CODES_LIMITS_MINUTE` / `CODES_LIMITS_HOUR`.
+See [.env.example](.env.example). Required in production: `OV_OAUTH_CLIENT_SECRET`, `CODES_FORM_SECRET`, `BASE_URL`, `DATABASE_URL` (and `DATABASE_DIRECT_URL` for the boot migrations, run as the owner). Optional: `EVENTS_URL` (relay), `INDEXNOW_KEY` (see below), `CODES_STAFF_SUBJECTS`, `CODES_PLAYGROUND_*`, `CODES_REGISTRY_TTL_MS`, `CODES_LIMITS_MINUTE` / `CODES_LIMITS_HOUR`.
+
+### IndexNow (openvibe-shared/indexnow)
+
+With `INDEXNOW_KEY` set (8–128 hex or alphanumeric characters, what IndexNow's own tools
+generate), the key file is served at `/<key>.txt` as `text/plain` and every public release
+transition tells the engines: publish, deprecate and revoke of a published or deprecated release
+ping `api.indexnow.org` with the release page (while it is published), the app page, `/updates`
+and `/sitemap.xml`; the module batches and debounces these. Nothing pings for a draft, and a
+release that was never public stays silent. Unset: the feature is off — no key file, nothing sent
+(what tests and drills do). The key is not a secret in the credential sense: engines fetch it by
+design. `test/indexnow.test.js`.
 
 ### Per-actor limits
 
@@ -137,7 +148,7 @@ fnm exec --using=22.22.1 npm run dev       # http://localhost:4900
 npx openvibe-contracts-check --service codes --src server
 ```
 
-Tests: ADR-013 trust-tier migration; secrets never persisted or re-displayed; Network errors surfaced honestly (404/403/409/422/503, unreachable, expired session refresh); scope editor offers only grantable capabilities and refuses forged requests before Network sees them; generated docs match the pinned versions (every contract, capability, event type, SDK module); webhook verification, v2 only (tampering, lengths, malformed headers, the ±300 s window both ways, timestamp header mismatch, a v1-only delivery refused, samples without v1, constant-time, the in-browser verifier agreeing); playgrounds refuse without the grant and call nothing; the usage page (owner, admins and staff only, Network not asked for anyone else, filters forwarded as offered, a Network failure shown as it answered); project export (complete, no secrets, audit for admin+ only, never partial) and delete (owner only, Network first, drafts and runs removed, public releases revoked with an event); manifest validation; release lifecycle and events; no internal key anywhere; PKCE sign-in; readiness, release.json, loopback metrics; the released codes manifest matching the code.
+Tests: ADR-013 trust-tier migration; secrets never persisted or re-displayed; Network errors surfaced honestly (404/403/409/422/503, unreachable, expired session refresh); scope editor offers only grantable capabilities and refuses forged requests before Network sees them; generated docs match the pinned versions (every contract, capability, event type, SDK module); webhook verification, v2 only (tampering, lengths, malformed headers, the ±300 s window both ways, timestamp header mismatch, a v1-only delivery refused, samples without v1, constant-time, the in-browser verifier agreeing); playgrounds refuse without the grant and call nothing; the usage page (owner, admins and staff only, Network not asked for anyone else, filters forwarded as offered, a Network failure shown as it answered); project export (complete, no secrets, audit for admin+ only, never partial) and delete (owner only, Network first, drafts and runs removed, public releases revoked with an event); manifest validation; release lifecycle and events; no internal key anywhere; PKCE sign-in; readiness, release.json, loopback metrics; the released codes manifest matching the code; IndexNow (off without a key, the key file served with a key, a publish pinging the page and the sitemap, a draft never pinging); and the home page's size budgets (`test/perf-budget.test.js`, openvibe-shared/perf-budget).
 
 ## Acceptance (must be true before "done")
 

@@ -44,7 +44,7 @@ async function boot(opts = {}) {
     const { createStore } = require('../../server/db');
     // One database per boot (PGlite, or CODES_TEST_STORE=pg: the containers), dropped when the boot closes.
     const testdb = await require('./db').testDb();
-    const built = await createApp({ config, store: createStore(testdb.db), log, limitsNow: opts.limitsNow, actorLimits: opts.actorLimits === true });
+    const built = await createApp({ config, store: createStore(testdb.db), log, limitsNow: opts.limitsNow, actorLimits: opts.actorLimits === true, indexnow: opts.indexnow });
     await built.ctx.keys.ensure();
     if (opts.relay) built.ctx.outbox.start();
     const server = await new Promise((resolve) => { const s = http.createServer(built.app); s.listen(0, '127.0.0.1', () => resolve(s)); });

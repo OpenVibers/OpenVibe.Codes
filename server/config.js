@@ -41,7 +41,9 @@ function load(env = process.env) {
         },
 
         // PostgreSQL (ADR-035): DATABASE_URL serves (PgBouncer), DATABASE_DIRECT_URL migrates (owner role).
-        db: { url: env.DATABASE_URL || '', directUrl: env.DATABASE_DIRECT_URL || '' },
+        // In development without DATABASE_URL an embedded PGlite database in data/pglite is used
+        // (CODES_PGLITE_DIR overrides the directory — how a test gets an isolated database of its own).
+        db: { url: env.DATABASE_URL || '', directUrl: env.DATABASE_DIRECT_URL || '', pgliteDir: env.CODES_PGLITE_DIR || '' },
         valkey: { url: env.VALKEY_URL || '', prefix: env.VALKEY_PREFIX || 'ov:codes:' },
 
         // OpenVibe.Network: SSO (OAuth2 authorization server with PKCE), JWKS, the developer
@@ -95,6 +97,11 @@ function load(env = process.env) {
             url: trim(env.EVENTS_URL || ''),
             intervalMs: int(env.EVENTS_RELAY_INTERVAL_MS, 2000),
         },
+
+        // IndexNow (openvibe-shared/indexnow): a key makes search engines recrawl a page the moment a
+        // public release appears, changes or goes away (the key file is served at /<key>.txt). Unset:
+        // off, no key file, nothing sent. Tests and drills never set it.
+        indexnow: { key: String(env.INDEXNOW_KEY || '').trim() },
     };
 }
 

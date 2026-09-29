@@ -27,9 +27,10 @@ const DEV_PGLITE = path.join(__dirname, '..', 'data', 'pglite');
 async function openDb(config, { log = console, registry } = {}) {
     if (!config.db.url) {
         if (config.isProduction) throw new Error('DATABASE_URL is not set: production serves from PostgreSQL (OpenVibe.Host roles/data add-service.sh codes)');
-        log.warn(`[Codes] DATABASE_URL unset: embedded PGlite database in ${DEV_PGLITE} (development only, one process)`);
-        fs.mkdirSync(DEV_PGLITE, { recursive: true });
-        const db = createDb({ pglite: DEV_PGLITE, service: 'codes', registry, log });
+        const dir = config.db.pgliteDir || DEV_PGLITE;
+        log.warn(`[Codes] DATABASE_URL unset: embedded PGlite database in ${dir} (development only, one process)`);
+        fs.mkdirSync(dir, { recursive: true });
+        const db = createDb({ pglite: dir, service: 'codes', registry, log });
         await db.migrate({ dir: MIGRATIONS, log });
         return db;
     }

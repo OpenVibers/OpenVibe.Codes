@@ -39,6 +39,7 @@ const { createPortalRoutes, createReleaseActionRoutes } = require('./http/portal
 const { createApi } = require('./http/api');
 const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
+const { createIndexNow } = require('openvibe-shared/indexnow');
 const { assetVersion, send } = require('./render/layout');
 const { html } = require('./render/html');
 
@@ -62,13 +63,18 @@ async function createApp(opts = {}) {
     const network = createNetworkClient({ config, fetchImpl, log });
     const outbox = createCodesOutbox({ db: store.db, config, fetchImpl, now: store.now, log });
     const trust = createTrust({ store, outbox });
-    const releases = createReleases({ store, outbox, trust });
+    // IndexNow (openvibe-shared/indexnow): created once at boot from INDEXNOW_KEY. Unset → off, nothing
+    // mounted, nothing sent; tests and drills never set it.
+    const indexnow = opts.indexnow !== undefined ? opts.indexnow : createIndexNow({
+        host: config.baseUrl, key: config.indexnow.key, ...(fetchImpl ? { fetch: fetchImpl } : {}), log,
+    });
+    const releases = createReleases({ store, outbox, trust, config, indexnow });
     const playground = createPlayground({ store, config, network, keys, fetchImpl, log });
     const archiver = createArchiver({ config, fetchImpl, log });
 
     // Each enforcing service's /limits.json, for /docs/limits and the project usage page.
     const limits = createLimitsReader();
-    const ctx = { config, store, docs, keys, sso, network, outbox, trust, releases, playground, archiver, limits, log };
+    const ctx = { config, store, docs, keys, sso, network, outbox, trust, releases, playground, archiver, limits, indexnow, log };
 
     const app = express();
     app.disable('x-powered-by');
@@ -127,6 +133,9 @@ async function createApp(opts = {}) {
     app.use('/auth/', rateLimit({ windowMs: 15 * 60_000, limit: 60, standardHeaders: true, legacyHeaders: false }));
     app.use('/auth', sso.routes());
     { const legal = require('openvibe-shared/legal'); app.get(legal.PATHS, legal.handler({ id: 'codes', service: 'codes', host: 'openvibe.codes', name: 'OpenVibe.Codes', profile: 'ugc' })); }
+
+    // GET /<key>.txt — the IndexNow key file (mounted only when a key is configured; it serves itself).
+    if (indexnow.enabled) app.use(indexnow.keyFile);
 
     // ── Static assets (content-hashed ?v= → immutable) ──────
     // This site's own pinned copy of the OpenVibe Frame's browser files (openvibe-shared/serve).

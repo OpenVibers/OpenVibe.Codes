@@ -26,8 +26,28 @@ const fail = (status, code, detail, extra) => { throw new ReleaseError(status, c
 /** Role needed to manage releases of an app in this environment (Network's rule for apps). */
 const manageRole = (environment) => (environment === 'production' ? 'admin' : 'developer');
 
-function createReleases({ store, outbox, trust }) {
+function createReleases({ store, outbox, trust, config, indexnow }) {
     const { db } = store;
+    const site = String((config && config.baseUrl) || '').replace(/\/+$/, '');
+    const abs = (p) => `${site}${p}`;
+
+    /**
+     * IndexNow (openvibe-shared/indexnow): tell the engines when a public, indexable page appears,
+     * changes or goes away. Called after the row moved, so beforeStatus/afterStatus are real. Only
+     * public releases (published, deprecated) count; a draft's own change is never public, and a
+     * revoked release that was never public stays silent. The sitemap and /updates change with them.
+     */
+    function pingChange(beforeStatus, afterStatus, rel) {
+        if (!indexnow || !indexnow.enabled) return;
+        const wasPublic = beforeStatus === 'published' || beforeStatus === 'deprecated';
+        const isPublic = afterStatus === 'published' || afterStatus === 'deprecated';
+        if (!wasPublic && !isPublic) return;
+        const paths = [abs(`/apps/${rel.app_id}`), abs('/updates'), abs('/sitemap.xml')];
+        // The release page itself is indexable only while published; ping it when it became or
+        // stopped being published, so an engine picks it up or drops it.
+        if (beforeStatus === 'published' || afterStatus === 'published') paths.unshift(abs(`/releases/${rel.id}`));
+        indexnow.pingSoon(paths);
+    }
 
     async function view(r) {
         if (!r) return null;
@@ -137,6 +157,7 @@ function createReleases({ store, outbox, trust }) {
             await writeLog(r.id, 'published', actor.label);
             env = await event('codes.app.published', r, actor, { compatibility: JSON.parse(r.compatibility || '{}') });
         });
+        pingChange(r.status, 'published', r);
         return { release: await get(r.id), event_id: env.event_id };
     }
 
@@ -160,6 +181,7 @@ function createReleases({ store, outbox, trust }) {
             await writeLog(r.id, 'deprecated', actor.label, { reason: why, replacement: repl });
             env = await event('codes.app.deprecated', r, actor, { reason: why, replacement: repl });
         });
+        pingChange(r.status, 'deprecated', r);
         return { release: await get(r.id), event_id: env.event_id };
     }
 
@@ -188,6 +210,7 @@ function createReleases({ store, outbox, trust }) {
                 }, { traceparent: actor.traceparent });
             }
         });
+        if (wasPublic) pingChange(r.status, 'revoked', r);
         return { release: await get(r.id), event_id: env ? env.event_id : null };
     }
 
