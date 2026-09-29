@@ -51,6 +51,9 @@ function createReleases({ store, outbox, trust }) {
         `SELECT * FROM releases WHERE app_id = ? ${includeDrafts ? '' : "AND status != 'draft'"} ORDER BY created_at DESC, id DESC`,
     ).all(String(appId))).map(view)));
     const recentPublic = async (limit = 20) => (await Promise.all((await db.prepare("SELECT * FROM releases WHERE status IN ('published', 'deprecated') ORDER BY published_at DESC LIMIT ?").all(limit)).map(view)));
+    // Light rows for the sitemap (http/discovery.js): no trust lookup per row, no N+1. Only the two
+    // non-draft statuses the public pages render; drafts, revoked and private releases never appear.
+    const publicIndex = async (limit = 5000) => await db.prepare("SELECT id, app_id, status, published_at FROM releases WHERE status IN ('published', 'deprecated') ORDER BY published_at DESC LIMIT ?").all(limit);
     const log = async (releaseId) => (await db.prepare('SELECT action, actor, at, detail FROM release_log WHERE release_id = ? ORDER BY id').all(releaseId))
         .map((l) => ({ ...l, detail: JSON.parse(l.detail || '{}') }));
 
@@ -218,7 +221,7 @@ function createReleases({ store, outbox, trust }) {
         return out;
     }
 
-    return { get, manifestOf, listForApp, listForProject, recentPublic, log, createDraft, publish, deprecate, revoke, retireProject, manageRole };
+    return { get, manifestOf, listForApp, listForProject, recentPublic, publicIndex, log, createDraft, publish, deprecate, revoke, retireProject, manageRole };
 }
 
 module.exports = { createReleases, ReleaseError, manageRole, RANK };

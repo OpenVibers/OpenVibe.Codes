@@ -2,7 +2,8 @@
 
 /**
  * Public pages: the landing page, policy pages, public release and trust pages, the staff trust
- * console, robots.txt and the sitemap.
+ * console. Crawl artifacts (robots.txt, sitemap.xml, llms.txt, the home page's JSON-LD) live in
+ * http/discovery.js and are mounted here.
  *
  * Policy pages are derived, not paraphrased: the compatibility and deprecation policy renders
  * ADR-002 and ADR-016 exactly as openvibe-contracts publishes them; the decision index is the ADR
@@ -16,6 +17,7 @@ const frame = require('openvibe-shared/frame');
 const path = require('path');
 const express = require('express');
 const { asyncRouter } = require('./router');
+const { createDiscoveryRoutes, homeJsonLd } = require('./discovery');
 const { html, raw, table, code, badge, time, notice, csrfField, problemBox } = require('../render/html');
 const { send } = require('../render/layout');
 const { markdown } = require('../render/markdown');
@@ -60,6 +62,7 @@ function createPageRoutes(ctx) {
         const recent = await releases.recentPublic(10);
         page(req, res, {
             index: true, cache: PUBLIC_CACHE,
+            jsonLd: homeJsonLd(config),
             body: html`<h1>Build on OpenVibe</h1>
 <p class="lead">OpenVibe.Codes is the developer portal: create a project and apps in OpenVibe.Network, get scoped credentials, request capability grants, and read reference docs generated from the exact contract and SDK versions the platform runs.</p>
 <div class="notice">Status: alpha. What works and what does not is listed on the <a href="/policy/transparency">transparency page</a>. Network owns projects, apps, credentials, grants and quotas; Codes is a portal over its API and never stores a secret.</div>
@@ -264,23 +267,9 @@ ${signedIn ? releaseActions(req, rel) : ''}
         }
     });
 
-    // ── Discovery ───────────────────────────────────────────
-    r.get('/robots.txt', (req, res) => {
-        res.set('Cache-Control', 'public, max-age=3600').type('text/plain').send([
-            'User-agent: *', 'Disallow: /projects', 'Disallow: /auth/', 'Disallow: /oauth/test-callback', 'Disallow: /staff', 'Disallow: /api/',
-            'Allow: /', `Sitemap: ${config.baseUrl}/sitemap.xml`, '',
-        ].join('\n'));
-    });
-    r.get('/sitemap.xml', (req, res) => {
-        const urls = ['/', '/docs', '/docs/api', '/docs/updates', '/docs/contracts', '/docs/capabilities', '/docs/events', '/docs/services', '/docs/billing', '/docs/limits', '/docs/tools', '/docs/sdk', '/oauth', '/tools/webhooks', '/manifests/validate',
-            '/policy', '/policy/rfc', '/policy/compatibility', '/policy/licensing', '/policy/transparency',
-            ...governance.filter((g) => !g.draft).map((g) => `/policy/${g.slug}`),
-            ...docs.contracts.map((c) => `/docs/contracts/${c.id}`), ...docs.capabilities.map((c) => `/docs/capabilities/${c.id}`),
-            ...require('openvibe-contracts').openapi.index().map((x) => `/docs/api/${x.service}`),
-            ...docs.sdk.map((m) => `/docs/sdk/${m.slug}`), ...docs.adrs.map((a) => `/docs/adr/${a.id}`)];
-        const x = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-        res.set('Cache-Control', 'public, max-age=3600').type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `<url><loc>${x(config.baseUrl + u)}</loc></url>`).join('\n')}\n</urlset>\n`);
-    });
+    // ── Discovery: robots.txt, sitemap.xml, llms.txt and the home page's JSON-LD (http/discovery.js,
+    // built with openvibe-shared/seo) ─────────────────────
+    r.use(createDiscoveryRoutes({ ...ctx, governance }));
 
     return r;
 }

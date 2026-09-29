@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const appIcon = require('openvibe-shared/app-icon');
 const frame = require('openvibe-shared/frame');
+const seo = require('openvibe-shared/seo');
 const { html, raw, esc } = require('./html');
 
 const NETWORK_URL = 'https://openvibe.network';
@@ -40,7 +41,7 @@ const asset = (rel) => `/${rel}?v=${assetVersion(rel)}`;
 
 /**
  * o: title, description, body (html), viewer, config, path, index (default false), scripts [rel],
- *    crumbs [{ label, href }]
+ *    crumbs [{ label, href }], jsonLd [nodes] (serialised by openvibe-shared/seo)
  */
 function renderPage(o) {
     const viewer = o.viewer || { kind: 'anonymous' };
@@ -82,6 +83,7 @@ function renderPage(o) {
 <link rel="canonical" href="${esc(canonical)}">
 <meta name="referrer" content="${o.noReferrer ? 'no-referrer' : 'strict-origin-when-cross-origin'}">
 ${appIcon.headTags({ site: 'codes' })}
+${(o.jsonLd || []).filter(Boolean).map(seo.jsonLdTag).join('\n')}
 <link rel="stylesheet" href="${asset('css/codes.css')}">
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>
