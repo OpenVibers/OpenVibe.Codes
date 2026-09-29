@@ -13,14 +13,26 @@
  * while verification goes through the SDK's verifyUserToken / verifyAppToken with `jwks: <url>`.
  *
  * Nothing the SDK says about a failed key fetch leaves this module: its message names the internal
- * JWKS URL and the fetch error. Every failure gets a fixed, public reason ('signing key not loaded
- * yet' for token.no_key, 'token does not verify' otherwise) and the real error is logged.
+ * JWKS URL and the fetch error, so token.no_key answers 'signing key not loaded yet' (and an error
+ * without a code 'token does not verify'). Reasons about the token itself (audience, expiry,
+ * signature) are kept: the playground's developers need them. Every rejection is logged.
  */
 const sdk = require('openvibe-sdk/auth');
 
 /** Public reasons. The SDK's own text (the JWKS URL, the fetch error) never goes over the wire. */
 const KEY_UNAVAILABLE = 'signing key not loaded yet';
 const DOES_NOT_VERIFY = 'token does not verify';
+
+/**
+ * What a caller may be told. Only token.no_key carries the SDK's fetch text (the internal JWKS URL and the connect
+ * error); every other code's message is about the token itself ('not for openvibe.media', 'expired'), which a
+ * developer in the playground needs, so it is kept.
+ */
+function publicReason(err) {
+    const code = err && err.code;
+    if (!code || code === 'token.no_key') return code ? KEY_UNAVAILABLE : DOES_NOT_VERIFY;
+    return (err.message && String(err.message).slice(0, 200)) || DOES_NOT_VERIFY;
+}
 
 /** Resolve the JWKS URL for the configured Network (internal first, then public). */
 function jwksUrl(config) {
@@ -64,7 +76,7 @@ function createKeyStore({ config, fetchImpl = globalThis.fetch, log = console })
             await refreshMirror();
             const code = err && err.code;
             log.warn(`[Codes] user token rejected (${code || 'error'}):`, (err && err.message) || err);
-            return { ok: false, reason: code === 'token.no_key' ? KEY_UNAVAILABLE : DOES_NOT_VERIFY, code, expired: code === 'token.expired' };
+            return { ok: false, reason: publicReason(err), code, expired: code === 'token.expired' };
         }
     }
     // Verify an app token. Same shape and same fixed reasons. The playground reads v.reason for its detail.
@@ -77,7 +89,7 @@ function createKeyStore({ config, fetchImpl = globalThis.fetch, log = console })
             await refreshMirror();
             const code = err && err.code;
             log.warn(`[Codes] app token rejected (${code || 'error'}):`, (err && err.message) || err);
-            return { ok: false, reason: code === 'token.no_key' ? KEY_UNAVAILABLE : DOES_NOT_VERIFY, code };
+            return { ok: false, reason: publicReason(err), code };
         }
     }
 
