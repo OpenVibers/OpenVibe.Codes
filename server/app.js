@@ -74,6 +74,7 @@ async function createApp(opts = {}) {
     app.disable('x-powered-by');
     app.set('trust proxy', config.trustProxy);
     const release = require('openvibe-shared/release').createRelease({ service: 'codes', root: path.join(__dirname, '..') });
+    require('./render/layout').setRelease(release.release);
     const metrics = require('openvibe-shared/metrics').instrument(app, { service: 'codes', release: release.release });
     app.locals.metrics = metrics.registry;
     app.locals.ctx = ctx;
