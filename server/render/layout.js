@@ -46,7 +46,7 @@ function setRelease(id) { if (id) RELEASE = String(id); }
 
 /**
  * o: title, description, body (html), viewer, config, path, index (default false), scripts [rel],
- *    crumbs [{ label, href }], jsonLd [nodes] (serialised by openvibe-shared/seo)
+ *    crumbs [{ label, href }], jsonLd [nodes] (serialised by openvibe-shared/seo), styles [openvibe-shared stylesheet names]
  */
 function renderPage(o) {
     const viewer = o.viewer || { kind: 'anonymous' };
@@ -90,6 +90,7 @@ function renderPage(o) {
 ${appIcon.headTags({ site: 'codes' })}
 ${(o.jsonLd || []).filter(Boolean).map(seo.jsonLdTag).join('\n')}
 <link rel="stylesheet" href="${asset('css/codes.css')}">
+${(o.styles || []).map((name) => `<link rel="stylesheet" href="${esc(ovServe.url(name))}">`).join('\n')}
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>
 <script src="${ovServe.url('footer.js')}" defer></script>
