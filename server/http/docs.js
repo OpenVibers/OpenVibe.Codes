@@ -21,6 +21,7 @@
  *   /docs/adr/:id               ADRs as published in openvibe-contracts
  */
 const { asyncRouter } = require('./router');
+const cache = require('openvibe-shared/cache-policy');
 const { html, raw, table, code, badge, time, problemBox } = require('../render/html');
 const { send } = require('../render/layout');
 const { markdown } = require('../render/markdown');
@@ -32,7 +33,7 @@ function createDocsRoutes(ctx) {
     const openapi = require('openvibe-contracts').openapi;
     const apiIndex = openapi.index();
     const apiDocs = new Map(apiIndex.map((s) => [s.service, openapi.document(s.service)]));
-    const PUBLIC_CACHE = 'public, max-age=300';
+    const PUBLIC_CACHE = cache.htmlHeaders({ maxAge: 300 });
 
     const tagNote = (tag, version) => (tag !== `v${version}` ? html` (tag ${tag})` : '');
     const versions = () => html`<p class="versions">Generated at ${time(docs.generatedAt)} from
@@ -256,7 +257,7 @@ ${(doc['x-openvibe-other-bindings'] || []).length ? html`<h2>Other bindings</h2>
             sample = await f.json();
         } catch (err) { failed = err.message; }
         send(res, 200, {
-            index: true, cache: 'public, max-age=60', viewer: req.viewer, config, path: req.originalUrl,
+            index: true, cache: cache.htmlHeaders({ maxAge: 60 }), viewer: req.viewer, config, path: req.originalUrl,
             title: 'The update system',
             description: 'How every OpenVibe site shows what shipped: the network changelog feed, the data-ov-shipped markup and the openvibe-shared / openvibe-sdk helpers.',
             crumbs: [{ label: 'Docs', href: '/docs' }, { label: 'Update system' }],
@@ -321,7 +322,7 @@ ${table(['Event type', 'Payload', 'Produced by', 'Consumed by'], docs.events.map
             ];
         });
         send(res, problem ? 502 : 200, {
-            index: true, cache: 'public, max-age=30', viewer: req.viewer, config, path: req.originalUrl,
+            index: true, cache: cache.htmlHeaders({ maxAge: 30 }), viewer: req.viewer, config, path: req.originalUrl,
             title: 'Services',
             crumbs: [{ label: 'Docs', href: '/docs' }, { label: 'Services' }],
             body: html`<h1>Service registry</h1>
@@ -349,7 +350,7 @@ ${table(['Service', 'Status (manifest)', 'Domains'], docs.services.map((s) => [h
         const api = (list || []).filter((t) => t.api && t.status !== 'unavailable');
         const families = [...new Set(api.map((t) => t.family))].sort();
         send(res, problem && !list ? 502 : 200, {
-            index: true, cache: 'public, max-age=60', viewer: req.viewer, config, path: req.originalUrl,
+            index: true, cache: cache.htmlHeaders({ maxAge: 60 }), viewer: req.viewer, config, path: req.originalUrl,
             title: 'Tools API',
             crumbs: [{ label: 'Docs', href: '/docs' }, { label: 'Tools' }],
             body: html`<h1>Tools API</h1>
@@ -383,7 +384,7 @@ ${families.map((f) => html`<h2>${f}</h2>${table(['Tool', 'Runs as', 'Access', 'I
         const n = (x) => Number(x).toLocaleString('en-US');
         const p = policy;
         send(res, problem && !p ? 502 : 200, {
-            index: true, cache: 'public, max-age=300', viewer: req.viewer, config, path: req.originalUrl,
+            index: true, cache: PUBLIC_CACHE, viewer: req.viewer, config, path: req.originalUrl,
             title: 'Billing policy',
             crumbs: [{ label: 'Docs', href: '/docs' }, { label: 'Billing' }],
             body: html`<h1>Billing policy</h1>

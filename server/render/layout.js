@@ -15,6 +15,7 @@ const path = require('path');
 const appIcon = require('openvibe-shared/app-icon');
 const frame = require('openvibe-shared/frame');
 const seo = require('openvibe-shared/seo');
+const cache = require('openvibe-shared/cache-policy');
 const { html, raw, esc } = require('./html');
 
 const NETWORK_URL = 'https://openvibe.network';
@@ -126,7 +127,7 @@ function render(v) { return require('./html').render(v); }
 function send(res, status, o) {
     // A page rendered for a signed-in person names them in the account bar: never shared caches.
     const personal = o.viewer && o.viewer.kind === 'user';
-    if (!res.get('Cache-Control')) res.set('Cache-Control', !personal && o.cache ? o.cache : 'private, no-store');
+    if (!res.get('Cache-Control')) res.set('Cache-Control', !personal && o.cache ? o.cache : cache.htmlHeaders({ private: true }));
     res.set('Vary', 'Cookie');
     res.status(status).type('html').send(renderPage(o));
 }

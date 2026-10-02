@@ -19,6 +19,7 @@ const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const contracts = require('openvibe-contracts');
+const cache = require('openvibe-shared/cache-policy');
 
 const configLib = require('./config');
 const { openStore } = require('./db');
@@ -145,7 +146,7 @@ async function createApp(opts = {}) {
         setHeaders(res, filePath) {
             const rel = path.relative(PUBLIC_DIR, filePath).split(path.sep).join('/');
             const v = res.req && res.req.query && res.req.query.v;
-            res.setHeader('Cache-Control', v && v === assetVersion(rel) ? 'public, max-age=31536000, immutable' : 'public, max-age=300');
+            res.setHeader('Cache-Control', cache.assetHeaders(rel, { hashed: !!v && v === assetVersion(rel) }));
         },
     }));
 
@@ -167,7 +168,7 @@ async function createApp(opts = {}) {
         // Never log request bodies: forms here carry secrets.
         log.error('[Codes]', err && err.message ? err.message.slice(0, 300) : err);
         if (res.headersSent) return;
-        res.set('Cache-Control', 'private, no-store');
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
         if (req.path.startsWith('/api/')) return contracts.http.sendProblem(res, 500, 'internal.error', { detail: 'Internal error', ctx: req.ov });
         if (err && err.type === 'entity.too.large') return res.status(413).type('text/plain').send('That form was too large.');
         res.status(500).type('text/plain').send('Something went wrong on our side. Try again in a moment.');

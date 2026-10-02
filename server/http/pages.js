@@ -15,6 +15,7 @@ const fs = require('fs');
 const ovServe = require('openvibe-shared/serve');
 const frame = require('openvibe-shared/frame');
 const showcase = require('openvibe-shared/showcase');
+const cache = require('openvibe-shared/cache-policy');
 const path = require('path');
 const express = require('express');
 const { asyncRouter } = require('./router');
@@ -62,7 +63,7 @@ function createPageRoutes(ctx) {
     const { config, docs, releases, trust, network, sso } = ctx;
     const r = asyncRouter();
     const form = express.urlencoded({ extended: false, limit: '32kb' });
-    const PUBLIC_CACHE = 'public, max-age=300';
+    const PUBLIC_CACHE = cache.htmlHeaders({ maxAge: 300 });
     const governance = loadGovernance();
     const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, ...o });
 
