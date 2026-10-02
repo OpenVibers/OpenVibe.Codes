@@ -57,6 +57,8 @@ const BUDGETS = {
     // Validating a manifest or checking a webhook signature: a developer's pace, not a crawler's.
     'codes.manifest.validate': { minute: 30, hour: 600 },
     'codes.webhook.tool': { minute: 30, hour: 600 },
+    // Routing a coding task over the harness catalog (no I/O, but a POST: the reads' defaults skip it).
+    'codes.harness.route': { minute: 30, hour: 600 },
     // Staff setting an app's trust tier.
     'codes.trust.set': { minute: 30, hour: 300 },
 };

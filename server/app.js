@@ -33,6 +33,7 @@ const { createReleases } = require('./domain/releases');
 const { createPlayground } = require('./domain/playground');
 const { createArchiver } = require('./domain/project-archive');
 const { createLimitsReader } = require('./domain/limits');
+const { createHarnesses } = require('./domain/harnesses');
 const { createDocsRoutes } = require('./http/docs');
 const { createToolRoutes } = require('./http/tools');
 const { createPageRoutes } = require('./http/pages');
@@ -75,7 +76,9 @@ async function createApp(opts = {}) {
 
     // Each enforcing service's /limits.json, for /docs/limits and the project usage page.
     const limits = createLimitsReader();
-    const ctx = { config, store, docs, keys, sso, network, outbox, trust, releases, playground, archiver, limits, indexnow, log };
+    // The harness catalog (server/data/harness-offers.json), read once: a bad seed row fails boot.
+    const harnesses = createHarnesses();
+    const ctx = { config, store, docs, keys, sso, network, outbox, trust, releases, playground, archiver, limits, harnesses, indexnow, log };
 
     const app = express();
     app.disable('x-powered-by');

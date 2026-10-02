@@ -5,6 +5,8 @@
  *
  *   GET  /docs/versions                   the pinned versions the docs were generated from
  *   POST /manifests/validate              { kind: app|mod, manifest } → { valid, errors, warnings }
+ *   GET  /harnesses                       the harness catalog, each harness with its agents
+ *   POST /harnesses/route                 { task, requirements? } → { selected, reasons, candidates }
  *
  *   codes.release.read (public; no token needed — a token that IS presented must hold it):
  *   GET  /apps/:app/releases              public releases of an app (never drafts) + trust tier
@@ -25,6 +27,7 @@ const rateLimit = require('express-rate-limit');
 const { http, serviceAuth } = require('openvibe-contracts');
 const manifests = require('../domain/manifests');
 const { ReleaseError } = require('../domain/releases');
+const placement = require('../domain/harness-placement');
 
 const APP_RE = /^app_[0-9A-HJKMNP-TV-Z]{26}$/;
 const REL_RE = /^rel_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -32,7 +35,7 @@ const MANAGE = 'codes.release.manage';
 const READ = 'codes.release.read';
 
 function createApi(ctx) {
-    const { config, docs, releases, trust, keys, actorLimits } = ctx;
+    const { config, docs, releases, trust, keys, actorLimits, harnesses } = ctx;
     const r = asyncRouter();
     // Per-actor limits (http/actor-limits.js): reads take the defaults once the token (if any) is checked;
     // writes name their budget after the guard and before the body is read.
@@ -53,6 +56,28 @@ function createApi(ctx) {
         if (!kind) return problem(req, res, 422, 'manifest.kind', 'kind is app or mod');
         const v = manifests.validate(kind, b.manifest, { eventTypes: docs.eventTypes });
         res.status(v.valid ? 200 : 422).json({ ...v, contracts_version: docs.contractsVersion });
+    });
+
+    r.get('/harnesses', reads, (req, res) => {
+        res.json({ harnesses: harnesses.list().map((h) => ({ ...h, agents: harnesses.agents(h.id) })) });
+    });
+
+    // Every harness × agent offer with the defaults (health up, no latency); placement runs no I/O.
+    r.post('/harnesses/route', limiter, B('codes.harness.route'), json, (req, res) => {
+        const b = req.body || {};
+        const plain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+        if (typeof b.task !== 'string' || !b.task) return problem(req, res, 422, 'harness.invalid', 'task is a non-empty string');
+        if (b.requirements !== undefined && !plain(b.requirements)) return problem(req, res, 422, 'harness.invalid', 'requirements is an object');
+        const caps = b.requirements && b.requirements.capabilities;
+        if (caps !== undefined && !(Array.isArray(caps) && caps.every((c) => typeof c === 'string'))) return problem(req, res, 422, 'harness.invalid', 'requirements.capabilities is an array of strings');
+        try {
+            res.json(placement.route({ task: b.task, extra: b.requirements || {}, harnesses }));
+        } catch (err) {
+            if (err && err.code === 'harness.task_unknown') return problem(req, res, 422, 'harness.task_unknown', `task is one of ${Object.keys(placement.TASKS).join(', ')}`);
+            const code = err && err.code === 'harness.placement_invalid' ? 'harness.placement_invalid' : 'internal.error';
+            ctx.log.error('[Codes] api error:', err && err.message ? err.message.slice(0, 200) : err);
+            return problem(req, res, 500, code, 'Internal error');
+        }
     });
 
     // Guards: the key the token names is looked up first (the SDK's JWKS client), then the synchronous contracts guard
