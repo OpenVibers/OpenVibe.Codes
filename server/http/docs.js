@@ -16,6 +16,7 @@
  *   /docs/services              the Network's registry with health as reported (never invented)
  *   /docs/billing               the billing policy as OpenVibe.Billing's /policy.json states it (never restated)
  *   /docs/limits                limits and tiers: each service's /limits.json as it answers (never restated)
+ *   /docs/harnesses             the coding harnesses and agents a task can be routed to, from the catalog
  *   /docs/export                the project export: the metadata JSON and the full archive's layout
  *   /docs/sdk[/:module]         SDK reference from its .d.ts files
  *   /docs/adr/:id               ADRs as published in openvibe-contracts
@@ -57,6 +58,7 @@ function createDocsRoutes(ctx) {
 <li><a href="/docs/events"><strong>Events</strong></a><span>${docs.events.length} event types services declare they produce</span></li>
 <li><a href="/docs/services"><strong>Services</strong></a><span>the registry as OpenVibe.Network reports it, with health</span></li>
 <li><a href="/docs/tools"><strong>Tools API</strong></a><span>every OpenVibe tool you can call from code, from the live registry</span></li>
+<li><a href="/docs/harnesses"><strong>Harnesses</strong></a><span>the coding harnesses and agents a task can be routed to, with their capabilities, prices and limits</span></li>
 <li><a href="/docs/billing"><strong>Billing policy</strong></a><span>prices, the creator split, fees, holds and cashouts, live from OpenVibe.Billing</span></li>
 <li><a href="/docs/limits"><strong>Limits and tiers</strong></a><span>what a project may do in sandbox and production, live from the services that enforce it</span></li>
 <li><a href="/docs/export"><strong>Project export</strong></a><span>take a project with you: its configuration, modules, objects and events as one download</span></li>
@@ -362,6 +364,47 @@ ${families.map((f) => html`<h2>${f}</h2>${table(['Tool', 'Runs as', 'Access', 'I
                 t.auth && t.auth.anonymous ? 'anonymous or token' : (t.auth && t.auth.capability === 'tools.net.probe' ? 'partner token (tools.net.probe)' : 'session or token'),
                 t.files ? `files (${t.files.min}-${t.files.max})` : 'JSON',
             ]))}`)}`,
+        });
+    });
+
+    // ── Coding harnesses (the catalog Codes routes coding tasks over, T16) ─────────
+    // The catalog is ctx.harnesses (the committed seed, validated at boot); nothing is fetched and
+    // no address target that is a local path is ever shown — only the address kind.
+    const isLocalPath = (t) => /^(?:[A-Za-z]:[\\/]|[~/]|\.\.?[\\/])/.test(String(t || ''));
+    const addressOf = (o) => {
+        const kind = (o.address && o.address.kind) || '—';
+        const target = o.address && o.address.target;
+        return target && !isLocalPath(target) ? html`${kind} <code>${target}</code>` : kind;
+    };
+    const usd = (n) => `$${Number(n || 0).toFixed(2)}`;
+    const duration = (n) => (n >= 3600 && n % 3600 === 0 ? `${n / 3600} h` : `${n} s`);
+    const flags = (c) => ['host_access', 'mcp', 'long_autonomy', 'resume'].filter((k) => c && c[k]).map((k) => k.replace(/_/g, ' ')).join(', ') || '—';
+    const count = (n) => Number(n).toLocaleString('en-US');
+    r.get('/harnesses', (req, res) => {
+        const offers = ctx.harnesses.list();
+        page(req, res, {
+            title: 'Coding harnesses',
+            description: 'The coding harnesses and agents Codes can route a task to, with their capabilities, prices and limits.',
+            crumbs: [{ label: 'Docs', href: '/docs' }, { label: 'Harnesses' }],
+            body: html`<h1>Coding harnesses</h1>
+<p>A task is routed with <code>POST /api/v1/harnesses/route</code> over <code>openvibe-sdk/placement</code>, which picks an offer from this catalog; see the <a href="/docs/api">API explorer</a>. The catalog below is read and validated when Codes starts, and every price and limit is as the offer states it.</p>
+${table(['Harness', 'Provider', 'Address', 'Capabilities', 'Price', 'Limits'], offers.map((o) => [
+            html`<strong>${o.name}</strong><br><code>${o.id}</code>`,
+            o.provider,
+            addressOf(o),
+            flags(o.capabilities),
+            `${usd(o.price.amount_usd)} / ${o.price.unit}`,
+            `${duration(o.limits.max_duration_seconds)}, ${count(o.limits.max_concurrent_runs)} concurrent, ${count(o.limits.max_context_tokens)} context tokens`,
+        ]))}
+<h2>Agents</h2>
+${offers.map((o) => html`<h3>${o.name} <code>${o.id}</code></h3>${o.agents.length
+            ? table(['Provider', 'Model', 'Context (in / out)', 'Price per 1k tokens'], o.agents.map((a) => [
+                a.provider,
+                a.model,
+                `${count(a.context_limits.input_tokens)} / ${count(a.context_limits.output_tokens)}`,
+                `${usd(a.price_per_1k_tokens.fresh_usd)} fresh, ${usd(a.price_per_1k_tokens.cached_usd)} cached, ${usd(a.price_per_1k_tokens.output_usd)} output`,
+            ]))
+            : html`<p class="muted">no agents yet</p>`}`)}`,
         });
     });
 

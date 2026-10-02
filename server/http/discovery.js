@@ -68,6 +68,7 @@ function publicPages({ docs, governance = [] }) {
         { path: '/docs/billing', changefreq: 'monthly', priority: 0.5 },
         { path: '/docs/limits', changefreq: 'monthly', priority: 0.5 },
         { path: '/docs/tools', changefreq: 'monthly', priority: 0.5 },
+        { path: '/docs/harnesses', changefreq: 'weekly', priority: 0.6 },
         { path: '/docs/export', changefreq: 'monthly', priority: 0.5 },
         { path: '/docs/sdk', changefreq: 'weekly', priority: 0.7 },
         { path: '/oauth', changefreq: 'monthly', priority: 0.5 },
@@ -154,6 +155,7 @@ function createDiscoveryRoutes(ctx) {
                     { title: 'Events', url: abs('/docs/events') },
                     { title: 'Services', url: abs('/docs/services') },
                     { title: 'Tools', url: abs('/docs/tools') },
+                    { title: 'Coding harnesses', url: abs('/docs/harnesses'), note: 'the harness catalog and how tasks are routed' },
                     { title: 'SDK', url: abs('/docs/sdk') },
                 ] },
                 { title: 'Developer tools', links: [
