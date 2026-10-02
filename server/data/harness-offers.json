@@ -1,0 +1,181 @@
+[
+  {
+    "id": "claude-code",
+    "name": "Claude Code",
+    "provider": "anthropic",
+    "capabilities": {
+      "host_access": true,
+      "mcp": true,
+      "long_autonomy": true,
+      "resume": true
+    },
+    "address": {
+      "kind": "cli",
+      "target": "claude"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 14400,
+      "max_concurrent_runs": 4,
+      "max_context_tokens": 200000
+    },
+    "agents": [
+      {
+        "id": "claude-code-sonnet",
+        "harness": "claude-code",
+        "provider": "anthropic",
+        "model": "claude-sonnet-5-5",
+        "context_limits": {
+          "input_tokens": 200000,
+          "output_tokens": 64000
+        },
+        "concurrency": 4,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "codex",
+    "name": "Codex",
+    "provider": "openai",
+    "capabilities": {
+      "host_access": true,
+      "mcp": true,
+      "long_autonomy": true,
+      "resume": true
+    },
+    "address": {
+      "kind": "cli",
+      "target": "codex"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 14400,
+      "max_concurrent_runs": 4,
+      "max_context_tokens": 200000
+    },
+    "agents": [
+      {
+        "id": "codex-default",
+        "harness": "codex",
+        "provider": "openai",
+        "model": "codex",
+        "context_limits": {
+          "input_tokens": 200000,
+          "output_tokens": 32000
+        },
+        "concurrency": 4,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "command-code",
+    "name": "Command Code",
+    "provider": "commandcode",
+    "capabilities": {
+      "host_access": true,
+      "mcp": true,
+      "long_autonomy": false,
+      "resume": true
+    },
+    "address": {
+      "kind": "cli",
+      "target": "cmd"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": []
+  },
+  {
+    "id": "aider",
+    "name": "Aider",
+    "provider": "aider",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true
+    },
+    "address": {
+      "kind": "cli",
+      "target": "aider"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": []
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "provider": "deepseek",
+    "capabilities": {
+      "host_access": false,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": false
+    },
+    "address": {
+      "kind": "api",
+      "target": "https://api.deepseek.com"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 3600,
+      "max_concurrent_runs": 8,
+      "max_context_tokens": 64000
+    },
+    "agents": [
+      {
+        "id": "deepseek-chat",
+        "harness": "deepseek",
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "context_limits": {
+          "input_tokens": 64000,
+          "output_tokens": 8192
+        },
+        "concurrency": 8,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  }
+]
