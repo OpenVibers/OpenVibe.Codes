@@ -29,7 +29,8 @@
     "App and mod manifest validation; release metadata (draft, publish, deprecate, revoke) with codes.app.* events through the SDK outbox; trust tiers per ADR-013 (unreviewed, reviewed, first-party) as staff-set metadata, older names migrated at boot",
     "Policy pages rendered from the published ADRs; licensing read from package metadata; governance pages (code of conduct, contributing, contributor ladder, moderation policy) rendered from the repository's Markdown",
     "Release API guarded by openvibe-contracts requireCapability (codes.release.manage, codes.release.read)",
-    "Readiness (/api/ready), /release.json and loopback-only /metrics"
+    "Readiness (/api/ready), /release.json and loopback-only /metrics",
+    "Coding-harness registry: a validated catalog of harnesses and their agents (capabilities, address, price and limits), a task placement adapter over openvibe-sdk/placement, and a public read API and read-only docs page (GET /api/v1/harnesses, POST /api/v1/harnesses/route, /docs/harnesses)"
   ],
   "notYet": [
     "The playgrounds have never been used on production (0 playground runs); the one production end-to-end run used curl, and it is not a committed, repeatable check",
@@ -56,6 +57,7 @@
     "app and mod manifest validation and release metadata with codes.app.* events",
     "ADR-013 trust tiers",
     "policy and governance pages (governance drafts pending owner review)",
-    "per-actor limits (openvibe-sdk/limits)"
+    "per-actor limits (openvibe-sdk/limits)",
+    "coding harness catalog, task routing and a read-only docs page"
   ]
 }
