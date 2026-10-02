@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const contracts = require('openvibe-contracts');
 const seo = require('openvibe-shared/seo');
+const cache = require('openvibe-shared/cache-policy');
 const { asyncRouter } = require('./router');
 
 const SITE_NAME = 'OpenVibe.Codes';
@@ -120,7 +121,7 @@ function createDiscoveryRoutes(ctx) {
     r.get('/robots.txt', (_req, res) => {
         // The same rules as before, plus the search and AI crawlers the shared kit names by name and
         // the sitemap. Every previous Disallow is kept (DISALLOW).
-        res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send(
+        res.type('text/plain').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(
             '# openvibe.codes: the public pages are for search and AI crawlers; the portal, sign-in, staff and the API are not.\n'
             + seo.robotsTxt({ sitemaps: [abs('/sitemap.xml')], disallow: DISALLOW }));
     });
@@ -135,7 +136,7 @@ function createDiscoveryRoutes(ctx) {
         ];
         if (firstContract) machine.push({ title: 'Contract JSON Schema', url: abs(`/docs/contracts/${firstContract}.json`), note: 'append .json to any contract page for its schema' });
         if (firstService) machine.push({ title: 'Service OpenAPI', url: abs(`/docs/api/${firstService}.json`), note: 'append .json to any API explorer page for its OpenAPI document' });
-        res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send(seo.llmsTxt({
+        res.type('text/plain').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.llmsTxt({
             name: SITE_NAME,
             summary: 'OpenVibe.Codes: the OpenVibe developer portal over OpenVibe.Network\'s API — projects, apps, scoped credentials and capability grants, reference documentation generated from the pinned contracts and SDK, and OAuth, webhook and manifest tools.',
             details: 'Every page is server-rendered and readable without JavaScript, and every one is public: no account is needed to read the docs or use the OAuth, webhook and manifest tools. Projects, apps, credentials and grants belong to OpenVibe.Network; the pages that manage them need a signed-in OpenVibe account and are deliberately not listed here or in the sitemap. The reference under /docs is generated at boot from the exact openvibe-contracts and openvibe-sdk versions the platform runs, so it cannot drift from them.',
@@ -175,7 +176,7 @@ function createDiscoveryRoutes(ctx) {
     r.get('/sitemap.xml', async (_req, res) => {
         const entries = await sitemapEntries();
         const urls = entries.map((e) => ({ loc: abs(e.path), ...(e.lastmod ? { lastmod: e.lastmod } : {}), changefreq: e.changefreq, priority: e.priority }));
-        res.type('application/xml').set('Cache-Control', 'public, max-age=3600').send(seo.sitemapXml(urls));
+        res.type('application/xml').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.sitemapXml(urls));
     });
 
     return r;

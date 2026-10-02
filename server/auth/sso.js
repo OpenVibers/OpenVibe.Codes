@@ -19,6 +19,7 @@ const { staff: staffMap } = require('openvibe-contracts');
  */
 const crypto = require('crypto');
 const express = require('express');
+const cache = require('openvibe-shared/cache-policy');
 
 const ACCESS_COOKIE = 'codes_at';
 const REFRESH_COOKIE = 'codes_rt';
@@ -179,12 +180,12 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             const state = crypto.randomBytes(16).toString('hex');
             const { verifier, challenge } = pkcePair();
             res.cookie(FLOW_COOKIE, JSON.stringify({ state, verifier, next: sanitizeNext(req.query.next), silent }), flowOpts());
-            res.set('Cache-Control', 'private, no-store');
+            res.set('Cache-Control', cache.htmlHeaders({ private: true }));
             res.redirect(authorizeUrl(config, { state, challenge, silent }));
         });
 
         r.get('/callback', async (req, res) => {
-            res.set('Cache-Control', 'private, no-store');
+            res.set('Cache-Control', cache.htmlHeaders({ private: true }));
             let flow = null;
             try { flow = JSON.parse(req.cookies[FLOW_COOKIE] || 'null'); } catch { flow = null; }
             res.clearCookie(FLOW_COOKIE, { ...cookieBase(), path: '/auth' });
@@ -222,7 +223,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
         };
         r.get('/logout', (req, res, next) => {
             if (sameOriginRequest(req)) return next();
-            res.set('Cache-Control', 'private, no-store');
+            res.set('Cache-Control', cache.htmlHeaders({ private: true }));
             const q = req.query.next ? `?next=${encodeURIComponent(sanitizeNext(req.query.next))}` : '';
             res.type('html').send(`<!doctype html><meta charset="utf-8"><title>Sign out</title><meta name="viewport" content="width=device-width,initial-scale=1">`
                 + `<form method="post" action="/auth/logout${q}" style="font:16px system-ui;margin:3em auto;max-width:24em;text-align:center">`
@@ -244,7 +245,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
         });
 
         r.get('/me', (req, res) => {
-            res.set('Cache-Control', 'private, no-store');
+            res.set('Cache-Control', cache.htmlHeaders({ private: true }));
             // No session at all (a guest: no access or refresh cookie) is signed out, not an error: the shared
             // navbar asks this on every page view, and a 401 logged a console error on each (browser check,
             // OpenVibe.Host). A session cookie that is present but invalid or expired still answers 401.

@@ -19,6 +19,7 @@
  */
 const express = require('express');
 const { asyncRouter } = require('./router');
+const cache = require('openvibe-shared/cache-policy');
 const Busboy = require('busboy');
 const { html, raw, table, code, badge, time, notice, csrfField, problemBox } = require('../render/html');
 const { send } = require('../render/layout');
@@ -738,7 +739,7 @@ function unexpected(req, res, err) {
     const log = req.app.locals.ctx.log;
     log.error('[Codes]', err && err.message ? err.message.slice(0, 300) : err);
     if (res.headersSent) return;
-    res.set('Cache-Control', 'private, no-store');
+    res.set('Cache-Control', cache.htmlHeaders({ private: true }));
     res.status(500).type('text/plain').send('Something went wrong on our side. Try again in a moment.');
 }
 
