@@ -7,9 +7,9 @@
   "runtime": "node 22, express 4, PostgreSQL 18 (openvibe-sdk/db, async) + Valkey 9",
   "port": 4900,
   "domain": "openvibe.codes",
-  "contracts": "openvibe-contracts v0.84.0",
+  "contracts": "openvibe-contracts v0.86.0",
   "packages": [
-    "openvibe-contracts v0.84.0",
+    "openvibe-contracts v0.86.0",
     "openvibe-sdk v0.26.0",
     "openvibe-shared v2.4.0"
   ],
@@ -30,7 +30,7 @@
     "Policy pages rendered from the published ADRs; licensing read from package metadata; governance pages (code of conduct, contributing, contributor ladder, moderation policy) rendered from the repository's Markdown",
     "Release API guarded by openvibe-contracts requireCapability (codes.release.manage, codes.release.read)",
     "Readiness (/api/ready), /release.json and loopback-only /metrics",
-    "Coding-harness registry: a validated catalog of harnesses and their agents (capabilities, address, price and limits), a task placement adapter over openvibe-sdk/placement, and a public read API and read-only docs page (GET /api/v1/harnesses, POST /api/v1/harnesses/route, /docs/harnesses)"
+    "Coding-harness registry: a validated catalog of harnesses and their agents (capabilities, address, price and limits), a task placement adapter over openvibe-sdk/placement, and a public read API and read-only docs page (GET /api/v1/harnesses, POST /api/v1/harnesses/route, /docs/harnesses); each harness × agent pair is routed as a platform.resource-offer@1 of kind harness with task:<kind> and harness:<flag> capabilities and a platform.harness-offer@1 detail"
   ],
   "notYet": [
     "The playgrounds have never been used on production (0 playground runs); the one production end-to-end run used curl, and it is not a committed, repeatable check",

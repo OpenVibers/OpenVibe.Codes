@@ -3,6 +3,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const contracts = require('openvibe-contracts');
 const { createHarnesses } = require('../server/domain/harnesses');
 const { TASKS, toOffer, requirementsFor, route } = require('../server/domain/harness-placement');
 const { check, done } = require('./helpers/boot');
@@ -31,35 +32,55 @@ function priced(row, freshUsd) {
             context_limits: { input_tokens: 100000, output_tokens: 8000 },
             price_per_1k_tokens: { fresh_usd: 0.003, cached_usd: 0.0003, output_usd: 0.015 },
         };
-        assert.deepStrictEqual(toOffer(harness, agent, { trust: 'partner', health: 'degraded', latencyMs: 900 }), {
+        const { agents, ...row } = harness;
+        assert.deepStrictEqual(toOffer(harness, agent, { trust: 'partner', health: 'degraded', latencyMs: 900, now }), {
             offer_id: 'command-code:command-code-test',
-            kind: 'provider',
+            kind: 'harness',
             provider: 'example',
             region: 'global',
             trust: 'partner',
-            capabilities: ['edit', 'review', 'host_access', 'mcp', 'resume'],
+            capabilities: ['task:edit', 'task:review', 'harness:host-access', 'harness:mcp', 'harness:resume'],
             capacity: { workers: { harness: 2 } },
             health: { status: 'degraded' },
             pricing: { model: 'per-operation', unit: 'token', marginal_usd_per_unit: 0.003 / 1000 },
-            max_context_tokens: 100000,
+            updated_at: '2026-10-02T12:00:00.000Z',
+            detail: { ...row, limits: { ...row.limits, max_context_tokens: 100000 }, task_capabilities: ['edit', 'review'] },
             latency_ms: { run_p95: 900 },
         });
 
         const deepseek = rows.find((row) => row.id === 'deepseek');
         const offer = toOffer(deepseek, deepseek.agents[0]);
         assert.strictEqual(offer.offer_id, 'deepseek:deepseek-chat');
-        assert.deepStrictEqual(offer.capabilities, ['edit', 'review']);
+        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:review']);
         assert.strictEqual(offer.trust, 'external');
         assert.deepStrictEqual(offer.health, { status: 'up' });
         assert.strictEqual('latency_ms' in offer, false);
-        assert.strictEqual(offer.max_context_tokens, 64000);
+        assert.strictEqual('max_context_tokens' in offer, false);
+        assert.strictEqual(offer.detail.limits.max_context_tokens, 64000);
+        assert.strictEqual('agents' in offer.detail, false);
         assert.strictEqual(toOffer(deepseek, { ...deepseek.agents[0], id: undefined }).offer_id, `deepseek:${deepseek.agents[0].model}`);
+    });
+
+    await check('every seed offer validates as platform.resource-offer@1 of kind harness', async () => {
+        const harnesses = createHarnesses({ catalogPath });
+        const offers = harnesses.list().flatMap((harness) => harnesses.agents(harness.id).map((agent) => [harness, toOffer(harness, agent, { now })]));
+        assert.strictEqual(offers.length, 3);
+        for (const [harness, offer] of offers) {
+            const result = contracts.validate('platform.resource-offer@1', JSON.parse(JSON.stringify(offer)));
+            assert.ok(result.valid, `${offer.offer_id}: ${JSON.stringify(result.errors)}`);
+            assert.strictEqual(offer.detail.id, harness.id);
+        }
+        const browsing = { ...rows[0], task_capabilities: ['edit', 'browse'] };
+        const offer = toOffer(browsing, browsing.agents[0], { now });
+        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:browse', 'harness:host-access', 'harness:mcp', 'harness:long-autonomy', 'harness:resume']);
+        assert.ok(contracts.validate('platform.resource-offer@1', JSON.parse(JSON.stringify(offer))).valid);
     });
 
     await check('requirementsFor maps each task and merges extras', async () => {
         assert.deepStrictEqual(requirementsFor('long').capabilities, TASKS.long);
-        const req = requirementsFor('edit', { trust: 'first-party', capabilities: ['mcp'] });
-        assert.deepStrictEqual(req.capabilities, ['edit', 'mcp']);
+        assert.deepStrictEqual(requirementsFor('review').capabilities, ['task:review']);
+        const req = requirementsFor('edit', { trust: 'first-party', capabilities: ['harness:mcp'] });
+        assert.deepStrictEqual(req.capabilities, ['task:edit', 'harness:mcp']);
         assert.deepStrictEqual(req.trust, ['first-party']);
         assert.strictEqual(req.objective, 'balanced');
     });
@@ -69,7 +90,7 @@ function priced(row, freshUsd) {
         const r = route({ task: 'review', harnesses, now });
         assert.ok(r.selected);
         const [harnessId] = r.selected.split(':');
-        assert.ok(toOffer(harnesses.get(harnessId), harnesses.agents(harnessId)[0]).capabilities.includes('review'));
+        assert.ok(toOffer(harnesses.get(harnessId), harnesses.agents(harnessId)[0]).capabilities.includes('task:review'));
         assert.ok(r.reasons.length);
         assert.deepStrictEqual(r.candidates.map((c) => c.id), ['claude-code:claude-code-sonnet', 'codex:codex-default', 'deepseek:deepseek-chat']);
     });
@@ -102,6 +123,17 @@ function priced(row, freshUsd) {
         assert.ok(r.candidates.every((c) => c.included));
         const flipped = route({ task: 'edit', harnesses: stub([priced(claude, 0.001), priced(codex, 0.003)]), opts, now });
         assert.strictEqual(flipped.selected, 'claude-code:claude-code-sonnet');
+    });
+
+    await check('a task:browse requirement excludes harnesses without it', async () => {
+        const [claude, codex] = rows;
+        const harnesses = stub([{ ...claude, task_capabilities: ['edit', 'review', 'browse'] }, codex]);
+        const r = route({ task: 'edit', extra: { capabilities: ['task:browse'] }, harnesses, now });
+        assert.strictEqual(r.selected, 'claude-code:claude-code-sonnet');
+        assert.deepStrictEqual(r.candidates.find((c) => c.id === 'codex:codex-default'), { id: 'codex:codex-default', included: false, reason: 'lacks task:browse' });
+        const none = route({ task: 'edit', extra: { capabilities: ['task:browse'] }, harnesses: createHarnesses({ catalogPath }), now });
+        assert.strictEqual(none.selected, null);
+        assert.ok(none.candidates.every((c) => c.reason === 'lacks task:browse'));
     });
 
     await check('an unknown task throws harness.task_unknown', async () => {

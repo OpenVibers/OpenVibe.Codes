@@ -7,33 +7,42 @@
 const contracts = require('openvibe-contracts');
 const { plan } = require('openvibe-sdk/placement');
 
-// Every coding harness offers edit and review until task capabilities reach harness-offer@1.
-const BASE_CAPABILITIES = ['edit', 'review'];
-const HARNESS_CAPABILITIES = ['host_access', 'mcp', 'long_autonomy', 'resume'];
+// A catalog row without task_capabilities takes edit and review.
+const DEFAULT_TASKS = ['edit', 'review'];
+// harness-offer@1 capability flag → the resource-offer@1 capability it adds when true.
+const HARNESS_FLAGS = { host_access: 'harness:host-access', mcp: 'harness:mcp', long_autonomy: 'harness:long-autonomy', resume: 'harness:resume' };
 
 const TASKS = Object.freeze({
-    edit: ['edit'],
-    review: ['review'],
-    long: ['edit', 'long_autonomy'],
-    resume: ['resume'],
+    edit: ['task:edit'],
+    review: ['task:review'],
+    long: ['task:edit', 'harness:long-autonomy'],
+    resume: ['harness:resume'],
 });
 
+/** One platform.resource-offer@1 of kind harness; its detail is the catalog row as platform.harness-offer@1. */
 function toOffer(harness, agent, opts = {}) {
-    const caps = harness.capabilities || {};
-    const limits = harness.limits || {};
+    const { agents, ...row } = harness;
+    const caps = row.capabilities || {};
+    const limits = row.limits || {};
+    const tasks = row.task_capabilities || DEFAULT_TASKS;
+    const maxContextTokens = (agent.context_limits && agent.context_limits.input_tokens) ?? limits.max_context_tokens;
     const health = typeof opts.health === 'string' ? { status: opts.health } : opts.health || { status: 'up' };
     const offer = {
         offer_id: `${harness.id}:${agent.id || agent.model}`,
-        kind: 'provider',
+        kind: 'harness',
         provider: agent.provider || harness.provider,
         region: 'global',
         trust: opts.trust || 'external',
-        capabilities: [...BASE_CAPABILITIES, ...HARNESS_CAPABILITIES.filter((name) => caps[name] === true)],
+        capabilities: [...tasks.map((task) => `task:${task}`), ...Object.keys(HARNESS_FLAGS).filter((name) => caps[name] === true).map((name) => HARNESS_FLAGS[name])],
         capacity: { workers: { harness: limits.max_concurrent_runs } },
         health,
         pricing: { model: 'per-operation', unit: 'token', marginal_usd_per_unit: agent.price_per_1k_tokens.fresh_usd / 1000 },
-        // Not an SDK Offer field: the planner ignores it; kept for callers sizing a run.
-        max_context_tokens: (agent.context_limits && agent.context_limits.input_tokens) ?? limits.max_context_tokens,
+        updated_at: new Date(opts.now ?? Date.now()).toISOString(),
+        detail: {
+            ...row,
+            limits: maxContextTokens == null ? limits : { ...limits, max_context_tokens: maxContextTokens },
+            task_capabilities: [...tasks],
+        },
     };
     if (opts.latencyMs != null) offer.latency_ms = { run_p95: opts.latencyMs };
     return offer;
@@ -61,10 +70,10 @@ function route({ task, extra = {}, harnesses, opts = {}, now = Date.now() }) {
     const req = requirementsFor(task, extra);
     const offers = harnesses.list().flatMap((harness) => harnesses.agents(harness.id).map((agent) => {
         const id = `${harness.id}:${agent.id || agent.model}`;
-        return toOffer(harness, agent, opts[id] || {});
+        return toOffer(harness, agent, { now, ...opts[id] });
     }));
     const result = plan(req, offers, { now });
-    // placement-result@1 types `selected` as a string, so a plan with no eligible candidate cannot validate.
+    // The Contracts compat gate refused widening placement-result@1 `selected` to null: a plan with nothing selected skips the check.
     if (result.selected !== null) {
         const check = contracts.validate('platform.placement-result@1', JSON.parse(JSON.stringify(result)));
         if (!check.valid) {
