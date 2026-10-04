@@ -35,6 +35,23 @@ const BOOST = /<script src="\/shared\/boost\.js\?v=[0-9a-f]{12}" data-main="#mai
         assert.match(signedIn.text, BOOST, '/projects: no boost script');
     });
 
+    await check('the home page head comes from openvibe-shared/shell with the same title, canonical, robots and JSON-LD', async () => {
+        const r = await t.get('/');
+        assert.strictEqual(r.status, 200);
+        const head = r.text.slice(0, r.text.indexOf('</head>'));
+        assert.strictEqual((r.text.match(/<title>/g) || []).length, 1, 'exactly one <title>');
+        assert.ok(head.includes('<title>OpenVibe.Codes: the OpenVibe developer portal</title>'), 'home title');
+        assert.ok(head.includes('<link rel="canonical" href="https://openvibe.codes/">'), 'canonical');
+        assert.ok(head.includes('<meta name="robots" content="index, follow">'), 'robots');
+        const ld = [...head.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => JSON.parse(m[1])['@type']);
+        assert.deepStrictEqual(ld, ['WebSite', 'WebApplication', 'WebPage'], 'the home JSON-LD');
+        for (const tag of ['<meta property="og:title"', 'data-ov-icon="codes"', '/css/codes.css?v=', '/shared/theme-loader.js', '/shared/navbar.js', '/shared/footer.js', '<meta name="referrer"']) {
+            assert.ok(head.includes(tag), `head has ${tag}`);
+        }
+        assert.ok(r.text.includes('id="ov-footer"'), 'the server-rendered footer');
+        assert.ok(r.text.includes('OpenVibeFooter.init(window.__OV_PAGE.footer)'), 'the footer is initialised');
+    });
+
     await check('the navbar config uses the {path} login template, not the path baked in', async () => {
         const r = await t.get('/docs');
         assert.match(r.text, /"loginUrl":"\/auth\/login\?next=\{path\}"/);

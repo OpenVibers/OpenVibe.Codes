@@ -1,10 +1,11 @@
 'use strict';
 
 /**
- * Page shell. Every page is server-rendered through this and is complete without JavaScript:
- *   - <head>: title, description, canonical, robots (portal pages are noindex), the shared app icon
- *   - the OpenVibe Frame: navbar.js and theme-loader.js from the Network (progressive), a <noscript>
- *     navigation bar and the server-rendered shared footer (openvibe-shared)
+ * Page shell. Every page is server-rendered through openvibe-shared/shell and is complete without JavaScript:
+ *   - <head>: title, description, canonical, robots (portal pages are noindex), Open Graph/Twitter,
+ *     JSON-LD (openvibe-shared/seo), plus Codes' extras: the shared app icon, stylesheets, the boost marker
+ *   - the OpenVibe Frame: theme-loader, web-runtime, navbar and footer scripts (the shell boots the
+ *     navbar; the footer is initialised below), a <noscript> navigation bar and the server-rendered footer
  *   - Codes' own script only where a page offers an optional in-browser convenience (webhook
  *     signature computed locally, copy buttons); every form works without it
  */
@@ -14,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const appIcon = require('openvibe-shared/app-icon');
 const frame = require('openvibe-shared/frame');
-const seo = require('openvibe-shared/seo');
+const shell = require('openvibe-shared/shell');
 const cache = require('openvibe-shared/cache-policy');
 const { html, raw, esc } = require('./html');
 
@@ -76,49 +77,43 @@ function renderPage(o) {
     const crumbs = (o.crumbs || []).length
         ? html`<nav class="crumbs" aria-label="Breadcrumbs">${o.crumbs.map((c, i) => html`${i ? ' / ' : ''}${c.href ? html`<a href="${c.href}">${c.label}</a>` : c.label}`)}</nav>`
         : '';
-    const title = o.title ? `${o.title} · ${SITE_NAME}` : `${SITE_NAME}: the OpenVibe developer portal`;
     const scripts = (o.scripts || []).map((rel) => html`<script src="${asset(rel)}" defer></script>`);
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)}</title>
-<meta name="description" content="${esc(o.description || 'Build on OpenVibe: projects, apps and scoped credentials, generated contract and SDK docs, webhook and OAuth tools, and manifest validation.')}">
-<meta name="robots" content="${o.index ? 'index, follow' : 'noindex, nofollow'}">
-<link rel="canonical" href="${esc(canonical)}">
-<meta name="referrer" content="${o.noReferrer ? 'no-referrer' : 'strict-origin-when-cross-origin'}">
+    return shell.page({
+        name: SITE_NAME,
+        lang: 'en',
+        title: o.title || `${SITE_NAME}: the OpenVibe developer portal`,
+        titleSuffix: o.title ? ` · ${SITE_NAME}` : '',
+        siteName: SITE_NAME,
+        description: o.description || 'Build on OpenVibe: projects, apps and scoped credentials, generated contract and SDK docs, webhook and OAuth tools, and manifest validation.',
+        canonical,
+        robots: o.index ? 'index, follow' : 'noindex, nofollow',
+        jsonLd: (o.jsonLd || []).filter(Boolean),
+        home: '/',
+        navLinks: NAV,
+        navbar: nav,
+        footer,
+        head: `<meta name="referrer" content="${o.noReferrer ? 'no-referrer' : 'strict-origin-when-cross-origin'}">
 ${appIcon.headTags({ site: 'codes' })}
-${(o.jsonLd || []).filter(Boolean).map(seo.jsonLdTag).join('\n')}
 <link rel="stylesheet" href="${asset('css/codes.css')}">
 ${(o.styles || []).map((name) => `<link rel="stylesheet" href="${esc(ovServe.url(name))}">`).join('\n')}
-<script src="${ovServe.url('theme-loader.js')}" defer></script>
-<script src="${ovServe.url('navbar.js')}" defer></script>
-<script src="${ovServe.url('footer.js')}" defer></script>
 ${render(scripts)}
 <meta name="ov-boost" content="codes@${esc(RELEASE)}">
-<script src="${ovServe.url('boost.js')}" data-main="#main" defer></script>
-</head>
-<body>
-<a class="skip" href="#main">Skip to content</a>
+<script src="${ovServe.url('boost.js')}" data-main="#main" defer></script>`,
+        body: `<a class="skip" href="#main">Skip to content</a>
 <div id="navbar-mount"></div>
-${frame.noscriptNav({ name: SITE_NAME, home: '/', links: NAV })}
 <noscript><div class="account-bar" role="navigation" aria-label="Account">${render(account)}</div></noscript>
 <main id="main" class="page">
 ${render(crumbs)}
 ${render(o.body)}
 ${o.path === '/' ? frame.shipped({ service: 'codes', title: `Recently shipped on ${SITE_NAME}` }) : ''}
 </main>
-${frame.footer(footer)}
 <script>
 window.__OV_PAGE = ${JSON.stringify({ navbar: nav, footer }).replace(/</g, '\\u003c')};
 document.addEventListener('DOMContentLoaded', function () {
-  try { if (window.OpenVibeNavbar) OpenVibeNavbar.init(window.__OV_PAGE.navbar); } catch (e) { /* the Frame is optional */ }
-  try { if (window.OpenVibeFooter) OpenVibeFooter.init(window.__OV_PAGE.footer); } catch (e) { /* */ }
+  try { if (window.OpenVibeFooter) OpenVibeFooter.init(window.__OV_PAGE.footer); } catch (e) { /* the Frame is optional */ }
 });
-</script>
-</body>
-</html>`;
+</script>`,
+    });
 }
 
 function render(v) { return require('./html').render(v); }
