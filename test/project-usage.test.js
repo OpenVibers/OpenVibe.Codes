@@ -107,6 +107,7 @@ function usageFor(projectId) {
         assert.match(body, /Events published per minute/);
         assert.match(body, /30 a minute/);
         assert.match(body, /OpenVibe Tools does not publish its limits yet/);
+        assert.ok(body.includes('Counts are what services report each hour. Cost is on your Billing page.'), 'the counts and cost note');
         // Errors.
         assert.match(body, /<code>events\.quota_exceeded<\/code>/);
         assert.match(body, /64<\/span> errors in these days/);

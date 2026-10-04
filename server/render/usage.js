@@ -74,6 +74,7 @@ function usageBody({ project, usage: u, limits: limitAnswers, query }) {
     const byService = [...u.totals].sort((a, b) => a.service.localeCompare(b.service) || a.capability.localeCompare(b.capability));
     return html`<h1>Usage <small>${project.name}</small></h1>
 <p class="muted">${u.freshness}${u.last_recorded_at ? html` Last rollup received ${time(u.last_recorded_at)}.` : ''} Showing ${u.range.from} to ${u.range.to} (UTC).</p>
+<p class="muted small">Counts are what services report each hour. Cost is on your Billing page.</p>
 ${filters(project.id, query)}
 
 <h2 id="summary">Summary</h2>

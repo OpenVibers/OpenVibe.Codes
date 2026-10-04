@@ -34,7 +34,7 @@
   ],
   "notYet": [
     "The playgrounds have never been used on production (0 playground runs); the one production end-to-end run used curl, and it is not a committed, repeatable check",
-    "Usage covers only what services report in their hourly *.usage.recorded rollups (Network adds them up per day; the current hour is not counted); no trace or error dashboards beyond the sampled failures",
+    "Usage counts come from the services' hourly *.usage.recorded rollups (Network adds them up per day; the current hour is not counted) and cost lives in Billing, not on the usage page; no trace or error dashboards beyond the sampled failures",
     "Billing sandbox, Chat bot and Realtime playgrounds; CLI and scaffolding; templates",
     "Consent screen for third-party production apps (a Network gap)",
     "No JSON-LD or llms.txt on the public pages",
