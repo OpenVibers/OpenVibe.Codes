@@ -14,9 +14,9 @@ const { measure, check, format } = require('openvibe-shared/perf-budget');
 const BUDGETS = {
     htmlRawKB: 30,   // measured 27.0 (fresh database; the showcase home, 2026-09-29: sections + six inline ring icons)
     htmlBrotliKB: 7.5,   // 6.7
-    jsFiles: 5,   // 4
-    jsRawKB: 225,   // 212.2
-    jsBrotliKB: 53,   // 49.9
+    jsFiles: 5,   // 5 (theme-loader, web-runtime, navbar, footer, boost: openvibe-shared/shell adds web-runtime, 2026-10-04)
+    jsRawKB: 245,   // 239.1 (212.2 before openvibe-shared/shell's web-runtime.js)
+    jsBrotliKB: 59,   // 56.3 (49.9 before web-runtime.js)
     cssFiles: 2,   // 1
     cssRawKB: 19,   // 17.3 (codes.css + the cached /shared/showcase.css)
     cssBrotliKB: 5,   // 4.1
