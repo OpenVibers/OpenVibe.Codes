@@ -39,7 +39,7 @@ function priced(row, freshUsd) {
             provider: 'example',
             region: 'global',
             trust: 'partner',
-            capabilities: ['task:edit', 'task:review', 'harness:host-access', 'harness:mcp', 'harness:resume'],
+            capabilities: ['task:edit', 'task:review', 'harness:host-access', 'harness:mcp', 'harness:resume', 'harness:edit', 'harness:tools'],
             capacity: { workers: { harness: 2 } },
             health: { status: 'degraded' },
             pricing: { model: 'per-operation', unit: 'token', marginal_usd_per_unit: 0.003 / 1000 },
@@ -72,7 +72,7 @@ function priced(row, freshUsd) {
         }
         const browsing = { ...rows[0], task_capabilities: ['edit', 'browse'] };
         const offer = toOffer(browsing, browsing.agents[0], { now });
-        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:browse', 'harness:host-access', 'harness:mcp', 'harness:long-autonomy', 'harness:resume']);
+        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:browse', 'harness:host-access', 'harness:mcp', 'harness:long-autonomy', 'harness:resume', 'harness:edit', 'harness:review', 'harness:tools', 'harness:vision']);
         assert.ok(contracts.validate('platform.resource-offer@1', JSON.parse(JSON.stringify(offer))).valid);
     });
 
@@ -134,6 +134,17 @@ function priced(row, freshUsd) {
         const none = route({ task: 'edit', extra: { capabilities: ['task:browse'] }, harnesses: createHarnesses({ catalogPath }), now });
         assert.strictEqual(none.selected, null);
         assert.ok(none.candidates.every((c) => c.reason === 'lacks task:browse'));
+    });
+
+    await check('a harness:vision requirement drops the vision:false harnesses', async () => {
+        const harnesses = createHarnesses({ catalogPath });
+        const r = route({ task: 'edit', extra: { capabilities: ['harness:vision'] }, harnesses, now });
+        assert.ok(['claude-code:claude-code-sonnet', 'codex:codex-default'].includes(r.selected), `selected ${r.selected}`);
+        for (const id of ['claude-code:claude-code-sonnet', 'codex:codex-default']) {
+            assert.deepStrictEqual(r.candidates.find((c) => c.id === id), { id, included: true, reason: null });
+        }
+        assert.deepStrictEqual(r.candidates.find((c) => c.id === 'deepseek:deepseek-chat'), { id: 'deepseek:deepseek-chat', included: false, reason: 'lacks harness:vision' });
+        assert.ok(toOffer(harnesses.get(r.selected.split(':')[0]), harnesses.agents(r.selected.split(':')[0])[0]).capabilities.includes('harness:vision'));
     });
 
     await check('an unknown task throws harness.task_unknown', async () => {

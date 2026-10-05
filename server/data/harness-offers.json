@@ -7,7 +7,14 @@
       "host_access": true,
       "mcp": true,
       "long_autonomy": true,
-      "resume": true
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": true,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": ["code"]
     },
     "address": {
       "kind": "cli",
@@ -50,7 +57,14 @@
       "host_access": true,
       "mcp": true,
       "long_autonomy": true,
-      "resume": true
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": true,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": ["code"]
     },
     "address": {
       "kind": "cli",
@@ -93,7 +107,14 @@
       "host_access": true,
       "mcp": true,
       "long_autonomy": false,
-      "resume": true
+      "resume": true,
+      "edit": true,
+      "review": false,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": ["code"]
     },
     "address": {
       "kind": "cli",
@@ -118,7 +139,14 @@
       "host_access": true,
       "mcp": true,
       "long_autonomy": false,
-      "resume": true
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": true,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": ["code"]
     },
     "address": {
       "kind": "cli",
@@ -143,7 +171,14 @@
       "host_access": true,
       "mcp": false,
       "long_autonomy": false,
-      "resume": true
+      "resume": true,
+      "edit": true,
+      "review": false,
+      "tools": true,
+      "vision": true,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": ["code"]
     },
     "address": {
       "kind": "cli",
@@ -168,7 +203,14 @@
       "host_access": false,
       "mcp": false,
       "long_autonomy": false,
-      "resume": false
+      "resume": false,
+      "edit": false,
+      "review": false,
+      "tools": false,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": ["code"]
     },
     "address": {
       "kind": "api",
