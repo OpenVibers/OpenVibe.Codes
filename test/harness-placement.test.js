@@ -39,7 +39,7 @@ function priced(row, freshUsd) {
             provider: 'example',
             region: 'global',
             trust: 'partner',
-            capabilities: ['task:edit', 'task:review', 'harness:host-access', 'harness:mcp', 'harness:resume', 'harness:edit', 'harness:tools'],
+            capabilities: ['task:edit', 'task:review', 'harness:host-access', 'harness:mcp', 'harness:resume', 'harness:edit', 'harness:tools', 'runtime:code'],
             capacity: { workers: { harness: 2 } },
             health: { status: 'degraded' },
             pricing: { model: 'per-operation', unit: 'token', marginal_usd_per_unit: 0.003 / 1000 },
@@ -51,7 +51,7 @@ function priced(row, freshUsd) {
         const deepseek = rows.find((row) => row.id === 'deepseek');
         const offer = toOffer(deepseek, deepseek.agents[0]);
         assert.strictEqual(offer.offer_id, 'deepseek:deepseek-chat');
-        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:review']);
+        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:review', 'runtime:code']);
         assert.strictEqual(offer.trust, 'external');
         assert.deepStrictEqual(offer.health, { status: 'up' });
         assert.strictEqual('latency_ms' in offer, false);
@@ -64,7 +64,7 @@ function priced(row, freshUsd) {
     await check('every seed offer validates as platform.resource-offer@1 of kind harness', async () => {
         const harnesses = createHarnesses({ catalogPath });
         const offers = harnesses.list().flatMap((harness) => harnesses.agents(harness.id).map((agent) => [harness, toOffer(harness, agent, { now })]));
-        assert.strictEqual(offers.length, 3);
+        assert.strictEqual(offers.length, 6);
         for (const [harness, offer] of offers) {
             const result = contracts.validate('platform.resource-offer@1', JSON.parse(JSON.stringify(offer)));
             assert.ok(result.valid, `${offer.offer_id}: ${JSON.stringify(result.errors)}`);
@@ -72,7 +72,7 @@ function priced(row, freshUsd) {
         }
         const browsing = { ...rows[0], task_capabilities: ['edit', 'browse'] };
         const offer = toOffer(browsing, browsing.agents[0], { now });
-        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:browse', 'harness:host-access', 'harness:mcp', 'harness:long-autonomy', 'harness:resume', 'harness:edit', 'harness:review', 'harness:tools', 'harness:vision']);
+        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:browse', 'harness:host-access', 'harness:mcp', 'harness:long-autonomy', 'harness:resume', 'harness:edit', 'harness:review', 'harness:tools', 'harness:vision', 'runtime:code']);
         assert.ok(contracts.validate('platform.resource-offer@1', JSON.parse(JSON.stringify(offer))).valid);
     });
 
@@ -92,7 +92,7 @@ function priced(row, freshUsd) {
         const [harnessId] = r.selected.split(':');
         assert.ok(toOffer(harnesses.get(harnessId), harnesses.agents(harnessId)[0]).capabilities.includes('task:review'));
         assert.ok(r.reasons.length);
-        assert.deepStrictEqual(r.candidates.map((c) => c.id), ['claude-code:claude-code-sonnet', 'codex:codex-default', 'deepseek:deepseek-chat']);
+        assert.deepStrictEqual(r.candidates.map((c) => c.id), ['claude-code:claude-code-sonnet', 'codex:codex-default', 'command-code:command-code-default', 'opencode:opencode-default', 'aider:aider-default', 'deepseek:deepseek-chat']);
     });
 
     await check('an offer whose health is down is excluded with a reason', async () => {

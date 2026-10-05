@@ -36,7 +36,7 @@ function toOffer(harness, agent, opts = {}) {
         provider: agent.provider || harness.provider,
         region: 'global',
         trust: opts.trust || 'external',
-        capabilities: [...tasks.map((task) => `task:${task}`), ...Object.keys(HARNESS_FLAGS).filter((name) => caps[name] === true).map((name) => HARNESS_FLAGS[name])],
+        capabilities: [...tasks.map((task) => `task:${task}`), ...Object.keys(HARNESS_FLAGS).filter((name) => caps[name] === true).map((name) => HARNESS_FLAGS[name]), ...(caps.runtimes || []).map((runtime) => `runtime:${runtime}`)],
         capacity: { workers: { harness: limits.max_concurrent_runs } },
         health,
         pricing: { model: 'per-operation', unit: 'token', marginal_usd_per_unit: agent.price_per_1k_tokens.fresh_usd / 1000 },

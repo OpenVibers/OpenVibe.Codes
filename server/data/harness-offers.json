@@ -129,7 +129,25 @@
       "max_concurrent_runs": 2,
       "max_context_tokens": 128000
     },
-    "agents": []
+    "agents": [
+      {
+        "id": "command-code-default",
+        "harness": "command-code",
+        "provider": "commandcode",
+        "model": "command-code",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
   },
   {
     "id": "opencode",
@@ -161,7 +179,25 @@
       "max_concurrent_runs": 2,
       "max_context_tokens": 128000
     },
-    "agents": []
+    "agents": [
+      {
+        "id": "opencode-default",
+        "harness": "opencode",
+        "provider": "opencode-go",
+        "model": "opencode",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
   },
   {
     "id": "aider",
@@ -193,7 +229,25 @@
       "max_concurrent_runs": 2,
       "max_context_tokens": 128000
     },
-    "agents": []
+    "agents": [
+      {
+        "id": "aider-default",
+        "harness": "aider",
+        "provider": "aider",
+        "model": "aider",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
   },
   {
     "id": "deepseek",
