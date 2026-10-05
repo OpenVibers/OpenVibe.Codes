@@ -13,7 +13,7 @@ const rows = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
 
 (async () => {
     await check('every seed row matches the pinned harness and agent contracts', async () => {
-        assert.strictEqual(rows.length, 5);
+        assert.strictEqual(rows.length, 6);
         for (const { agents, ...offer } of rows) {
             const harnessCheck = contracts.validate('platform.harness-offer@1', offer);
             assert.strictEqual(harnessCheck.valid, true, JSON.stringify(harnessCheck.errors));

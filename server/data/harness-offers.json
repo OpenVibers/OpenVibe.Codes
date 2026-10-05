@@ -111,6 +111,31 @@
     "agents": []
   },
   {
+    "id": "opencode",
+    "name": "OpenCode",
+    "provider": "opencode-go",
+    "capabilities": {
+      "host_access": true,
+      "mcp": true,
+      "long_autonomy": false,
+      "resume": true
+    },
+    "address": {
+      "kind": "cli",
+      "target": "opencode"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": []
+  },
+  {
     "id": "aider",
     "name": "Aider",
     "provider": "aider",
