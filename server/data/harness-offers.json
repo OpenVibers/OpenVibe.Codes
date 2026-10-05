@@ -175,7 +175,7 @@
       "edit": true,
       "review": false,
       "tools": true,
-      "vision": false,
+      "vision": true,
       "browser": false,
       "computer_use": false,
       "runtimes": ["code"]
