@@ -7,7 +7,7 @@ first `docs/adr/` — the plan (§8) lists **ADR-050 Codes Harness Fabric** amon
 
 ## Context and current evidence
 
-- **The plan makes Codes the coding-harness fabric, not one harness.** §3 owner direction: "OpenVibe.Codes is the
+- **The plan makes Codes the coding-harness fabric, not one harness.** The plan's owner-direction block (line 43): "OpenVibe.Codes is the
   coding-harness fabric and vibe-coding environment: OpenRouter for coding agents plus the contribution surface for
   OpenVibe itself." T16's finish line is "OpenRouter for coding harnesses plus the cloud/local vibe-coding IDE ... all
   routing through the universal Fabric, never through a second coding-harness router."
@@ -105,8 +105,8 @@ first `docs/adr/` — the plan (§8) lists **ADR-050 Codes Harness Fabric** amon
 
 - **A second coding-harness router inside Codes (or reusing `openvibe-agents`' scored router as the optimizer):**
   rejected. §2.1.11 allows products to add policy but not optimizers, and T16 requires routing "through the universal
-  Fabric, never through a second coding-harness router". `openvibe-agents` is the *prototype* (§1.2) and becomes Actor's
-  engine, not Codes' router.
+  Fabric, never through a second coding-harness router". `openvibe-agents` is the *prototype* (§1.1, line 97) and becomes
+  Actor's engine, not Codes' router.
 - **Putting the catalog in Contracts or in a database now:** rejected for the seed. The catalog is Codes' data and
   changes per deployment; Contracts owns the *shape* (`platform.harness-offer@1`), not the rows. Moving the rows to the
   registry is a plausible later step (decision 7) but would make today's read API depend on tracks that have not
@@ -151,8 +151,8 @@ first `docs/adr/` — the plan (§8) lists **ADR-050 Codes Harness Fabric** amon
   422 `harness.invalid` and an unknown task is 422 `harness.task_unknown`, both under their per-actor limits
   (`test/harnesses-api.test.js:18-76`); `/docs/harnesses` server-renders every seed harness and hides local paths
   (`test/layout.test.js:60-73`).
-- **Still owed before the product closes T16** (the §9 universal gates do not yet cover Codes): a cheaper
-  ineligible candidate never wins on the *live* catalog; a broken harness fails over immediately and a healthy one is
-  not re-picked without `minGain` hysteresis once a current placement is supplied; a routed task actually launches a
-  harness, streams progress, reports usage and resumes — none of which exists in Codes today, and none of which this
-  record claims.
+- **Still owed before the product closes T16** (the §9 gates have not yet been run for Codes): never writes a
+  protected branch directly; a failed harness continues via handoff; a cheaper ineligible candidate never wins on the
+  *live* catalog; a broken harness fails over immediately and a healthy one is not re-picked without `minGain`
+  hysteresis once a current placement is supplied; a routed task actually launches a harness, streams progress, reports
+  usage and resumes — none of which exists in Codes today, and none of which this record claims.
