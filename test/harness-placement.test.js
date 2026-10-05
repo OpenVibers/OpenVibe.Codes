@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const contracts = require('openvibe-contracts');
 const { createHarnesses } = require('../server/domain/harnesses');
+const { plan } = require('openvibe-sdk/placement');
 const { TASKS, toOffer, requirementsFor, route } = require('../server/domain/harness-placement');
 const { check, done } = require('./helpers/boot');
 
@@ -39,19 +40,19 @@ function priced(row, freshUsd) {
             provider: 'example',
             region: 'global',
             trust: 'partner',
-            capabilities: ['task:edit', 'task:review', 'harness:host-access', 'harness:mcp', 'harness:resume', 'harness:edit', 'harness:tools', 'runtime:code'],
+            capabilities: ['task:edit', 'harness:host-access', 'harness:mcp', 'harness:resume', 'harness:edit', 'harness:tools', 'runtime:code'],
             capacity: { workers: { harness: 2 } },
             health: { status: 'degraded' },
             pricing: { model: 'per-operation', unit: 'token', marginal_usd_per_unit: 0.003 / 1000 },
             updated_at: '2026-10-02T12:00:00.000Z',
-            detail: { ...row, limits: { ...row.limits, max_context_tokens: 100000 }, task_capabilities: ['edit', 'review'] },
+            detail: { ...row, limits: { ...row.limits, max_context_tokens: 100000 }, task_capabilities: ['edit'] },
             latency_ms: { run_p95: 900 },
         });
 
         const deepseek = rows.find((row) => row.id === 'deepseek');
         const offer = toOffer(deepseek, deepseek.agents[0]);
         assert.strictEqual(offer.offer_id, 'deepseek:deepseek-chat');
-        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:review', 'runtime:code']);
+        assert.deepStrictEqual(offer.capabilities, []);
         assert.strictEqual(offer.trust, 'external');
         assert.deepStrictEqual(offer.health, { status: 'up' });
         assert.strictEqual('latency_ms' in offer, false);
@@ -85,6 +86,40 @@ function priced(row, freshUsd) {
         assert.strictEqual(req.objective, 'balanced');
     });
 
+    await check('task capabilities derive from the capability booleans', async () => {
+        const byId = new Map(rows.map((row) => [row.id, row]));
+        const tasksOf = (id) => toOffer(byId.get(id), byId.get(id).agents[0]).detail.task_capabilities;
+        assert.deepStrictEqual(tasksOf('claude-code'), ['edit', 'review']);
+        assert.deepStrictEqual(tasksOf('command-code'), ['edit']);
+        assert.deepStrictEqual(tasksOf('aider'), ['edit']);
+        assert.deepStrictEqual(tasksOf('deepseek'), []);
+        // An explicit task_capabilities list still overrides the booleans.
+        const claude = byId.get('claude-code');
+        assert.deepStrictEqual(toOffer({ ...claude, task_capabilities: ['edit', 'browse'] }, claude.agents[0]).detail.task_capabilities, ['edit', 'browse']);
+
+        const harnesses = createHarnesses({ catalogPath });
+        const review = route({ task: 'review', harnesses, now });
+        for (const id of ['command-code:command-code-default', 'aider:aider-default', 'deepseek:deepseek-chat']) {
+            assert.deepStrictEqual(review.candidates.find((c) => c.id === id), { id, included: false, reason: 'lacks task:review' });
+        }
+        assert.ok(!['command-code', 'aider', 'deepseek'].includes(review.selected.split(':')[0]));
+        const edit = route({ task: 'edit', harnesses, now });
+        assert.deepStrictEqual(edit.candidates.find((c) => c.id === 'deepseek:deepseek-chat'), { id: 'deepseek:deepseek-chat', included: false, reason: 'lacks task:edit' });
+        assert.ok(edit.candidates.some((c) => c.id === 'command-code:command-code-default' && c.included));
+    });
+
+    await check('deepseek advertises no runtime class', async () => {
+        const deepseek = rows.find((row) => row.id === 'deepseek');
+        const offer = toOffer(deepseek, deepseek.agents[0]);
+        assert.deepStrictEqual(offer.capabilities, []);
+        assert.strictEqual('runtimes' in offer.detail.capabilities, false);
+        // A bare runtime:code requirement no longer reaches the host-less API, but still reaches a code CLI.
+        const req = { kind: 'harness.edit', mobility: 'job', latency_class: 'interactive', objective: 'balanced', capabilities: ['runtime:code'] };
+        assert.strictEqual(plan(req, [offer], { now }).selected, null);
+        const claude = rows.find((row) => row.id === 'claude-code');
+        assert.strictEqual(plan(req, [toOffer(claude, claude.agents[0])], { now }).selected, 'claude-code:claude-code-sonnet');
+    });
+
     await check('a review task selects a review-capable offer', async () => {
         const harnesses = createHarnesses({ catalogPath });
         const r = route({ task: 'review', harnesses, now });
@@ -106,9 +141,11 @@ function priced(row, freshUsd) {
         const harnesses = createHarnesses({ catalogPath });
         const r = route({ task: 'edit', extra: { trust: 'first-party' }, harnesses, now, opts: { 'codex:codex-default': { trust: 'first-party' } } });
         assert.strictEqual(r.selected, 'codex:codex-default');
-        for (const c of r.candidates.filter((c) => c.id !== 'codex:codex-default')) {
+        for (const c of r.candidates.filter((c) => c.id !== 'codex:codex-default' && c.id !== 'deepseek:deepseek-chat')) {
             assert.deepStrictEqual(c, { id: c.id, included: false, reason: 'workload requires first-party trust' });
         }
+        // Deepseek cannot edit, so it drops out on capabilities before trust is considered.
+        assert.deepStrictEqual(r.candidates.find((c) => c.id === 'deepseek:deepseek-chat'), { id: 'deepseek:deepseek-chat', included: false, reason: 'lacks task:edit' });
         const none = route({ task: 'edit', extra: { trust: ['first-party'] }, harnesses, now });
         assert.strictEqual(none.selected, null);
         assert.ok(none.candidates.every((c) => !c.included));
@@ -133,7 +170,11 @@ function priced(row, freshUsd) {
         assert.deepStrictEqual(r.candidates.find((c) => c.id === 'codex:codex-default'), { id: 'codex:codex-default', included: false, reason: 'lacks task:browse' });
         const none = route({ task: 'edit', extra: { capabilities: ['task:browse'] }, harnesses: createHarnesses({ catalogPath }), now });
         assert.strictEqual(none.selected, null);
-        assert.ok(none.candidates.every((c) => c.reason === 'lacks task:browse'));
+        for (const c of none.candidates.filter((c) => c.id !== 'deepseek:deepseek-chat')) {
+            assert.strictEqual(c.reason, 'lacks task:browse');
+        }
+        // Deepseek drops on capabilities it lacks (edit) before task:browse.
+        assert.deepStrictEqual(none.candidates.find((c) => c.id === 'deepseek:deepseek-chat'), { id: 'deepseek:deepseek-chat', included: false, reason: 'lacks task:edit' });
     });
 
     await check('a harness:vision requirement drops the vision:false harnesses', async () => {
@@ -143,7 +184,7 @@ function priced(row, freshUsd) {
         for (const id of ['claude-code:claude-code-sonnet', 'codex:codex-default']) {
             assert.deepStrictEqual(r.candidates.find((c) => c.id === id), { id, included: true, reason: null });
         }
-        assert.deepStrictEqual(r.candidates.find((c) => c.id === 'deepseek:deepseek-chat'), { id: 'deepseek:deepseek-chat', included: false, reason: 'lacks harness:vision' });
+        assert.deepStrictEqual(r.candidates.find((c) => c.id === 'command-code:command-code-default'), { id: 'command-code:command-code-default', included: false, reason: 'lacks harness:vision' });
         assert.ok(toOffer(harnesses.get(r.selected.split(':')[0]), harnesses.agents(r.selected.split(':')[0])[0]).capabilities.includes('harness:vision'));
     });
 

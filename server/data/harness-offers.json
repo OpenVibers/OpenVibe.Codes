@@ -263,8 +263,7 @@
       "tools": false,
       "vision": false,
       "browser": false,
-      "computer_use": false,
-      "runtimes": ["code"]
+      "computer_use": false
     },
     "address": {
       "kind": "api",
