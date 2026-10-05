@@ -10,7 +10,10 @@ const { plan } = require('openvibe-sdk/placement');
 // A catalog row without task_capabilities takes edit and review.
 const DEFAULT_TASKS = ['edit', 'review'];
 // harness-offer@1 capability flag → the resource-offer@1 capability it adds when true.
-const HARNESS_FLAGS = { host_access: 'harness:host-access', mcp: 'harness:mcp', long_autonomy: 'harness:long-autonomy', resume: 'harness:resume' };
+const HARNESS_FLAGS = {
+    host_access: 'harness:host-access', mcp: 'harness:mcp', long_autonomy: 'harness:long-autonomy', resume: 'harness:resume',
+    edit: 'harness:edit', review: 'harness:review', tools: 'harness:tools', vision: 'harness:vision', browser: 'harness:browser', computer_use: 'harness:computer-use',
+};
 
 const TASKS = Object.freeze({
     edit: ['task:edit'],
