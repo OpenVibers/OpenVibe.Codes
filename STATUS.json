@@ -30,14 +30,14 @@
     "Policy pages rendered from the published ADRs; licensing read from package metadata; governance pages (code of conduct, contributing, contributor ladder, moderation policy) rendered from the repository's Markdown",
     "Release API guarded by openvibe-contracts requireCapability (codes.release.manage, codes.release.read)",
     "Readiness (/api/ready), /release.json and loopback-only /metrics",
-    "Coding-harness registry: a validated catalog of harnesses and their agents (capabilities, address, price and limits), a task placement adapter over openvibe-sdk/placement, and a public read API and read-only docs page (GET /api/v1/harnesses, POST /api/v1/harnesses/route, /docs/harnesses); each harness × agent pair is routed as a platform.resource-offer@1 of kind harness with task:<kind> and harness:<flag> capabilities and a platform.harness-offer@1 detail"
+    "Coding-harness registry: a validated catalog of harnesses and their agents (capabilities, address, price and limits), a task placement adapter over openvibe-sdk/placement, and a public read API and read-only docs page (GET /api/v1/harnesses, POST /api/v1/harnesses/route, /docs/harnesses); each harness × agent pair is routed as a platform.resource-offer@1 of kind harness with task:<kind> and harness:<flag> capabilities and a platform.harness-offer@1 detail",
+    "Crawl and machine-readable artifacts built with openvibe-shared/seo: robots.txt (every previous Disallow kept, search and AI crawlers named), sitemap.xml (the fixed public pages with STATUS.json's content date, each public app and published release with its real publish time — never \"today\"), llms.txt and llms-full.txt (every fixed public page with a one-line description), and the home page's WebSite/WebApplication/WebPage JSON-LD; the portal, staff console, sign-in and API are absent from all of them and Disallowed in robots.txt"
   ],
   "notYet": [
     "The playgrounds have never been used on production (0 playground runs); the one production end-to-end run used curl, and it is not a committed, repeatable check",
     "Usage counts come from the services' hourly *.usage.recorded rollups (Network adds them up per day; the current hour is not counted) and cost lives in Billing, not on the usage page; no trace or error dashboards beyond the sampled failures",
     "Billing sandbox, Chat bot and Realtime playgrounds; CLI and scaffolding; templates",
     "Consent screen for third-party production apps (a Network gap)",
-    "No JSON-LD or llms.txt on the public pages",
     "Governance material (code of conduct, contribution guide, contributor ladder, moderation policy) is written as drafts pending owner review: not in effect, not indexed"
   ],
   "capabilitiesRegistered": true,
@@ -58,6 +58,7 @@
     "ADR-013 trust tiers",
     "policy and governance pages (governance drafts pending owner review)",
     "per-actor limits (openvibe-sdk/limits)",
-    "coding harness catalog, task routing and a read-only docs page"
+    "coding harness catalog, task routing and a read-only docs page",
+    "crawl artifacts (robots.txt, sitemap.xml, llms.txt, llms-full.txt) and the home page's JSON-LD"
   ]
 }

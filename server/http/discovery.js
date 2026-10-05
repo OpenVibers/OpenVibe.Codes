@@ -1,9 +1,10 @@
 'use strict';
 
 /**
- * Crawl and machine-readability artifacts (plan T11): GET /robots.txt, GET /sitemap.xml and
- * GET /llms.txt, plus the home page's JSON-LD. Every one is built with openvibe-shared/seo — the
- * same toolkit the other OpenVibe sites use — so they say the same things here as everywhere.
+ * Crawl and machine-readability artifacts (plan T11): GET /robots.txt, GET /sitemap.xml,
+ * GET /llms.txt and GET /llms-full.txt, plus the home page's JSON-LD. Every one is built with
+ * openvibe-shared/seo — the same toolkit the other OpenVibe sites use — so they say the same things
+ * here as everywhere.
  *
  * Public pages only, and never the viewer: the portal, staff console, sign-in and the API are absent
  * from all of them and Disallowed in robots.txt. lastmod is a real timestamp from the site's own
@@ -23,6 +24,34 @@ const DESCRIPTION = 'The OpenVibe developer portal: create projects and apps in 
 // Every rule robots.txt had before this module existed: none of them may quietly disappear.
 const DISALLOW = ['/projects', '/auth/', '/oauth/test-callback', '/staff', '/api/'];
 const RELEASE_LIMIT = 5000;
+
+// The one line /llms-full.txt says about each fixed public page: a title and what the page serves.
+// These are the pages publicPages() lists (and so the sitemap), so the two cannot name different sets.
+const PAGE_TEXT = {
+    '/': ['OpenVibe.Codes home', 'The developer portal: create a project, get scoped credentials and request capability grants over OpenVibe.Network.'],
+    '/updates': ['What shipped on OpenVibe.Codes', 'This site\'s update log, from the network changelog feed.'],
+    '/docs': ['Platform reference', 'Reference generated at boot from the pinned openvibe-contracts and openvibe-sdk.'],
+    '/docs/api': ['API explorer', 'Every service\'s routes from the contracts\' OpenAPI 3.1 documents.'],
+    '/docs/updates': ['The update system', 'The feed, the data-ov-shipped markup and the shared helpers every OpenVibe site shows.'],
+    '/docs/contracts': ['Contracts', 'The JSON Schemas with their fields, examples and versions.'],
+    '/docs/capabilities': ['Capabilities', 'Every capability, which of them can be granted to apps, and its owner, visibility and status.'],
+    '/docs/events': ['Event types', 'Every event type a service manifest declares it produces or consumes.'],
+    '/docs/services': ['Service registry', 'The Network\'s registry as it answers, with health (never invented).'],
+    '/docs/billing': ['Billing policy', 'The billing policy as OpenVibe.Billing\'s /policy.json states it.'],
+    '/docs/limits': ['Limits and tiers', 'What a project may do in sandbox and production, from the services that enforce it.'],
+    '/docs/tools': ['Tools API', 'The OpenVibe.Tools registry, callable from code.'],
+    '/docs/harnesses': ['Coding harnesses', 'The harnesses and agents a coding task can be routed to, with their prices and limits.'],
+    '/docs/export': ['Project export', 'What a project export holds: the metadata JSON and the full archive.'],
+    '/docs/sdk': ['SDK reference', 'openvibe-sdk modules, from their type definitions.'],
+    '/oauth': ['OAuth callback helper', 'Authorization code + PKCE, with a callback that never exchanges the code.'],
+    '/tools/webhooks': ['Webhook signature tester', 'Decides as a receiver requiring signature v2 does.'],
+    '/manifests/validate': ['Manifest validation', 'App and mod manifests, validated against the pinned contracts.'],
+    '/policy': ['Policy', 'The portal\'s policy pages: decisions, compatibility, licensing, transparency and community.'],
+    '/policy/rfc': ['Proposals and decisions', 'How a contract, capability or event changes, and the ADR record.'],
+    '/policy/compatibility': ['Compatibility and deprecation', 'ADR-002 and ADR-016 as published, with the current deprecations.'],
+    '/policy/licensing': ['Licensing', 'What each package Codes runs is licensed under.'],
+    '/policy/transparency': ['Transparency', 'What Codes stores, what it does not, and what works today.'],
+};
 
 /** "2026-09-28" or "2026-09-28T12:00:00Z" as YYYY-MM-DD; null when the value is unusable. */
 function dayOf(ts) {
@@ -89,6 +118,42 @@ function publicPages({ docs, governance = [] }) {
     return pages;
 }
 
+/**
+ * The title and one-line text /llms-full.txt gives a public page: the fixed pages from PAGE_TEXT,
+ * governance pages from their own blurb, and the generated docs pages from the same data the page
+ * renders. Nothing here is fetched or invented; an unknown path (there is none today) falls back to
+ * the path as its title.
+ */
+function describePage(pathname, { docs, governance = [], apiIndex = [] }) {
+    if (PAGE_TEXT[pathname]) return { title: PAGE_TEXT[pathname][0], text: PAGE_TEXT[pathname][1] };
+    let m;
+    if ((m = /^\/policy\/([^/]+)$/.exec(pathname))) {
+        const g = governance.find((x) => x.slug === m[1]);
+        if (g) return { title: g.title, text: g.blurb || '' };
+    }
+    if ((m = /^\/docs\/contracts\/([^/]+)$/.exec(pathname))) {
+        const c = docs.contracts.find((x) => x.id === m[1]);
+        if (c) return { title: c.title, text: seo.clip(c.description, 200) };
+    }
+    if ((m = /^\/docs\/capabilities\/([^/]+)$/.exec(pathname))) {
+        const c = docs.capabilities.find((x) => x.id === m[1]);
+        if (c) return { title: c.id, text: seo.clip(c.description, 200) };
+    }
+    if ((m = /^\/docs\/api\/([^/]+)$/.exec(pathname))) {
+        const s = apiIndex.find((x) => x.service === m[1]);
+        if (s) return { title: `${s.name} API`, text: `${s.operations} routes performing ${s.capabilities} capabilities.` };
+    }
+    if ((m = /^\/docs\/sdk\/([^/]+)$/.exec(pathname))) {
+        const mod = docs.sdk.find((x) => x.slug === m[1]);
+        if (mod) return { title: mod.name, text: `From ${mod.typesFile} (${mod.browser}).` };
+    }
+    if ((m = /^\/docs\/adr\/([^/]+)$/.exec(pathname))) {
+        const a = docs.adrs.find((x) => x.id === m[1]);
+        if (a) return { title: a.title, text: `Status: ${a.status}. Published in openvibe-contracts.` };
+    }
+    return { title: pathname, text: '' };
+}
+
 function createDiscoveryRoutes(ctx) {
     const { config, docs, releases, governance = [] } = ctx;
     const r = asyncRouter();
@@ -133,6 +198,7 @@ function createDiscoveryRoutes(ctx) {
         const machine = [
             { title: 'Sitemap', url: abs('/sitemap.xml'), note: 'the public pages below, each with a real lastmod' },
             { title: 'robots.txt', url: abs('/robots.txt'), note: 'search and AI crawlers are welcome on the public pages' },
+            { title: 'Full text for language models', url: abs('/llms-full.txt'), note: 'every fixed public page, one line each' },
             { title: 'Release metadata (JSON)', url: abs('/release.json'), note: 'this service\'s current release, per ADR-016' },
         ];
         if (firstContract) machine.push({ title: 'Contract JSON Schema', url: abs(`/docs/contracts/${firstContract}.json`), note: 'append .json to any contract page for its schema' });
@@ -171,6 +237,29 @@ function createDiscoveryRoutes(ctx) {
                     ...governance.filter((g) => !g.draft).map((g) => ({ title: g.title, url: abs(`/policy/${g.slug}`) })),
                 ] },
                 { title: 'Machine-readable', links: machine },
+            ],
+        }));
+    });
+
+    // /llms-full.txt: the same public pages the sitemap lists, one title and one line of text each,
+    // so a language model sees what this origin serves without fetching every page. Never a private
+    // page (the portal, sign-in, staff and the API are absent) and maxBytes caps the file.
+    r.get('/llms-full.txt', (_req, res) => {
+        const pages = publicPages({ docs, governance });
+        const apiIndex = contracts.openapi.index();
+        const isDocs = (p) => p === '/docs' || p.startsWith('/docs/');
+        const tools = ['/oauth', '/tools/webhooks', '/manifests/validate'];
+        const group = (pick) => pages.filter((p) => pick(p.path)).map((p) => ({ url: p.path, ...describePage(p.path, { docs, governance, apiIndex }) }));
+        res.type('text/plain').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.llmsFull({
+            site: SITE_NAME,
+            summary: 'Every fixed public page of OpenVibe.Codes, one line each: the home and update log, the reference generated from the pinned contracts and SDK, the developer tools, and the policy pages.',
+            base: site,
+            maxBytes: 512 * 1024,
+            sections: [
+                { title: 'Home', pages: group((p) => p === '/') },
+                { title: 'Reference', pages: group(isDocs) },
+                { title: 'Playgrounds', pages: group((p) => tools.includes(p)) },
+                { title: 'Site', pages: group((p) => p !== '/' && !isDocs(p) && !tools.includes(p)) },
             ],
         }));
     });
