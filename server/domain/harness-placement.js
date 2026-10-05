@@ -7,8 +7,14 @@
 const contracts = require('openvibe-contracts');
 const { plan } = require('openvibe-sdk/placement');
 
-// A catalog row without task_capabilities takes edit and review.
-const DEFAULT_TASKS = ['edit', 'review'];
+// A catalog row without task_capabilities derives its task kinds from the capability booleans:
+// edit needs capabilities.edit === true, review needs capabilities.review === true.
+const TASK_FLAGS = ['edit', 'review'];
+
+function tasksFor(caps) {
+    return TASK_FLAGS.filter((task) => caps[task] === true);
+}
+
 // harness-offer@1 capability flag → the resource-offer@1 capability it adds when true.
 const HARNESS_FLAGS = {
     host_access: 'harness:host-access', mcp: 'harness:mcp', long_autonomy: 'harness:long-autonomy', resume: 'harness:resume',
@@ -27,7 +33,7 @@ function toOffer(harness, agent, opts = {}) {
     const { agents, ...row } = harness;
     const caps = row.capabilities || {};
     const limits = row.limits || {};
-    const tasks = row.task_capabilities || DEFAULT_TASKS;
+    const tasks = row.task_capabilities || tasksFor(caps);
     const maxContextTokens = (agent.context_limits && agent.context_limits.input_tokens) ?? limits.max_context_tokens;
     const health = typeof opts.health === 'string' ? { status: opts.health } : opts.health || { status: 'up' };
     const offer = {
@@ -36,7 +42,7 @@ function toOffer(harness, agent, opts = {}) {
         provider: agent.provider || harness.provider,
         region: 'global',
         trust: opts.trust || 'external',
-        capabilities: [...tasks.map((task) => `task:${task}`), ...Object.keys(HARNESS_FLAGS).filter((name) => caps[name] === true).map((name) => HARNESS_FLAGS[name])],
+        capabilities: [...tasks.map((task) => `task:${task}`), ...Object.keys(HARNESS_FLAGS).filter((name) => caps[name] === true).map((name) => HARNESS_FLAGS[name]), ...(caps.runtimes || []).map((runtime) => `runtime:${runtime}`)],
         capacity: { workers: { harness: limits.max_concurrent_runs } },
         health,
         pricing: { model: 'per-operation', unit: 'token', marginal_usd_per_unit: agent.price_per_1k_tokens.fresh_usd / 1000 },

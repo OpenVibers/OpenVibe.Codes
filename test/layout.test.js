@@ -63,8 +63,12 @@ const BOOST = /<script src="\/shared\/boost\.js\?v=[0-9a-f]{12}" data-main="#mai
         assert.strictEqual(r.status, 200, r.text.slice(0, 300));
         assert.match(r.headers.get('content-type'), /^text\/html/);
         const rows = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'server', 'data', 'harness-offers.json'), 'utf8'));
-        for (const h of rows) assert.ok(r.text.includes(`<code>${h.id}</code>`), `${h.id} listed`);
-        assert.ok(r.text.includes('no agents yet'), 'a harness without agents says "no agents yet"');
+        for (const h of rows) {
+            assert.ok(r.text.includes(`<code>${h.id}</code>`), `${h.id} listed`);
+            assert.ok(h.agents.length > 0, `${h.id} has an agent`);
+            for (const a of h.agents) assert.ok(r.text.includes(a.model), `${h.id} lists ${a.model}`);
+        }
+        assert.ok(!r.text.includes('no agents yet'), 'every seed harness has an agent');
         assert.ok(!r.text.includes('/home/') && !r.text.includes('/mnt/'), 'no local filesystem path on the page');
     });
 

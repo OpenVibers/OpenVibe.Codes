@@ -23,8 +23,9 @@ const rows = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'server', 'da
         assert.ok(harnesses.some((h) => h.id === 'opencode'), "GET /harnesses includes the 'opencode' harness");
         for (const row of rows) {
             const h = harnesses.find((x) => x.id === row.id);
-            // Seed rows without an agent yet (command-code, aider, opencode) come back with agents: [].
-            assert.deepStrictEqual(h, { ...row, agents: row.agents || [] });
+            // Every seed row ships at least one agent (command-code, aider and opencode each carry one subscription pool).
+            assert.deepStrictEqual(h, { ...row, agents: row.agents });
+            assert.ok(h.agents.length > 0, `${row.id} has an agent`);
         }
     });
 
