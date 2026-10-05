@@ -2,7 +2,7 @@
 
 /**
  * Public pages: the landing page, policy pages, public release and trust pages, the staff trust
- * console. Crawl artifacts (robots.txt, sitemap.xml, llms.txt, the home page's JSON-LD) live in
+ * console. Crawl artifacts (robots.txt, sitemap.xml, llms.txt, llms-full.txt, the home page's JSON-LD) live in
  * http/discovery.js and are mounted here.
  *
  * Policy pages are derived, not paraphrased: the compatibility and deprecation policy renders
@@ -315,7 +315,7 @@ ${signedIn ? releaseActions(req, rel) : ''}
         }
     });
 
-    // ── Discovery: robots.txt, sitemap.xml, llms.txt and the home page's JSON-LD (http/discovery.js,
+    // ── Discovery: robots.txt, sitemap.xml, llms.txt, llms-full.txt and the home page's JSON-LD (http/discovery.js,
     // built with openvibe-shared/seo) ─────────────────────
     r.use(createDiscoveryRoutes({ ...ctx, governance }));
 

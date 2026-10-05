@@ -1,9 +1,9 @@
 'use strict';
 /**
  * The public crawl artifacts (plan T11), fetched from the booted app: /robots.txt, /sitemap.xml,
- * /llms.txt and the home page's JSON-LD. Each is served with the right status and content type,
- * carries at least one real entry, lists public pages only, and takes lastmod from the site's own
- * data (STATUS.json) — never from the clock.
+ * /llms.txt, /llms-full.txt and the home page's JSON-LD. Each is served with the right status and
+ * content type, carries at least one real entry, lists public pages only, and takes lastmod from the
+ * site's own data (STATUS.json) — never from the clock.
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -50,8 +50,25 @@ const PRIVATE = ['/projects', '/staff', '/auth/', '/oauth/test-callback'];
             assert.ok(r.text.includes('(https://openvibe.codes/docs)'), 'no reference link');
             assert.ok(r.text.includes('(https://openvibe.codes/docs/harnesses)'), 'no harnesses reference link');
             assert.ok(r.text.includes('https://openvibe.codes/sitemap.xml'), 'sitemap not listed');
+            assert.ok(r.text.includes('(https://openvibe.codes/llms-full.txt)'), 'llms-full.txt not listed');
             for (const p of PRIVATE) assert.ok(!r.text.includes(`https://openvibe.codes${p}`), `private path in llms.txt: ${p}`);
             assert.ok(!r.text.includes('https://openvibe.codes/api/'), 'api path in llms.txt');
+        });
+
+        await check('llms-full.txt: 200 text/plain, the site title, and every page the sitemap lists', async () => {
+            const r = await t.get('/llms-full.txt');
+            assert.strictEqual(r.status, 200);
+            assert.match(r.headers.get('content-type'), /^text\/plain/);
+            assert.match(r.headers.get('cache-control') || '', /public, max-age=\d+/);
+            assert.ok(r.text.startsWith('# OpenVibe.Codes'), 'no title');
+            const sitemap = await t.get('/sitemap.xml');
+            const locs = [...sitemap.text.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
+            assert.ok(locs.length >= 20, `sitemap too small: ${locs.length}`);
+            for (const loc of locs) assert.ok(r.text.includes(loc), `llms-full.txt is missing ${loc}`);
+            assert.ok(r.text.includes('URL: https://openvibe.codes/docs\n'), 'no /docs entry');
+            assert.ok(r.text.includes('URL: https://openvibe.codes/tools/webhooks\n'), 'no playground entry');
+            for (const p of PRIVATE) assert.ok(!r.text.includes(`https://openvibe.codes${p}`), `private path in llms-full.txt: ${p}`);
+            assert.ok(!r.text.includes('https://openvibe.codes/api/'), 'api path in llms-full.txt');
         });
 
         await check('home page: WebSite + the site\'s primary type, the same for every crawler', async () => {

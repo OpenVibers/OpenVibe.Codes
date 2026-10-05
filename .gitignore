@@ -8,3 +8,4 @@ dist/
 *.pem
 *.key
 !server/data/
+node_modules
