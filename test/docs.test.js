@@ -22,7 +22,7 @@ const sdkPkg = require('openvibe-sdk/package.json');
         assert.strictEqual(tag('openvibe-contracts'), 'v0.107.0');
         assert.strictEqual(tag('openvibe-sdk'), `v${sdkPkg.version}`);
         assert.strictEqual(tag('openvibe-shared'), `v${require('openvibe-shared/package.json').version}`);
-        assert.strictEqual(sdkPkg.version, '0.26.0');
+        assert.strictEqual(sdkPkg.version, '0.35.0');
         // The contracts tag v0.107.0 carries the released codes manifest, codes.app-manifest@1 and codes.resource.read.
         assert.ok(contracts.services.get('codes') && contracts.services.get('codes').status === 'alpha');
         assert.ok(contracts.resolve('codes.app-manifest@1'));
