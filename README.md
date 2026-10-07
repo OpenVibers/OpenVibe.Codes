@@ -52,7 +52,7 @@ Everything is server-rendered and usable without JavaScript. The only scripts of
 - **OpenVibe.Events** — the outbox relay publishes `codes.app.*` with Codes' service token (`events.event.publish`); the Events playground calls it with the app's token (`events.app.publish`); the project archive pulls the project's app events with a Network export token (`events.app.read`).
 - **OpenVibe.Media** — the Media playground uploads with the app's token into the project's namespace; the project archive lists the project's objects, namespaces and download URLs with a Network export token (`media.object.list`, `media.object.read`).
 - **PostgreSQL 18 and Valkey 9** (OpenVibe.Host `roles/data/`, ADR-035): every read and write is async through `openvibe-sdk/db`; Valkey holds the per-actor limit counters (optional).
-- **openvibe-contracts** v0.107.0, **openvibe-sdk v0.26.0**, **openvibe-shared v2.9.0** (pinned tag tarballs; the docs show the tag and the package version, and say so when they differ).
+- **openvibe-contracts** v0.107.0, **openvibe-sdk v0.26.0**, **openvibe-shared v2.12.0** (pinned tag tarballs; the docs show the tag and the package version, and say so when they differ).
 
 No path in Codes sends or accepts a shared loopback key (tested by grep and at runtime).
 
