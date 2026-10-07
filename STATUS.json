@@ -7,7 +7,9 @@
   "runtime": "node 22, express 4, PostgreSQL 18 (openvibe-sdk/db, async) + Valkey 9",
   "port": 4900,
   "domain": "openvibe.codes",
-  "contracts": "openvibe-contracts v0.107.0",
+  "contracts": "openvibe-contracts v0.112.0",
+  "sdk": "openvibe-sdk v0.35.0",
+  "shared": "openvibe-shared v2.13.0",
   "packages": [
     "openvibe-contracts v0.107.0",
     "openvibe-sdk v0.35.0",
@@ -45,7 +47,6 @@
   "serviceManifestRegistered": true,
   "deployed": true,
   "placeholderInSites": false,
-  "updated": "2026-10-07",
   "features": [
     "developer portal over Network's projects, apps, credentials, grants, quotas and audit",
     "per-project usage page from Network's rollups",
@@ -62,5 +63,6 @@
     "coding harness catalog, task routing and a read-only docs page",
     "authority resource index (codes.resource.read) over Codes' manifests and releases, with OVRN reads",
     "crawl artifacts (robots.txt, sitemap.xml, llms.txt, llms-full.txt) and the home page's JSON-LD"
-  ]
+  ],
+  "updated": "2026-10-07"
 }
