@@ -10,6 +10,7 @@
  *   /projects         the signed-in portal over Network's projects API (http/portal.js)
  *   /releases/:id/*   release actions (http/portal.js)
  *   /api/v1           JSON API (http/api.js)
+ *   /api/v1/resources the authority resource index, codes.resource.read (registry/resource-index.js)
  *   /auth/*           Network SSO with PKCE (auth/sso.js)
  *   /api/health, /api/ready, /release.json, /metrics (loopback only)
  */
@@ -38,7 +39,8 @@ const { createDocsRoutes } = require('./http/docs');
 const { createToolRoutes } = require('./http/tools');
 const { createPageRoutes } = require('./http/pages');
 const { createPortalRoutes, createReleaseActionRoutes } = require('./http/portal');
-const { createApi } = require('./http/api');
+const { createApi, createCapabilityAccess } = require('./http/api');
+const resourceIndex = require('./registry/resource-index');
 const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
 const { createIndexNow } = require('openvibe-shared/indexnow');
@@ -154,6 +156,9 @@ async function createApp(opts = {}) {
     }));
 
     // ── API ─────────────────────────────────────────────────
+    // The authority resource index (ADR-048, codes.resource.read): mounted before /api/v1 so the path is
+    // the index's own, guarded with the same service-token check the JSON API's first-party routes use.
+    app.use('/api/v1/resources', resourceIndex.router({ guard: createCapabilityAccess({ config, keys }).checked(resourceIndex.RESOURCE_READ) }));
     app.use('/api/v1', createApi(ctx));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
 
