@@ -71,7 +71,7 @@ function load(env = process.env) {
         // Where playgrounds call, with the APP's own token (never Codes' credentials). Defaults are
         // the public origins published in openvibe-contracts' service manifests.
         playground: {
-            eventsUrl: trim(env.CODES_PLAYGROUND_EVENTS_URL || originOf('events', 'https://events.openvibe.network')),
+            eventsUrl: trim(env.CODES_PLAYGROUND_EVENTS_URL || originOf('events', 'https://openvibe.events')),
             mediaUrl: trim(env.CODES_PLAYGROUND_MEDIA_URL || originOf('media', 'https://openvibe.media')),
             maxUploadBytes: int(env.CODES_PLAYGROUND_MAX_UPLOAD_BYTES, 1024 * 1024),
             runsPerHour: int(env.CODES_PLAYGROUND_RUNS_PER_HOUR, 60),
