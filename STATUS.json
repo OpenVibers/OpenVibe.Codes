@@ -44,7 +44,7 @@
   "serviceManifestRegistered": true,
   "deployed": true,
   "placeholderInSites": false,
-  "updated": "2026-09-28",
+  "updated": "2026-10-07",
   "features": [
     "developer portal over Network's projects, apps, credentials, grants, quotas and audit",
     "per-project usage page from Network's rollups",
