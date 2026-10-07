@@ -7,9 +7,9 @@
   "runtime": "node 22, express 4, PostgreSQL 18 (openvibe-sdk/db, async) + Valkey 9",
   "port": 4900,
   "domain": "openvibe.codes",
-  "contracts": "openvibe-contracts v0.97.0",
+  "contracts": "openvibe-contracts v0.107.0",
   "packages": [
-    "openvibe-contracts v0.97.0",
+    "openvibe-contracts v0.107.0",
     "openvibe-sdk v0.26.0",
     "openvibe-shared v2.9.0"
   ],
@@ -29,6 +29,7 @@
     "App and mod manifest validation; release metadata (draft, publish, deprecate, revoke) with codes.app.* events through the SDK outbox; trust tiers per ADR-013 (unreviewed, reviewed, first-party) as staff-set metadata, older names migrated at boot",
     "Policy pages rendered from the published ADRs; licensing read from package metadata; governance pages (code of conduct, contributing, contributor ladder, moderation policy) rendered from the repository's Markdown",
     "Release API guarded by openvibe-contracts requireCapability (codes.release.manage, codes.release.read)",
+    "Authority resource index (ADR-048, codes.resource.read, first-party): GET /api/v1/resources lists the validated manifests (codes.manifest, mfs_) and releases (codes.release, rel_) Codes owns as pages of common.resource-summary@1, GET /api/v1/resources/:ovrn reads one by its computed OVRN; ?project=prj_… is the tenancy boundary (another project's rows never answer), ?kind= narrows, keyset cursor paging (default limit 100, max 1000). Guarded with openvibe-contracts requireCapability; every page and summary is validated against the released common.resource-list-result@1 / common.resource-summary@1 in test/resource-index.test.js. The capability is released 'planned' — the contracts follow-up flips it once this is deployed",
     "Readiness (/api/ready), /release.json and loopback-only /metrics",
     "Coding-harness registry: a validated catalog of harnesses and their agents (capabilities, address, price and limits), a task placement adapter over openvibe-sdk/placement, and a public read API and read-only docs page (GET /api/v1/harnesses, POST /api/v1/harnesses/route, /docs/harnesses); each harness × agent pair is routed as a platform.resource-offer@1 of kind harness with task:<kind> and harness:<flag> capabilities and a platform.harness-offer@1 detail",
     "Crawl and machine-readable artifacts built with openvibe-shared/seo: robots.txt (every previous Disallow kept, search and AI crawlers named), sitemap.xml (the fixed public pages with STATUS.json's content date, each public app and published release with its real publish time — never \"today\"), llms.txt and llms-full.txt (every fixed public page with a one-line description), and the home page's WebSite/WebApplication/WebPage JSON-LD; the portal, staff console, sign-in and API are absent from all of them and Disallowed in robots.txt"
@@ -59,6 +60,7 @@
     "policy and governance pages (governance drafts pending owner review)",
     "per-actor limits (openvibe-sdk/limits)",
     "coding harness catalog, task routing and a read-only docs page",
+    "authority resource index (codes.resource.read) over Codes' manifests and releases, with OVRN reads",
     "crawl artifacts (robots.txt, sitemap.xml, llms.txt, llms-full.txt) and the home page's JSON-LD"
   ]
 }

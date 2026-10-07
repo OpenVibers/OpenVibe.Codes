@@ -34,6 +34,36 @@ const REL_RE = /^rel_[0-9A-HJKMNP-TV-Z]{26}$/;
 const MANAGE = 'codes.release.manage';
 const READ = 'codes.release.read';
 
+/**
+ * The service-token capability guard this service's first-party routes use: the key the token names is
+ * looked up first (the SDK's JWKS client), then the synchronous openvibe-contracts requireCapability runs
+ * against it. Exported so the resource index (server/registry/resource-index.js, mounted by server/app.js)
+ * guards codes.resource.read with the same check — never a second auth path.
+ *
+ *   const access = createCapabilityAccess({ config, keys });
+ *   app.use('/api/v1/resources', resourceIndex.router({ guard: access.checked('codes.resource.read') }));
+ */
+function createCapabilityAccess({ config, keys }) {
+    const guardOpts = { issuer: config.networkIssuer, audience: 'openvibe.codes', acceptSandbox: true };
+    const bearerToken = (req) => String(req.headers.authorization || '').replace(/^Bearer\s+/, '');
+    const loadKey = (req, res, next) => { keys.pemForToken(bearerToken(req)).then((pem) => { req.ovNetworkKey = pem; next(); }, () => next()); };
+    const guardFor = (cap) => (req, res, next) => serviceAuth.requireCapability(cap, { ...guardOpts, getPublicKey: () => req.ovNetworkKey || null })(req, res, next);
+    const bearer = (req) => String(req.headers.authorization || '').startsWith('Bearer ');
+    /**
+     * The chain for a route a token is REQUIRED on: no token is 401 auth.required; a token that does not
+     * hold the capability is 403 capability.denied and an invalid one 401 token.* (requireCapability decides
+     * those two).
+     */
+    const checked = (cap, detail = 'send Authorization: Bearer <service token for audience openvibe.codes>') => {
+        const guard = guardFor(cap);   // built once, at mount: an unknown capability fails the boot, not a request
+        return [
+            loadKey,
+            (req, res, next) => (bearer(req) ? guard(req, res, next) : http.sendProblem(res, 401, 'auth.required', { detail, ctx: req.ov })),
+        ];
+    };
+    return { loadKey, guardFor, bearer, checked };
+}
+
 function createApi(ctx) {
     const { config, docs, releases, trust, keys, actorLimits, harnesses } = ctx;
     const r = asyncRouter();
@@ -81,18 +111,13 @@ function createApi(ctx) {
     });
 
     // Guards: the key the token names is looked up first (the SDK's JWKS client), then the synchronous contracts guard
-    // runs against it.
-    const guardOpts = { issuer: config.networkIssuer, audience: 'openvibe.codes', acceptSandbox: true };
-    const bearerToken = (req) => String(req.headers.authorization || '').replace(/^Bearer\s+/, '');
-    const loadKey = (req, res, next) => { keys.pemForToken(bearerToken(req)).then((pem) => { req.ovNetworkKey = pem; next(); }, () => next()); };
-    const guardFor = (cap) => (req, res, next) => serviceAuth.requireCapability(cap, { ...guardOpts, getPublicKey: () => req.ovNetworkKey || null })(req, res, next);
-    const manageGuard = guardFor('codes.release.manage');
+    // runs against it (createCapabilityAccess — the same check server/app.js guards the resource index with).
+    const { loadKey, guardFor, bearer, checked } = createCapabilityAccess({ config, keys });
     const readGuard = guardFor('codes.release.read');
-    const bearer = (req) => String(req.headers.authorization || '').startsWith('Bearer ');
     // Public reads: anonymous callers pass; a presented token must be valid and hold codes.release.read.
     const readAccess = [loadKey, (req, res, next) => (bearer(req) ? readGuard(req, res, next) : next())];
-    const manageAccess = [loadKey, (req, res, next) => (bearer(req) ? manageGuard(req, res, next)
-        : problem(req, res, 401, 'auth.required', 'send Authorization: Bearer <app token for audience openvibe.codes>'))];
+    // Managing releases needs a token: an app's own, holding codes.release.manage.
+    const manageAccess = checked('codes.release.manage', 'send Authorization: Bearer <app token for audience openvibe.codes>');
 
     r.get('/apps/:app/releases', ...readAccess, reads, async (req, res) => {
         if (!APP_RE.test(req.params.app)) return problem(req, res, 404, 'app.not_found', 'not an app id');
@@ -177,4 +202,4 @@ function createApi(ctx) {
     return r;
 }
 
-module.exports = { createApi, MANAGE, READ };
+module.exports = { createApi, createCapabilityAccess, MANAGE, READ };
