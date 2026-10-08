@@ -1,7 +1,7 @@
 'use strict';
 /**
  * openvibe-sdk/service (plan T16/J2): the entry point's graceful stop runs its close steps in order
- * (outbox.stop, then store.close) and resolves exit 0; a second signal while stopping is a no-op.
+ * (the JWKS refresher stops, then store.close) and resolves exit 0; a second signal while stopping is a no-op.
  */
 const assert = require('assert');
 const http = require('http');
@@ -11,10 +11,10 @@ const { createLifecycle } = require('../server/index');
 const listen = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
 (async () => {
-    await check('the entry point stop runs outbox.stop then store.close, then exits 0', async () => {
+    await check('the entry point stop stops the JWKS refresher then closes the store, then exits 0', async () => {
         const steps = [];
         const ctx = {
-            outbox: { stop: async () => { steps.push('outbox.stop'); } },
+            keys: { client: { stop: () => { steps.push('keys.stop'); } } },
             store: { close: async () => { steps.push('store.close'); } },
         };
         const server = http.createServer((req, res) => res.end('ok'));
@@ -26,14 +26,14 @@ const listen = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1'
 
         assert.strictEqual(code, 0);
         assert.deepStrictEqual(exits, [0]);
-        assert.deepStrictEqual(steps, ['outbox.stop', 'store.close']);
+        assert.deepStrictEqual(steps, ['keys.stop', 'store.close']);
         assert.strictEqual(server.listening, false);
     });
 
     await check('a second signal while stopping is a no-op', async () => {
         let stops = 0; let closes = 0; let exits = 0;
         const ctx = {
-            outbox: { stop: async () => { stops += 1; } },
+            keys: { client: { stop: () => { stops += 1; } } },
             store: { close: async () => { closes += 1; } },
         };
         const server = http.createServer((req, res) => res.end('ok'));

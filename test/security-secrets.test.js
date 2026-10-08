@@ -1,13 +1,11 @@
 'use strict';
 /**
  * Codes' own secrets never leave in a response, an event or a log line (roadmap WS-R task 5, the
- * internal-secret class). secrets.test.js pins the secrets Network hands out (client secrets, typed
- * tokens); this suite covers Codes' environment: its Network OAuth client secret and its form secret
- * are sentinels, and every route the booted app has (listed from Express's router stack) is
- * requested as anonymous, a developer and staff with real and nonsense ids, plus the sign-in callback
- * with a forged code (it posts the client secret to Network), unknown paths and every write route
- * with a broken body. No body or header may carry either (a form token derived from the form secret
- * is fine; the secret is not), nor may the outbox or the captured log lines.
+ * internal-secret class). Codes' environment holds one: its Network OAuth client secret, a sentinel here. Every route
+ * the booted app has (listed from Express's router stack) is requested as anonymous, a signed-in person and a Network
+ * admin with real and nonsense ids, plus the sign-in callback with a forged code (it posts the client secret to
+ * Network), the developer console's old addresses (now redirects), unknown paths and every write route with a broken
+ * body. No body or header may carry it, nor may the database or the captured log lines.
  *
  *   node test/security-secrets.test.js
  */
@@ -19,21 +17,20 @@ appModule.createApp = async (...a) => { const built = await realCreate(...a); ca
 const { boot, check, done } = require('./helpers/boot');
 const { getPaths, crawl, listRoutes, expand, leaks, nextAddress } = require('./security-crawl');
 
-const SECRETS = { OV_OAUTH_CLIENT_SECRET: 'sentinel-not-a-secret-codes-oauth-client', CODES_FORM_SECRET: 'sentinel-not-a-secret-codes-form' };
+const SECRETS = { OV_OAUTH_CLIENT_SECRET: 'sentinel-not-a-secret-codes-oauth-client' };
 
 (async () => {
     const t = await boot({ env: SECRETS });
     const dev = t.network.addUser('dev');
     const staff = t.network.addUser('root', { role: 'admin' });
-    const project = await t.project(dev, 'Secret Test');
-    const app = await t.app(dev, project, { name: 'Secret App' });
 
     await check('every GET route, as three people, with real and nonsense ids: no sentinel', async () => {
         const nonsense = ['nope', "'\"<x>", 'x'.repeat(300)];
-        const values = (name) => (name === 'project' ? [project, ...nonsense] : name === 'app' ? [app.id, ...nonsense] : [app.id, project, ...nonsense]);
+        const values = () => ['claude-code', ...nonsense];
         const paths = getPaths(capturedApp, values, {
             query: 'q=x&code=forged&state=forged&next=%2F',
-            extra: ['/api/health', '/api/ready', '/metrics', '/release.json', '/auth/callback?code=forged&state=forged', '/callback?code=forged&state=forged', '/api/nope', '/nope', '/.env', '/api/%'],
+            extra: ['/api/health', '/api/ready', '/metrics', '/release.json', '/auth/callback?code=forged&state=forged', '/callback?code=forged&state=forged', '/api/nope', '/nope', '/.env', '/api/%',
+                '/projects', '/docs/api', '/oauth/test-callback?code=x', '/api/v1/releases/rel_x', '/docs/harnesses'],
         });
         const r = await crawl(t, paths, { anonymous: null, dev, staff }, () => SECRETS);
         assert.ok(r.answered >= paths.length * 2, `${r.answered} answers`);
@@ -42,7 +39,7 @@ const SECRETS = { OV_OAUTH_CLIENT_SECRET: 'sentinel-not-a-secret-codes-oauth-cli
 
     await check('every write route with a broken body, anonymous and as the developer: no sentinel', async () => {
         const found = [];
-        const values = (name) => (name === 'project' ? [project] : name === 'app' ? [app.id] : ['x']);
+        const values = () => ['x'];
         for (const route of listRoutes(capturedApp)) {
             for (const method of route.methods.filter((m) => ['post', 'put', 'patch', 'delete'].includes(m))) {
                 for (const p of expand(route.path, values)) {
@@ -56,7 +53,7 @@ const SECRETS = { OV_OAUTH_CLIENT_SECRET: 'sentinel-not-a-secret-codes-oauth-cli
         assert.deepStrictEqual(found, []);
     });
 
-    await check('the outbox and the captured log lines carry no sentinel', async () => {
+    await check('the database and the captured log lines carry no sentinel', async () => {
         const text = await t.dbDump() + t.logs();
         for (const [k, v] of Object.entries(SECRETS)) assert.ok(!text.includes(v), `${k} in the database or the logs`);
     });

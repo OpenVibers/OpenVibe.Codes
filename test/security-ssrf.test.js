@@ -1,12 +1,10 @@
 'use strict';
 /**
- * Codes fetches no URL a developer typed (roadmap WS-R task 5, the SSRF class). The URLs developers
- * give Codes (manifest homepage/icon/webhook fields, OAuth redirect URIs, the webhook tester's
- * delivery target) are validated and stored, or used to build a sample, never requested: every
- * outbound request of the process is recorded while manifests and forms full of internal addresses
- * in every spelling go through validate, create and publish, the redirect form and the webhook
- * tools, and none may go to any of them. And a ratchet: every file in server/ that makes an
- * outbound request itself is on a reviewed list with where it goes.
+ * Codes fetches no URL anyone typed (roadmap WS-R task 5, the SSRF class). The values a caller can hand Codes (a
+ * routing request's requirements, sign-in's next=, the developer console's old addresses that now redirect) are read
+ * or echoed into a redirect, never requested: every outbound request of the process is recorded while requests full
+ * of internal addresses in every spelling go through them, and none may go to any of them. And a ratchet: every file
+ * in server/ that makes an outbound request itself is on a reviewed list with where it goes.
  *
  *   node test/security-ssrf.test.js
  */
@@ -18,7 +16,6 @@ const outbound = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = (url, opts) => { outbound.push(String((url && url.url) || url)); return realFetch(url, opts); };
 
-const manifests = require('../server/domain/manifests');
 const { boot, check, done } = require('./helpers/boot');
 
 const PROBE = '/ssrf-probe-path';
@@ -28,35 +25,22 @@ const INTERNAL = [`http://127.0.0.1:3000${PROBE}`, `http://2130706433${PROBE}`, 
 (async () => {
     const t = await boot();
     const dev = t.network.addUser('dev');
-    const project = await t.project(dev, 'Probe Project');
-    const app = await t.app(dev, project, { name: 'Probe App' });
-    const base = `/projects/${project}/apps/${app.id}`;
-
-    await check('manifests, redirect URIs and the webhook tools full of internal URLs are never fetched', async () => {
-        let v = 1;
+    await check('routing requests, sign-in and the moved addresses full of internal URLs are never fetched', async () => {
         for (const u of INTERNAL) {
-            const manifest = JSON.stringify({ ...manifests.template('app', { appId: app.id, projectId: project, environment: 'sandbox', name: 'Probe App' }), version: `1.0.${v++}`,
-                homepage: u, icon: u, icon_url: u, webhook_url: u, webhooks: [{ url: u, events: ['x'] }], support_url: u, privacy_policy_url: u });
-            await t.get(`${base}/releases`, { as: dev, form: { kind: 'app', manifest, intent: 'validate' } });
-            const made = await t.get(`${base}/releases`, { as: dev, form: { kind: 'app', manifest, intent: 'create' } });
-            if (made.status === 303) await t.get(`/releases/${made.headers.get('location').split('/').pop()}/publish`, { as: dev, form: {} });
-            await t.get('/manifests/validate', { form: { kind: 'app', manifest } });
-            await t.get(`${base}/redirects`, { as: dev, form: { redirect_uris: u } });
-            await t.get('/tools/webhooks/sample', { form: { url: u, endpoint: u, secret: 'sample-not-a-secret', event_type: 'codes.app.published' } });
-            await t.get('/tools/webhooks/verify', { form: { url: u, endpoint: u, secret: 'sample-not-a-secret', body: '{}', signature_v2: 't=1,v2=00' } });
+            await t.get('/api/v1/harnesses/route', { as: dev, json: { task: 'edit', requirements: { capabilities: [u], url: u, endpoint: u } } });
+            await t.get(`/auth/login?next=${encodeURIComponent(u)}`);
+            await t.get(`/projects?url=${encodeURIComponent(u)}`);
             await t.get(`/tools/webhooks?url=${encodeURIComponent(u)}`);
+            await t.get('/api/v1/releases', { method: 'POST', json: { url: u } });
         }
         const hit = outbound.filter((u) => u.includes(PROBE));
-        assert.deepStrictEqual(hit, [], 'Codes fetched a URL a developer typed');
+        assert.deepStrictEqual(hit, [], 'Codes fetched a URL a caller typed');
     });
 
     await check('ratchet: every file that makes an outbound request itself is reviewed', () => {
         const REVIEWED = {
             'server/auth/keys.js': 'no request itself; openvibe-sdk/auth fetches the JWKS',
             'server/auth/sso.js': 'Network OAuth token and revoke (configured)',
-            'server/domain/limits.js': 'the services\' /limits.json (configured internal URLs)',
-            'server/domain/project-archive.js': 'no request: a shell snippet in the archive\'s README text',
-            'server/http/docs.js': 'Network changelog, Tools catalog and Billing policy (configured)',
         };
         const root = path.join(__dirname, '..');
         const found = [];
@@ -71,7 +55,7 @@ const INTERNAL = [`http://127.0.0.1:3000${PROBE}`, `http://2130706433${PROBE}`, 
             }
         };
         walk(path.join(root, 'server'));
-        assert.ok(found.length >= 4, `the scan finds the known sites (${found.join(', ')})`);
+        assert.ok(found.includes('server/auth/sso.js'), `the scan finds the known site (${found.join(', ')})`);
         assert.deepStrictEqual(found.filter((f) => !REVIEWED[f]).sort(), [], 'a new outbound request site: a developer-chosen URL goes through openvibe-shared/egress; then add the file here with where it goes');
     });
 

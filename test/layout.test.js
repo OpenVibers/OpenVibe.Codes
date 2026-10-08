@@ -20,7 +20,7 @@ const BOOST = /<script src="\/shared\/boost\.js\?v=[0-9a-f]{12}" data-main="#mai
     const release = (await t.get('/release.json')).json().release;
 
     await check('every rendered page carries the ov-boost marker (the app\'s release) and the data-main boost script', async () => {
-        for (const p of ['/', '/docs', '/oauth', '/manifests/validate', '/docs/harnesses']) {
+        for (const p of ['/', '/harnesses', '/improve', '/policy']) {
             const r = await t.get(p);
             assert.strictEqual(r.status, 200, p);
             const m = r.text.match(MARKER);
@@ -29,10 +29,10 @@ const BOOST = /<script src="\/shared\/boost\.js\?v=[0-9a-f]{12}" data-main="#mai
             assert.match(r.text, BOOST, `${p}: no boost script with data-main`);
             assert.match(r.text, /<main id="main"/, `${p}: the page's main is not #main`);
         }
-        const signedIn = await t.get('/projects', { as: user });
+        const signedIn = await t.get('/improve', { as: user });
         assert.strictEqual(signedIn.status, 200);
-        assert.match(signedIn.text, MARKER, '/projects: no ov-boost marker');
-        assert.match(signedIn.text, BOOST, '/projects: no boost script');
+        assert.match(signedIn.text, MARKER, '/improve signed in: no ov-boost marker');
+        assert.match(signedIn.text, BOOST, '/improve signed in: no boost script');
     });
 
     await check('the home page head comes from openvibe-shared/shell with the same title, canonical, robots and JSON-LD', async () => {
@@ -40,7 +40,7 @@ const BOOST = /<script src="\/shared\/boost\.js\?v=[0-9a-f]{12}" data-main="#mai
         assert.strictEqual(r.status, 200);
         const head = r.text.slice(0, r.text.indexOf('</head>'));
         assert.strictEqual((r.text.match(/<title>/g) || []).length, 1, 'exactly one <title>');
-        assert.ok(head.includes('<title>OpenVibe.Codes: the OpenVibe developer portal</title>'), 'home title');
+        assert.ok(head.includes('<title>OpenVibe.Codes: code with any agent</title>'), 'home title');
         assert.ok(head.includes('<link rel="canonical" href="https://openvibe.codes/">'), 'canonical');
         assert.ok(head.includes('<meta name="robots" content="index, follow">'), 'robots');
         const ld = [...head.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => JSON.parse(m[1])['@type']);
@@ -53,13 +53,13 @@ const BOOST = /<script src="\/shared\/boost\.js\?v=[0-9a-f]{12}" data-main="#mai
     });
 
     await check('the navbar config uses the {path} login template, not the path baked in', async () => {
-        const r = await t.get('/docs');
+        const r = await t.get('/harnesses');
         assert.match(r.text, /"loginUrl":"\/auth\/login\?next=\{path\}"/);
         assert.ok(!/"loginUrl":"\/auth\/login\?next=%2F/.test(r.text), 'loginUrl still has the current path baked in');
     });
 
     await check('the harness catalog page lists every seed harness server-side, with no local path', async () => {
-        const r = await t.get('/docs/harnesses');
+        const r = await t.get('/harnesses');
         assert.strictEqual(r.status, 200, r.text.slice(0, 300));
         assert.match(r.headers.get('content-type'), /^text\/html/);
         const rows = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'server', 'data', 'harness-offers.json'), 'utf8'));

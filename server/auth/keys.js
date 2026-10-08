@@ -3,19 +3,18 @@
 /**
  * The Network's RS256 signing key, fetched once from GET /api/.well-known/jwks on the configured
  * internal URL and kept fresh by openvibe-sdk/auth's JWKS client. Tokens are verified offline
- * against it: the person's session token (sign-in) and, in playgrounds, the app token a developer
- * brings.
+ * against it: the person's session token (sign-in).
  *
  * The SDK keeps one client per URL: the last good keys through outages, exponential backoff, a
  * rotation honoured at once, unknown-kid floods throttled, the refresh timer unref'd. This module
- * is a thin shim so the rest of Codes (the contracts-based requireCapability guard, the readiness
- * check, the SSO middleware) can keep talking to `keys.get()` / `keys.ensure()` / `keys.loaded()`,
+ * is a thin shim so the rest of Codes (the readiness check, the SSO middleware) can keep talking to
+ * `keys.get()` / `keys.ensure()` / `keys.loaded()`,
  * while verification goes through the SDK's verifyUserToken / verifyAppToken with `jwks: <url>`.
  *
  * Nothing the SDK says about a failed key fetch leaves this module: its message names the internal
  * JWKS URL and the fetch error, so token.no_key answers 'signing key not loaded yet' (and an error
  * without a code 'token does not verify'). Reasons about the token itself (audience, expiry,
- * signature) are kept: the playground's developers need them. Every rejection is logged.
+ * signature) are kept. Every rejection is logged.
  */
 const sdk = require('openvibe-sdk/auth');
 
@@ -40,9 +39,9 @@ function jwksUrl(config) {
 }
 
 /**
- * `keys` is what app.js hands the rest of the service: a facade over the SDK's jwksClient. The
- * contracts-based requireCapability wants a synchronous PEM, so we mirror the cached first key as
- * PEM — refreshed every time the SDK gives us keys (ensure(), verifyUser(), verifyApp()).
+ * `keys` is what app.js hands the rest of the service: a facade over the SDK's jwksClient. A synchronous caller
+ * wants a PEM, so we mirror the cached first key as PEM — refreshed every time the SDK gives us keys (ensure(),
+ * verifyUser(), verifyApp()).
  */
 function createKeyStore({ config, fetchImpl = globalThis.fetch, log = console }) {
     const url = jwksUrl(config);

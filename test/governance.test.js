@@ -44,7 +44,7 @@ const ROOT = path.join(__dirname, '..');
         assert.match(idx.text, /\(draft, pending owner review\)/);
         const map = await t.get('/sitemap.xml');
         for (const g of GOVERNANCE) assert.ok(!map.text.includes(`/policy/${g.slug}<`), `${g.slug} not in the sitemap while a draft`);
-        assert.ok(map.text.includes('/policy/compatibility<'));
+        assert.ok(map.text.includes('/improve<'));
     });
 
     await check('every openvibe.codes link in the documents resolves', async () => {
@@ -53,7 +53,7 @@ const ROOT = path.join(__dirname, '..');
             const text = fs.readFileSync(path.join(ROOT, g.file), 'utf8');
             for (const m of text.matchAll(/\]\(https:\/\/openvibe\.codes(\/[^)\s#]*)\)/g)) links.add(m[1]);
         }
-        assert.ok(links.size >= 5);
+        assert.ok(links.size >= 4);
         for (const l of links) assert.strictEqual((await t.get(l)).status, 200, l);
     });
 

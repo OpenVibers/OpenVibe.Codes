@@ -1,5 +1,5 @@
 [Unit]
-Description=OpenVibe.Codes — the developer portal (projects over Network's API, generated docs, tools, release metadata)
+Description=OpenVibe.Codes — the open coding-agent harness (the agent catalog and router, Improve OpenVibe; the developer console moved to OpenVibe.Services)
 # Network (sign-in, JWKS, the projects API, registry, tokens) and Events (the outbox relay) should be
 # up first, but Codes degrades honestly without them: docs, tools and policy pages serve; project
 # pages show Network's failure; events wait in the outbox (see /api/ready).

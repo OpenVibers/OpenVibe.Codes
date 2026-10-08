@@ -1,26 +1,23 @@
 'use strict';
 
 /**
- * Per-actor rate limits at Codes' capability boundaries (roadmap WS-R task 4; openvibe-sdk/limits):
- * /api/v1, the signed-in portal (/projects), release actions, the developer tools' forms and the
- * staff trust form.
+ * Per-actor rate limits at Codes' boundaries (roadmap WS-R task 4; openvibe-sdk/limits): /api/v1 (the coding-agent
+ * catalog and its router).
  *
- * The per-address limits in app.js and the routers (pages 300 a minute, portal writes 60, the tools and
- * API writes 30 and 60, sign-in) and the playground's runs an hour per person stay. These count
+ * The per-address limits in app.js and the routers (pages 300 a minute, the router 60, sign-in) stay. These count
  * requests by who makes them:
  *
- *   an app                 its principal, app:app_… (the token requireCapability verified on /api/v1)
  *   a person               user:usr_… (the signed-in session sso.middleware verified)
  *   anyone else            ip:<address>
  *
- * Codes hosts no git remotes: there are no clone or push routes to leave out. Past a limit the route
- * answers 429 problem+json `rate_limited` with Retry-After before it does any work (before the form or
- * upload is read, before Network is asked); the refusal is logged once and counted in
- * codes_rate_limited_total{limit,window}. Reads take CODES_LIMITS_MINUTE / CODES_LIMITS_HOUR (120 and
- * 3000); every write has its own number below. Counters live in this process: a restart forgets them.
+ * Codes hosts no git remotes: there are no clone or push routes to leave out. Past a limit the route answers 429
+ * problem+json `rate_limited` with Retry-After before it does any work (before the body is read); the refusal is
+ * logged once and counted in codes_rate_limited_total{limit,window}. Reads take CODES_LIMITS_MINUTE /
+ * CODES_LIMITS_HOUR (120 and 3000); the router has its own number below. Counters live in this process unless
+ * VALKEY_URL is set.
  *
- * Never limited: /api/health, /api/ready, /release.json, /metrics, sign-in, and the public pages and
- * docs (the per-address limit bounds them).
+ * Never limited: /api/health, /api/ready, /release.json, /metrics, sign-in, and the public pages (the per-address
+ * limit bounds them).
  */
 const { createActorLimiter, createValkeyLimitStore } = require('openvibe-sdk/limits');
 
@@ -34,33 +31,8 @@ function actor(req) {
 
 /** The writes and the expensive reads, each with its numbers per caller (a minute, an hour). */
 const BUDGETS = {
-    // A project is a Network record with its own members and environments: people start a few.
-    'codes.project.create': { minute: 5, hour: 30 },
-    // Members, roles, archive and delete: an owner changes a few at a time.
-    'codes.project.manage': { minute: 20, hour: 200 },
-    // The full archive reads every object and event a project holds (one at a time per project).
-    'codes.project.export': { minute: 3, hour: 20 },
-    // An app is a Network client with credentials: a developer registers a few.
-    'codes.app.create': { minute: 10, hour: 60 },
-    // Redirect URIs, grants and revoking an app: a developer saves a form now and then.
-    'codes.app.manage': { minute: 30, hour: 300 },
-    // Rotating or revoking a credential mints or kills a secret: a few at a time.
-    'codes.app.credential': { minute: 10, hour: 60 },
-    // A playground run calls Events or Media with the app's own credential: above the runs an hour
-    // per person (CODES_PLAYGROUND_RUNS_PER_HOUR, 60), which keeps deciding; refusals count.
-    'codes.playground.run': { minute: 10, hour: 120 },
-    // A release draft (a validated manifest; the editor's "validate only" counts too, so a developer
-    // fixing a manifest has room): 20 a minute, 200 an hour.
-    'codes.release.create': { minute: 20, hour: 200 },
-    // Publishing, deprecating and revoking a release announce it to the network.
-    'codes.release.manage': { minute: 20, hour: 200 },
-    // Validating a manifest or checking a webhook signature: a developer's pace, not a crawler's.
-    'codes.manifest.validate': { minute: 30, hour: 600 },
-    'codes.webhook.tool': { minute: 30, hour: 600 },
     // Routing a coding task over the harness catalog (no I/O, but a POST: the reads' defaults skip it).
     'codes.harness.route': { minute: 30, hour: 600 },
-    // Staff setting an app's trust tier.
-    'codes.trust.set': { minute: 30, hour: 300 },
 };
 
 /**

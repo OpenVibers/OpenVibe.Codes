@@ -2,12 +2,11 @@
 
 /**
  * Page shell. Every page is server-rendered through openvibe-shared/shell and is complete without JavaScript:
- *   - <head>: title, description, canonical, robots (portal pages are noindex), Open Graph/Twitter,
+ *   - <head>: title, description, canonical, robots (pages are noindex unless they say otherwise), Open Graph/Twitter,
  *     JSON-LD (openvibe-shared/seo), plus Codes' extras: the shared app icon, stylesheets, the boost marker
  *   - the OpenVibe Frame: theme-loader, web-runtime, navbar and footer scripts (the shell boots the
  *     navbar; the footer is initialised below), a <noscript> navigation bar and the server-rendered footer
- *   - Codes' own script only where a page offers an optional in-browser convenience (webhook
- *     signature computed locally, copy buttons); every form works without it
+ *   - Codes' own script only where a page offers an optional in-browser convenience (copy buttons)
  */
 const crypto = require('crypto');
 const ovServe = require('openvibe-shared/serve');
@@ -23,12 +22,9 @@ const NETWORK_URL = 'https://openvibe.network';
 const SITE_NAME = 'OpenVibe.Codes';
 const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public');
 const NAV = [
-    { label: 'Projects', href: '/projects' },
-    { label: 'Docs', href: '/docs' },
-    { label: 'OAuth', href: '/oauth' },
-    { label: 'Webhooks', href: '/tools/webhooks' },
-    { label: 'Manifests', href: '/manifests/validate' },
-    { label: 'Policy', href: '/policy' },
+    { label: 'Agents', href: '/harnesses' },
+    { label: 'Improve OpenVibe', href: '/improve' },
+    { label: 'Community', href: '/policy' },
 ];
 
 const hashes = new Map();
@@ -69,11 +65,12 @@ function renderPage(o) {
     };
     // This site's own account links live in the shared navbar's account menu (the page's account
     // bar below is only for visitors without JavaScript).
-    if (signedIn) nav.menu = { before: [...(viewer.staff ? [{ label: 'Staff', href: '/staff', icon: 'fa-shield' }] : []), { label: 'Your projects', href: '/projects', icon: 'fa-folder' }] };
+    // Your projects and apps live on the developer platform (OpenVibe.Services).
+    if (signedIn) nav.menu = { before: [{ label: 'Your projects', href: 'https://openvibe.services/projects', icon: 'fa-folder' }] };
     const footer = { service: 'codes', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' };
     const account = signedIn
-        ? html`Signed in as <strong>${viewer.displayName || viewer.username || 'you'}</strong>${viewer.staff ? html` · <a href="/staff">Staff</a>` : ''} · <a href="/projects">Your projects</a> · <a href="/auth/logout?next=${loginNext}">Sign out</a>`
-        : html`<a href="/auth/login?next=${loginNext}">Sign in with OpenVibe</a> to manage projects and apps`;
+        ? html`Signed in as <strong>${viewer.displayName || viewer.username || 'you'}</strong> · <a href="/auth/logout?next=${loginNext}">Sign out</a>`
+        : html`<a href="/auth/login?next=${loginNext}">Sign in with OpenVibe</a>`;
     const crumbs = (o.crumbs || []).length
         ? html`<nav class="crumbs" aria-label="Breadcrumbs">${o.crumbs.map((c, i) => html`${i ? ' / ' : ''}${c.href ? html`<a href="${c.href}">${c.label}</a>` : c.label}`)}</nav>`
         : '';
@@ -81,10 +78,10 @@ function renderPage(o) {
     return shell.page({
         name: SITE_NAME,
         lang: 'en',
-        title: o.title || `${SITE_NAME}: the OpenVibe developer portal`,
+        title: o.title || `${SITE_NAME}: code with any agent`,
         titleSuffix: o.title ? ` · ${SITE_NAME}` : '',
         siteName: SITE_NAME,
-        description: o.description || 'Build on OpenVibe: projects, apps and scoped credentials, generated contract and SDK docs, webhook and OAuth tools, and manifest validation.',
+        description: o.description || 'The open coding-agent harness: Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API and your own models behind one router, and the way to improve OpenVibe itself.',
         canonical,
         robots: o.index ? 'index, follow' : 'noindex, nofollow',
         jsonLd: (o.jsonLd || []).filter(Boolean),
@@ -118,7 +115,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 function render(v) { return require('./html').render(v); }
 
-/** Send a page; portal pages are private and never cached. */
+/** Send a page; a page rendered for a signed-in person is private and never cached. */
 function send(res, status, o) {
     // A page rendered for a signed-in person names them in the account bar: never shared caches.
     const personal = o.viewer && o.viewer.kind === 'user';

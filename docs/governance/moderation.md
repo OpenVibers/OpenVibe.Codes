@@ -2,12 +2,12 @@
 
 **Draft — pending owner review.** This text is a proposal. It takes effect only when the owner of the OpenVibers organization approves it and removes this line.
 
-This policy explains how OpenVibe moderates its developer spaces: the OpenVibers repositories, OpenVibe.Codes, and the apps and releases published through it. Viewer- and streamer-facing products (Live, Chat, Community) keep their own moderation rules; this policy does not change them.
+This policy explains how OpenVibe moderates its developer spaces: the OpenVibers repositories, OpenVibe.Codes, and the apps and releases published through OpenVibe.Services. Viewer- and streamer-facing products (Live, Chat, Community) keep their own moderation rules; this policy does not change them.
 
 ## What can be moderated
 
 - **Conduct** in issues, pull requests, discussions and reviews, under the [code of conduct](https://openvibe.codes/policy/code-of-conduct).
-- **Releases** published in Codes: a release that is malicious, misleading about what it does, infringes someone's rights, or breaks the platform's rules.
+- **Releases** published on OpenVibe.Services: a release that is malicious, misleading about what it does, infringes someone's rights, or breaks the platform's rules.
 - **Apps and projects**: an app that abuses its grants, tries to get around them, or harms the people who use it.
 - **Trust tiers** (unreviewed, reviewed, first-party): these are information only. A tier never grants or blocks anything; changing one is a note to users, not a sanction.
 
@@ -35,7 +35,7 @@ From mildest to most serious. Moderators pick the mildest step that fixes the pr
 
 - Revocation and deprecation reasons for releases are public on the release page, and changes to trust tiers are listed in the app's public trust history.
 - Network keeps an append-only audit log of changes to projects, apps, credentials and grants; project admins can read it for their own project, and can download it with the project export.
-- A release revoked by Codes staff who could not manage it as project members, and every trust tier change, are also reported as `codes.moderation.action` to the network's moderation audit log, which OpenVibe staff can read.
+- A release revoked by Services staff who could not manage it as project members, and every trust tier change, are also reported as `services.moderation.action` to the network's moderation audit log, which OpenVibe staff can read.
 - Reports and the identity of the people who report stay confidential.
 
 ## Appeals

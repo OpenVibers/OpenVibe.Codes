@@ -36,24 +36,19 @@ function files(dir) {
     });
 
     const t = await boot();
-    await check('a whole portal session never sends an internal key to Network', async () => {
+    await check('a whole session (sign-in, every page, the router) never sends an internal key to Network', async () => {
         const u = t.network.addUser('nia');
-        const p = await t.project(u);
-        const a = await t.app(u, p);
-        await t.grant(u, p, a.id, 'media.object.upload');
-        await t.get(`/projects/${p}`, { as: u });
-        await t.get(`/projects/${p}/apps/${a.id}`, { as: u });
-        await t.get(`/projects/${p}/apps/${a.id}/playground/media`, { as: u, multipart: { fields: { credential_type: 'client_secret', credential: a.secret }, file: { name: 'x', content: 'x' } } });
+        for (const p of ['/', '/harnesses', '/improve', '/policy', '/auth/me']) await t.get(p, { as: u });
+        await t.get('/api/v1/harnesses/route', { as: u, json: { task: 'edit' } });
         const sent = t.network.requests.filter((r) => r.headers['x-internal-key']);
         assert.strictEqual(sent.length, 0);
-        assert.ok(t.network.requests.length > 10);
     });
 
-    await check('presenting X-Internal-Key gets nothing: the API still wants an app token', async () => {
-        const r = await t.get('/api/v1/apps/app_01JABCDEFGHJKMNPQRSTVWXYZ0/releases', { method: 'POST', headers: { 'x-internal-key': 'anything', 'content-type': 'application/json' }, body: '{}' });
-        assert.strictEqual(r.status, 401);
-        const page = await t.get('/projects', { headers: { 'x-internal-key': 'anything' } });
-        assert.strictEqual(page.status, 401);
+    await check('presenting X-Internal-Key changes nothing: the public routes answer as for anyone', async () => {
+        const r = await t.get('/api/v1/harnesses', { headers: { 'x-internal-key': 'anything' } });
+        assert.strictEqual(r.status, 200);
+        const me = await t.get('/auth/me', { headers: { 'x-internal-key': 'anything' } });
+        assert.deepStrictEqual(JSON.parse(me.text), { user: null }, 'the key signs nobody in');
     });
 
     await t.close();

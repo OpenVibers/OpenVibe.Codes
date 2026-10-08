@@ -2,22 +2,19 @@
 /**
  * Truthful readiness for GET /api/ready (openvibe-shared/ready, Track O).
  *
- *   db              required  a real query on Codes' PostgreSQL store: every Codes table answers
- *   docs            required  the reference was generated at boot from the pinned packages
- *   jwks            optional  openvibe-sdk/auth's JWKS cache has the Network signing key; without
- *                             it nobody can sign in and app tokens cannot be verified (docs and
- *                             tools still serve). The SDK keeps one client per URL and reports
- *                             readiness, staleness, failures and the next try for us.
- *   network         optional  the Network answers (its /.well-known/openvibe descriptor); without
- *                             it the portal shows Network's failure on every project page
- *   oauth_client    optional  OV_OAUTH_CLIENT_SECRET is set (sign-in and the events relay need it)
- *   events_relay    optional  the outbox relay is configured and has no rejected rows
+ *   db              required  a real round trip to Codes' PostgreSQL store (it holds no table of its own since the
+ *                             console moved to OpenVibe.Services; the harness's runs will)
+ *   catalog         required  the harness catalog loaded and validated at boot
+ *   jwks            optional  openvibe-sdk/auth's JWKS cache has the Network signing key; without it nobody can sign
+ *                             in (every public page and the router still serve). The SDK keeps one client per URL and
+ *                             reports readiness, staleness, failures and the next try for us.
+ *   oauth_client    optional  OV_OAUTH_CLIENT_SECRET is set (sign-in needs it)
+ *   valkey          optional  shared per-actor limit counters
  */
 const { jwksStatus } = require('openvibe-sdk/auth');
 const { createReadiness } = require('openvibe-shared/ready');
-const { TABLES } = require('./db');
 
-function createCodesReadiness({ store, network, outbox, docs, config, valkey = null, release = null }) {
+function createCodesReadiness({ store, harnesses, config, valkey = null, release = null }) {
     const { db } = store;
     return createReadiness({
         service: 'codes',
@@ -25,20 +22,15 @@ function createCodesReadiness({ store, network, outbox, docs, config, valkey = n
         checks: [
             {
                 name: 'db', required: true,
-                // A real round trip that names the store (postgresql / pglite), and the tables present.
+                // A real round trip that names the store (postgresql / pglite).
                 check: async () => {
                     const r = await db.ready();
-                    if (!r.ok) return r.error;
-                    const names = new Set((await db.prepare("SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema()").all()).map((r) => r.name));
-                    const missing = TABLES.filter((t) => !names.has(t));
-                    return missing.length ? `missing ${missing.join(', ')} (migrations did not run)` : { ok: true, detail: r.detail };
+                    return r.ok ? { ok: true, detail: r.detail } : r.error;
                 },
             },
             {
-                name: 'docs', required: true,
-                check: () => (docs && docs.contracts.length && docs.capabilities.length
-                    ? { ok: true, detail: { contracts: docs.contractsVersion, sdk: docs.sdkVersion } }
-                    : 'reference docs were not generated'),
+                name: 'catalog', required: true,
+                check: () => (harnesses && harnesses.list().length ? { ok: true, detail: { harnesses: harnesses.list().length } } : 'the harness catalog is empty'),
             },
             { name: 'valkey', required: false, check: async () => (valkey ? valkey.ready() : { skipped: 'VALKEY_URL not set: per-actor limits count in this process only' }) },
             {
@@ -49,28 +41,13 @@ function createCodesReadiness({ store, network, outbox, docs, config, valkey = n
                     const statuses = jwksStatus();
                     if (!statuses.length) return 'no JWKS clients (misconfigured)';
                     const first = statuses[0];
-                    if (!first.ready) return 'Network signing key not loaded yet: sign-in and token checks are unavailable';
+                    if (!first.ready) return 'Network signing key not loaded yet: sign-in is unavailable';
                     return { ok: true, detail: { keys: first.keys, failures: first.failures, stale: first.stale, fetched_at: first.fetchedAt } };
-                },
-            },
-            {
-                name: 'network', required: false, cacheMs: 30_000,
-                check: async () => {
-                    try { await network.registry.descriptor(); return true; } catch (err) { return `OpenVibe.Network did not answer: ${network.problemOf(err).code}`; }
                 },
             },
             {
                 name: 'oauth_client', required: false,
                 check: () => (config.oauth.clientSecret ? true : 'OV_OAUTH_CLIENT_SECRET unset: sign-in cannot complete'),
-            },
-            {
-                name: 'events_relay', required: false,
-                check: async () => {
-                    const s = await outbox.status();
-                    if (!s.enabled) return `relay off (EVENTS_URL or OV_OAUTH_CLIENT_SECRET unset); ${s.pending} events waiting`;
-                    if (s.rejected) return `${s.rejected} events rejected by OpenVibe.Events`;
-                    return { ok: true, detail: { pending: s.pending } };
-                },
             },
         ],
     });
