@@ -1,8 +1,9 @@
 'use strict';
 
 /**
- * Public pages: the home page (the open coding-agent harness), the agent catalog, Improve OpenVibe (how OpenVibe
- * itself is built and how to help), the community documents, and the update log. Crawl artifacts (robots.txt,
+ * Public pages: the home page (the open coding-agent harness), getting started with the harness on your own machine,
+ * the agent catalog, Improve OpenVibe (how OpenVibe itself is built and how to help), the community documents, and the
+ * update log. Crawl artifacts (robots.txt,
  * sitemap.xml, llms.txt, llms-full.txt, the home page's JSON-LD) live in http/discovery.js and are mounted here.
  *
  * What is shown is read, never restated: the catalog is server/data/harness-offers.json as validated at boot, the
@@ -26,6 +27,9 @@ const placement = require('../domain/harness-placement');
 
 const ROOT = path.join(__dirname, '..', '..');
 const GITHUB = 'https://github.com/OpenVibers';
+const { version: VERSION } = require('../../package.json');
+// The harness installs from its release tag, the way every OpenVibe library is pinned.
+const INSTALL = `npm install -g https://codeload.github.com/OpenVibers/OpenVibe.Codes/tar.gz/refs/tags/v${VERSION}`;
 
 /**
  * Community documents: Markdown in this repository (the same files GitHub shows), rendered as they are. A document
@@ -77,13 +81,16 @@ function createPageRoutes(ctx) {
     r.get('/', (req, res) => {
         const offers = harnesses.list();
         const tasks = Object.keys(placement.TASKS);
-        const snippet = `# Which agent should take this task?
-curl -s ${config.baseUrl}/api/v1/harnesses/route \\
-  -H 'content-type: application/json' \\
-  -d '{"task":"edit"}'
-
-# → { "selected": "claude-code:…",
-#     "reasons": […], "candidates": […] }`;
+        const snippet = `$ openvibe-codes run "add a test for the date parser"
+run run_20261008… · ~/my-project
+▶ codex · session 0199…
+! You have hit your usage limit.
+⇢ handing over from codex: You have hit your usage limit.
+▶ claude-code · session 4f2e…
+  → Read src/date.js
+  → Edit test/date.test.js
+Added test/date.test.js: three cases, all pass.
+✔ done (48 s · $0.0400 · 31k in / 1.2k out)`;
         page(req, res, {
             index: true, cache: PUBLIC_CACHE,
             jsonLd: homeJsonLd(config),
@@ -92,8 +99,8 @@ curl -s ${config.baseUrl}/api/v1/harnesses/route \\
                 eyebrow: 'OpenVibe.Codes · the open coding-agent harness · alpha',
                 title: 'Code with', accent: 'any agent',
                 lede: 'One open harness for Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API and models you host yourself: send a coding task to the agent that fits it, hand it over when one gets stuck, and keep the whole run in one place. Then point it at OpenVibe itself.',
-                actions: [{ label: 'Meet the agents', href: '/harnesses', primary: true }, { label: 'Improve OpenVibe', href: '/improve' }],
-                note: 'Open source (AGPL-3.0). Today: the agent catalog and a routing API anyone can call. Running jobs, hand-offs and a self-hosted runner come next; the list below says exactly what works.',
+                actions: [{ label: 'Install the harness', href: '/start', primary: true }, { label: 'Meet the agents', href: '/harnesses' }],
+                note: `Open source (AGPL-3.0). Version ${VERSION} runs on your machine with the agents and keys you already have; nothing goes through OpenVibe. A hosted runner comes next; the list below says exactly what works.`,
                 aside: { html: `<pre class="codes-hero-code"><code>${showcase.esc(snippet)}</code></pre>` },
             }))}
 ${raw(showcase.features({
@@ -106,7 +113,7 @@ ${raw(showcase.steps({
                     { title: 'Describe the task', text: `One of ${tasks.join(', ')}, plus anything it must have: a capability, a runtime, a ceiling on cost.` },
                     { title: 'Hard limits first', text: 'An agent that lacks a required capability is out, whatever it costs. Each refusal says why.' },
                     { title: 'Then the cheapest fit', text: 'Already-paid capacity and free allowances first, then price per token, through the same placement engine every OpenVibe service uses.' },
-                    { title: 'Hand-offs', text: 'When the first agent stalls, the run moves to the next candidate with its context (next: the runner).' },
+                    { title: 'Hand-offs', text: 'When an agent fails, hits its usage limit or goes quiet, the task moves to the next one with a note: the task, the files touched and the state of the tree.' },
                 ],
             }))}
 <section class="sc-sec" aria-labelledby="h-improve"><h2 id="h-improve">Improve OpenVibe</h2>
@@ -114,14 +121,94 @@ ${raw(showcase.steps({
 <p><a class="sc-btn sc-primary" href="/improve">Start contributing</a> <a class="sc-btn" href="/policy/contributing">Read the guide</a></p></section>
 <section class="sc-sec" aria-labelledby="h-status"><h2 id="h-status">What works today</h2>
 ${table(['Piece', 'State'], [
+                [html`<a href="/start">The harness on your machine</a> (<code>openvibe-codes</code>)`, `Live, ${VERSION}: runs a task on any of the seven agents with your CLIs and keys, streams one event format, keeps every run to show or resume.`],
+                ['Hand-offs between agents', 'Live: a failed, rate-limited or silent agent hands the task to the next one with a note on what was done.'],
                 [html`<a href="/harnesses">The agent catalog</a>`, 'Live: every harness and model with its capabilities, prices and limits.'],
                 [html`<code>GET /api/v1/harnesses</code>, <code>POST /api/v1/harnesses/route</code>`, 'Live: public, no key needed; per-address and per-caller limits.'],
-                ['Running a task on an agent, streaming its output, budgets', 'Next. The agents run today on OpenVibe\'s own machines; opening that to everyone is the next step.'],
-                ['Hand-offs between agents, resumable sessions', 'Next, with the runner.'],
-                ['A runner on your own machine (your CLIs, your keys)', 'Planned.'],
-                [html`Improve OpenVibe from here: repository → change → tests → review → pull request`, 'Planned. Today: the contributor path on GitHub, below.'],
+                ['A hosted runner: tasks on OpenVibe\'s machines, with budgets', 'Next, on OpenVibe.Run workers.'],
+                ['OpenVibe.Actor using Codes for its coding work', 'Next: Actor is OpenVibe\'s general agent; Codes is the part of it that writes code.'],
+                [html`Improve OpenVibe from here: repository → change → tests → review → pull request`, 'Planned. Today: the harness plus the contributor path on GitHub, below.'],
             ])}</section>
 ${raw(showcase.cta({ title: 'Building an app instead?', text: 'Projects, keys, grants and the API docs of every OpenVibe service live on OpenVibe.Services.', actions: [{ label: 'Open the developer platform', href: SERVICES_ORIGIN, primary: true }, { label: 'Meet the agents', href: '/harnesses' }] }))}`,
+        });
+    });
+
+    // ── Getting started: the harness on your own machine (bin/openvibe-codes.js, harness/) ──
+    r.get('/start', (req, res) => {
+        const example = `$ openvibe-codes agents
+✔ claude-code        Claude Code      ~/.local/bin/claude
+✔ codex              Codex            ~/.local/bin/codex
+· aider              Aider            \`aider\` is not on PATH (install Aider)
+· deepseek           DeepSeek         set DEEPSEEK_API_KEY
+
+$ cd my-project
+$ openvibe-codes run "rename getUser to findUser everywhere"
+$ openvibe-codes run --permission read "where is the session cookie set?"
+$ openvibe-codes runs
+$ openvibe-codes resume run_… "now add a test"`;
+        const fromCode = `const { createHarness } = require('openvibe-codes');
+
+const harness = createHarness();          // your PATH, your keys
+for await (const event of harness.run({ prompt: 'fix the failing test', cwd: '.' })) {
+    if (event.type === 'result') console.log(event.is_error ? 'failed' : 'done', event.result);
+}`;
+        const events = `{"type":"system","subtype":"init","agent":"codex","session_id":"0199…","run_id":"run_…"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","content":"…","is_error":false}]}}
+{"type":"system","subtype":"handoff","from":"codex","reason":"You have hit your usage limit."}
+{"type":"result","subtype":"success","is_error":false,"result":"…","total_cost_usd":0.04,"usage":{…}}`;
+        page(req, res, {
+            index: true, cache: PUBLIC_CACHE,
+            title: 'Get started with the coding-agent harness',
+            description: 'Install openvibe-codes and run coding tasks on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or your own model, with hand-offs between them, from your terminal or your own code.',
+            crumbs: [{ label: 'Get started' }],
+            body: html`<h1>Get started</h1>
+<p><code>openvibe-codes</code> runs a coding task on whichever agent fits it, hands it to the next one when an agent fails, hits its limit or goes quiet, and keeps the whole run. It runs on your machine with the agents and keys you already have: nothing goes through OpenVibe, and it needs no account.</p>
+<h2 id="install">Install</h2>
+<p>Node.js 22 or newer, then:</p>
+<pre><code>${INSTALL}</code></pre>
+<p>Or from a clone: <code>git clone ${GITHUB}/OpenVibe.Codes</code>, <code>npm ci</code>, then <code>node bin/openvibe-codes.js</code>. Check what it found with <code>openvibe-codes agents</code>.</p>
+<h2 id="agents">The agents it can use</h2>
+<p>Install any of them; the harness uses what is there and says why the rest are not.</p>
+${table(['Agent', 'What it needs'], [
+                [html`<a href="/harnesses#claude-code">Claude Code</a>`, html`<code>claude</code> on PATH, signed in`],
+                [html`<a href="/harnesses#codex">Codex</a>`, html`<code>codex</code> on PATH, signed in`],
+                [html`<a href="/harnesses#opencode">OpenCode</a>`, html`<code>opencode</code> on PATH`],
+                [html`<a href="/harnesses#command-code">Command Code</a>`, html`<code>cmd</code> on PATH`],
+                [html`<a href="/harnesses#aider">Aider</a>`, html`<code>aider</code> on PATH`],
+                [html`<a href="/harnesses#deepseek">DeepSeek</a>`, html`<code>DEEPSEEK_API_KEY</code>; the harness runs its own agent loop against the API`],
+                [html`<a href="/harnesses#openai-compatible">Your own model</a>`, html`<code>OPENVIBE_CODES_BASE_URL</code> (an OpenAI-compatible server: llama.cpp, vLLM, Ollama, LM Studio…), <code>OPENVIBE_CODES_MODEL</code>, and <code>OPENVIBE_CODES_API_KEY</code> if it wants one`],
+            ])}
+<h2 id="use">Use it</h2>
+<pre><code>${example}</code></pre>
+${table(['Command', 'What it does'], [
+                [html`<code>agents</code>`, 'Which agents this machine can run, and why not the others.'],
+                [html`<code>route [--task edit] [--need harness:resume]</code>`, 'Which agent a task would go to, with the reason for every candidate.'],
+                [html`<code>run [options] "task"</code>`, html`Run a task. <code>--agent</code> skips routing, <code>--model</code> picks the first agent's model, <code>--cwd</code> sets where it works, <code>--attempts</code> caps the hand-offs (default 3), <code>--no-handoff</code> stops at the first result, <code>--json</code> prints the events. A task of <code>-</code> is read from stdin.`],
+                [html`<code>runs</code>`, 'The latest runs on this machine.'],
+                [html`<code>show &lt;run id&gt; [--json]</code>`, 'One run: each attempt, its session and the result; every event with --json.'],
+                [html`<code>resume &lt;run id&gt; "follow-up"</code>`, 'Continue the run\'s last session with the same agent.'],
+            ])}
+<p>The exit code follows the result: 0 when the last agent finished, 1 when it did not.</p>
+<h2 id="permission">Permission levels</h2>
+${table(['Level', 'What the agent may do'], [
+                [html`<code>read</code>`, 'Look and answer. Claude Code runs in plan mode, Codex in its read-only sandbox, the API agents get only list, read and search tools.'],
+                [html`<code>edit</code> (default)`, html`Change files in the working directory. Claude Code accepts edits and is refused <code>git push</code>; Codex runs in its workspace-write sandbox; the API agents can write and edit files but not run commands.`],
+                [html`<code>full</code>`, 'Anything, unattended, including running commands. Use it in a container, a VM or a throwaway checkout.'],
+            ])}
+<p>The built-in API agent never leaves the working directory, never reads a <code>.env</code> file and never writes under <code>.git</code>, at any level.</p>
+<h2 id="handoffs">Hand-offs</h2>
+<p>When an attempt fails, hits a usage limit, crashes or prints nothing for a while, the harness stops it and gives the task to the next agent the router picks, leaving out the ones already tried. The next agent gets a note: the original task, which agent tried and why it stopped, the tools it used, the files it changed, its last message and <code>git status</code>. Every attempt is in the run.</p>
+<h2 id="events">One event format</h2>
+<p>Every agent's output becomes the same events: one JSON object per line with <code>--json</code>, the same shape as Claude Code's <code>stream-json</code>, ending with exactly one <code>result</code>. Keys and tokens in an agent's output are redacted before an event is printed or kept.</p>
+<pre><code>${events}</code></pre>
+<h2 id="runs">Where runs are kept</h2>
+<p>In <code>$OPENVIBE_CODES_HOME</code>, else <code>$XDG_STATE_HOME/openvibe-codes</code>, else <code>~/.local/state/openvibe-codes</code>: one directory per run with its attempts and events, readable only by you.</p>
+<h2 id="code">From your own code</h2>
+<pre><code>${fromCode}</code></pre>
+<p><code>harness.agents()</code>, <code>harness.route({ task })</code> and <code>harness.run({ prompt, cwd, agent, permission, handoff })</code> are what the command line uses. The router is the same one behind <a href="/api/v1/harnesses"><code>/api/v1/harnesses/route</code></a>.</p>
+<h2 id="next">What comes next</h2>
+<p>A hosted runner on OpenVibe.Run workers for people who would rather not run agents themselves, with budgets; OpenVibe.Actor using Codes for its coding work; and <a href="/improve">Improve OpenVibe</a> as a guided run: pick a repository, describe the change, get a pull request.</p>`,
         });
     });
 

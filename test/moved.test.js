@@ -40,7 +40,7 @@ const { movedTo } = require('../server/http/moved');
     });
 
     await check('what Codes serves stays here', async () => {
-        for (const p of ['/', '/harnesses', '/improve', '/policy', '/policy/contributing', '/updates', '/api/v1/harnesses', '/robots.txt']) {
+        for (const p of ['/', '/start', '/harnesses', '/improve', '/policy', '/policy/contributing', '/updates', '/api/v1/harnesses', '/robots.txt']) {
             const r = await t.get(p);
             assert.strictEqual(r.status, 200, `${p}: ${r.status}`);
         }

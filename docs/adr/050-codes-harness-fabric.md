@@ -1,6 +1,6 @@
 # ADR-050: The Codes harness fabric and its boundaries
 
-**Status:** Proposed 2026-10-05. Governs the Codes product code that has not been written yet; the catalog, the
+**Status:** Proposed 2026-10-05; decision 8 added by the owner's decision of 2026-10-08. Governs the Codes product code that has not been written yet; the catalog, the
 placement adapter and the read API recorded under **Context and current evidence** are the seed this
 record is written against, as they stand on `main` (most recently `af3aab3`, `a1097e7`). Written in Codes'
 first `docs/adr/` — the plan (§8) lists **ADR-050 Codes Harness Fabric** among the ADRs "to write before their code", and no earlier record covers it.
@@ -100,6 +100,18 @@ first `docs/adr/` — the plan (§8) lists **ADR-050 Codes Harness Fabric** amon
    it does not; this record does not decide that. Nor does it decide trust defaults: `toOffer()` defaults every harness
    to `trust: 'external'` (`harness-placement.js:44`, asserted at `test/harness-placement.test.js:56`) — whether
    first-party harnesses should advertise a different class is **open**.
+
+8. **Owner decision, 2026-10-08: the harness runs on the person's machine first.** Codes became the open, modular
+   coding-agent harness and the developer console moved to OpenVibe.Services. The write half that decision 5 left open
+   starts where it needs no other track: `openvibe-codes` (`harness/`, `bin/`) launches the agents a person already
+   has (Claude Code, Codex, OpenCode, Command Code, Aider as CLIs; DeepSeek and any OpenAI-compatible server through
+   the harness's own tool loop), turns every agent's output into one event stream in Claude Code's `stream-json` shape,
+   hands a failed or silent attempt to the next agent `plan()` picks with a note on what was done, and keeps runs in a
+   local store. Routing still goes through `openvibe-sdk/placement` (decision 1): an agent that is not installed or has
+   no key is passed to `plan()` as `health: down` with the reason. Nothing is sent to OpenVibe and no key leaves the
+   machine, so T2/T5/T14 are not prerequisites for this half. A hosted runner (OpenVibe.Run workers, budgets, metering)
+   still waits on T14 and T5, and OpenVibe.Actor (T17) uses Codes for its coding work rather than owning a second
+   coding harness.
 
 ## Alternatives considered
 

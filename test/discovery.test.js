@@ -32,7 +32,7 @@ const PRIVATE = ['/projects', '/staff', '/auth/', '/oauth/test-callback'];
             assert.strictEqual(r.status, 200);
             assert.match(r.headers.get('content-type'), /^application\/xml/);
             assert.match(r.headers.get('cache-control') || '', /public, max-age=\d+/);
-            for (const p of ['/', '/harnesses', '/improve', '/policy']) assert.ok(r.text.includes(`<loc>https://openvibe.codes${p}</loc>`), `no ${p} entry`);
+            for (const p of ['/', '/start', '/harnesses', '/improve', '/policy']) assert.ok(r.text.includes(`<loc>https://openvibe.codes${p}</loc>`), `no ${p} entry`);
             for (const p of ['/docs', '/projects', '/oauth', '/tools/webhooks', '/policy/transparency']) assert.ok(!r.text.includes(`<loc>https://openvibe.codes${p}</loc>`), `${p} moved to openvibe.services`);
             const lastmods = [...r.text.matchAll(/<lastmod>([^<]+)<\/lastmod>/g)].map((m) => m[1]);
             assert.ok(lastmods.length > 0, 'no lastmod anywhere');

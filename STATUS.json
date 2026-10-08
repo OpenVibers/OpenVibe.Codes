@@ -15,21 +15,28 @@
     "openvibe-sdk v0.35.2",
     "openvibe-shared v2.13.3"
   ],
-  "summary": "Public at https://openvibe.codes (sudo ovhost deploy codes; unit openvibe-codes on 127.0.0.1:4900). Since 2026-10-08 Codes is the open coding-agent harness: the agent catalog with a public routing API, Improve OpenVibe (every repository and the path to a reviewed pull request) and the community documents. The developer console that used to live here moved to OpenVibe.Services (https://openvibe.services) and every one of its addresses answers a permanent redirect there.",
+  "summary": "Public at https://openvibe.codes (sudo ovhost deploy codes; unit openvibe-codes on 127.0.0.1:4900). Since 2026-10-08 Codes is the open coding-agent harness: openvibe-codes (a command-line tool and Node.js module, v0.2.0) runs a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or a person's own OpenAI-compatible model on their machine, hands it to the next agent when one fails or goes quiet, and keeps every run; the site carries the agent catalog with a public routing API, getting started, Improve OpenVibe and the community documents. The developer console that used to live here moved to OpenVibe.Services (https://openvibe.services) and every one of its addresses answers a permanent redirect there.",
   "works": [
+    "openvibe-codes on a person's machine (bin/openvibe-codes.js, harness/): agents, route, run, runs, show, resume; installs from the release tag",
+    "Adapters for Claude Code, Codex, OpenCode, Command Code and Aider (their CLIs) and for the DeepSeek API and any OpenAI-compatible server (the harness's own agent loop with list/read/grep/write/edit/run tools, confined to the working directory)",
+    "One event stream for every agent, in Claude Code's stream-json shape, ending with exactly one result; keys and tokens redacted",
+    "Hand-offs: a failed, rate-limited, crashed or silent attempt hands the task to the next routed agent with a note (task, tools, files changed, last message, git status)",
+    "Permission levels read / edit / full mapped onto each agent's own sandbox or tool set",
+    "Runs kept on the person's machine (OPENVIBE_CODES_HOME, files 0600) for show and resume",
     "Sign-in with OpenVibe.Network (authorization code + PKCE S256), session tokens in httpOnly cookies",
     "The agent catalog (server/data/harness-offers.json, validated at boot as platform.harness-offer@1 / platform.agent-offer@1): /harnesses and GET /api/v1/harnesses",
-    "Routing a task over the catalog with openvibe-sdk/placement: POST /api/v1/harnesses/route { task, requirements? } → { selected, reasons, candidates }",
+    "Routing a task over the catalog with openvibe-sdk/placement: POST /api/v1/harnesses/route { task, requirements? } → { selected, reasons, candidates } (the same router the command line uses)",
+    "Getting started (/start): install, the agents and what each needs, commands, permission levels, hand-offs, the event format, using it from code",
     "Improve OpenVibe (/improve): every repository from the pinned contracts' service manifests, and the contributor path",
     "The community documents (code of conduct, contributing, contributor ladder, moderation) rendered from this repository",
     "Permanent redirects for every former console address (301 for reads, 308 for writes) to openvibe.services",
     "robots.txt, sitemap.xml, llms.txt and llms-full.txt; per-actor and per-address limits; truthful readiness"
   ],
   "notYet": [
-    "Running a task on an agent, streaming its output, budgets (the agents run today on OpenVibe's own machines through ~/openvibe/agents)",
-    "Hand-offs between agents and resumable sessions",
-    "A runner on a person's own machine (their CLIs, their keys)",
-    "Improve OpenVibe as a flow on this site (repository → change → tests → review → pull request); today it is the contributor path on GitHub",
+    "A hosted runner (tasks on OpenVibe.Run workers for people who do not run agents themselves) with budgets and metering",
+    "OpenVibe.Actor using Codes for its coding work",
+    "Improve OpenVibe as a guided run on this site (repository → change → tests → review → pull request); today it is the harness plus the contributor path on GitHub",
+    "The OpenVibe agent pool (~/openvibe/agents) running on this package instead of its own adapters",
     "The community documents are drafts pending the owner's review"
   ],
   "capabilitiesRegistered": true,
@@ -37,6 +44,8 @@
   "deployed": true,
   "placeholderInSites": false,
   "features": [
+    "coding-agent harness (command line and Node.js module)",
+    "hand-offs between agents",
     "coding-agent catalog and router",
     "Improve OpenVibe",
     "community documents",

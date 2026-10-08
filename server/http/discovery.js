@@ -19,15 +19,19 @@ const { asyncRouter } = require('./router');
 
 const SITE_NAME = 'OpenVibe.Codes';
 const SERVICES_ORIGIN = 'https://openvibe.services';
-const DESCRIPTION = 'The open coding-agent harness: send a coding task to Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or a model you host, with routing by capability and cost, hand-offs between agents, and the way to improve OpenVibe itself.';
+const DESCRIPTION = 'The open coding-agent harness: run a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or a model you host, with routing by capability and cost, hand-offs between agents, and the way to improve OpenVibe itself.';
+const { version: VERSION } = require('../../package.json');
+const INSTALL_HINT = `npm install -g https://codeload.github.com/OpenVibers/OpenVibe.Codes/tar.gz/refs/tags/v${VERSION}`;
+const HARNESS_PAGES = ['/', '/start', '/harnesses', '/improve'];
 // Sign-in and the API are not for crawlers. The console's old addresses redirect to openvibe.services.
 const DISALLOW = ['/auth/', '/api/'];
 
 // The one line /llms-full.txt says about each fixed public page: a title and what the page serves.
 // These are the pages publicPages() lists (and so the sitemap), so the two cannot name different sets.
 const PAGE_TEXT = {
-    '/': ['OpenVibe.Codes home', 'Code with any agent: the coding-agent catalog, how a task is routed, what works today, and how to improve OpenVibe.'],
-    '/harnesses': ['The coding agents', 'Every harness the router can pick (Claude Code, Codex, OpenCode, Command Code, Aider, DeepSeek) with its models, capabilities, prices and limits.'],
+    '/': ['OpenVibe.Codes home', 'Code with any agent: the coding-agent harness, how a task is routed and handed off, what works today, and how to improve OpenVibe.'],
+    '/start': ['Get started with the coding-agent harness', 'Install openvibe-codes; the agents it can use and what each needs; the commands, permission levels, hand-offs, the event format and using it from your own code.'],
+    '/harnesses': ['The coding agents', 'Every harness the router can pick (Claude Code, Codex, OpenCode, Command Code, Aider, DeepSeek, your own model) with its models, capabilities, prices and limits.'],
     '/improve': ['Improve OpenVibe', 'How OpenVibe is built in the open: every repository, and the path from a change to a reviewed pull request.'],
     '/updates': ['What shipped on OpenVibe.Codes', 'This site\'s update log, from the network changelog feed.'],
     '/policy': ['Community', 'The code of conduct, the contributing guide, the contributor ladder and the moderation policy.'],
@@ -52,7 +56,7 @@ function homeJsonLd(config) {
     const site = String(config.baseUrl).replace(/\/+$/, '');
     return [
         seo.jsonLd.website({ name: SITE_NAME, url: site, description: DESCRIPTION }),
-        seo.jsonLd.softwareApp({ name: SITE_NAME, url: site, description: DESCRIPTION, category: 'DeveloperApplication', keywords: 'ai coding agent, coding agent router, claude code, codex, opencode, deepseek, aider, open source coding harness, contribute to open source' }),
+        seo.jsonLd.softwareApp({ name: SITE_NAME, url: site, description: DESCRIPTION, category: 'DeveloperApplication', keywords: 'ai coding agent, coding agent harness, coding agent router, agent hand-off, claude code, codex, opencode, command code, deepseek, aider, self-hosted coding agent, open source coding harness, contribute to open source' }),
         seo.jsonLd.webPage({ name: SITE_NAME, url: `${site}/`, description: DESCRIPTION, siteUrl: site }),
     ];
 }
@@ -61,6 +65,7 @@ function homeJsonLd(config) {
 function publicPages({ governance = [] }) {
     const pages = [
         { path: '/', changefreq: 'weekly', priority: 1.0 },
+        { path: '/start', changefreq: 'weekly', priority: 0.9 },
         { path: '/harnesses', changefreq: 'weekly', priority: 0.9 },
         { path: '/improve', changefreq: 'weekly', priority: 0.8 },
         { path: '/updates', changefreq: 'daily', priority: 0.5 },
@@ -95,11 +100,12 @@ function createDiscoveryRoutes(ctx) {
     r.get('/llms.txt', (_req, res) => {
         res.type('text/plain').set('Cache-Control', TEXT).send(seo.llmsTxt({
             name: SITE_NAME,
-            summary: 'OpenVibe.Codes: the open coding-agent harness. A catalog of coding agents (Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API) with a public routing API, and the way to improve OpenVibe itself.',
-            details: `Every page is server-rendered and readable without JavaScript. The catalog and the router are public: GET /api/v1/harnesses lists every harness with its models, and POST /api/v1/harnesses/route picks one for a task by capability first, then cost. Running tasks, hand-offs and a self-hosted runner come next. The developer console that used to live here (projects, apps, keys, the API reference, OAuth and webhook tools, releases) is OpenVibe.Services at ${SERVICES_ORIGIN}.`,
+            summary: 'OpenVibe.Codes: the open coding-agent harness. openvibe-codes runs a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or your own OpenAI-compatible model, hands it to the next agent when one fails, and keeps every run; plus a public catalog and routing API, and the way to improve OpenVibe itself.',
+            details: `Every page is server-rendered and readable without JavaScript. The harness is a command-line tool and a Node.js module that runs on your machine with your agents and keys (install: ${INSTALL_HINT}). Every agent's output becomes one event stream in Claude Code's stream-json shape. The catalog and the router are public: GET /api/v1/harnesses lists every harness with its models, and POST /api/v1/harnesses/route picks one for a task by capability first, then cost. A hosted runner comes next. The developer console that used to live here (projects, apps, keys, the API reference, OAuth and webhook tools, releases) is OpenVibe.Services at ${SERVICES_ORIGIN}.`,
             sections: [
                 { title: 'Start here', links: [
                     { title: 'Code with any agent', url: abs('/'), note: 'what the harness is, how a task finds its agent, what works today' },
+                    { title: 'Get started', url: abs('/start'), note: 'install, agents, commands, permission levels, hand-offs, events, from your own code' },
                     { title: 'The coding agents', url: abs('/harnesses'), note: 'every harness with its models, capabilities, prices and limits' },
                     { title: 'Improve OpenVibe', url: abs('/improve'), note: 'every repository and the path to a reviewed pull request' },
                     { title: 'What shipped on OpenVibe.Codes', url: abs('/updates') },
@@ -127,12 +133,12 @@ function createDiscoveryRoutes(ctx) {
         const pages = publicPages({ governance }).map((p) => ({ url: p.path, ...describePage(p.path, { governance }) }));
         res.type('text/plain').set('Cache-Control', TEXT).send(seo.llmsFull({
             site: SITE_NAME,
-            summary: 'Every public page of OpenVibe.Codes, one line each: the harness, the agent catalog, Improve OpenVibe, the update log and the community documents.',
+            summary: 'Every public page of OpenVibe.Codes, one line each: the harness, getting started, the agent catalog, Improve OpenVibe, the update log and the community documents.',
             base: site,
             maxBytes: 128 * 1024,
             sections: [
-                { title: 'Harness', pages: pages.filter((p) => ['/', '/harnesses', '/improve'].includes(p.url)) },
-                { title: 'Site', pages: pages.filter((p) => !['/', '/harnesses', '/improve'].includes(p.url)) },
+                { title: 'Harness', pages: pages.filter((p) => HARNESS_PAGES.includes(p.url)) },
+                { title: 'Site', pages: pages.filter((p) => !HARNESS_PAGES.includes(p.url)) },
             ],
         }));
     });

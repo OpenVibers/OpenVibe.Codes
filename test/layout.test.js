@@ -20,7 +20,7 @@ const BOOST = /<script src="\/shared\/boost\.js\?v=[0-9a-f]{12}" data-main="#mai
     const release = (await t.get('/release.json')).json().release;
 
     await check('every rendered page carries the ov-boost marker (the app\'s release) and the data-main boost script', async () => {
-        for (const p of ['/', '/harnesses', '/improve', '/policy']) {
+        for (const p of ['/', '/start', '/harnesses', '/improve', '/policy']) {
             const r = await t.get(p);
             assert.strictEqual(r.status, 200, p);
             const m = r.text.match(MARKER);

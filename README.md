@@ -15,7 +15,9 @@ One place to send a coding task to the agent that fits it — by what the task n
 
 | Surface | Path | Notes |
 |---|---|---|
+| The harness | `openvibe-codes` ([bin/openvibe-codes.js](bin/openvibe-codes.js), [harness/](harness/)) | Runs on a person's own machine with their CLIs and keys; nothing goes through OpenVibe. See **Use the harness** below. |
 | Home | `/` | What the harness is, the agents in the catalog, how a task finds its agent, Improve OpenVibe, and an honest table of what works today and what comes next. |
+| Get started | `/start` | Install, the agents and what each needs, the commands, permission levels, hand-offs, the event format and using it from code. |
 | The agents | `/harnesses` | Every harness in [`server/data/harness-offers.json`](server/data/harness-offers.json) (validated at boot as `platform.harness-offer@1`, each model as `platform.agent-offer@1`) with its provider, address kind, what it can do, price and limits, and its models with context limits and token prices. No local path is ever shown. |
 | Agent API | `GET /api/v1/harnesses`, `POST /api/v1/harnesses/route` | Public, no key. The router takes `{ task, requirements? }` (`task` is `edit`, `review`, `long` or `resume`; `requirements.capabilities` adds hard constraints) and answers `{ selected, reasons, candidates }` from `openvibe-sdk/placement` — hard constraints first (a missing capability excludes an agent, and says so), then cost. RFC 9457 problems (`harness.invalid`, `harness.task_unknown`). |
 | Improve OpenVibe | `/improve` | Every OpenVibe repository, from the pinned contracts' service manifests (the services that run, then the shared libraries), and the path from a change to a reviewed pull request. |
@@ -26,21 +28,46 @@ One place to send a coding task to the agent that fits it — by what the task n
 
 Everything is server-rendered and usable without JavaScript.
 
+## Use the harness
+
+```bash
+npm install -g https://codeload.github.com/OpenVibers/OpenVibe.Codes/tar.gz/refs/tags/v0.2.0   # Node.js 22+
+openvibe-codes agents                                   # what this machine can run, and why not the rest
+openvibe-codes run "rename getUser to findUser"         # routed, handed off on failure, kept
+openvibe-codes run --agent codex --permission read "where is the session cookie set?"
+openvibe-codes runs                                     # the latest runs
+openvibe-codes resume <run id> "now add a test"
+```
+
+| Agent | Adapter | Needs |
+|---|---|---|
+| Claude Code | `claude -p --output-format stream-json` | `claude` on PATH |
+| Codex | `codex exec --json` | `codex` on PATH |
+| OpenCode | `opencode run --format json` | `opencode` on PATH |
+| Command Code | `cmd --print --output-format json` | `cmd` on PATH |
+| Aider | `aider --message` | `aider` on PATH |
+| DeepSeek | the harness's own agent loop ([harness/adapters/api.js](harness/adapters/api.js)) | `DEEPSEEK_API_KEY` |
+| Your own model | the same loop against any OpenAI-compatible server | `OPENVIBE_CODES_BASE_URL`, `OPENVIBE_CODES_MODEL`, optional `OPENVIBE_CODES_API_KEY` |
+
+- **Events.** Every adapter turns its agent's output into one stream in Claude Code's `stream-json` shape (system/init, assistant text and tool_use, user tool_result, system warning/error/handoff, exactly one result), [harness/events.js](harness/events.js). Keys, tokens and private keys are redacted before an event is printed or kept.
+- **Permission levels.** `read` (Claude Code plan mode, Codex read-only sandbox, read tools only), `edit` (the default: edits in the working directory, Claude Code refused `git push`, the API loop without commands), `full` (anything, unattended). The API loop never leaves the working directory, never reads `.env` and never writes under `.git`.
+- **Hand-offs.** A failed, rate-limited, crashed or silent attempt (`stallMs`) is stopped and the task goes to the next agent the router picks, leaving out the ones tried, with a note: the task, why the last agent stopped, its tools, the files it changed, its last message and `git status`.
+- **Runs** are kept in `$OPENVIBE_CODES_HOME` (else `$XDG_STATE_HOME/openvibe-codes`, else `~/.local/state/openvibe-codes`), one 0700 directory per run.
+- **From code:** `const { createHarness } = require('openvibe-codes')`, then `for await (const e of createHarness().run({ prompt, cwd }))`.
+
 ## What comes next
 
-The harness grows out of the agent pool that already builds OpenVibe (`~/openvibe/agents` on the owner's machines: Claude Code, Codex, OpenCode Go, Command Code and the DeepSeek API, each with launch, streaming, usage, resume and pooling, plus routing and hand-offs). The order, adapter interface first:
-
-1. **Adapters** — one interface per harness (launch, stream, usage, resume, pool, capabilities), the personal paths and credentials replaced by tenant configuration and keys kept in OpenVibe.AI.
-2. **Runs** — `POST /api/v1/jobs`, a stream, cancel; budgets per person and per project; the run log in Codes' own database.
-3. **Hand-offs and sessions** — a stalled run moves to the next candidate with its context.
-4. **A runner on your own machine** — your CLIs and your keys, through an OpenVibe Node.
-5. **Improve OpenVibe as a flow** — repository → change → tests → independent review → pull request, never straight to `main`.
+1. **A hosted runner** — the same harness on OpenVibe.Run workers for people who would rather not run agents themselves: `POST /api/v1/jobs`, a stream, cancel, budgets per person and per project, metered through Billing, the run log in Codes' own database.
+2. **OpenVibe.Actor uses Codes** — Actor is OpenVibe's general agent (owner, 2026-10-08); its coding steps run through this harness.
+3. **Improve OpenVibe as a flow** — repository → change → tests → independent review → pull request, never straight to `main`.
+4. **The OpenVibe agent pool on this package** — `~/openvibe/agents` (the pool that builds OpenVibe) replaces its own adapters with these.
 
 ## Owns
 
 - The harness catalog and the routing policy over it (placement itself is `openvibe-sdk/placement`, the one implementation every service uses).
 - Its pages and the community documents in this repository.
-- Nothing in its database yet: migration 0002 dropped the console's tables when the console moved; the harness's runs will live here.
+- The harness package (`harness/`, `bin/`): adapters, the event format, hand-offs and the local run store.
+- Nothing in its database yet: migration 0002 dropped the console's tables when the console moved; hosted runs will live here.
 
 ## Does not own
 
@@ -76,7 +103,7 @@ fnm exec --using=22.22.1 npm test          # every test/*.test.js on temp PGlite
 fnm exec --using=22.22.1 npm run dev       # http://localhost:4900
 ```
 
-Tests: the catalog (validation at boot, the API and the router: capability first, the reasons, refusals as problems); the redirects (every console address 301 or 308 to the same path on openvibe.services, what stays here answering 200); sign-in (PKCE, state, next=, an assertion or app token is not a session, cross-site sign-out refused); the community documents (drafts marked, not indexed, every link resolving); the crawl artifacts; per-actor limits; no internal key anywhere; no secret in any response, the database or the logs; no URL a caller typed ever fetched; readiness, release.json and loopback metrics; the released codes manifest matching the code; and the home page's size budgets (`test/perf-budget.test.js`, openvibe-shared/perf-budget).
+Tests: the harness against stand-in agents (`test/helpers/fake-agents.js`: every CLI adapter's events, hand-offs on failure and on silence, redaction, resume, the API loop against a stand-in server with its path rules, the command line and its exit codes); the catalog (validation at boot, the API and the router: capability first, the reasons, refusals as problems); the redirects (every console address 301 or 308 to the same path on openvibe.services, what stays here answering 200); sign-in (PKCE, state, next=, an assertion or app token is not a session, cross-site sign-out refused); the community documents (drafts marked, not indexed, every link resolving); the crawl artifacts; per-actor limits; no internal key anywhere; no secret in any response, the database or the logs; no URL a caller typed ever fetched; readiness, release.json and loopback metrics; the released codes manifest matching the code; and the home page's size budgets (`test/perf-budget.test.js`, openvibe-shared/perf-budget).
 
 ## Security (threat notes)
 
