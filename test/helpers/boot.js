@@ -8,12 +8,12 @@ process.env.CODES_RATE_LIMIT_PER_MIN = process.env.CODES_RATE_LIMIT_PER_MIN || '
  * (the app's logger AND console), and returns a small HTTP client. Every test file gets its own.
  *
  *   const t = await boot();
- *   t.get(path, { as: user, form, json, multipart: { fields, file }, headers, method })
+ *   t.get(path, { as: user, form, json, headers, method })
  *   t.signIn(user) → cookie header value (codes_at = a Network user token, as after /auth/callback)
- *   t.csrf(user), t.logs(), t.dbDump(), t.project(user, name), t.app(user, projectId, body)
+ *   t.logs(), t.dbDump()
  */
 const http = require('http');
-const { startNetwork, startEvents, startMedia } = require('./mocks');
+const { startNetwork } = require('./mocks');
 
 const captured = [];
 for (const m of ['log', 'info', 'warn', 'error']) {
@@ -23,17 +23,10 @@ for (const m of ['log', 'info', 'warn', 'error']) {
 
 async function boot(opts = {}) {
     const network = await startNetwork(opts.network || {});
-    const events = await startEvents(network);
-    const media = await startMedia(network);
     const env = {
         NODE_ENV: 'test', PORT: '0', BASE_URL: 'https://openvibe.codes', TRUST_PROXY: '1',
         OV_NETWORK_URL: network.url, OV_NETWORK_INTERNAL_URL: network.url,
         OV_OAUTH_CLIENT_ID: 'codes', OV_OAUTH_CLIENT_SECRET: 'codes-secret', COOKIE_SECURE: 'false',
-        CODES_FORM_SECRET: 'test-form-secret',
-        CODES_PLAYGROUND_EVENTS_URL: events.url, CODES_PLAYGROUND_MEDIA_URL: media.url,
-        CODES_EXPORT_EVENTS_URL: events.url, CODES_EXPORT_MEDIA_URL: media.url,
-        CODES_REGISTRY_TTL_MS: '0',
-        ...(opts.relay ? { EVENTS_URL: events.url, EVENTS_RELAY_INTERVAL_MS: '50' } : {}),
         ...(opts.env || {}),
     };
     const configLib = require('../../server/config');
@@ -44,14 +37,12 @@ async function boot(opts = {}) {
     const { createStore } = require('../../server/db');
     // One database per boot (PGlite, or CODES_TEST_STORE=pg: the containers), dropped when the boot closes.
     const testdb = await require('./db').testDb();
-    const built = await createApp({ config, store: createStore(testdb.db), log, limitsNow: opts.limitsNow, actorLimits: opts.actorLimits === true, indexnow: opts.indexnow });
+    const built = await createApp({ config, store: createStore(testdb.db), log, limitsNow: opts.limitsNow, actorLimits: opts.actorLimits === true });
     await built.ctx.keys.ensure();
-    if (opts.relay) built.ctx.outbox.start();
     const server = await new Promise((resolve) => { const s = http.createServer(built.app); s.listen(0, '127.0.0.1', () => resolve(s)); });
     const base = `http://127.0.0.1:${server.address().port}`;
 
     const signIn = (user) => `codes_at=${network.userToken(user)}`;
-    const csrf = (user) => require('../../server/auth/forms').csrfToken({ formSecret: env.CODES_FORM_SECRET }, user);
 
     async function get(p, o = {}) {
         const headers = { ...(o.headers || {}) };
@@ -60,18 +51,8 @@ async function boot(opts = {}) {
         let body = o.body;
         if (o.json !== undefined) { body = JSON.stringify(o.json); headers['content-type'] = 'application/json'; }
         if (o.form) {
-            const f = { ...o.form };
-            if (o.as && f.csrf === undefined) f.csrf = csrf(o.as);
-            body = new URLSearchParams(f).toString();
+            body = new URLSearchParams({ ...o.form }).toString();
             headers['content-type'] = 'application/x-www-form-urlencoded';
-        }
-        if (o.multipart) {
-            const fd = new FormData();
-            const fields = { ...(o.multipart.fields || {}) };
-            if (o.as && fields.csrf === undefined) fields.csrf = csrf(o.as);
-            for (const [k, v] of Object.entries(fields)) fd.append(k, v);
-            if (o.multipart.file) fd.append('file', new Blob([o.multipart.file.content], { type: o.multipart.file.type || 'text/plain' }), o.multipart.file.name || 'f.txt');
-            body = fd;
         }
         const res = await fetch(base + p, { method: o.method || (body ? 'POST' : 'GET'), headers, body, redirect: 'manual' });
         const buf = Buffer.from(await res.arrayBuffer());
@@ -86,35 +67,14 @@ async function boot(opts = {}) {
         return (await Promise.all(tables.map(async (tname) => JSON.stringify(await db.prepare(`SELECT * FROM "${tname}"`).all())))).join('\n');
     }
 
-    async function project(user, name = 'Test project') {
-        const r = await get('/projects', { as: user, form: { name } });
-        if (r.status !== 303) throw new Error(`project: ${r.status} ${r.text.slice(0, 300)}`);
-        return r.headers.get('location').split('/').pop();
-    }
-    /** Create an app through the portal; returns { id, secret, page }. */
-    async function app(user, projectId, body = {}) {
-        const r = await get(`/projects/${projectId}/apps`, { as: user, form: { name: 'Test app', environment: 'sandbox', type: 'confidential', redirect_uris: '', ...body } });
-        if (r.status === 303) return { id: r.headers.get('location').split('/').pop().split('?')[0], secret: null, page: r };
-        if (r.status !== 200) throw new Error(`app: ${r.status} ${r.text.slice(0, 300)}`);
-        const secret = (r.text.match(/ovsec_[A-Za-z0-9_-]{43}/) || [null])[0];
-        const id = (r.text.match(/app_[0-9A-HJKMNP-TV-Z]{26}/) || [null])[0];
-        return { id, secret, page: r };
-    }
-    /** Approve a grant the way Network would after staff put it in the allowance. */
-    async function grant(owner, projectId, appId, capability) {
-        network.setAllowance(projectId, [...new Set([...network.state.projects.get(projectId).allowance, capability])]);
-        const r = await get(`/projects/${projectId}/apps/${appId}/grants`, { as: owner, form: { capability } });
-        if (r.status !== 303) throw new Error(`grant: ${r.status} ${r.text.slice(0, 300)}`);
-    }
-
     const t = {
-        base, network, events, media, config, ctx: built.ctx, get, signIn, csrf, dbDump, project, app, grant,
+        base, network, config, ctx: built.ctx, get, signIn, dbDump,
         logs: () => captured.join('\n'),
         async close() {
             await new Promise((r) => server.close(r));
-            await built.ctx.outbox.stop();
+            built.ctx.keys.client.stop();
             await testdb.close();
-            await network.close(); await events.close(); await media.close();
+            await network.close();
         },
     };
     return t;

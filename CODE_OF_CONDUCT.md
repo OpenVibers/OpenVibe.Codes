@@ -2,7 +2,7 @@
 
 **Draft — pending owner review.** This text is a proposal. It takes effect only when the owner of the OpenVibers organization approves it and removes this line.
 
-This code applies to everyone who takes part in OpenVibe's developer spaces: the OpenVibers repositories on GitHub (issues, pull requests, discussions, reviews), OpenVibe.Codes, and any chat or call about building on OpenVibe. The products themselves (Live, Chat, Community and the rest) have their own rules for viewers and streamers; this code is about how we work together on the platform and the apps built on it.
+This code applies to everyone who takes part in OpenVibe's developer spaces: the OpenVibers repositories on GitHub (issues, pull requests, discussions, reviews), OpenVibe.Codes, OpenVibe.Services, and any chat or call about building on OpenVibe. The products themselves (Live, Chat, Community and the rest) have their own rules for viewers and streamers; this code is about how we work together on the platform and the apps built on it.
 
 ## What we expect
 

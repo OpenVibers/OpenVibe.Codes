@@ -1,18 +1,17 @@
 'use strict';
 
 /**
- * OpenVibe.Codes — Express app factory. server/index.js listens and starts the outbox relay; tests
- * build their own instance with a temp database, an injectable clock and mock neighbours.
+ * OpenVibe.Codes — the open coding-agent harness. Express app factory; server/index.js listens, tests build their own
+ * instance with a temp database and mock neighbours.
  *
- *   /                 landing, policy, public release pages, staff trust (http/pages.js)
- *   /docs             generated reference (http/docs.js)
- *   /oauth, /tools/webhooks, /manifests/validate   developer tools (http/tools.js)
- *   /projects         the signed-in portal over Network's projects API (http/portal.js)
- *   /releases/:id/*   release actions (http/portal.js)
- *   /api/v1           JSON API (http/api.js)
- *   /api/v1/resources the authority resource index, codes.resource.read (registry/resource-index.js)
+ *   /, /harnesses, /improve, /policy/*, /updates   the public pages (http/pages.js)
+ *   /api/v1/harnesses, /api/v1/harnesses/route     the agent catalog and its router (http/api.js)
  *   /auth/*           Network SSO with PKCE (auth/sso.js)
  *   /api/health, /api/ready, /release.json, /metrics (loopback only)
+ *
+ * The developer console moved to OpenVibe.Services on 2026-10-08: http/moved.js answers its addresses (/projects,
+ * /docs, /oauth, /tools, /manifests, /releases, /apps, /staff, the platform policy pages and the rest of /api/v1)
+ * with permanent redirects there, before anything else runs.
  */
 const path = require('path');
 const express = require('express');
@@ -26,24 +25,12 @@ const configLib = require('./config');
 const { openStore } = require('./db');
 const { createKeyStore } = require('./auth/keys');
 const { createSso } = require('./auth/sso');
-const { createNetworkClient } = require('./clients/network');
-const { createCodesOutbox } = require('./events/outbox');
-const { generate } = require('./docs/generate');
-const { createTrust } = require('./domain/trust');
-const { createReleases } = require('./domain/releases');
-const { createPlayground } = require('./domain/playground');
-const { createArchiver } = require('./domain/project-archive');
-const { createLimitsReader } = require('./domain/limits');
 const { createHarnesses } = require('./domain/harnesses');
-const { createDocsRoutes } = require('./http/docs');
-const { createToolRoutes } = require('./http/tools');
 const { createPageRoutes } = require('./http/pages');
-const { createPortalRoutes, createReleaseActionRoutes } = require('./http/portal');
-const { createApi, createCapabilityAccess } = require('./http/api');
-const resourceIndex = require('./registry/resource-index');
+const { createApi } = require('./http/api');
+const { createMovedRoutes } = require('./http/moved');
 const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
-const { createIndexNow } = require('openvibe-shared/indexnow');
 const { assetVersion, send } = require('./render/layout');
 const { html } = require('./render/html');
 
@@ -52,7 +39,7 @@ const VERSION = require('../package.json').version;
 
 /**
  * opts: config, store, now (clock), fetchImpl, log, limitsNow (the per-actor limiter's clock,
- * tests), actorLimits (false: count nobody, tests only)
+ * tests), actorLimits (false: count nobody, tests only), valkey
  */
 async function createApp(opts = {}) {
     const config = opts.config || configLib.load();
@@ -61,26 +48,11 @@ async function createApp(opts = {}) {
     // PostgreSQL (ADR-035): opened and migrated here unless the caller (a test, a script) hands in a store.
     const store = opts.store || await openStore(config, { now: opts.now, log });
 
-    const docs = generate({ now: store.now });
     const keys = createKeyStore({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     const sso = createSso({ config, keys, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log });
-    const network = createNetworkClient({ config, fetchImpl, log });
-    const outbox = createCodesOutbox({ db: store.db, config, fetchImpl, now: store.now, log });
-    const trust = createTrust({ store, outbox });
-    // IndexNow (openvibe-shared/indexnow): created once at boot from INDEXNOW_KEY. Unset → off, nothing
-    // mounted, nothing sent; tests and drills never set it.
-    const indexnow = opts.indexnow !== undefined ? opts.indexnow : createIndexNow({
-        host: config.baseUrl, key: config.indexnow.key, ...(fetchImpl ? { fetch: fetchImpl } : {}), log,
-    });
-    const releases = createReleases({ store, outbox, trust, config, indexnow });
-    const playground = createPlayground({ store, config, network, keys, fetchImpl, log });
-    const archiver = createArchiver({ config, fetchImpl, log });
-
-    // Each enforcing service's /limits.json, for /docs/limits and the project usage page.
-    const limits = createLimitsReader();
     // The harness catalog (server/data/harness-offers.json), read once: a bad seed row fails boot.
     const harnesses = createHarnesses();
-    const ctx = { config, store, docs, keys, sso, network, outbox, trust, releases, playground, archiver, limits, harnesses, indexnow, log };
+    const ctx = { config, store, keys, sso, harnesses, log };
 
     const app = express();
     app.disable('x-powered-by');
@@ -90,8 +62,8 @@ async function createApp(opts = {}) {
     const metrics = require('openvibe-shared/metrics').instrument(app, { service: 'codes', release: release.release });
     app.locals.metrics = metrics.registry;
     app.locals.ctx = ctx;
-    // Per-actor limits (http/actor-limits.js) at /api/v1, the portal, release actions and the tools'
-    // forms, counted once the caller is known; the per-address limits below stay.
+    // Per-actor limits (http/actor-limits.js) at /api/v1, counted once the caller is known; the per-address
+    // limits below stay.
     // Valkey (ADR-035): shared, never-authoritative state (per-actor limit counters). Optional.
     const valkey = opts.valkey !== undefined ? opts.valkey : (config.valkey.url ? require('openvibe-sdk/valkey').createValkey({ url: config.valkey.url, prefix: config.valkey.prefix, log }) : null);
     ctx.valkey = valkey;
@@ -129,8 +101,11 @@ async function createApp(opts = {}) {
     app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'openvibe-codes', version: VERSION }));
     // GET /release.json (ADR-016) and POST /release-metrics: open tabs' update reports into /metrics.
     release.mount(app, { registry: metrics.registry });
-    const readiness = createCodesReadiness({ store, network, outbox, docs, config, release: release.release, valkey: ctx.valkey });
+    const readiness = createCodesReadiness({ store, harnesses, config, release: release.release, valkey: ctx.valkey });
     app.get('/api/ready', readiness.handler);
+
+    // ── The developer console's addresses: permanent redirects to OpenVibe.Services ──
+    app.use(createMovedRoutes());
 
     // ── Who is asking (verified offline; refreshed when expired) ──
     app.use(sso.middleware());
@@ -139,9 +114,6 @@ async function createApp(opts = {}) {
     app.use('/auth/', rateLimit({ windowMs: 15 * 60_000, limit: 60, standardHeaders: true, legacyHeaders: false }));
     app.use('/auth', sso.routes());
     { const legal = require('openvibe-shared/legal'); app.get(legal.PATHS, legal.handler({ id: 'codes', service: 'codes', host: 'openvibe.codes', name: 'OpenVibe.Codes', profile: 'ugc' })); }
-
-    // GET /<key>.txt — the IndexNow key file (mounted only when a key is configured; it serves itself).
-    if (indexnow.enabled) app.use(indexnow.keyFile);
 
     // ── Static assets (content-hashed ?v= → immutable) ──────
     // This site's own pinned copy of the OpenVibe Frame's browser files (openvibe-shared/serve).
@@ -156,20 +128,13 @@ async function createApp(opts = {}) {
     }));
 
     // ── API ─────────────────────────────────────────────────
-    // The authority resource index (ADR-048, codes.resource.read): mounted before /api/v1 so the path is
-    // the index's own, guarded with the same service-token check the JSON API's first-party routes use.
-    app.use('/api/v1/resources', resourceIndex.router({ guard: createCapabilityAccess({ config, keys }).checked(resourceIndex.RESOURCE_READ) }));
     app.use('/api/v1', createApi(ctx));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
 
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.CODES_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));   // per address; tests raise it
-    app.use('/docs', createDocsRoutes(ctx));
-    app.use('/projects', rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true, legacyHeaders: false, skip: (req) => req.method === 'GET' }), createPortalRoutes(ctx));
-    app.use('/releases', createReleaseActionRoutes(ctx));
-    app.use(createToolRoutes(ctx));
     app.use(createPageRoutes(ctx));
-    app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try the <a href="/docs">docs</a>.</p>` }));
+    app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try <a href="/harnesses">the agents</a>, <a href="/improve">Improve OpenVibe</a>, or the developer platform at <a href="https://openvibe.services">openvibe.services</a>.</p>` }));
 
     // eslint-disable-next-line no-unused-vars
     app.use((err, req, res, _next) => {

@@ -1,5 +1,4 @@
 'use strict';
-const { staff: staffMap } = require('openvibe-contracts');
 
 /**
  * Sign-in with OpenVibe.Network: OAuth 2 authorization code with PKCE (S256), as OAuth client
@@ -110,8 +109,6 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             username: typeof claims.username === 'string' ? claims.username.slice(0, 64) : null,
             displayName: typeof claims.display_name === 'string' ? claims.display_name.slice(0, 80) : (typeof claims.username === 'string' ? claims.username.slice(0, 64) : 'you'),
             role,
-            // Staff = the contracts staff map's staff.site.configure (ADR-022), or a subject in CODES_STAFF_SUBJECTS.
-            staff: staffMap.can(claims, 'staff.site.configure') || Boolean(subject && config.staffSubjects.includes(subject)),
             // The person's Network access token: used for server-side Network calls, never rendered.
             token,
         };

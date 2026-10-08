@@ -8,15 +8,8 @@
  * load(env) is pure so tests can build a config without touching process.env.
  */
 require('dotenv').config();
-const contracts = require('openvibe-contracts');
-
 const trim = (s) => String(s || '').replace(/\/+$/, '');
 const int = (v, def) => (Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : def);
-const list = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
-const originOf = (id, fallback) => {
-    const m = contracts.services.get(id);
-    return (m && m.publicOrigin) || fallback;
-};
 
 function load(env = process.env) {
     const nodeEnv = env.NODE_ENV || 'development';
@@ -46,9 +39,7 @@ function load(env = process.env) {
         db: { url: env.DATABASE_URL || '', directUrl: env.DATABASE_DIRECT_URL || '', pgliteDir: env.CODES_PGLITE_DIR || '' },
         valkey: { url: env.VALKEY_URL || '', prefix: env.VALKEY_PREFIX || 'ov:codes:' },
 
-        // OpenVibe.Network: SSO (OAuth2 authorization server with PKCE), JWKS, the developer
-        // projects API (/api/v1/projects, called server-side with the signed-in person's token),
-        // the registry, and client-credentials tokens (Codes' own and, in playgrounds, the app's).
+        // OpenVibe.Network: SSO (OAuth2 authorization server with PKCE) and its JWKS.
         networkUrl,
         networkInternalUrl: trim(env.OV_NETWORK_INTERNAL_URL || 'http://127.0.0.1:4000'),
         networkIssuer: trim(env.OV_NETWORK_ISSUER || networkUrl),
@@ -62,46 +53,7 @@ function load(env = process.env) {
             sessionAudience: env.OV_SESSION_AUDIENCE || 'openvibe.network',
         },
         cookies: { secure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : isProduction },
-        // Signs the per-person form token (CSRF). Unset: a random per-process key.
-        formSecret: env.CODES_FORM_SECRET || '',
 
-        // Staff (trust tiers): staff.site.configure (Network admins), plus these subjects (usr_…).
-        staffSubjects: list(env.CODES_STAFF_SUBJECTS),
-
-        // Where playgrounds call, with the APP's own token (never Codes' credentials). Defaults are
-        // the public origins published in openvibe-contracts' service manifests.
-        playground: {
-            eventsUrl: trim(env.CODES_PLAYGROUND_EVENTS_URL || originOf('events', 'https://openvibe.events')),
-            mediaUrl: trim(env.CODES_PLAYGROUND_MEDIA_URL || originOf('media', 'https://openvibe.media')),
-            maxUploadBytes: int(env.CODES_PLAYGROUND_MAX_UPLOAD_BYTES, 1024 * 1024),
-            runsPerHour: int(env.CODES_PLAYGROUND_RUNS_PER_HOUR, 60),
-        },
-
-        // The full project archive (server/domain/project-archive.js): Media and Events are read
-        // server-side (loopback by default, as for /docs/limits) with Network's read-only export
-        // tokens. The limits bound one archive: objects and events per environment, and how long
-        // Media's signed download URLs in it stay valid (Media allows at most an hour).
-        export: {
-            mediaUrl: trim(env.CODES_EXPORT_MEDIA_URL || env.OV_MEDIA_INTERNAL_URL || 'http://127.0.0.1:4100'),
-            eventsUrl: trim(env.CODES_EXPORT_EVENTS_URL || env.OV_EVENTS_INTERNAL_URL || 'http://127.0.0.1:4300'),
-            maxObjects: Math.max(1, int(env.CODES_EXPORT_MAX_OBJECTS, 5000)),
-            maxEvents: Math.max(1, int(env.CODES_EXPORT_MAX_EVENTS, 10000)),
-            urlTtlS: Math.min(3600, Math.max(60, int(env.CODES_EXPORT_URL_TTL_S, 3600))),
-        },
-
-        // Registry answers are cached this long (Network's own health poll runs every 60 s).
-        registryTtlMs: int(env.CODES_REGISTRY_TTL_MS, 30 * 1000),
-
-        // OpenVibe.Events: the outbox relay runs only when EVENTS_URL and the client secret are set.
-        events: {
-            url: trim(env.EVENTS_URL || ''),
-            intervalMs: int(env.EVENTS_RELAY_INTERVAL_MS, 2000),
-        },
-
-        // IndexNow (openvibe-shared/indexnow): a key makes search engines recrawl a page the moment a
-        // public release appears, changes or goes away (the key file is served at /<key>.txt). Unset:
-        // off, no key file, nothing sent. Tests and drills never set it.
-        indexnow: { key: String(env.INDEXNOW_KEY || '').trim() },
     };
 }
 

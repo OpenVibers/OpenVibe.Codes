@@ -1,99 +1,37 @@
 'use strict';
 
 /**
- * JSON API (/api/v1). Errors are RFC 9457 problems (openvibe-contracts http.sendProblem).
+ * JSON API (/api/v1): the coding-agent catalog and its router. Errors are RFC 9457 problems (openvibe-contracts
+ * http.sendProblem). Both routes are public: the catalog is published data and routing runs no I/O.
  *
- *   GET  /docs/versions                   the pinned versions the docs were generated from
- *   POST /manifests/validate              { kind: app|mod, manifest } → { valid, errors, warnings }
- *   GET  /harnesses                       the harness catalog, each harness with its agents
- *   POST /harnesses/route                 { task, requirements? } → { selected, reasons, candidates }
+ *   GET  /harnesses          the harness catalog, each harness with its agents (platform.harness-offer@1 rows)
+ *   POST /harnesses/route    { task, requirements? } → { selected, reasons, candidates } (openvibe-sdk/placement)
  *
- *   codes.release.read (public; no token needed — a token that IS presented must hold it):
- *   GET  /apps/:app/releases              public releases of an app (never drafts) + trust tier
- *   GET  /apps/:app/trust                 the app's trust tier (metadata only, ADR-013)
- *   GET  /releases/:id                    one public release with its manifest
- *
- *   codes.release.manage — an app managing its OWN releases with its own token:
- *   POST /apps/:app/releases              { kind, manifest, notes, publish } → draft (or published)
- *   POST /releases/:id/publish | /deprecate { reason, replacement } | /revoke { reason }
- *
- * Guards are openvibe-contracts requireCapability() (audience openvibe.codes, issuer, expiry, claim
- * shape, the capability; sandbox app tokens accepted, release records carry the environment), then
- * sub = app:<the app in the path>. No route accepts a shared loopback key of any kind.
+ * The developer platform's API (releases, manifest validation, the docs' versions, the resource index) moved to
+ * OpenVibe.Services on 2026-10-08; server/http/moved.js answers those paths with permanent redirects there.
  */
 const express = require('express');
-const { asyncRouter } = require('./router');
 const rateLimit = require('express-rate-limit');
-const { http, serviceAuth } = require('openvibe-contracts');
-const manifests = require('../domain/manifests');
-const { ReleaseError } = require('../domain/releases');
+const { http } = require('openvibe-contracts');
+const { asyncRouter } = require('./router');
 const placement = require('../domain/harness-placement');
 
-const APP_RE = /^app_[0-9A-HJKMNP-TV-Z]{26}$/;
-const REL_RE = /^rel_[0-9A-HJKMNP-TV-Z]{26}$/;
-const MANAGE = 'codes.release.manage';
-const READ = 'codes.release.read';
-
-/**
- * The service-token capability guard this service's first-party routes use: the key the token names is
- * looked up first (the SDK's JWKS client), then the synchronous openvibe-contracts requireCapability runs
- * against it. Exported so the resource index (server/registry/resource-index.js, mounted by server/app.js)
- * guards codes.resource.read with the same check — never a second auth path.
- *
- *   const access = createCapabilityAccess({ config, keys });
- *   app.use('/api/v1/resources', resourceIndex.router({ guard: access.checked('codes.resource.read') }));
- */
-function createCapabilityAccess({ config, keys }) {
-    const guardOpts = { issuer: config.networkIssuer, audience: 'openvibe.codes', acceptSandbox: true };
-    const bearerToken = (req) => String(req.headers.authorization || '').replace(/^Bearer\s+/, '');
-    const loadKey = (req, res, next) => { keys.pemForToken(bearerToken(req)).then((pem) => { req.ovNetworkKey = pem; next(); }, () => next()); };
-    const guardFor = (cap) => (req, res, next) => serviceAuth.requireCapability(cap, { ...guardOpts, getPublicKey: () => req.ovNetworkKey || null })(req, res, next);
-    const bearer = (req) => String(req.headers.authorization || '').startsWith('Bearer ');
-    /**
-     * The chain for a route a token is REQUIRED on: no token is 401 auth.required; a token that does not
-     * hold the capability is 403 capability.denied and an invalid one 401 token.* (requireCapability decides
-     * those two).
-     */
-    const checked = (cap, detail = 'send Authorization: Bearer <service token for audience openvibe.codes>') => {
-        const guard = guardFor(cap);   // built once, at mount: an unknown capability fails the boot, not a request
-        return [
-            loadKey,
-            (req, res, next) => (bearer(req) ? guard(req, res, next) : http.sendProblem(res, 401, 'auth.required', { detail, ctx: req.ov })),
-        ];
-    };
-    return { loadKey, guardFor, bearer, checked };
-}
-
 function createApi(ctx) {
-    const { config, docs, releases, trust, keys, actorLimits, harnesses } = ctx;
+    const { actorLimits, harnesses } = ctx;
     const r = asyncRouter();
-    // Per-actor limits (http/actor-limits.js): reads take the defaults once the token (if any) is checked;
-    // writes name their budget after the guard and before the body is read.
+    // Per-actor limits (http/actor-limits.js): reads take the defaults; the route names its budget before the body is read.
     const reads = actorLimits.reads('codes.read');
-    const B = (name) => actorLimits.budget(name);
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-    const json = express.json({ limit: '96kb' });
+    const json = express.json({ limit: '32kb' });
     const limiter = rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true, legacyHeaders: false });
-    const problem = (req, res, status, code, detail, extra) => http.sendProblem(res, status, code, { detail, ctx: req.ov, extra });
-
-    r.get('/docs/versions', reads, (req, res) => {
-        res.json({ contracts: docs.contractsVersion, contracts_tag: docs.contractsTag, sdk: docs.sdkVersion, sdk_tag: docs.sdkTag, generated_at: docs.generatedAt, contracts_count: docs.contracts.length, capabilities_count: docs.capabilities.length });
-    });
-
-    r.post('/manifests/validate', limiter, B('codes.manifest.validate'), json, (req, res) => {
-        const b = req.body || {};
-        const kind = b.kind === 'mod' ? 'mod' : (b.kind === 'app' ? 'app' : null);
-        if (!kind) return problem(req, res, 422, 'manifest.kind', 'kind is app or mod');
-        const v = manifests.validate(kind, b.manifest, { eventTypes: docs.eventTypes });
-        res.status(v.valid ? 200 : 422).json({ ...v, contracts_version: docs.contractsVersion });
-    });
+    const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
 
     r.get('/harnesses', reads, (req, res) => {
         res.json({ harnesses: harnesses.list().map((h) => ({ ...h, agents: harnesses.agents(h.id) })) });
     });
 
     // Every harness × agent offer with the defaults (health up, no latency); placement runs no I/O.
-    r.post('/harnesses/route', limiter, B('codes.harness.route'), json, (req, res) => {
+    r.post('/harnesses/route', limiter, actorLimits.budget('codes.harness.route'), json, (req, res) => {
         const b = req.body || {};
         const plain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
         if (typeof b.task !== 'string' || !b.task) return problem(req, res, 422, 'harness.invalid', 'task is a non-empty string');
@@ -110,96 +48,7 @@ function createApi(ctx) {
         }
     });
 
-    // Guards: the key the token names is looked up first (the SDK's JWKS client), then the synchronous contracts guard
-    // runs against it (createCapabilityAccess — the same check server/app.js guards the resource index with).
-    const { loadKey, guardFor, bearer, checked } = createCapabilityAccess({ config, keys });
-    const readGuard = guardFor('codes.release.read');
-    // Public reads: anonymous callers pass; a presented token must be valid and hold codes.release.read.
-    const readAccess = [loadKey, (req, res, next) => (bearer(req) ? readGuard(req, res, next) : next())];
-    // Managing releases needs a token: an app's own, holding codes.release.manage.
-    const manageAccess = checked('codes.release.manage', 'send Authorization: Bearer <app token for audience openvibe.codes>');
-
-    r.get('/apps/:app/releases', ...readAccess, reads, async (req, res) => {
-        if (!APP_RE.test(req.params.app)) return problem(req, res, 404, 'app.not_found', 'not an app id');
-        res.set('Cache-Control', 'public, max-age=60');
-        res.json({ app_id: req.params.app, trust: await trust.get(req.params.app), releases: await releases.listForApp(req.params.app) });
-    });
-    r.get('/apps/:app/trust', ...readAccess, reads, async (req, res) => {
-        if (!APP_RE.test(req.params.app)) return problem(req, res, 404, 'app.not_found', 'not an app id');
-        res.set('Cache-Control', 'public, max-age=60');
-        res.json({ app_id: req.params.app, ...await trust.get(req.params.app), note_on_authority: 'metadata only; grants in OpenVibe.Network are the authority' });
-    });
-    r.get('/releases/:id', ...readAccess, reads, async (req, res) => {
-        const rel = REL_RE.test(req.params.id) ? await releases.get(req.params.id) : null;
-        if (!rel || rel.status === 'draft') return problem(req, res, 404, 'release.not_found', 'no such release');
-        res.set('Cache-Control', 'public, max-age=60');
-        const m = await releases.manifestOf(rel.manifest_id);
-        res.json({ release: rel, manifest: m ? m.body : null });
-    });
-
-    // ── App token: an app manages its own releases ──────────
-    /** After manageGuard: the verified token's app, project and environment. */
-    function appPrincipal(req, res, appId) {
-        const c = claimsOf(req);
-        if (!c || typeof c.sub !== 'string' || !c.sub.startsWith('app:')) { problem(req, res, 403, 'capability.denied', 'only app tokens manage releases here; people use the portal'); return null; }
-        const self = c.sub.slice(4);
-        if (appId && self !== appId) { problem(req, res, 403, 'release.forbidden', 'an app manages only its own releases'); return null; }
-        return {
-            actor: { kind: 'app', label: c.sub, subject: self, traceparent: req.ov.traceparent },
-            app: { id: self, project_id: typeof c.project_id === 'string' ? c.project_id : (Array.isArray(c.ns) ? c.ns[0] : null), environment: c.env === 'production' ? 'production' : 'sandbox', revoked_at: null },
-        };
-    }
-    // requireCapability already verified this token (signature, issuer, audience, expiry, claims);
-    // read the claims it does not copy onto req.principal (project_id, env).
-    function claimsOf(req) {
-        if (!req.principal || !req.principal.sub) return null;
-        try { return JSON.parse(Buffer.from(String(req.headers.authorization).slice(7).trim().split('.')[1], 'base64url').toString('utf8')); } catch { return null; }
-    }
-    const fail = (req, res, err) => {
-        if (err instanceof ReleaseError) return problem(req, res, err.status, err.code, err.detail, err.validation ? { validation: err.validation } : undefined);
-        ctx.log.error('[Codes] api error:', err && err.message ? err.message.slice(0, 200) : err);
-        return problem(req, res, 500, 'internal.error', 'Internal error');
-    };
-
-    r.post('/apps/:app/releases', limiter, ...manageAccess, B('codes.release.create'), json, async (req, res) => {
-        if (!APP_RE.test(req.params.app)) return problem(req, res, 404, 'app.not_found', 'not an app id');
-        const p = appPrincipal(req, res, req.params.app);
-        if (!p) return;
-        if (!p.app.project_id) return problem(req, res, 403, 'token.invalid_claims', 'the token names no project');
-        const b = req.body || {};
-        try {
-            const kind = b.kind === 'mod' ? 'mod' : 'app';
-            const out = await releases.createDraft({ actor: p.actor, app: p.app, kind, manifest: b.manifest, notes: b.notes, eventTypes: docs.eventTypes });
-            let release = out.release;
-            if (b.publish === true) release = (await releases.publish({ actor: p.actor, releaseId: release.id, app: p.app })).release;
-            res.status(201).json({ release, warnings: out.validation.warnings });
-        } catch (err) { fail(req, res, err); }
-    });
-
-    for (const action of ['publish', 'deprecate', 'revoke']) {
-        r.post(`/releases/:id/${action}`, limiter, ...manageAccess, B('codes.release.manage'), json, async (req, res) => {
-            const rel = REL_RE.test(req.params.id) ? await releases.get(req.params.id) : null;
-            if (!rel) return problem(req, res, 404, 'release.not_found', 'no such release');
-            const p = appPrincipal(req, res, rel.app_id);
-            if (!p) return;
-            const b = req.body || {};
-            try {
-                const out = action === 'publish' ? await releases.publish({ actor: p.actor, releaseId: rel.id, app: p.app })
-                    : action === 'deprecate' ? await releases.deprecate({ actor: p.actor, releaseId: rel.id, app: p.app, reason: b.reason, replacement: b.replacement })
-                        : await releases.revoke({ actor: p.actor, releaseId: rel.id, app: p.app, reason: b.reason });
-                res.json(out);
-            } catch (err) { fail(req, res, err); }
-        });
-    }
-
-    // eslint-disable-next-line no-unused-vars
-    r.use((err, req, res, _next) => {
-        if (err && err.type === 'entity.parse.failed') return problem(req, res, 400, 'request.malformed_json', 'body is not valid JSON');
-        if (err && err.type === 'entity.too.large') return problem(req, res, 413, 'request.too_large', 'body too large');
-        ctx.log.error('[Codes] api error:', err && err.message ? err.message.slice(0, 200) : err);
-        return problem(req, res, 500, 'internal.error', 'Internal error');
-    });
     return r;
 }
 
-module.exports = { createApi, createCapabilityAccess, MANAGE, READ };
+module.exports = { createApi };

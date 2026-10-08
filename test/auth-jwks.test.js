@@ -59,7 +59,7 @@ function jwk(k, kid) { return { ...k.export({ format: 'jwk' }), use: 'sig', alg:
         await jwks.close();
     });
 
-    // A rotation publishes two keys: the /api/v1 guard must verify against the one the token names, not the first.
+    // A rotation publishes two keys: verification must use the one the token names, not the first.
     await check('service tokens get the key their kid names (a rotation keeps two keys)', async () => {
         const a = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
         const b = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -118,16 +118,16 @@ function jwk(k, kid) { return { ...k.export({ format: 'jwk' }), use: 'sig', alg:
         assert.strictEqual(v.reason, 'signing key not loaded yet', 'a fixed public reason, not the SDK text');
         assert.ok(!/127\.0\.0\.1|jwks|ECONNREFUSED|fetch failed/i.test(v.reason), `reason leaks: ${v.reason}`);
 
-        // The same unreachable JWKS behind a booted Codes: neither /api/v1 nor /api/ready names it.
+        // The same unreachable JWKS behind a booted Codes: neither sign-in nor /api/ready names it.
         const t = await boot({ env: { OV_NETWORK_INTERNAL_URL: 'http://127.0.0.1:9', OV_NETWORK_URL: 'http://127.0.0.1:9' } });
         const ready = await t.get('/api/ready');
         const readyText = ready.text;
         assert.ok(!/127\.0\.0\.1|\.well-known\/jwks|ECONNREFUSED|fetch failed/i.test(readyText),
             `/api/ready leaks the JWKS URL or the fetch error: ${readyText.slice(0, 400)}`);
-        const api = await t.get('/api/v1/releases/rel_missing', { headers: { authorization: `Bearer ${token}` } });
-        assert.strictEqual(api.status, 401, `an unverifiable token is 401: ${api.status} ${api.text.slice(0, 200)}`);
-        assert.ok(!/127\.0\.0\.1|\.well-known\/jwks|ECONNREFUSED|fetch failed/i.test(api.text),
-            `the API answer leaks the JWKS URL or the fetch error: ${api.text.slice(0, 300)}`);
+        const me = await t.get('/auth/me', { cookie: `codes_at=${token}` });
+        assert.strictEqual(me.status, 401, `an unverifiable session token is 401: ${me.status} ${me.text.slice(0, 200)}`);
+        assert.ok(!/127\.0\.0\.1|\.well-known\/jwks|ECONNREFUSED|fetch failed/i.test(me.text),
+            `the sign-in answer leaks the JWKS URL or the fetch error: ${me.text.slice(0, 300)}`);
         await t.close();
     });
 

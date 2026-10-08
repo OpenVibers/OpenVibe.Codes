@@ -1,6 +1,7 @@
 'use strict';
 /**
- * In-process stand-ins for Codes' neighbours, with a real RS256 key pair.
+ * An in-process stand-in for OpenVibe.Network (sign-in, JWKS, tokens), with a real RS256 key pair. Much of it served
+ * the developer console that moved to OpenVibe.Services; what Codes' tests use is sign-in and the JWKS.
  *
  *   Network   JWKS; /oauth/token (authorization_code + PKCE S256 for client `codes`, refresh_token,
  *             client_credentials for `codes` and for developer apps with Network's app rules:
@@ -13,18 +14,10 @@
  *             answers what setUsage() stored for the project, or an empty network.project-usage-result@1.
  *             POST /api/v1/projects/:project/export-tokens as Network mints them (owner/admin only,
  *             sub app:app_<project ULID>, read-only caps, purpose export), recorded in exportTokens.
- *   Events    POST /api/v1/events: verifies the app token (openvibe-contracts), needs the capability;
- *             GET /api/v1/events (pull, events.app.read): the token's project and env only, paged
- *             like Events (next_after_seq, latest_seq); addAppEvent() seeds it
- *   Media     POST /api/v1/:app/files: verifies the token, capability and namespace;
- *             GET /api/v2/:project/(objects|objects/:id/download|namespaces) for app-shaped tokens
- *             of that project, the token's env picking the tenant; addObject() seeds it
- *   Both      fail(pathPattern, status) answers matching requests with a problem (failure tests)
  * Every request is recorded in `.requests` so tests can assert what was (not) called.
  */
 const http = require('http');
 const crypto = require('crypto');
-const Busboy = require('busboy');
 const { serviceAuth, ids, capabilities } = require('openvibe-contracts');
 
 function listen(handler) {
@@ -333,165 +326,4 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
     };
 }
 
-/** Problem answers and injected failures shared by the Events and Media stand-ins. */
-function failures() {
-    const list = [];
-    return {
-        fail(pattern, status = 503, code = 'service.unavailable') { list.push({ re: pattern instanceof RegExp ? pattern : new RegExp(pattern), status, code }); },
-        clear() { list.length = 0; },
-        match: (url) => list.find((f) => f.re.test(url)) || null,
-    };
-}
-const problemJson = (json, status, code, detail) => json(status, { type: `https://openvibe.network/problems/${code}`, title: 'Error', status, code, detail }, { 'Content-Type': 'application/problem+json' });
-
-/**
- * Events: POST /api/v1/events with an app or service token carrying events.event.publish; GET
- * /api/v1/events pulls an app token's own project and environment (events.app.read, topic
- * app.<project_key>.* only), with Events' paging: next_after_seq moves to latest_seq at the end.
- */
-async function startEvents(network) {
-    const published = [];
-    const requests = [];
-    const stored = [];
-    const f = failures();
-    let seq = 0;
-    const verify = (req) => serviceAuth.verifyServiceToken(String(req.headers.authorization || '').slice(7), { publicKey: network.publicPem, issuer: network.url, audience: 'openvibe.events', acceptSandbox: true });
-    const srv = await listen((req, raw, json) => {
-        const url = new URL(req.url, 'http://x');
-        requests.push({ method: req.method, path: req.url, auth: String(req.headers.authorization || '') });
-        const failing = f.match(req.url);
-        if (failing) return problemJson(json, failing.status, failing.code, 'injected failure');
-        if (url.pathname === '/api/v1/events' && req.method === 'GET') {
-            const v = verify(req);
-            if (!v.ok) return problemJson(json, 401, v.code, v.reason);
-            if (!String(v.claims.sub).startsWith('app:')) return problemJson(json, 403, 'capability.denied', 'service reads are not modelled here');
-            if (!v.claims.cap.includes('events.app.read')) return problemJson(json, 403, 'capability.denied', 'events.app.read not granted');
-            const key = `p${v.claims.project_id.replace(/^prj_/, '').toLowerCase()}`;
-            if (url.searchParams.get('topic') !== `app.${key}.*`) return problemJson(json, 403, 'events.topic_not_allowed', `app.* patterns must name your project: app.${key}.*`);
-            const after = Number(url.searchParams.get('after_seq') || 0);
-            const limit = Math.min(1000, Number(url.searchParams.get('limit') || 100));
-            const rows = stored.filter((r) => r.seq > after && r.project_id === v.claims.project_id && r.env === v.claims.env).slice(0, limit);
-            return json(200, { events: rows.map((r) => ({ seq: r.seq, event: r.event })), next_after_seq: rows.length === limit ? rows[rows.length - 1].seq : seq, latest_seq: seq });
-        }
-        if (req.url === '/api/v1/events' && req.method === 'POST') {
-            const v = verify(req);
-            if (!v.ok) return json(401, { type: 'x', title: 'Unauthorized', status: 401, code: v.code, detail: v.reason });
-            const isApp = String(v.claims.sub).startsWith('app:');
-            const needed = isApp ? 'events.app.publish' : 'events.event.publish';
-            if (!v.claims.cap.includes(needed)) return json(403, { type: 'x', title: 'Forbidden', status: 403, code: 'capability.denied', detail: `${needed} not granted` });
-            const body = JSON.parse(raw.toString('utf8'));
-            const events = body.events || [body];
-            if (isApp) {
-                // events.app.publish: app.<project_key>.* types, source app-<lowercase app ULID>.
-                const key = `p${v.claims.project_id.replace(/^prj_/, '').toLowerCase()}`;
-                const src = `app-${v.claims.sub.replace(/^app:app_/, '').toLowerCase()}`;
-                for (const e of events) {
-                    if (!e.event_type.startsWith(`app.${key}.`)) return json(403, { type: 'x', title: 'Forbidden', status: 403, code: 'events.type_not_allowed', detail: `apps publish app.${key}.* only` });
-                    if (e.source !== src) return json(403, { type: 'x', title: 'Forbidden', status: 403, code: 'events.source_mismatch', detail: `source must be ${src}` });
-                }
-            }
-            const results = events.map((e) => { published.push({ event: e, sub: v.claims.sub }); return { event_id: e.event_id, seq: ++seq, duplicate: false }; });
-            return json(201, body.events ? { results } : results[0]);
-        }
-        return json(404, { error: 'not found' });
-    });
-    /** An app event of `projectId` in `env`, as an app of that project would have published it. */
-    function addAppEvent(projectId, env, name = 'order.created', payload = {}) {
-        const key = `p${projectId.replace(/^prj_/, '').toLowerCase()}`;
-        const event = { event_id: ids.newId('event'), event_type: `app.${key}.${name}`, version: 1, source: `app-${ids.ulid().toLowerCase()}`, actor: { type: 'app', id: ids.newId('app') }, timestamp: new Date().toISOString(), visibility: 'internal', subject: { type: 'thing', id: String(seq + 1) }, payload };
-        stored.push({ seq: ++seq, project_id: projectId, env, event });
-        return stored[stored.length - 1];
-    }
-    return { url: srv.url, published, requests, stored, addAppEvent, fail: f.fail, clear: f.clear, close: srv.close };
-}
-
-/**
- * Media: POST /api/v1/:app/files with a token carrying media.object.upload for that namespace; and
- * for a developer project's app-shaped tokens, GET /api/v2/:project/objects (list verb: .list or
- * .read), /objects/:id/download?format=json (media.object.read) and /namespaces, the token's env
- * picking the tenant. Sandbox objects are never public; private ones get signed URLs (ttl ≤ 1 h).
- */
-async function startMedia(network) {
-    const uploads = [];
-    const requests = [];
-    const objects = [];
-    const f = failures();
-    const verify = (req) => serviceAuth.verifyServiceToken(String(req.headers.authorization || '').slice(7), { publicKey: network.publicPem, issuer: network.url, audience: 'openvibe.media', acceptSandbox: true });
-    let base = null;
-    function v2(req, url, json) {
-        const m = url.pathname.match(/^\/api\/v2\/(prj_[0-9A-HJKMNP-TV-Z]{26})\/(namespaces|objects)(?:\/(med_[0-9A-HJKMNP-TV-Z]{26})\/download)?$/);
-        if (!m || req.method !== 'GET') return json(404, { error: 'not found' });
-        const [, project, what, id] = m;
-        const v = verify(req);
-        if (!v.ok) return json(401, { error: 'Authentication required' });
-        if (v.claims.actor_type !== 'app') return problemJson(json, 403, 'capability.denied', 'app tokens only here');
-        if (v.claims.project_id !== project) return problemJson(json, 403, 'capability.namespace_denied', `this app token belongs to ${v.claims.project_id}, not ${project}`);
-        const verbOk = id ? v.claims.cap.includes('media.object.read') : v.claims.cap.some((c) => c === 'media.object.list' || c === 'media.object.read');
-        if (!verbOk) return problemJson(json, 403, 'capability.denied', `${id ? 'media.object.read' : 'media.object.list'} not granted`);
-        const env = v.claims.env === 'sandbox' ? 'sandbox' : 'production';
-        const mine = objects.filter((o) => o._project === project && o._env === env);
-        const view = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith('_')));
-        const root = env === 'sandbox' ? `app.${project}.sandbox` : `app.${project}`;
-        if (what === 'namespaces') {
-            return json(200, { namespaces: [{ namespace: root, owner: `project:${project}`, parent: null, policy: {}, quota: { bytes: env === 'sandbox' ? 100 * 1024 * 1024 : 1024 * 1024 * 1024, objects: null }, usage: { bytes: mine.reduce((n, o) => n + o.size_bytes, 0), objects: mine.length } }] });
-        }
-        if (!id) {
-            const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 50), 1), 200);
-            const cursor = url.searchParams.get('cursor');
-            const all = ['1', 'true'].includes(url.searchParams.get('include_deleted') || '');
-            const rows = mine.filter((o) => (all || o.lifecycle_status !== 'deleted') && (!cursor || o.id < cursor)).sort((a, b) => (a.id < b.id ? 1 : -1)).slice(0, limit + 1);
-            const page = rows.slice(0, limit);
-            return json(200, { objects: page.map(view), next_cursor: rows.length > limit ? page[page.length - 1].id : null, limit });
-        }
-        const o = mine.find((x) => x.id === id);
-        if (!o) return problemJson(json, 404, 'media.object.not_found', 'No such object in this namespace');
-        if (o.lifecycle_status === 'deleted') return problemJson(json, 410, 'media.object.deleted', 'Object was deleted');
-        if (o.lifecycle_status !== 'ready') return problemJson(json, 409, 'media.object.not_ready', `Object is ${o.lifecycle_status}`);
-        if (o.public_url) return json(200, { url: o.public_url, expires_at: null, public: true });
-        const ttl = Math.min(3600, Math.max(30, Number(url.searchParams.get('ttl')) || 300));
-        const exp = Math.floor(Date.now() / 1000) + ttl;
-        return json(200, { url: `${base}/o/${o.id}?exp=${exp}&sig=${crypto.createHash('sha256').update(`${o.id}.${exp}`).digest('hex').slice(0, 32)}`, expires_at: new Date(exp * 1000).toISOString(), public: false });
-    }
-    const srv = await listen((req, raw, json) => new Promise((resolve) => {
-        requests.push({ method: req.method, path: req.url, auth: String(req.headers.authorization || '') });
-        const failing = f.match(req.url);
-        if (failing) { problemJson(json, failing.status, failing.code, 'injected failure'); return resolve(); }
-        const url = new URL(req.url, 'http://x');
-        if (url.pathname.startsWith('/api/v2/')) { v2(req, url, json); return resolve(); }
-        const m = req.url.match(/^\/api\/v1\/([^/]+)\/files$/);
-        if (!m || req.method !== 'POST') { json(404, { error: 'not found' }); return resolve(); }
-        const v = verify(req);
-        if (!v.ok) { json(401, { type: 'x', title: 'Unauthorized', status: 401, code: v.code, detail: v.reason }); return resolve(); }
-        const c = capabilities.check(v.claims, 'media.object.upload', { namespace: decodeURIComponent(m[1]) });
-        if (!c.allowed) { json(403, { type: 'x', title: 'Forbidden', status: 403, code: c.code, detail: c.reason }); return resolve(); }
-        const bb = Busboy({ headers: req.headers });
-        let file = null;
-        bb.on('file', (_n, stream, info) => { const chunks = []; stream.on('data', (d) => chunks.push(d)); stream.on('end', () => { file = { buf: Buffer.concat(chunks), info }; }); });
-        bb.on('close', () => {
-            const key = crypto.createHash('sha256').update(file.buf).digest('hex').slice(0, 16);
-            uploads.push({ app: m[1], key, size: file.buf.length });
-            json(201, { key, app_id: m[1], user_id: null, original_name: file.info.filename, size: file.buf.length, mime: file.info.mimeType, sha256: crypto.createHash('sha256').update(file.buf).digest('hex'), url: `/f/${key}`, created_at: new Date().toISOString() });
-            resolve();
-        });
-        bb.end(raw);
-    }));
-    base = srv.url;
-    /** An object in the project's `env` tenant, shaped as Media's object view (locations left out). */
-    function addObject(projectId, env, { visibility = 'private', status = 'ready', size = 5, metadata = {} } = {}) {
-        const id = `med_${ids.ulid()}`;
-        const tenant = env === 'sandbox' ? `${projectId}-sandbox` : projectId;
-        const o = {
-            id, media_ref: { media_id: id }, legacy_ref: null, app_id: tenant, namespace: env === 'sandbox' ? `app.${projectId}.sandbox` : `app.${projectId}`, kind: 'file',
-            owner: { subject: null, app: null, user_id: null }, visibility, lifecycle_status: status, mime_type: 'text/plain', size_bytes: size,
-            content_hash: crypto.createHash('sha256').update(id).digest('hex'), metadata, held: false, readiness: { metadata: true, bytes_verified: status === 'ready', playable: false },
-            public_url: visibility !== 'private' && status === 'ready' && env === 'production' ? `${srv.url}/o/${id}` : null,
-            created_at: new Date().toISOString(), updated_at: new Date().toISOString(), deleted_at: status === 'deleted' ? new Date().toISOString() : null,
-            ...(env === 'sandbox' ? { sandbox: true } : {}), _project: projectId, _env: env,
-        };
-        objects.push(o);
-        return o;
-    }
-    return { url: srv.url, uploads, requests, objects, addObject, fail: f.fail, clear: f.clear, close: srv.close };
-}
-
-module.exports = { startNetwork, startEvents, startMedia, signJwt };
+module.exports = { startNetwork, signJwt };

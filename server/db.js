@@ -3,19 +3,16 @@
 /**
  * OpenVibe.Codes' own PostgreSQL database (ADR-035, roadmap WS-X2): the schema is migrations/NNNN_*.sql, applied at boot.
  *
- * Codes owns ONLY what is Codes' by ADR-014: release metadata keyed to Network app ids, trust tiers
- * (metadata, never authority), validated manifests, and playground run logs. Projects, members,
- * apps, credentials, grants and quotas belong to OpenVibe.Network and are never copied here.
- *
- * No table has a column for a secret, token or credential, and nothing written here ever contains
- * one (test/secrets.test.js scans every table).
+ * Codes holds no table today: the developer console's records (manifests, releases, trust tiers, playground logs)
+ * moved to OpenVibe.Services on 2026-10-08 and migration 0002 dropped them here. The harness's runs, sessions and
+ * hand-offs will live here when they arrive; nothing written here will ever contain a secret, token or credential.
  */
 const fs = require('fs');
 const path = require('path');
 const { createDb } = require('openvibe-sdk/db');
 const { ids } = require('openvibe-contracts');
 
-const TABLES = ['manifests', 'releases', 'release_log', 'trust', 'trust_history', 'playground_runs'];
+const TABLES = [];
 
 const MIGRATIONS = path.join(__dirname, '..', 'migrations');
 const DEV_PGLITE = path.join(__dirname, '..', 'data', 'pglite');

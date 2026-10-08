@@ -6,7 +6,7 @@ Thank you for helping. This guide covers every OpenVibers repository; a reposito
 
 ## Where things live
 
-- Each service has its own repository under [github.com/OpenVibers](https://github.com/OpenVibers): OpenVibe.Network (identity, projects, apps, grants), OpenVibe.Live, OpenVibe.Media, OpenVibe.Events, OpenVibe.Chat, OpenVibe.Codes (this portal), and others.
+- Each service has its own repository under [github.com/OpenVibers](https://github.com/OpenVibers): OpenVibe.Network (identity, projects, apps, grants), OpenVibe.Live, OpenVibe.Media, OpenVibe.Events, OpenVibe.Chat, OpenVibe.Services (the developer platform), OpenVibe.Codes (the coding-agent harness, where this guide lives), and others.
 - Interfaces between services live in OpenVibe.Contracts: schemas, capabilities, event types, service manifests and the decision record (ADRs).
 - The client library for apps is OpenVibe.SDK (`openvibe-sdk`). Working examples are in OpenVibe.Examples.
 
@@ -14,7 +14,7 @@ Thank you for helping. This guide covers every OpenVibers repository; a reposito
 
 - For a bug, open an issue in the repository that has it: what you did, what you expected, what happened, and the version (the service's `/release.json`, or the package version).
 - For a small fix (a typo, a clear bug with an obvious fix), you can open a pull request straight away.
-- For anything that changes a public interface — a contract, a capability, an event type, an API route others call — start with a proposal, as described in [proposals and decisions](https://openvibe.codes/policy/rfc). A pull request that changes an interface without an accepted proposal will be asked to open one first.
+- For anything that changes a public interface — a contract, a capability, an event type, an API route others call — start with a proposal, as described in [proposals and decisions](https://openvibe.services/policy/rfc). A pull request that changes an interface without an accepted proposal will be asked to open one first.
 - Security problems: do not open a public issue. Write to Contact@OpenVibe.Network with the details and give us time to fix it before you publish anything.
 
 ## Making a change
@@ -38,7 +38,7 @@ A maintainer may ask for changes. When the pull request is approved and CI passe
 
 ## Licensing
 
-Each repository's LICENSE file applies to contributions to it. The services are licensed under the AGPL-3.0; the SDK and contracts packages have their own licenses, shown on the [licensing page](https://openvibe.codes/policy/licensing). By opening a pull request you confirm that you have the right to contribute the code under that repository's license. Do not add code you copied from somewhere whose license does not allow it.
+Each repository's LICENSE file applies to contributions to it. The services are licensed under the AGPL-3.0; the SDK and contracts packages have their own licenses, shown on the [licensing page](https://openvibe.services/policy/licensing). By opening a pull request you confirm that you have the right to contribute the code under that repository's license. Do not add code you copied from somewhere whose license does not allow it.
 
 ## Growing as a contributor
 

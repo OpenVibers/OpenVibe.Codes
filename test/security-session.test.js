@@ -12,7 +12,6 @@ const { signJwt } = require('./helpers/mocks');
 (async () => {
     const s = await boot();
     const staff = s.network.addUser('stafferson');
-    s.ctx.config.staffSubjects.push(staff.subject);     // as CODES_STAFF_SUBJECTS would
     const APP = 'app_01JABCDEFGHJKMNPQRSTVWXYZ0';
 
     const now = () => Math.floor(Date.now() / 1000);
@@ -22,14 +21,12 @@ const { signJwt } = require('./helpers/mocks');
         nonce: null, typ: 'fedcm', jti: 'x', aud: 'https://tenant.openvibe.host', iat: now(), exp: now() + 300,
     }, s.network.privatePem);
 
-    await check('a FedCM assertion is not a Codes session (cannot act as staff)', async () => {
+    await check('a FedCM assertion is not a Codes session (it signs nobody in)', async () => {
         const cookie = `codes_at=${fedcm()}`;
-        const page = await s.get('/staff', { cookie });
-        assert.notStrictEqual(page.status, 200, 'the staff console must not open for an assertion');
-        const body = new URLSearchParams({ app_id: APP, tier: 'first-party', note: 'pwned', csrf: s.csrf(staff) }).toString();
-        const r = await s.get('/staff/trust', { cookie, body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
-        assert.notStrictEqual(r.status, 303, 'the trust tier must not be set');
-        assert.strictEqual((await s.ctx.trust.get(APP)).tier, 'unreviewed');
+        const me = await s.get('/auth/me', { cookie });
+        assert.strictEqual(me.status, 401, 'an assertion for another site is not a session here');
+        const page = await s.get('/', { cookie });
+        assert.ok(!page.text.includes(`Signed in as <strong>${staff.username}`), 'the page shows nobody signed in');
     });
 
     await check('an app token is not a Codes session', async () => {
@@ -48,12 +45,10 @@ const { signJwt } = require('./helpers/mocks');
         assert.strictEqual((await s.get('/auth/me', { as: staff })).status, 200);
     });
 
-    await check('a real Network session token still signs the staff member in', async () => {
-        const page = await s.get('/staff', { as: staff });
-        assert.strictEqual(page.status, 200, page.text.slice(0, 200));
-        const r = await s.get('/staff/trust', { as: staff, form: { app_id: APP, tier: 'reviewed', note: 'checked' } });
-        assert.strictEqual(r.status, 303);
-        assert.strictEqual((await s.ctx.trust.get(APP)).tier, 'reviewed');
+    await check('a real Network session token signs the person in', async () => {
+        const me = await s.get('/auth/me', { as: staff });
+        assert.strictEqual(me.status, 200, me.text.slice(0, 200));
+        assert.strictEqual(JSON.parse(me.text).user.username, staff.username);
     });
 
     await check('another site cannot sign a person out; this site can', async () => {
@@ -63,9 +58,9 @@ const { signJwt } = require('./helpers/mocks');
         assert.match(cross.text, /method="post"/);
         const crossPost = await s.get('/auth/logout', { as: staff, method: 'POST', headers: { 'sec-fetch-site': 'cross-site' } });
         assert.strictEqual(crossPost.status, 403);
-        const same = await s.get('/auth/logout?next=/projects', { as: staff, headers: { 'sec-fetch-site': 'same-origin' } });
+        const same = await s.get('/auth/logout?next=/improve', { as: staff, headers: { 'sec-fetch-site': 'same-origin' } });
         assert.strictEqual(same.status, 303);
-        assert.strictEqual(same.headers.get('location'), '/projects');
+        assert.strictEqual(same.headers.get('location'), '/improve');
         assert.match(String(same.headers.get('set-cookie') || ''), /codes_at=;/);
     });
 

@@ -2,7 +2,7 @@
   "name": "openvibe-codes",
   "version": "0.1.0",
   "private": true,
-  "description": "OpenVibe.Codes: the developer portal. Projects, apps, credentials and grants over OpenVibe.Network's API (Network owns them), docs generated from the pinned contracts and SDK, OAuth callback helper, webhook tester, grant-respecting playgrounds, manifest validation and release metadata. Server-rendered and useful without JavaScript.",
+  "description": "OpenVibe.Codes: the open coding-agent harness. The agent catalog (Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API) with a public routing API, and the way to improve OpenVibe itself. Server-rendered and useful without JavaScript.",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
@@ -21,16 +21,15 @@
   "license": "AGPL-3.0-only",
   "repository": "github:OpenVibers/OpenVibe.Codes",
   "dependencies": {
-    "busboy": "^1.6.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.1.0",
     "iovalkey": "^0.4.0",
-    "openvibe-contracts": "https://codeload.github.com/OpenVibers/OpenVibe.Contracts/tar.gz/refs/tags/v0.112.0",
-    "openvibe-sdk": "https://codeload.github.com/OpenVibers/OpenVibe.SDK/tar.gz/refs/tags/v0.35.0",
-    "openvibe-shared": "https://codeload.github.com/OpenVibers/OpenVibe.Shared/tar.gz/refs/tags/v2.13.2",
+    "openvibe-contracts": "https://codeload.github.com/OpenVibers/OpenVibe.Contracts/tar.gz/refs/tags/v0.113.0",
+    "openvibe-sdk": "https://codeload.github.com/OpenVibers/OpenVibe.SDK/tar.gz/refs/tags/v0.35.2",
+    "openvibe-shared": "https://codeload.github.com/OpenVibers/OpenVibe.Shared/tar.gz/refs/tags/v2.13.3",
     "pg": "^8.23.0"
   },
   "engines": {

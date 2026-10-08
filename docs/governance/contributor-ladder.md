@@ -34,7 +34,7 @@ A contributor trusted to review other people's changes in a repository.
 Someone responsible for a repository: its direction, its releases and its quality.
 
 - **Can:** merge pull requests; cut releases and tags; accept or decline proposals that affect only their repository; take part in moderation decisions.
-- **Expected to:** keep `main` releasable and tests passing; keep the README and status notes honest; follow the [compatibility policy](https://openvibe.codes/policy/compatibility) (deprecate before removing, announce breaking changes); take part in proposals that touch their repository's interfaces.
+- **Expected to:** keep `main` releasable and tests passing; keep the README and status notes honest; follow the [compatibility policy](https://openvibe.services/policy/compatibility) (deprecate before removing, announce breaking changes); take part in proposals that touch their repository's interfaces.
 - **How to become one:** sustained work as a reviewer, with good judgement about compatibility and security. Existing maintainers propose it; the owner approves.
 - **Deploy access** (production servers, secrets) is separate from maintainer rights and is given only by the owner, to named people, for named services.
 
