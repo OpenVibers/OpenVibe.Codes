@@ -9,7 +9,7 @@
   "domain": "openvibe.codes",
   "contracts": "openvibe-contracts v0.112.0",
   "sdk": "openvibe-sdk v0.35.0",
-  "shared": "openvibe-shared v2.13.0",
+  "shared": "openvibe-shared v2.13.2",
   "packages": [
     "openvibe-contracts v0.107.0",
     "openvibe-sdk v0.35.0",
@@ -64,5 +64,5 @@
     "authority resource index (codes.resource.read) over Codes' manifests and releases, with OVRN reads",
     "crawl artifacts (robots.txt, sitemap.xml, llms.txt, llms-full.txt) and the home page's JSON-LD"
   ],
-  "updated": "2026-10-07"
+  "updated": "2026-10-08"
 }
