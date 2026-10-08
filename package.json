@@ -1,9 +1,12 @@
 {
   "name": "openvibe-codes",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "OpenVibe.Codes: the open coding-agent harness. The agent catalog (Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API) with a public routing API, and the way to improve OpenVibe itself. Server-rendered and useful without JavaScript.",
-  "main": "server/index.js",
+  "description": "OpenVibe.Codes: the open coding-agent harness. Run a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or your own model, with routing by capability and cost and hand-offs between agents; plus the site with the agent catalog, a public routing API and the way to improve OpenVibe itself.",
+  "main": "harness/index.js",
+  "bin": {
+    "openvibe-codes": "bin/openvibe-codes.js"
+  },
   "scripts": {
     "start": "node server/index.js",
     "dev": "NODE_ENV=development node server/index.js",

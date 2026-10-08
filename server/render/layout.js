@@ -22,6 +22,7 @@ const NETWORK_URL = 'https://openvibe.network';
 const SITE_NAME = 'OpenVibe.Codes';
 const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public');
 const NAV = [
+    { label: 'Get started', href: '/start' },
     { label: 'Agents', href: '/harnesses' },
     { label: 'Improve OpenVibe', href: '/improve' },
     { label: 'Community', href: '/policy' },

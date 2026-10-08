@@ -87,7 +87,7 @@ const { boot, check, done } = require('./helpers/boot');
     });
 
     await check('public pages are complete without JavaScript (noscript nav, SSR footer)', async () => {
-        for (const p of ['/', '/harnesses', '/improve', '/policy', '/policy/contributing']) {
+        for (const p of ['/', '/start', '/harnesses', '/improve', '/policy', '/policy/contributing']) {
             const r = await t.get(p);
             assert.strictEqual(r.status, 200, p);
             assert.match(r.text, /<noscript><nav/);

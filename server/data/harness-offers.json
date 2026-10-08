@@ -14,7 +14,9 @@
       "vision": true,
       "browser": false,
       "computer_use": false,
-      "runtimes": ["code"]
+      "runtimes": [
+        "code"
+      ]
     },
     "address": {
       "kind": "cli",
@@ -64,7 +66,9 @@
       "vision": true,
       "browser": false,
       "computer_use": false,
-      "runtimes": ["code"]
+      "runtimes": [
+        "code"
+      ]
     },
     "address": {
       "kind": "cli",
@@ -114,7 +118,9 @@
       "vision": false,
       "browser": false,
       "computer_use": false,
-      "runtimes": ["code"]
+      "runtimes": [
+        "code"
+      ]
     },
     "address": {
       "kind": "cli",
@@ -164,7 +170,9 @@
       "vision": true,
       "browser": false,
       "computer_use": false,
-      "runtimes": ["code"]
+      "runtimes": [
+        "code"
+      ]
     },
     "address": {
       "kind": "cli",
@@ -214,7 +222,9 @@
       "vision": true,
       "browser": false,
       "computer_use": false,
-      "runtimes": ["code"]
+      "runtimes": [
+        "code"
+      ]
     },
     "address": {
       "kind": "cli",
@@ -254,13 +264,13 @@
     "name": "DeepSeek",
     "provider": "deepseek",
     "capabilities": {
-      "host_access": false,
+      "host_access": true,
       "mcp": false,
       "long_autonomy": false,
-      "resume": false,
-      "edit": false,
-      "review": false,
-      "tools": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
       "vision": false,
       "browser": false,
       "computer_use": false
@@ -289,6 +299,55 @@
           "output_tokens": 8192
         },
         "concurrency": 8,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0.00027,
+          "cached_usd": 0.00007,
+          "output_usd": 0.0011
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "openai-compatible",
+    "name": "Your own model",
+    "provider": "self-hosted",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false
+    },
+    "address": {
+      "kind": "api",
+      "target": "http://127.0.0.1:8080/v1"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 3600,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 32000
+    },
+    "agents": [
+      {
+        "id": "openai-compatible-local",
+        "harness": "openai-compatible",
+        "provider": "self-hosted",
+        "model": "local",
+        "context_limits": {
+          "input_tokens": 32000,
+          "output_tokens": 4096
+        },
+        "concurrency": 2,
         "price_per_1k_tokens": {
           "fresh_usd": 0,
           "cached_usd": 0,
