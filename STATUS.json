@@ -9,7 +9,7 @@
   "domain": "openvibe.codes",
   "contracts": "openvibe-contracts v0.113.0",
   "sdk": "openvibe-sdk v0.35.2",
-  "shared": "openvibe-shared v2.15.0",
+  "shared": "openvibe-shared v2.17.0",
   "packages": [
     "openvibe-contracts v0.113.0",
     "openvibe-sdk v0.35.2",
@@ -51,5 +51,5 @@
     "community documents",
     "redirects for the moved developer console"
   ],
-  "updated": "2026-10-08"
+  "updated": "2026-10-09"
 }
