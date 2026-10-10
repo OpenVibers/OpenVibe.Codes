@@ -34,15 +34,38 @@ const LEVELS = { read: 1, edit: 2, full: 3 };
 const SHOWN_AS = { list_dir: 'LS', read_file: 'Read', grep: 'Grep', write_file: 'Write', edit_file: 'Edit', run_command: 'Bash' };
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage', '.cache']);
 
+/**
+ * The real path of abs, with any part that does not exist yet kept as written; null when a component is
+ * not a directory. Every existing component is realpath'd, so a symlink cannot hide where the path goes.
+ */
+function realPath(abs) {
+    let p = path.resolve(abs);
+    const tail = [];
+    for (;;) {
+        try { return path.join(fs.realpathSync(p), ...tail); }
+        catch (err) {
+            if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') return null;
+            const parent = path.dirname(p);
+            if (parent === p) return null;
+            tail.unshift(path.basename(p));
+            p = parent;
+        }
+    }
+}
+
 /** A path inside the working directory, or an Error that says why not. */
 function inside(cwd, p, { write = false } = {}) {
     const root = fs.realpathSync(cwd);
     const abs = path.resolve(root, String(p || '.'));
     if (abs !== root && !abs.startsWith(`${root}${path.sep}`)) return new Error(`${p} is outside the working directory`);
-    const rel = path.relative(root, abs);
+    // Resolve symlinks before trusting the textual check: `link/.env` or `link` → a path outside the
+    // working directory would otherwise read and write through the link.
+    const real = realPath(abs);
+    if (real === null || (real !== root && !real.startsWith(`${root}${path.sep}`))) return new Error(`${p} is outside the working directory`);
+    const rel = path.relative(root, real);
     if (/(^|[\\/])\.env(\.|$)/.test(rel)) return new Error('.env files are not read or written');
     if (write && /(^|[\\/])\.git([\\/]|$)/.test(rel)) return new Error('.git is not written');
-    return abs;
+    return real;
 }
 
 function runTool(name, args, cwd) {
@@ -71,7 +94,8 @@ function runTool(name, args, cwd) {
         const hits = [];
         const walk = (p) => {
             if (hits.length >= 200) return;
-            const st = fs.statSync(p);
+            const st = fs.lstatSync(p);
+            if (st.isSymbolicLink()) return;    // a link can point anywhere: never followed
             if (st.isDirectory()) { for (const n of fs.readdirSync(p)) if (!SKIP_DIRS.has(n) && !/^\.env/.test(n)) walk(path.join(p, n)); return; }
             if (st.size > 1_000_000) return;
             const text = fs.readFileSync(p, 'utf8');

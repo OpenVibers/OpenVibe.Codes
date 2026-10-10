@@ -227,7 +227,11 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
                 + `<p>Sign out of OpenVibe.Codes?</p><button type="submit">Sign out</button> <a href="/">Cancel</a></form>`);
         });
         r.post('/logout', (req, res, next) => (sameOriginRequest(req) ? next() : res.status(403).type('text/plain').send('Sign-out must come from this site.')));
+        // The GET (confirm page) and POST (403) handlers above only cover those two methods; this runs for
+        // every other one too, so it repeats the same-origin check rather than signing out on a cross-site
+        // DELETE (or any other verb).
         r.all('/logout', async (req, res) => {
+            if (!sameOriginRequest(req)) return res.status(403).type('text/plain').send('Sign-out must come from this site.');
             const rt = req.cookies && req.cookies[REFRESH_COOKIE];
             if (rt) {
                 fetchImpl(`${config.networkInternalUrl}/oauth/revoke`, {

@@ -111,7 +111,9 @@ async function createApp(opts = {}) {
     app.use(sso.middleware());
 
     // ── Sign-in (OAuth2 + PKCE client of OpenVibe.Network) ──
-    app.use('/auth/', rateLimit({ windowMs: 15 * 60_000, limit: 60, standardHeaders: true, legacyHeaders: false }));
+    // The limit is on the sign-in routes only: the shared navbar asks /auth/me on every page view, so
+    // counting it here would 429 (and render the visitor signed out) after 60 views in 15 minutes.
+    app.use(['/auth/login', '/auth/callback', '/auth/logout'], rateLimit({ windowMs: 15 * 60_000, limit: 60, standardHeaders: true, legacyHeaders: false }));
     app.use('/auth', sso.routes());
     { const legal = require('openvibe-shared/legal'); app.get(legal.PATHS, legal.handler({ id: 'codes', service: 'codes', host: 'openvibe.codes', name: 'OpenVibe.Codes', profile: 'ugc' })); }
 

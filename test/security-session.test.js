@@ -58,10 +58,26 @@ const { signJwt } = require('./helpers/mocks');
         assert.match(cross.text, /method="post"/);
         const crossPost = await s.get('/auth/logout', { as: staff, method: 'POST', headers: { 'sec-fetch-site': 'cross-site' } });
         assert.strictEqual(crossPost.status, 403);
+        // The GET/POST handlers only cover those verbs; any other (DELETE here) must be refused too.
+        const crossDelete = await s.get('/auth/logout', { as: staff, method: 'DELETE', headers: { 'sec-fetch-site': 'cross-site' } });
+        assert.strictEqual(crossDelete.status, 403, 'a cross-site DELETE is refused');
+        assert.ok(!/codes_at=;|codes_at=deleted/i.test(String(crossDelete.headers.get('set-cookie') || '')), 'the session cookie is kept');
         const same = await s.get('/auth/logout?next=/improve', { as: staff, headers: { 'sec-fetch-site': 'same-origin' } });
         assert.strictEqual(same.status, 303);
         assert.strictEqual(same.headers.get('location'), '/improve');
         assert.match(String(same.headers.get('set-cookie') || ''), /codes_at=;/);
+    });
+
+    await check('/auth/me is not counted by the sign-in limiter; the sign-in routes still are', async () => {
+        // The shared navbar asks /auth/me on every page view; it must not eat (or be eaten by) the
+        // 60-per-15-minutes sign-in budget (server/app.js).
+        for (let i = 0; i < 65; i++) {
+            const me = await s.get('/auth/me');
+            assert.strictEqual(me.status, 200, `/auth/me request ${i + 1} answered ${me.status}`);
+        }
+        let last = 0;
+        for (let i = 0; i < 61; i++) last = (await s.get('/auth/login')).status;
+        assert.strictEqual(last, 429, 'the sign-in route is still limited');
     });
 
     await s.close();
