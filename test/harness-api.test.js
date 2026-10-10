@@ -46,6 +46,12 @@ const toolResults = (events) => events.filter((e) => e.type === 'user').flatMap(
     fs.writeFileSync(path.join(work, 'src', 'a.js'), 'const name = 1;\nmodule.exports = name;\n');
     fs.writeFileSync(path.join(work, '.env'), 'SECRET=1\n');
     fs.writeFileSync(path.join(dir, 'outside.txt'), 'outside');
+    fs.mkdirSync(path.join(dir, 'outside-dir'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'outside-dir', 'secret.txt'), 'OUTSIDE-SECRET-KEY\n');
+    // Symlinks inside the working directory: they resolve textually inside it, but point out (or at .env).
+    fs.symlinkSync(path.join(dir, 'outside.txt'), path.join(work, 'outside-link'));
+    fs.symlinkSync(path.join(work, '.env'), path.join(work, 'env-link'));
+    fs.symlinkSync(path.join(dir, 'outside-dir'), path.join(work, 'dir-link'));
     const env = { PATH: '/nonexistent', OPENVIBE_CODES_HOME: path.join(dir, 'home'), OPENVIBE_CODES_BASE_URL: api.url, OPENVIBE_CODES_MODEL: 'tiny', OPENVIBE_CODES_API_KEY: 'k-123' };
     const h = createHarness({ env, store: createStore({ env }) });
 
@@ -88,6 +94,24 @@ const toolResults = (events) => events.filter((e) => e.type === 'user').flatMap(
         assert.ok(res.some((c) => /\.git is not written/.test(c.content)));
         assert.ok(!res.some((c) => /SECRET=1/.test(c.content)), 'grep skips .env files');
         assert.ok(!fs.existsSync(path.join(work, '.git')));
+    });
+
+    await check('a symlink inside the working directory cannot carry a read or write past it', async () => {
+        api.set([{ calls: [
+            ['read_file', { path: 'outside-link' }],
+            ['read_file', { path: 'env-link' }],
+            ['read_file', { path: 'dir-link/secret.txt' }],
+            ['write_file', { path: 'dir-link/planted.txt', content: 'x' }],
+            ['grep', { pattern: 'OUTSIDE-SECRET-KEY' }],
+        ] }, { content: 'ok' }]);
+        const events = await collect(h.run({ prompt: 'escape', agent: 'openai-compatible', cwd: work, permission: 'full', handoff: false }));
+        const res = toolResults(events);
+        assert.strictEqual(res.length, 5, JSON.stringify(res.map((c) => c.content)));
+        assert.ok(res.slice(0, 4).every((c) => c.is_error), JSON.stringify(res.map((c) => c.content)));
+        assert.ok(res.slice(0, 4).every((c) => /outside the working directory|\.env files are not read/.test(c.content)), JSON.stringify(res.map((c) => c.content)));
+        assert.strictEqual(res[4].content, 'no matches', 'grep did not follow the linked directory');
+        assert.ok(!res.some((c) => /SECRET=1|OUTSIDE-SECRET-KEY/.test(c.content)), 'nothing behind a link came back');
+        assert.ok(!fs.existsSync(path.join(dir, 'outside-dir', 'planted.txt')), 'no write through the link');
     });
 
     await check('run_command exists only at the full level, and runs in the working directory', async () => {
