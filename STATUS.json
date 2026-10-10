@@ -9,11 +9,11 @@
   "domain": "openvibe.codes",
   "contracts": "openvibe-contracts v0.127.0",
   "sdk": "openvibe-sdk v0.37.2",
-  "shared": "openvibe-shared v2.21.1",
+  "shared": "openvibe-shared v2.21.2",
   "packages": [
     "openvibe-contracts v0.127.0",
     "openvibe-sdk v0.37.2",
-    "openvibe-shared v2.21.1"
+    "openvibe-shared v2.21.2"
   ],
   "summary": "Public at https://openvibe.codes (sudo ovhost deploy codes; unit openvibe-codes on 127.0.0.1:4900). Since 2026-10-08 Codes is the open coding-agent harness: openvibe-codes (a command-line tool and Node.js module, v0.2.0) runs a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or a person's own OpenAI-compatible model on their machine, hands it to the next agent when one fails or goes quiet, and keeps every run; the site carries the agent catalog with a public routing API, getting started, Improve OpenVibe and the community documents. The developer console that used to live here moved to OpenVibe.Services (https://openvibe.services) and every one of its addresses answers a permanent redirect there.",
   "works": [
