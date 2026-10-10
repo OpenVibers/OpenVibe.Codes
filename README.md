@@ -83,6 +83,36 @@ openvibe-codes resume <run id> "now add a test"
 
 No path in Codes sends or accepts a shared loopback key (tested by grep and at runtime).
 
+## Capabilities
+
+- **Registered:** none. The released `codes` service manifest declares no capability and no events, and the developer console's `codes.release.*`, `codes.resource.*` and `codes.app.*` names are retired (their replacements are OpenVibe.Services'). `capabilitiesRegistered` in STATUS.json records that empty registration.
+- **Routed over:** each catalog offer (`platform.harness-offer@1`, [server/data/harness-offers.json](server/data/harness-offers.json)) carries the flags the router matches. A task (`edit`, `review`, `long`, `resume`) becomes the requirements `task:edit`, `task:review`, and — for a long run or a resume — `harness:long-autonomy` and `harness:resume`; an agent's own flags add `harness:host-access`, `harness:mcp`, `harness:long-autonomy`, `harness:resume`, `harness:edit`, `harness:review`, `harness:tools`, `harness:vision`, `harness:browser` and `harness:computer-use`, and each runtime adds `runtime:<name>` (`runtime:code` today) ([server/domain/harness-placement.js](server/domain/harness-placement.js)).
+- **Called on other services:** none. Sign-in uses OpenVibe.Network's OAuth2 authorization, token and revoke endpoints (client `codes`, PKCE S256) and its JWKS, not a capability.
+
+## Acceptance
+
+`npm test` (development: `fnm exec --using=22.22.1 npm test`) runs every `test/*.test.js` in its own process ([test/run.js](test/run.js)), each on a temp PGlite database with in-process mocks of OpenVibe.Network, Events and Media ([test/helpers/boot.js](test/helpers/boot.js)); `CODES_TEST_STORE=pg` runs the same against the containers. The main files, one line each:
+
+- [test/harness-run.test.js](test/harness-run.test.js) — every CLI adapter turns its agent's output into the shared events with one result; availability comes from PATH and keys; routing leaves out what is not here and says why; a failed or silent attempt hands the task on; redaction; the local run store.
+- [test/harness-api.test.js](test/harness-api.test.js) — the API agent loop against a stand-in OpenAI-compatible server: tools confined to the working directory, permission levels, `.env`/`.git`/outside paths refused, an HTTP error ends the run, resume continues the conversation.
+- [test/harness-placement.test.js](test/harness-placement.test.js) — placement over the catalog: hard capability constraints first, then cost, with the reasons; an unknown task is refused.
+- [test/harnesses.test.js](test/harnesses.test.js) — the catalog validated at boot as `platform.harness-offer@1` / `platform.agent-offer@1`.
+- [test/harnesses-api.test.js](test/harnesses-api.test.js) — `GET /api/v1/harnesses` and `POST /api/v1/harnesses/route`, their 422 problems and their per-actor limits.
+- [test/harness-cli.test.js](test/harness-cli.test.js) — the `openvibe-codes` command (`agents`, `route`, `run`, `runs`, `show`, `resume`) and its exit code.
+- [test/moved.test.js](test/moved.test.js) — every former console address answers 301 or 308 to the same path on openvibe.services, and what stays here is untouched.
+- [test/auth-jwks.test.js](test/auth-jwks.test.js) — the Network signing key is fetched and verified: the last good keys through an outage, backoff, readiness reporting the cache.
+- [test/security-session.test.js](test/security-session.test.js) — a session cookie must hold a Network session token, not a FedCM assertion or an app/service token.
+- [test/security-secrets.test.js](test/security-secrets.test.js) — no secret reaches a response, the database or a log line.
+- [test/no-internal-key.test.js](test/no-internal-key.test.js) — no `X-Internal-Key` in code, deploy files or the environment, and no special treatment for one.
+- [test/security-ssrf.test.js](test/security-ssrf.test.js) — no URL a caller typed is ever fetched, plus a ratchet on the files that make outbound requests.
+- [test/actor-limits.test.js](test/actor-limits.test.js) — per-actor 429s with `Retry-After` before any work, while another caller still passes and the never-limited endpoints stay open.
+- [test/contracts.test.js](test/contracts.test.js) — the released codes manifest matches the code, with no console capability or event left.
+- [test/open-redirect.test.js](test/open-redirect.test.js) — sign-in's `next=` never leaves the site.
+- [test/governance.test.js](test/governance.test.js) — the community documents are served as they are, drafts marked and kept out of search.
+- [test/start-page.test.js](test/start-page.test.js) — `/start` names every adapter and its needs, and the command line prints the same version.
+- [test/discovery.test.js](test/discovery.test.js) — robots.txt, sitemap.xml and llms.txt are served with real public entries and a lastmod from the site's own data.
+- [test/perf-budget.test.js](test/perf-budget.test.js) — the home page's size budgets, measured on the server as it runs.
+
 ## Configuration
 
 See [.env.example](.env.example). Required in production: `OV_OAUTH_CLIENT_SECRET`, `BASE_URL`, `DATABASE_URL` (and `DATABASE_DIRECT_URL` for the boot migrations, run as the owner). Optional: `VALKEY_URL`, `CODES_LIMITS_MINUTE` / `CODES_LIMITS_HOUR`.
