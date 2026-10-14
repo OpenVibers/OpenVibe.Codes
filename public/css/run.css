@@ -31,3 +31,5 @@
 .run-patch .add { color: var(--success, #22c55e); }
 .run-patch .del { color: var(--danger, #e5484d); }
 .run-patch .hunk { color: var(--accent-light, #60a5fa); }
+.run-repo { overflow-wrap: break-word; }
+.run-host { display: block; font-size: 0.55em; font-weight: 500; color: var(--text-muted, #8b9bb4); }

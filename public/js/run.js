@@ -60,8 +60,9 @@
             setTimeout(function () { window.location.reload(); }, 800);
         });
         source.onerror = function () {
-            // The stream ended or the link dropped: the page itself shows where the task is.
-            if (source.readyState === 2) setTimeout(function () { window.location.reload(); }, 3000);
+            // The stream ended or could not open (Run busy or down): the page itself shows where the task is, so it is
+            // reloaded, not too often while the stream stays away.
+            if (source.readyState === 2) setTimeout(function () { window.location.reload(); }, 15000);
         };
     }
 
