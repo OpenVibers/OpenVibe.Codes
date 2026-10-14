@@ -56,6 +56,8 @@ function fakeHarness({ fail = false } = {}) {
             [{ repo: 'https://github.com/a/b', prompt: '   ' }, /prompt/],
             [{ repo: 'https://github.com/a/b', prompt: 'x', ref: '--upload-pack=evil' }, /ref/],
             [{ repo: 'https://github.com/a/b', prompt: 'x', push: { branch: '-x' } }, /push.branch/],
+            [{ repo: 'https://github.com/a/b', prompt: 'x', push: { branch: 'main' } }, /never main/],
+            [{ repo: 'https://github.com/a/b', prompt: 'x', push: { branch: 'release/2.0' } }, /never release\/2\.0/],
         ]) assert.throws(() => parseArgs(JSON.stringify(input)), why);
         assert.throws(() => parseArgs('not json'), /JSON/);
         assert.strictEqual(parseArgs(JSON.stringify({ repo: 'file:///tmp/x', prompt: 'x' }), env).repo, 'file:///tmp/x');
@@ -93,6 +95,17 @@ function fakeHarness({ fail = false } = {}) {
         assert.deepStrictEqual(fs.readdirSync(tmp), [], 'the scratch directory is gone');
         // The source repository is untouched.
         assert.strictEqual(fs.readFileSync(path.join(src.dir, 'README.md'), 'utf8'), '# Demo\n');
+    });
+
+    await check('a push is only ever a new branch: never the base, a protected name, an existing branch, or unchecked', () => {
+        const { pushTarget } = require('../harness/job');
+        assert.deepStrictEqual(pushTarget('fix/typo', 'main'), { branch: 'fix/typo' });
+        assert.match(pushTarget(null, 'main', { now: 1 }).branch, /^openvibe-codes\/1$/);
+        assert.match(pushTarget('dev', 'dev').refused, /started from/);
+        for (const name of ['main', 'master', 'develop', 'production', 'release/1.2', 'gh-pages', 'Main']) assert.match(pushTarget(name, 'feature').refused, /never/, name);
+        assert.match(pushTarget('fix/typo', 'main', { exists: true }).refused, /already exists/);
+        assert.match(pushTarget('fix/typo', 'main', { exists: null }).refused, /could not say/);
+        assert.match(fs.readFileSync(path.join(__dirname, '..', 'harness', 'job.js'), 'utf8'), /\['push', remoteUrl, `HEAD:refs\/heads\/\$\{branch\}`\]/, 'never a forced refspec');
     });
 
     await check('a failed agent or a bad clone ends with a reason, never a crash', async () => {
