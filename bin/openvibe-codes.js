@@ -8,6 +8,7 @@
  */
 const path = require('path');
 const { createHarness } = require('../harness');
+const { runJob, resultWriter } = require('../harness/job');
 const { version: VERSION } = require('../package.json');
 
 const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your terminal
@@ -28,6 +29,8 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
   openvibe-codes runs                         the latest runs on this machine
   openvibe-codes show <run id> [--json]       one run's attempts and result (--json: every event)
   openvibe-codes resume <run id> "follow-up"  continue a run's last session with its agent
+  openvibe-codes job                          one task as an OpenVibe Run job (JSON input on stdin; the
+                                              OpenVibe Node's job worker runs it on your own machine)
 
 Environment: DEEPSEEK_API_KEY · OPENVIBE_CODES_BASE_URL, OPENVIBE_CODES_MODEL, OPENVIBE_CODES_API_KEY
 (your own OpenAI-compatible server) · OPENVIBE_CODES_HOME (where runs are kept).
@@ -132,6 +135,12 @@ async function main() {
         let last = null;
         for await (const e of run) { last = e; if (o.json) out(JSON.stringify(e)); else printEvent(e); }
         return last && last.type === 'result' && !last.is_error ? 0 : 1;
+    }
+    if (cmd === 'job') {
+        // The job ends 0 whenever it handed over a result, ok or not (the document says which): OpenVibe Run keeps a
+        // result only from a job that exited 0, and the person needs the summary and the patch either way.
+        await runJob({ input: await readStdin(), harness, emit: out, writeResult: resultWriter(out) });
+        return 0;
     }
     if (cmd === 'runs') {
         const runs = harness.store.listRuns(Number(o.limit) || 20);

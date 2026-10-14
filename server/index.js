@@ -6,6 +6,7 @@
  */
 const { createApp } = require('./app');
 const { gracefulStop } = require('openvibe-sdk/service');
+const { startSubscriptions } = require('openvibe-sdk/account-data');
 
 /**
  * The process stop (openvibe-sdk/service, docs/service.md's 5 s family): the HTTP drain runs
@@ -31,6 +32,12 @@ async function start() {
     // Keep the JWKS cache fresh in the background (openvibe-sdk/auth): one client per URL, the last
     // good keys through outages, exponential backoff, unknown-kid floods throttled, an unref'd timer.
     ctx.keys.client.start();
+    // The two account subscriptions at OpenVibe.Events (ADR-033), created when missing; off without EVENTS_URL,
+    // CODES_EVENTS_SECRET or the client secret.
+    startSubscriptions({
+        eventsUrl: config.events.url, endpoint: `http://127.0.0.1:${config.port}/internal/events`, secret: config.events.secrets[0],
+        networkInternalUrl: config.networkInternalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+    });
 
     createLifecycle({ server, ctx });
     return { server, ctx };

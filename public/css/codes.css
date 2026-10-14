@@ -79,3 +79,4 @@ meter.headroom { width: 8rem; max-width: 100%; vertical-align: middle; }
 .page .sc-hero, .page .sc-sec, .page .sc-cta { padding-left: 0; padding-right: 0; }
 .page .sc-ic .ov-icon { --ovi-size: 28px !important; }
 .codes-hero-code { margin: 0; padding: 16px; border-radius: 14px; border: 1px solid var(--border, #1f2d47); background: var(--bg-primary, #0a0f1c); font-size: 13px; line-height: 1.6; overflow: auto; }
+
