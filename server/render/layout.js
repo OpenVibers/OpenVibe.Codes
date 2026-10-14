@@ -23,6 +23,7 @@ const SITE_NAME = 'OpenVibe.Codes';
 const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public');
 const NAV = [
     { label: 'Get started', href: '/start' },
+    { label: 'Run on your machine', href: '/run' },
     { label: 'Agents', href: '/harnesses' },
     { label: 'Improve OpenVibe', href: '/improve' },
     { label: 'Community', href: '/policy' },
@@ -45,7 +46,8 @@ function setRelease(id) { if (id) RELEASE = String(id); }
 
 /**
  * o: title, description, body (html), viewer, config, path, index (default false), scripts [rel],
- *    crumbs [{ label, href }], jsonLd [nodes] (serialised by openvibe-shared/seo), styles [openvibe-shared stylesheet names]
+ *    crumbs [{ label, href }], jsonLd [nodes] (serialised by openvibe-shared/seo), styles [openvibe-shared stylesheet names],
+ *    css [this site's own extra stylesheets, rel to public/, for the pages that need them]
  */
 function renderPage(o) {
     const viewer = o.viewer || { kind: 'anonymous' };
@@ -93,6 +95,7 @@ function renderPage(o) {
         head: `<meta name="referrer" content="${o.noReferrer ? 'no-referrer' : 'strict-origin-when-cross-origin'}">
 ${appIcon.headTags({ site: 'codes' })}
 <link rel="stylesheet" href="${asset('css/codes.css')}">
+${(o.css || []).map((rel) => `<link rel="stylesheet" href="${esc(asset(rel))}">`).join('\n')}
 ${(o.styles || []).map((name) => `<link rel="stylesheet" href="${esc(ovServe.url(name))}">`).join('\n')}
 ${render(scripts)}
 <meta name="ov-boost" content="codes@${esc(RELEASE)}">

@@ -53,6 +53,13 @@ function load(env = process.env) {
             sessionAudience: env.OV_SESSION_AUDIENCE || 'openvibe.network',
         },
         cookies: { secure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : isProduction },
+        // OpenVibe.Events (ADR-033): account export and deletion arrive at POST /internal/events, signed with one of these.
+        events: {
+            url: trim(env.EVENTS_URL || ''),
+            secrets: String(env.CODES_EVENTS_SECRET || '').split(',').map((s) => s.trim()).filter(Boolean),
+        },
+        // OpenVibe.Run (plan T16): a coding task on the person's own machine is a Run job Codes starts for them.
+        run: { url: trim(env.CODES_RUN_URL || 'http://127.0.0.1:4920') },
 
     };
 }

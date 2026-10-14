@@ -99,8 +99,8 @@ Added test/date.test.js: three cases, all pass.
                 eyebrow: 'OpenVibe.Codes · the open coding-agent harness · alpha',
                 title: 'Code with', accent: 'any agent',
                 lede: 'One open harness for Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API and models you host yourself: send a coding task to the agent that fits it, hand it over when one gets stuck, and keep the whole run in one place. Then point it at OpenVibe itself.',
-                actions: [{ label: 'Install the harness', href: '/start', primary: true }, { label: 'Meet the agents', href: '/harnesses' }],
-                note: `Open source (AGPL-3.0). Version ${VERSION} runs on your machine with the agents and keys you already have; nothing goes through OpenVibe. A hosted runner comes next; the list below says exactly what works.`,
+                actions: [{ label: 'Install the harness', href: '/start', primary: true }, { label: 'Run on your machine from the web', href: '/run' }, { label: 'Meet the agents', href: '/harnesses' }],
+                note: `Open source (AGPL-3.0). Version ${VERSION} runs on your machine with the agents and keys you already have, from your terminal or started from this site in any browser; the list below says exactly what works.`,
                 aside: { html: `<pre class="codes-hero-code"><code>${showcase.esc(snippet)}</code></pre>` },
             }))}
 ${raw(showcase.features({
@@ -123,6 +123,7 @@ ${raw(showcase.steps({
 ${table(['Piece', 'State'], [
                 [html`<a href="/start">The harness on your machine</a> (<code>openvibe-codes</code>)`, `Live, ${VERSION}: runs a task on any of the seven agents with your CLIs and keys, streams one event format, keeps every run to show or resume.`],
                 ['Hand-offs between agents', 'Live: a failed, rate-limited or silent agent hands the task to the next one with a note on what was done.'],
+                [html`<a href="/run">Run on your machine</a>: start a task in any browser, your phone included; your own computer runs it`, 'Live: add your machine on openvibe.bot/machines (one command), then watch the task live here and get the patch, a branch or a pull request. It runs only on your own machines, in the Node\'s job sandbox.'],
                 [html`<a href="/harnesses">The agent catalog</a>`, 'Live: every harness and model with its capabilities, prices and limits.'],
                 [html`<code>GET /api/v1/harnesses</code>, <code>POST /api/v1/harnesses/route</code>`, 'Live: public, no key needed; per-address and per-caller limits.'],
                 [html`<a href="/improve">Improve OpenVibe</a>: a repository, a change on a branch with its test, a pull request that CI checks and a maintainer reviews`, 'Live: by hand, or with the harness doing the change on your machine.'],
@@ -206,7 +207,7 @@ ${table(['Level', 'What the agent may do'], [
 <pre><code>${fromCode}</code></pre>
 <p><code>harness.agents()</code>, <code>harness.route({ task })</code> and <code>harness.run({ prompt, cwd, agent, permission, handoff })</code> are what the command line uses. The router is the same one behind <a href="/api/v1/harnesses"><code>/api/v1/harnesses/route</code></a>.</p>
 <h2 id="next">What comes next</h2>
-<p>A hosted runner on OpenVibe.Run workers for people who would rather not run agents themselves, with budgets; OpenVibe.Actor using Codes for its coding work; and <a href="/improve">Improve OpenVibe</a> as a guided run: pick a repository, describe the change, get a pull request.</p>`,
+<p>Tasks from the web already run on your own machine (<a href="/run">Run on your machine</a>). Next: a hosted runner on OpenVibe.Run workers for people who would rather not run agents themselves, with budgets; OpenVibe.Actor using Codes for its coding work; and <a href="/improve">Improve OpenVibe</a> as a guided run: pick a repository, describe the change, get a pull request.</p>`,
         });
     });
 

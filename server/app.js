@@ -27,6 +27,8 @@ const { createKeyStore } = require('./auth/keys');
 const { createSso } = require('./auth/sso');
 const { createHarnesses } = require('./domain/harnesses');
 const { createPageRoutes } = require('./http/pages');
+const { createRunRoutes } = require('./http/run');
+const { createRunClient } = require('./domain/run-client');
 const { createApi } = require('./http/api');
 const { createMovedRoutes } = require('./http/moved');
 const { createCodesReadiness } = require('./observability');
@@ -97,6 +99,18 @@ async function createApp(opts = {}) {
     }));
     app.use(cookieParser());
 
+    // ── OpenVibe.Events → Codes (loopback only: nginx answers 404 for /internal/) ──
+    // network.account.export_requested and network.account.deleted (ADR-033) for the coding tasks people started here.
+    // The consumer reads the raw body itself (the v2 signature covers it) and refuses a request that came through a proxy.
+    {
+        const { createNetworkSender } = require('openvibe-sdk/account-data');
+        const accountData = require('./account-data').create({ db: store.db, log });
+        const accountSend = opts.accountSend || (config.oauth.clientSecret
+            ? createNetworkSender({ networkInternalUrl: config.networkInternalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret, fetch: fetchImpl || globalThis.fetch })
+            : null);
+        app.post('/internal/events', accountData.consumer({ secrets: config.events.secrets, send: accountSend, log }));
+    }
+
     // ── Machine endpoints ───────────────────────────────────
     app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'openvibe-codes', version: VERSION }));
     // GET /release.json (ADR-016) and POST /release-metrics: open tabs' update reports into /metrics.
@@ -136,6 +150,9 @@ async function createApp(opts = {}) {
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.CODES_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));   // per address; tests raise it
     app.use(createPageRoutes(ctx));
+    // Run on your machine (plan T16): coding tasks on the person's own machine, through OpenVibe Run.
+    ctx.run = opts.run || createRunClient({ config, fetchImpl: fetchImpl || globalThis.fetch });
+    app.use(createRunRoutes({ config, store, sso, harnesses, run: ctx.run, fetchImpl: fetchImpl || globalThis.fetch, log }));
     app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try <a href="/harnesses">the agents</a>, <a href="/improve">Improve OpenVibe</a>, or the developer platform at <a href="https://openvibe.services">openvibe.services</a>.</p>` }));
 
     // eslint-disable-next-line no-unused-vars
