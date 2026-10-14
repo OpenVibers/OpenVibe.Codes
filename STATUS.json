@@ -49,7 +49,8 @@
     "coding-agent catalog and router",
     "Improve OpenVibe",
     "community documents",
-    "redirects for the moved developer console"
+    "redirects for the moved developer console",
+    "run a coding task on your own machine from any browser (/run; openvibe-codes job through OpenVibe Run and the person's own OpenVibe Node)"
   ],
-  "updated": "2026-10-12"
+  "updated": "2026-10-14"
 }
