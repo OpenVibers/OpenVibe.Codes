@@ -125,9 +125,7 @@ ${table(['Piece', 'State'], [
                 ['Hand-offs between agents', 'Live: a failed, rate-limited or silent agent hands the task to the next one with a note on what was done.'],
                 [html`<a href="/harnesses">The agent catalog</a>`, 'Live: every harness and model with its capabilities, prices and limits.'],
                 [html`<code>GET /api/v1/harnesses</code>, <code>POST /api/v1/harnesses/route</code>`, 'Live: public, no key needed; per-address and per-caller limits.'],
-                ['A hosted runner: tasks on OpenVibe\'s machines, with budgets', 'Next, on OpenVibe.Run workers.'],
-                ['OpenVibe.Actor using Codes for its coding work', 'Next: Actor is OpenVibe\'s general agent; Codes is the part of it that writes code.'],
-                [html`Improve OpenVibe from here: repository → change → tests → review → pull request`, 'Planned. Today: the harness plus the contributor path on GitHub, below.'],
+                [html`<a href="/improve">Improve OpenVibe</a>: a repository, a change on a branch with its test, a pull request that CI checks and a maintainer reviews`, 'Live: by hand, or with the harness doing the change on your machine.'],
             ])}</section>
 ${raw(showcase.cta({ title: 'Building an app instead?', text: 'Projects, keys, grants and the API docs of every OpenVibe service live on OpenVibe.Services.', actions: [{ label: 'Open the developer platform', href: SERVICES_ORIGIN, primary: true }, { label: 'Meet the agents', href: '/harnesses' }] }))}`,
         });
@@ -262,7 +260,7 @@ ${offers.map((o) => html`<h3>${o.name} <code>${o.id}</code></h3>${o.agents.lengt
             description: 'OpenVibe is open source: every service and library is on GitHub. How to pick a repository, make a change, run its tests and open a pull request, and the community rules that apply.',
             crumbs: [{ label: 'Improve OpenVibe' }],
             body: html`<h1>Improve OpenVibe</h1>
-<p>Every OpenVibe service and library is open source under <a href="${GITHUB}">OpenVibers</a> on GitHub, and changes arrive as pull requests that the owner approves. You can do it by hand today; the harness will take the same path for you: repository → change → tests → independent review → pull request, never straight to <code>main</code>.</p>
+<p>Every OpenVibe service and library is open source under <a href="${GITHUB}">OpenVibers</a> on GitHub, and changes arrive as pull requests that the owner approves. Every change takes the same path: repository → change → tests → independent review → pull request, never straight to <code>main</code>. Make it by hand, or let <a href="/start">the harness</a> make it on your machine with the agent you choose; you open the pull request.</p>
 <ol class="steps">
 <li><strong>Pick a repository</strong> from the lists below, or find the page you want to change and follow its "source" link.</li>
 <li><strong>Read its README</strong>: what it owns, how to run it, and its tests (<code>npm test</code> runs them on temporary databases; nothing needs a live service).</li>
