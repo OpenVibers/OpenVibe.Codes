@@ -37,6 +37,24 @@ function git(args, { cwd, env = {}, timeout = 120_000 } = {}) {
     });
 }
 
+// Branches a task never pushes to, whatever it names (plan §9 gate: Codes never writes a protected branch directly). The
+// check that matters is that the branch does not exist yet (pushBranch asks GitHub); these names are refused before
+// anything is asked.
+const PROTECTED = /^(main|master|trunk|dev|develop|development|staging|stage|production|prod|stable|live|gh-pages|release|releases|hotfix)([/-].*)?$/i;
+
+/**
+ * The branch a task may push: a new one. → { branch } or { refused }. `exists` is GitHub's answer for that name (true
+ * when it already exists, null when GitHub could not be asked: refused too, never assumed new).
+ */
+function pushTarget(requested, base, { exists = false, now = Date.now() } = {}) {
+    const branch = requested || `openvibe-codes/${now.toString(36)}`;
+    if (branch === base) return { refused: 'a task never pushes to the branch it started from' };
+    if (PROTECTED.test(branch)) return { refused: `a task pushes only a new branch of its own, never ${branch}` };
+    if (exists === null) return { refused: 'GitHub could not say whether the branch exists, so nothing was pushed' };
+    if (exists) return { refused: `${branch} already exists: a task pushes only a new branch` };
+    return { branch };
+}
+
 /** Any credential an URL or a message might carry, replaced. */
 function scrub(s) {
     return String(s).replace(/(https?:\/\/)[^@/\s]+@/g, '$1***@').replace(/gh[pousr]_[A-Za-z0-9]{20,}/g, '***');
@@ -62,6 +80,7 @@ function parseArgs(raw, env = process.env) {
         pull_request: a.push.pull_request === true,
     } : null;
     if (push && push.branch && (!BRANCH.test(push.branch) || push.branch.startsWith('-'))) throw new Error('push.branch must be a branch name');
+    if (push && push.branch && PROTECTED.test(push.branch)) throw new Error(`push.branch must be a new branch of the task's own, never ${push.branch}`);
     return {
         repo: repo.toString(), ref, prompt, permission, push,
         agent: typeof a.agent === 'string' && /^[a-z0-9-]{1,40}$/.test(a.agent) ? a.agent : null,
@@ -111,21 +130,30 @@ function githubRepo(url) {
     return m ? { owner: m[1], name: m[2] } : null;
 }
 
-/** Commit on a new branch and push it with GITHUB_TOKEN (never the base branch); a pull request when asked. */
+/**
+ * Commit on a new branch and push it with GITHUB_TOKEN; a pull request when asked. Only ever a branch that does not
+ * exist yet: never the base, never a protected name, never someone's existing branch (GitHub is asked first, and a push
+ * is never forced, so a branch made meanwhile is not overwritten either).
+ */
 async function pushBranch(dir, job, { env, fetchImpl, base }) {
     const token = env.GITHUB_TOKEN;
     const gh = githubRepo(job.repo);
     if (!token || !gh) return { pushed: false, reason: !gh ? 'push is for github.com repositories' : 'this machine has no GITHUB_TOKEN' };
-    const branch = job.push.branch || `openvibe-codes/${Date.now().toString(36)}`;
-    if (branch === base) return { pushed: false, reason: 'a task never pushes to the branch it started from' };
+    const first = pushTarget(job.push.branch, base);
+    if (first.refused) return { pushed: false, reason: first.refused };
+    const branch = first.branch;
+    const remoteUrl = `https://x-access-token:${token}@github.com/${gh.owner}/${gh.name}.git`;
+    let exists = null;
+    try { exists = (await git(['ls-remote', '--heads', remoteUrl, `refs/heads/${branch}`], { cwd: dir, timeout: 60_000 })).trim() !== ''; } catch { exists = null; }
+    const checked = pushTarget(branch, base, { exists });
+    if (checked.refused) return { pushed: false, reason: checked.refused };
     const who = {
         GIT_AUTHOR_NAME: env.GIT_AUTHOR_NAME || 'OpenVibe.Codes', GIT_AUTHOR_EMAIL: env.GIT_AUTHOR_EMAIL || 'codes@openvibe.codes',
         GIT_COMMITTER_NAME: env.GIT_AUTHOR_NAME || 'OpenVibe.Codes', GIT_COMMITTER_EMAIL: env.GIT_AUTHOR_EMAIL || 'codes@openvibe.codes',
     };
     await git(['checkout', '-b', branch], { cwd: dir });
     await git(['commit', '-m', job.prompt.split('\n')[0].slice(0, 72) || 'OpenVibe.Codes task'], { cwd: dir, env: who });
-    const remote = `https://x-access-token:${token}@github.com/${gh.owner}/${gh.name}.git`;
-    await git(['push', remote, `HEAD:refs/heads/${branch}`], { cwd: dir, timeout: 180_000 });
+    await git(['push', remoteUrl, `HEAD:refs/heads/${branch}`], { cwd: dir, timeout: 180_000 });
     const out = { pushed: true, branch, branch_url: `https://github.com/${gh.owner}/${gh.name}/tree/${encodeURIComponent(branch)}` };
     if (job.push.pull_request) {
         const r = await fetchImpl(`https://api.github.com/repos/${gh.owner}/${gh.name}/pulls`, {
@@ -214,4 +242,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { runJob, parseArgs, compact, resultWriter, scrub, githubRepo, JOB_PROTOCOL };
+module.exports = { runJob, parseArgs, compact, resultWriter, scrub, githubRepo, pushTarget, JOB_PROTOCOL };
