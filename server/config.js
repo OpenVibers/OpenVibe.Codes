@@ -43,6 +43,8 @@ function load(env = process.env) {
         networkUrl,
         networkInternalUrl: trim(env.OV_NETWORK_INTERNAL_URL || 'http://127.0.0.1:4000'),
         networkIssuer: trim(env.OV_NETWORK_ISSUER || networkUrl),
+        // The audience of the Network service tokens a first-party service calls /api/v1/tasks with (codes.task.*).
+        serviceAudience: env.CODES_AUDIENCE || 'openvibe.codes',
         oauth: {
             clientId: env.OV_OAUTH_CLIENT_ID || 'codes',
             clientSecret: env.OV_OAUTH_CLIENT_SECRET || '',

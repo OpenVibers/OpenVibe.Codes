@@ -1,7 +1,7 @@
 'use strict';
 /**
  * The released contracts (the pinned openvibe-contracts tag) describe what the code does. Since 0.113.0 the codes
- * service manifest declares no capability and no event: the developer console moved to OpenVibe.Services, which owns
+ * service manifest declares the coding-task capabilities (codes.task.*, Contracts 0.162) and no event: the developer console moved to OpenVibe.Services, which owns
  * services.release.* and services.app.*, and the codes.* forms are retired. The harness catalog's rows are the
  * contracts' platform.harness-offer@1 and platform.agent-offer@1 (checked at boot by server/domain/harnesses.js).
  */
@@ -14,12 +14,14 @@ const { check, done } = require('./helpers/boot');
 (async () => {
     const manifest = contracts.services.get('codes');
 
-    await check('the codes service manifest is released as alpha, live, with no capability and no event', async () => {
+    await check('the codes service manifest is released as alpha, live, with the coding-task capabilities and no event', async () => {
         assert.ok(manifest);
         assert.strictEqual(manifest.status, 'alpha');
         assert.deepStrictEqual(manifest.domains, ['openvibe.codes']);
         assert.strictEqual(manifest.exposure.state, 'live');
-        assert.deepStrictEqual(manifest.capabilities, []);
+        // Contracts 0.162: a first-party service starts, reads and cancels a person's coding task (http/tasks-api.js).
+        assert.deepStrictEqual(manifest.capabilities, ['codes.task.start', 'codes.task.read', 'codes.task.cancel']);
+        for (const id of manifest.capabilities) assert.strictEqual(contracts.capabilities.get(id).status, 'active', id);
         assert.deepStrictEqual(manifest.eventsProduced, []);
         const range = manifest.contractRanges['openvibe-contracts'];
         assert.ok(require('openvibe-sdk/core').satisfiesRange(require('openvibe-contracts/package.json').version, range));

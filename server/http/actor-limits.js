@@ -33,6 +33,8 @@ function actor(req) {
 const BUDGETS = {
     // Routing a coding task over the harness catalog (no I/O, but a POST: the reads' defaults skip it).
     'codes.harness.route': { minute: 30, hour: 600 },
+    // A service starting (or cancelling) a coding task for a person counts against that person (tasks-api.js).
+    'codes.task.start': { minute: 6, hour: 60 },
 };
 
 /**

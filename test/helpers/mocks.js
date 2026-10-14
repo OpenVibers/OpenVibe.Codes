@@ -322,6 +322,8 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
         setCatalog(list) { st.catalog = list; },
         setDown(v) { st.down = v; },
         mintApp: (appId, audience, cap, extra = {}) => { const a = st.apps.get(appId); const now = Math.floor(Date.now() / 1000); return serviceAuth.signServiceToken({ iss: issuer, sub: `app:${a.id}`, actor_type: 'app', aud: [audience], cap, ns: [a.project_id], project_id: a.project_id, env: a.environment, iat: now, exp: now + 300, jti: `tok_${crypto.randomBytes(8).toString('hex')}`, ...extra }, privatePem); },
+        /** A Network client-credentials token: a first-party service (svc:<id>) or an app (app:<id>), for audience, holding cap. */
+        mintService: (sub, audience, cap, extra = {}) => { const now = Math.floor(Date.now() / 1000); return serviceAuth.signServiceToken({ iss: issuer, sub, actor_type: sub.startsWith('svc:') ? 'service' : 'app', aud: [audience], cap, iat: now, exp: now + 300, jti: `tok_${crypto.randomBytes(8).toString('hex')}`, ...extra }, privatePem); },
         close: srv.close,
     };
 }

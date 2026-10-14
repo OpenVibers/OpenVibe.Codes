@@ -28,6 +28,7 @@ const { createSso } = require('./auth/sso');
 const { createHarnesses } = require('./domain/harnesses');
 const { createPageRoutes } = require('./http/pages');
 const { createRunRoutes } = require('./http/run');
+const { createTasksApi } = require('./http/tasks-api');
 const { createRunClient } = require('./domain/run-client');
 const { createApi } = require('./http/api');
 const { createMovedRoutes } = require('./http/moved');
@@ -144,14 +145,16 @@ async function createApp(opts = {}) {
     }));
 
     // ── API ─────────────────────────────────────────────────
+    // Run on your machine (plan T16): coding tasks on the person's own machine, through OpenVibe Run, from the /run
+    // pages below or, for a first-party service acting for the person, from /api/v1/tasks (codes.task.*).
+    ctx.run = opts.run || createRunClient({ config, fetchImpl: fetchImpl || globalThis.fetch });
     app.use('/api/v1', createApi(ctx));
+    app.use('/api/v1', createTasksApi({ config, store, keys, run: ctx.run, harnesses, actorLimits: ctx.actorLimits, log }));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
 
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.CODES_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));   // per address; tests raise it
     app.use(createPageRoutes(ctx));
-    // Run on your machine (plan T16): coding tasks on the person's own machine, through OpenVibe Run.
-    ctx.run = opts.run || createRunClient({ config, fetchImpl: fetchImpl || globalThis.fetch });
     app.use(createRunRoutes({ config, store, sso, harnesses, run: ctx.run, fetchImpl: fetchImpl || globalThis.fetch, log }));
     app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try <a href="/harnesses">the agents</a>, <a href="/improve">Improve OpenVibe</a>, or the developer platform at <a href="https://openvibe.services">openvibe.services</a>.</p>` }));
 

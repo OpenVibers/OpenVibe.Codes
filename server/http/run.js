@@ -17,22 +17,18 @@ const { asyncRouter } = require('./router');
 const { send } = require('../render/layout');
 const { html, raw, esc } = require('../render/html');
 
+const { parseArgs } = require('../../harness/job');
+const { createRunTasks, TERMINAL, STATE_LABEL } = require('../domain/run-tasks');
+
+const DELEGABLE = new Set(['owner', 'admin']);
+const MACHINES_URL = 'https://openvibe.bot/machines';
+
 /** A repository URL as a heading: the host small, then owner/name, which may break after a slash but never mid-word. */
 function repoName(url) {
     const [host, ...path] = String(url).replace(/^https:\/\//, '').split('/');
     if (!path.length) return host;
     return html`<small class="run-host">${host}/</small>${path.map((part, i) => html`${i ? raw('/<wbr>') : ''}${part}`)}`;
 }
-const { parseArgs } = require('../../harness/job');
-const { RunError } = require('../domain/run-client');
-
-const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'expired']);
-const STATE_LABEL = {
-    queued: 'Waiting for your machine', placed: 'Sent to your machine', running: 'Running', succeeded: 'Finished',
-    failed: 'Failed', cancelled: 'Cancelled', expired: 'Expired (no machine took it in time)',
-};
-const DELEGABLE = new Set(['owner', 'admin']);
-const MACHINES_URL = 'https://openvibe.bot/machines';
 
 function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globalThis.fetch, log = console }) {
     const r = asyncRouter();
@@ -62,19 +58,9 @@ function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globa
         const row = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [id]);
         return row && row.subject === req.viewer.subject ? row : null;
     };
-    const who = (row) => ({ subject: row.subject, project: row.project_id });
-
-    /** A task not yet ended asks Run where its job is; an ended job's result is kept on the row. */
-    async function refresh(row) {
-        if (!row.job_id || TERMINAL.has(row.state)) return row;
-        let job;
-        try { job = await run.read(row.job_id, who(row)); } catch (e) { log.warn(`[Codes] task ${row.id}: ${e.message}`); return row; }
-        if (job.state === row.state && !TERMINAL.has(job.state)) return row;
-        const error = job.error ? `${job.error.code}${job.error.detail ? `: ${job.error.detail}` : ''}` : null;
-        const result = job.result && typeof job.result === 'object' ? job.result : null;
-        return db.one('UPDATE run_tasks SET state = $2, result = $3, error = $4, updated_at = $5 WHERE id = $1 RETURNING *',
-            [row.id, job.state, result ? JSON.stringify(result) : null, error, store.now()]);
-    }
+    // A task not yet ended asks Run where its job is; an ended job's result is kept on the row (domain/run-tasks).
+    const tasks = createRunTasks({ store, run, config, log });
+    const { who, refresh } = tasks;
 
     function formHtml({ projects, values = {}, error = null }) {
         const agents = harnesses.list();
@@ -168,19 +154,8 @@ ${tasksHtml(recent)}`;
         }
         const projects = await projectsOf(req, res);
         if (!projects.some((p) => p.id === values.project)) return runPage(req, res, { values, error: 'Choose one of your projects.', status: 422 });
-        const id = store.newId('tsk');
-        const at = store.now();
-        await db.exec(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $10)`,
-        [id, req.viewer.subject, values.project, args.repo, args.ref, args.prompt, args.agent, !!args.push, !!(args.push && args.push.pull_request), at]);
-        try {
-            const job = await run.submit({ subject: req.viewer.subject, project: values.project, args, key: id });
-            await db.exec('UPDATE run_tasks SET job_id = $2, state = $3, updated_at = $4 WHERE id = $1', [id, job.id, job.state, store.now()]);
-        } catch (e) {
-            const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
-            await db.exec("UPDATE run_tasks SET state = 'failed', error = $2, updated_at = $3 WHERE id = $1", [id, why, store.now()]);
-        }
-        return res.redirect(303, `/run/tasks/${id}`);
+        const row = await tasks.start({ subject: req.viewer.subject, project: values.project, args });
+        return res.redirect(303, `/run/tasks/${row.id}`);
     });
 
     function resultHtml(row) {
