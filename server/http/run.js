@@ -16,6 +16,13 @@ const express = require('express');
 const { asyncRouter } = require('./router');
 const { send } = require('../render/layout');
 const { html, raw, esc } = require('../render/html');
+
+/** A repository URL as a heading: the host small, then owner/name, which may break after a slash but never mid-word. */
+function repoName(url) {
+    const [host, ...path] = String(url).replace(/^https:\/\//, '').split('/');
+    if (!path.length) return host;
+    return html`<small class="run-host">${host}/</small>${path.map((part, i) => html`${i ? raw('/<wbr>') : ''}${part}`)}`;
+}
 const { parseArgs } = require('../../harness/job');
 const { RunError } = require('../domain/run-client');
 
@@ -90,7 +97,7 @@ ${error ? html`<p class="run-notice run-notice-error" role="alert">${error}</p>`
 
     function tasksHtml(rows) {
         if (!rows.length) return html`<p class="muted">No tasks yet.</p>`;
-        return html`<ul class="run-tasks">${rows.map((t) => html`<li><a href="/run/tasks/${t.id}"><span class="run-pill run-pill-${t.state}">${STATE_LABEL[t.state] || t.state}</span> <b>${t.repo.replace(/^https:\/\//, '')}</b> <span class="muted">${t.prompt.split('\n')[0].slice(0, 90)}</span></a></li>`)}</ul>`;
+        return html`<ul class="run-tasks">${rows.map((t) => html`<li><a href="/run/tasks/${t.id}"><span class="run-pill run-pill-${t.state}">${STATE_LABEL[t.state] || t.state}</span> <b>${repoName(t.repo)}</b> <span class="muted">${t.prompt.split('\n')[0].slice(0, 90)}</span></a></li>`)}</ul>`;
     }
 
     async function runPage(req, res, { values, error, status = 200 } = {}) {
@@ -200,7 +207,7 @@ ${typeof d.duration_ms === 'number' ? html`<p class="muted">${Math.round(d.durat
         row = await refresh(row);
         const live = !TERMINAL.has(row.state);
         const body = html`<p class="crumbs"><a href="/run">Run on your machine</a></p>
-<h1>${row.repo.replace(/^https:\/\//, '')}${row.ref ? html` <small>${row.ref}</small>` : ''}</h1>
+<h1 class="run-repo">${repoName(row.repo)}${row.ref ? html` <small>${row.ref}</small>` : ''}</h1>
 <p><span class="run-pill run-pill-${row.state}" data-state>${STATE_LABEL[row.state] || row.state}</span>${row.agent ? html` <span class="run-pill">${row.agent}</span>` : ''}</p>
 <pre class="run-prompt">${row.prompt}</pre>
 ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events" aria-live="polite"><h2>Live</h2><ol class="run-log" data-log></ol></section>
