@@ -104,6 +104,15 @@ const toolResults = (events) => events.filter((e) => e.type === 'user').flatMap(
             assert.strictEqual(tokenCalls.length, 1, 'one token for both turns');
             assert.deepStrictEqual([tokenCalls[0].path, tokenCalls[0].body.grant_type, tokenCalls[0].body.audience, tokenCalls[0].body.client_id], ['/oauth/token', 'client_credentials', 'openvibe.ai', 'app_01JAB2C3D4E5F6G7H8J9K0MNPQ']);
             assert.ok(Math.abs(r.total_cost_usd - 0.003) < 1e-9, `cost ${r.total_cost_usd}`);
+            assert.ok(!('x_openvibe' in api.requests[0].body), 'the router, when no project provider is named');
+            // OPENVIBE_AI_SECRET names the project's own provider: every request carries it for AI to use.
+            const ownEnv = { ...aiEnv, OPENVIBE_AI_SECRET: 'deepseek-key', OPENVIBE_AI_PROVIDER_URL: 'https://api.deepseek.com/v1', OPENVIBE_AI_PROVIDER_MODEL: 'deepseek-chat' };
+            const own = createHarness({ env: ownEnv, store: createStore({ env: ownEnv }) });
+            api.set([{ content: 'done' }]);
+            const before = api.requests.length;
+            const done = (await collect(own.run({ prompt: 'hi', agent: 'openvibe-ai', cwd: work, permission: 'read', handoff: false }))).find((e) => e.type === 'result');
+            assert.strictEqual(done.is_error, false, done.result);
+            assert.deepStrictEqual(api.requests[before].body.x_openvibe, { provider: { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat', secret: 'deepseek-key' } });
         } finally { await new Promise((r) => network.close(r)); }
     });
 
