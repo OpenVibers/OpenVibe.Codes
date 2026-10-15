@@ -81,8 +81,9 @@ DISABLE_GRAVATAR = true
 ENABLE_FEDERATED_AVATAR = false
 
 [ui]
-DEFAULT_THEME = forgejo-auto
-THEMES = forgejo-auto,forgejo-light,forgejo-dark
+; openvibe: Forgejo's dark theme in OpenVibe's colours (custom/public/assets/css/theme-openvibe.css).
+DEFAULT_THEME = openvibe
+THEMES = openvibe,forgejo-auto,forgejo-light,forgejo-dark
 
 [ui.meta]
 AUTHOR = OpenVibers

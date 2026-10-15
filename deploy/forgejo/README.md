@@ -19,6 +19,7 @@ redirect URI.
 |---|---|
 | `install.sh` | Binary (sha256-checked), the `forgejo` user, the PostgreSQL role and the `ov_forgejo` database, `/etc/forgejo/app.ini` with secrets generated on the host, and the systemd unit. Idempotent; `FORGEJO_VERSION=x.y.z` upgrades the binary. |
 | `app.ini.template` | The config; `@…@` values are filled in by `install.sh`. |
+| `custom/` | The OpenVibe look: `theme-openvibe.css`, Forgejo's dark theme in the network's colours, which is the default theme. |
 | `openvibe-forgejo.service` | The unit: `127.0.0.1:5060`, hardened, 1 GB of memory at most. |
 | `setup-sso.sh` | The site admin (a random password in `/root/forgejo-admin.txt`) and the OpenVibe sign-in. The client secret is read from Network's database. |
 | `mirror-github.sh [file]` | The `OpenVibers` organisation and one pull mirror per public repository: names from `gh`, or one per line in `file`. |

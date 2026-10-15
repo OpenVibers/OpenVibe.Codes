@@ -1,0 +1,44 @@
+/* OpenVibe Git: Forgejo's dark theme in OpenVibe's colours (the network's default "vibe" theme: deep navy, blue accent).
+   Installed by deploy/forgejo/install.sh into /var/lib/forgejo/custom/public/assets/css/; app.ini makes it the default. */
+@import url("./theme-forgejo-dark.css");
+
+:root {
+    --is-dark-theme: true;
+    --color-body: #0b1220;
+    --color-box-body: #131c2e;
+    --color-box-body-highlight: #182338;
+    --color-box-header: #111a2b;
+    --color-nav-bg: #0f1729;
+    --color-nav-hover-bg: #182338;
+    --color-header-wrapper: #0f1729;
+    --color-footer: #0f1729;
+    --color-menu: #131c2e;
+    --color-card: #131c2e;
+    --color-input-background: #0f1729;
+    --color-input-border: #2c3d5c;
+    --color-input-border-hover: #3b82f6;
+    --color-secondary: #1f2d47;
+    --color-secondary-dark-1: #2c3d5c;
+    --color-secondary-dark-2: #3a4e72;
+    --color-light-border: #1f2d47;
+    --color-text: #e6edf7;
+    --color-text-light: #b7c4d9;
+    --color-text-light-1: #96a7c2;
+    --color-text-light-2: #7d8ea9;
+    --color-text-light-3: #66768f;
+    --color-primary: #3b82f6;
+    --color-primary-contrast: #ffffff;
+    --color-primary-dark-1: #2f74e8;
+    --color-primary-dark-2: #2563eb;
+    --color-primary-dark-3: #1d4ed8;
+    --color-primary-light-1: #5b97f7;
+    --color-primary-light-2: #7aabf8;
+    --color-primary-light-3: #9abffa;
+    --color-primary-alpha-10: #3b82f61a;
+    --color-primary-alpha-20: #3b82f633;
+    --color-primary-alpha-30: #3b82f64d;
+    --color-primary-alpha-40: #3b82f666;
+    --color-primary-alpha-50: #3b82f680;
+    --color-accent: #3b82f6;
+    --color-active-line: #3b82f622;
+}
