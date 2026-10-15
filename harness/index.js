@@ -26,6 +26,27 @@ const { apiAgent } = require('./adapters/api');
 const ev = require('./events');
 const { createStore } = require('./sessions');
 
+/**
+ * OpenVibe.AI's token: a five-minute Network token for your app (client credentials, audience openvibe.ai), fetched when
+ * missing or within 30 s of expiring. OPENVIBE_AI_TOKEN, when set, is used as it is instead.
+ */
+function networkToken() {
+    let cached = null;
+    return async (env, doFetch) => {
+        if (env.OPENVIBE_AI_TOKEN) return env.OPENVIBE_AI_TOKEN;
+        if (cached && cached.until > Date.now()) return cached.token;
+        const network = String(env.OPENVIBE_NETWORK_URL || 'https://openvibe.network').replace(/\/+$/, '');
+        const res = await doFetch(`${network}/oauth/token`, {
+            method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ grant_type: 'client_credentials', client_id: env.OPENVIBE_APP_ID || '', client_secret: env.OPENVIBE_APP_SECRET || '', audience: 'openvibe.ai' }).toString(),
+        });
+        const body = await res.json().catch(() => null);
+        if (!res.ok || !body || !body.access_token) throw new Error(`OpenVibe.Network refused the app's token (HTTP ${res.status}${body && body.error ? `: ${body.error}` : ''})`);
+        cached = { token: body.access_token, until: Date.now() + Math.max(30, Number(body.expires_in) || 300) * 1000 - 30000 };
+        return cached.token;
+    };
+}
+
 /** The adapter for each catalog harness (the catalog row's id). */
 function adaptersFor(env) {
     return {
@@ -35,6 +56,8 @@ function adaptersFor(env) {
         'command-code': cli.commandCode,
         aider: cli.aider,
         deepseek: apiAgent({ id: 'deepseek', name: 'DeepSeek', baseUrl: env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com', keyEnv: 'DEEPSEEK_API_KEY', model: 'deepseek-chat', priceIn: 0.00027, priceOut: 0.0011 }),
+        // OpenVibe.AI's OpenAI-compatible endpoint: its router picks the model, each answer reports its cost.
+        'openvibe-ai': apiAgent({ id: 'openvibe-ai', name: 'OpenVibe.AI', baseUrl: env.OPENVIBE_AI_URL || 'https://ai.openvibe.services/v1', token: networkToken(), model: 'openvibe' }),
         'openai-compatible': apiAgent({ id: 'openai-compatible', name: 'Your own model', baseUrl: env.OPENVIBE_CODES_BASE_URL || 'http://127.0.0.1:8080/v1', keyEnv: 'OPENVIBE_CODES_API_KEY', model: env.OPENVIBE_CODES_MODEL || 'local' }),
     };
 }
@@ -53,6 +76,7 @@ function availability(adapter, env) {
         const where = onPath(adapter.bin, env);
         return where ? { available: true, where } : { available: false, reason: `\`${adapter.bin}\` is not on PATH (install ${adapter.name})` };
     }
+    if (adapter.id === 'openvibe-ai') return env.OPENVIBE_AI_TOKEN || (env.OPENVIBE_APP_ID && env.OPENVIBE_APP_SECRET) ? { available: true, where: adapter.baseUrl } : { available: false, reason: 'set OPENVIBE_APP_ID and OPENVIBE_APP_SECRET (an app of your project on openvibe.services with ai.app.run)' };
     if (adapter.id === 'openai-compatible') return env.OPENVIBE_CODES_BASE_URL ? { available: true, where: env.OPENVIBE_CODES_BASE_URL } : { available: false, reason: 'set OPENVIBE_CODES_BASE_URL (and OPENVIBE_CODES_MODEL) to your server' };
     return env[adapter.keyEnv] ? { available: true, where: adapter.baseUrl } : { available: false, reason: `set ${adapter.keyEnv}` };
 }

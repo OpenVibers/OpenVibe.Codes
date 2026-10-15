@@ -141,7 +141,10 @@ function runCommand(command, cwd, signal) {
 }
 
 /**
- * apiAgent({ id, name, baseUrl, keyEnv, model, priceIn, priceOut }) → an adapter.
+ * apiAgent({ id, name, baseUrl, keyEnv, model, priceIn, priceOut, token }) → an adapter.
+ * token(env, fetch) → a bearer, asked before every request (OpenVibe.AI takes a five-minute Network token, refreshed by
+ * the function); without it the key is keyEnv's value. When the API reports each answer's cost (OpenVibe.AI's
+ * x_openvibe.cost_usd), the run's cost is the sum of those, not a price list.
  * ctx (from harness/index.js): { env, fetch, sessions } — sessions keeps the conversation for resume.
  */
 function apiAgent(spec) {
@@ -169,15 +172,17 @@ function apiAgent(spec) {
                 messages.push({ role: 'user', content: t.prompt });
                 yield ev.init(sessionId, spec.id, model);
                 const u = { input: 0, output: 0, cacheRead: 0 };
+                const reported = { usd: 0, any: false };
                 let lastText = '';
                 let turns = 0;
                 let failure = null;
                 try {
                     while (turns < maxTurns && !cancelled) {
                         turns++;
+                        const bearer = spec.token ? await spec.token(env, doFetch) : key;
                         const res = await doFetch(`${base}/chat/completions`, {
                             method: 'POST',
-                            headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+                            headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
                             body: JSON.stringify({ model, messages, tools, tool_choice: 'auto' }),
                             signal: controller.signal,
                         });
@@ -188,6 +193,7 @@ function apiAgent(spec) {
                             break;
                         }
                         const usage = body.usage || {};
+                        if (body.x_openvibe && Number.isFinite(+body.x_openvibe.cost_usd)) { reported.usd += +body.x_openvibe.cost_usd; reported.any = true; }
                         u.input += +usage.prompt_tokens || 0; u.output += +usage.completion_tokens || 0;
                         u.cacheRead += +(usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens)) || 0;
                         const msg = body.choices[0].message || {};
@@ -216,7 +222,7 @@ function apiAgent(spec) {
                     yield ev.error(failure);
                 }
                 if (ctx.sessions) ctx.sessions.save(sessionId, { agent: spec.id, model, messages: messages.slice(-200) });
-                const cost = (u.input * (spec.priceIn || 0) + u.output * (spec.priceOut || 0)) / 1000;
+                const cost = reported.any ? reported.usd : (u.input * (spec.priceIn || 0) + u.output * (spec.priceOut || 0)) / 1000;
                 yield ev.result({ ok: !failure && !cancelled, text: failure || lastText, sessionId, model, startedAt, turns, costUsd: cost,
                     usage: ev.usage({ input: u.input - u.cacheRead, output: u.output, cacheRead: u.cacheRead }) });
             }());

@@ -28,7 +28,7 @@ async function mockApi() {
             if (!step) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'done' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } })); return; }
             if (step.status) { res.writeHead(step.status, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: step.error } })); return; }
             res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: step.content || '', ...(step.calls ? { tool_calls: step.calls.map((c, i) => ({ id: `call_${requests.length}_${i}`, type: 'function', function: { name: c[0], arguments: JSON.stringify(c[1]) } })) } : {}) } }], usage: { prompt_tokens: 1000, completion_tokens: 100, prompt_cache_hit_tokens: 400 } }));
+            res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: step.content || '', ...(step.calls ? { tool_calls: step.calls.map((c, i) => ({ id: `call_${requests.length}_${i}`, type: 'function', function: { name: c[0], arguments: JSON.stringify(c[1]) } })) } : {}) } }], usage: { prompt_tokens: 1000, completion_tokens: 100, prompt_cache_hit_tokens: 400 }, ...(step.x ? { x_openvibe: step.x } : {}) }));
         });
     });
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -74,6 +74,37 @@ const toolResults = (events) => events.filter((e) => e.type === 'user').flatMap(
         assert.strictEqual(api.requests[0].body.model, 'tiny');
         assert.deepStrictEqual(api.requests[0].body.tools.map((t) => t.function.name).sort(), ['edit_file', 'grep', 'list_dir', 'read_file', 'write_file']);
         assert.strictEqual(api.requests[2].body.messages.filter((m) => m.role === 'tool').length, 3, 'every tool result went back to the model');
+    });
+
+    await check('OpenVibe.AI: the app\'s Network token is fetched once and reused, and the cost is what AI reported', async () => {
+        const tokenCalls = [];
+        const network = http.createServer((req, res) => {
+            let body = '';
+            req.on('data', (d) => { body += d; });
+            req.on('end', () => {
+                tokenCalls.push({ path: req.url, body: Object.fromEntries(new URLSearchParams(body)) });
+                res.writeHead(200, { 'content-type': 'application/json' });
+                res.end(JSON.stringify({ access_token: 'ov-app-token', token_type: 'Bearer', expires_in: 300 }));
+            });
+        });
+        await new Promise((r) => network.listen(0, '127.0.0.1', r));
+        const aiEnv = { ...env, OPENVIBE_AI_URL: api.url, OPENVIBE_NETWORK_URL: `http://127.0.0.1:${network.address().port}`, OPENVIBE_APP_ID: 'app_01JAB2C3D4E5F6G7H8J9K0MNPQ', OPENVIBE_APP_SECRET: 's'.repeat(40) };
+        const ai = createHarness({ env: aiEnv, store: createStore({ env: aiEnv }) });
+        try {
+            api.set([
+                { calls: [['read_file', { path: 'src/a.js' }]], x: { run_id: 'run_1', cost_usd: 0.0021 } },
+                { content: 'It exports name.', x: { run_id: 'run_2', cost_usd: 0.0009 } },
+            ]);
+            const events = await collect(ai.run({ prompt: 'what does a.js export?', agent: 'openvibe-ai', cwd: work, permission: 'read', handoff: false }));
+            const r = events.find((e) => e.type === 'result');
+            assert.strictEqual(r.is_error, false, r.result);
+            assert.strictEqual(r.result, 'It exports name.');
+            assert.deepStrictEqual(api.requests.map((q) => q.auth), ['Bearer ov-app-token', 'Bearer ov-app-token']);
+            assert.strictEqual(api.requests[0].body.model, 'openvibe');
+            assert.strictEqual(tokenCalls.length, 1, 'one token for both turns');
+            assert.deepStrictEqual([tokenCalls[0].path, tokenCalls[0].body.grant_type, tokenCalls[0].body.audience, tokenCalls[0].body.client_id], ['/oauth/token', 'client_credentials', 'openvibe.ai', 'app_01JAB2C3D4E5F6G7H8J9K0MNPQ']);
+            assert.ok(Math.abs(r.total_cost_usd - 0.003) < 1e-9, `cost ${r.total_cost_usd}`);
+        } finally { await new Promise((r) => network.close(r)); }
     });
 
     await check('read permission offers no writing tool, and a forced write is refused', async () => {

@@ -49,6 +49,7 @@ openvibe-codes resume <run id> "now add a test"
 | Command Code | `cmd --print --output-format json` | `cmd` on PATH |
 | Aider | `aider --message` | `aider` on PATH |
 | DeepSeek | the harness's own agent loop ([harness/adapters/api.js](harness/adapters/api.js)) | `DEEPSEEK_API_KEY` |
+| OpenVibe.AI | the same loop against AI's `/v1/chat/completions`; its router picks the model and each answer reports its cost | `OPENVIBE_APP_ID` + `OPENVIBE_APP_SECRET` (an app with `ai.app.run`; tokens are fetched and refreshed), or `OPENVIBE_AI_TOKEN` |
 | Your own model | the same loop against any OpenAI-compatible server | `OPENVIBE_CODES_BASE_URL`, `OPENVIBE_CODES_MODEL`, optional `OPENVIBE_CODES_API_KEY` |
 
 - **Events.** Every adapter turns its agent's output into one stream in Claude Code's `stream-json` shape (system/init, assistant text and tool_use, user tool_result, system warning/error/handoff, exactly one result), [harness/events.js](harness/events.js). Keys, tokens and private keys are redacted before an event is printed or kept.
