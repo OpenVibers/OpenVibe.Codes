@@ -167,10 +167,10 @@ ${tasksHtml(recent)}`;
             : d.ok ? html`<p class="run-notice run-notice-ok">The agents finished the task${d.agents && d.agents.length ? ` (${d.agents.join(' → ')})` : ''}.</p>`
                 : html`<p class="run-notice run-notice-error">The task ended without success${d.error ? `: ${d.error}` : ''}.</p>`;
         return html`<section class="run-result">${verdict}
-${d.summary ? html`<h2>What the agent said</h2><pre class="run-summary">${d.summary}</pre>` : ''}
+${d.summary ? html`<h2>What the agent said</h2><pre tabindex="0" class="run-summary">${d.summary}</pre>` : ''}
 ${push ? (push.pushed ? html`<p>Pushed <a href="${push.branch_url}">${push.branch}</a>${push.pull_request ? html` · <a href="${push.pull_request}">pull request</a>` : ''}${push.pull_request_error ? html` · the pull request was not opened (${push.pull_request_error})` : ''}</p>` : html`<p class="muted">Not pushed: ${push.reason}</p>`) : ''}
 ${files.length ? html`<h2>Changed files</h2><table class="run-files"><tbody>${files.map((f) => html`<tr><td><code>${f.path}</code></td><td class="add">+${f.added == null ? '·' : f.added}</td><td class="del">−${f.removed == null ? '·' : f.removed}</td></tr>`)}</tbody></table>` : (row.state === 'succeeded' ? html`<p class="muted">No files changed.</p>` : '')}
-${d.patch ? html`<h2>The patch${d.patch_truncated ? ' (cut)' : ''}</h2><pre class="run-patch" data-patch>${d.patch}</pre>` : ''}
+${d.patch ? html`<h2>The patch${d.patch_truncated ? ' (cut)' : ''}</h2><pre tabindex="0" class="run-patch" data-patch>${d.patch}</pre>` : ''}
 ${typeof d.duration_ms === 'number' ? html`<p class="muted">${Math.round(d.duration_ms / 1000)} s on your machine${d.cost_usd ? ` · about $${Number(d.cost_usd).toFixed(4)} of model use on your own keys` : ''}</p>` : ''}
 </section>`;
     }
@@ -184,7 +184,7 @@ ${typeof d.duration_ms === 'number' ? html`<p class="muted">${Math.round(d.durat
         const body = html`<p class="crumbs"><a href="/run">Run on your machine</a></p>
 <h1 class="run-repo">${repoName(row.repo)}${row.ref ? html` <small>${row.ref}</small>` : ''}</h1>
 <p><span class="run-pill run-pill-${row.state}" data-state>${STATE_LABEL[row.state] || row.state}</span>${row.agent ? html` <span class="run-pill">${row.agent}</span>` : ''}</p>
-<pre class="run-prompt">${row.prompt}</pre>
+<pre tabindex="0" class="run-prompt">${row.prompt}</pre>
 ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events" aria-live="polite"><h2>Live</h2><ol class="run-log" data-log></ol></section>
 <form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : resultHtml(row)}`;
         return page(req, res, { title: 'Task', body });

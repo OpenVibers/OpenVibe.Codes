@@ -30,7 +30,7 @@ function markdown(src, { headingOffset = 1 } = {}) {
     const flushList = () => { if (list) { out.push(`<${list.type}>${list.items.map((i) => `<li>${inline(i)}</li>`).join('')}</${list.type}>`); list = null; } };
     for (const line of lines) {
         if (fence) {
-            if (/^```/.test(line)) { out.push(`<pre><code>${esc(fence.join('\n'))}</code></pre>`); fence = null; } else fence.push(line);
+            if (/^```/.test(line)) { out.push(`<pre tabindex="0"><code>${esc(fence.join('\n'))}</code></pre>`); fence = null; } else fence.push(line);
             continue;
         }
         if (/^```/.test(line)) { flushPara(); flushList(); fence = []; continue; }
@@ -54,7 +54,7 @@ function markdown(src, { headingOffset = 1 } = {}) {
         flushList();
         para.push(line.trim());
     }
-    if (fence) out.push(`<pre><code>${esc(fence.join('\n'))}</code></pre>`);
+    if (fence) out.push(`<pre tabindex="0"><code>${esc(fence.join('\n'))}</code></pre>`);
     flushPara(); flushList();
     return out.join('\n');
 }
