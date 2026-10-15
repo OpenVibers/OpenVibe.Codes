@@ -176,6 +176,7 @@ ${table(['Agent', 'What it needs'], [
                 [html`<a href="/harnesses#command-code">Command Code</a>`, html`<code>cmd</code> on PATH`],
                 [html`<a href="/harnesses#aider">Aider</a>`, html`<code>aider</code> on PATH`],
                 [html`<a href="/harnesses#deepseek">DeepSeek</a>`, html`<code>DEEPSEEK_API_KEY</code>; the harness runs its own agent loop against the API`],
+                [html`<a href="/harnesses#openvibe-ai">OpenVibe.AI</a>`, html`<code>OPENVIBE_APP_ID</code> and <code>OPENVIBE_APP_SECRET</code> (an app of your project on openvibe.services with <code>ai.app.run</code>; AI's router picks the model and your project pays), or a Network token in <code>OPENVIBE_AI_TOKEN</code>`],
                 [html`<a href="/harnesses#openai-compatible">Your own model</a>`, html`<code>OPENVIBE_CODES_BASE_URL</code> (an OpenAI-compatible server: llama.cpp, vLLM, Ollama, LM Studio…), <code>OPENVIBE_CODES_MODEL</code>, and <code>OPENVIBE_CODES_API_KEY</code> if it wants one`],
             ])}
 <h2 id="use">Use it</h2>

@@ -301,8 +301,57 @@
         "concurrency": 8,
         "price_per_1k_tokens": {
           "fresh_usd": 0.00027,
-          "cached_usd": 0.00007,
+          "cached_usd": 7e-05,
           "output_usd": 0.0011
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "openvibe-ai",
+    "name": "OpenVibe.AI",
+    "provider": "openvibe",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false
+    },
+    "address": {
+      "kind": "api",
+      "target": "https://ai.openvibe.services/v1"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 3600,
+      "max_concurrent_runs": 4,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "openvibe-ai-router",
+        "harness": "openvibe-ai",
+        "provider": "openvibe",
+        "model": "openvibe",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 16000
+        },
+        "concurrency": 4,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
         },
         "availability_windows": []
       }
