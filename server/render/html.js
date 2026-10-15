@@ -27,7 +27,8 @@ const time = (iso) => (iso ? html`<time datetime="${iso}">${String(iso).replace(
 /** A <table> from headers and rows of cells (cells are already html or plain values). */
 function table(headers, rows, { cls = '', empty = 'Nothing here yet.' } = {}) {
     if (!rows.length) return html`<p class="muted">${empty}</p>`;
-    return html`<div class="table-wrap"><table class="${cls}"><thead><tr>${headers.map((h) => html`<th scope="col">${h}</th>`)}</tr></thead><tbody>${rows.map((r) => html`<tr>${r.map((c) => html`<td>${c}</td>`)}</tr>`)}</tbody></table></div>`;
+    // The wrapper scrolls sideways on a phone, so it is a focusable, named region (axe scrollable-region-focusable).
+    return html`<div class="table-wrap" tabindex="0" role="region" aria-label="Table: ${headers.join(', ')}"><table class="${cls}"><thead><tr>${headers.map((h) => html`<th scope="col">${h}</th>`)}</tr></thead><tbody>${rows.map((r) => html`<tr>${r.map((c) => html`<td>${c}</td>`)}</tr>`)}</tbody></table></div>`;
 }
 
 /** A problem as returned by Network, Events or Media — shown as it came, never softened. */
