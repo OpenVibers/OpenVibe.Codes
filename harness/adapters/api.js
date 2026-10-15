@@ -142,6 +142,7 @@ function runCommand(command, cwd, signal) {
 
 /**
  * apiAgent({ id, name, baseUrl, keyEnv, model, priceIn, priceOut, token }) → an adapter.
+ * extra(env) → fields added to every request body (OpenVibe.AI's x_openvibe.provider: the project's own provider).
  * token(env, fetch) → a bearer, asked before every request (OpenVibe.AI takes a five-minute Network token, refreshed by
  * the function); without it the key is keyEnv's value. When the API reports each answer's cost (OpenVibe.AI's
  * x_openvibe.cost_usd), the run's cost is the sum of those, not a price list.
@@ -183,7 +184,7 @@ function apiAgent(spec) {
                         const res = await doFetch(`${base}/chat/completions`, {
                             method: 'POST',
                             headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
-                            body: JSON.stringify({ model, messages, tools, tool_choice: 'auto' }),
+                            body: JSON.stringify({ ...(spec.extra ? spec.extra(env) : {}), model, messages, tools, tool_choice: 'auto' }),
                             signal: controller.signal,
                         });
                         const body = await res.json().catch(() => null);

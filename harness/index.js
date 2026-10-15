@@ -47,6 +47,12 @@ function networkToken() {
     };
 }
 
+/** x_openvibe.provider for OpenVibe.AI when OPENVIBE_AI_SECRET names the project's own provider key, else nothing. */
+function projectProvider(env) {
+    if (!env.OPENVIBE_AI_SECRET) return {};
+    return { x_openvibe: { provider: { base_url: env.OPENVIBE_AI_PROVIDER_URL || 'https://api.openai.com/v1', model: env.OPENVIBE_AI_PROVIDER_MODEL || 'gpt-5-mini', secret: env.OPENVIBE_AI_SECRET } } };
+}
+
 /** The adapter for each catalog harness (the catalog row's id). */
 function adaptersFor(env) {
     return {
@@ -57,7 +63,9 @@ function adaptersFor(env) {
         aider: cli.aider,
         deepseek: apiAgent({ id: 'deepseek', name: 'DeepSeek', baseUrl: env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com', keyEnv: 'DEEPSEEK_API_KEY', model: 'deepseek-chat', priceIn: 0.00027, priceOut: 0.0011 }),
         // OpenVibe.AI's OpenAI-compatible endpoint: its router picks the model, each answer reports its cost.
-        'openvibe-ai': apiAgent({ id: 'openvibe-ai', name: 'OpenVibe.AI', baseUrl: env.OPENVIBE_AI_URL || 'https://ai.openvibe.services/v1', token: networkToken(), model: 'openvibe' }),
+        // OPENVIBE_AI_SECRET names a project secret granted to ai (ADR-056): AI sends each request to the project's own
+        // provider (OPENVIBE_AI_PROVIDER_URL, OPENVIBE_AI_PROVIDER_MODEL) with that key, revealed per request by Network.
+        'openvibe-ai': apiAgent({ id: 'openvibe-ai', name: 'OpenVibe.AI', baseUrl: env.OPENVIBE_AI_URL || 'https://ai.openvibe.services/v1', token: networkToken(), model: 'openvibe', extra: projectProvider }),
         'openai-compatible': apiAgent({ id: 'openai-compatible', name: 'Your own model', baseUrl: env.OPENVIBE_CODES_BASE_URL || 'http://127.0.0.1:8080/v1', keyEnv: 'OPENVIBE_CODES_API_KEY', model: env.OPENVIBE_CODES_MODEL || 'local' }),
     };
 }

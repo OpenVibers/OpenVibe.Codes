@@ -49,7 +49,7 @@ openvibe-codes resume <run id> "now add a test"
 | Command Code | `cmd --print --output-format json` | `cmd` on PATH |
 | Aider | `aider --message` | `aider` on PATH |
 | DeepSeek | the harness's own agent loop ([harness/adapters/api.js](harness/adapters/api.js)) | `DEEPSEEK_API_KEY` |
-| OpenVibe.AI | the same loop against AI's `/v1/chat/completions`; its router picks the model and each answer reports its cost | `OPENVIBE_APP_ID` + `OPENVIBE_APP_SECRET` (an app with `ai.app.run`; tokens are fetched and refreshed), or `OPENVIBE_AI_TOKEN` |
+| OpenVibe.AI | the same loop against AI's `/v1/chat/completions`; each answer reports its cost | `OPENVIBE_APP_ID` + `OPENVIBE_APP_SECRET` (an app with `ai.app.run`; tokens are fetched and refreshed), or `OPENVIBE_AI_TOKEN`. App runs on AI's router use free capacity without tools, so name your project's own provider: `OPENVIBE_AI_SECRET` (a project secret granted to `ai` for reveal to the provider's origin), `OPENVIBE_AI_PROVIDER_URL` (default `https://api.openai.com/v1`), `OPENVIBE_AI_PROVIDER_MODEL`. The key stays in OpenVibe.Network, never on the machine |
 | Your own model | the same loop against any OpenAI-compatible server | `OPENVIBE_CODES_BASE_URL`, `OPENVIBE_CODES_MODEL`, optional `OPENVIBE_CODES_API_KEY` |
 
 - **Events.** Every adapter turns its agent's output into one stream in Claude Code's `stream-json` shape (system/init, assistant text and tool_use, user tool_result, system warning/error/handoff, exactly one result), [harness/events.js](harness/events.js). Keys, tokens and private keys are redacted before an event is printed or kept.
