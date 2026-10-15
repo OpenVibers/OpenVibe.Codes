@@ -50,6 +50,14 @@ if [ ! -f /etc/forgejo/app.ini ]; then
     echo "config written to /etc/forgejo/app.ini (database ov_forgejo, role forgejo)"
 fi
 
+# The OpenVibe look (custom/: the openvibe theme), refreshed on every run. app.ini names it; an install from before the
+# theme gets the two [ui] lines updated in place.
+cp -r "$KIT/custom/." /var/lib/forgejo/custom/
+chown -R forgejo:forgejo /var/lib/forgejo/custom
+if ! grep -q '^DEFAULT_THEME = openvibe' /etc/forgejo/app.ini; then
+    sed -i -e 's/^DEFAULT_THEME = .*/DEFAULT_THEME = openvibe/' -e 's/^THEMES = .*/THEMES = openvibe,forgejo-auto,forgejo-light,forgejo-dark/' /etc/forgejo/app.ini
+fi
+
 # 5. The service.
 install -m 0644 "$KIT/openvibe-forgejo.service" /etc/systemd/system/openvibe-forgejo.service
 systemctl daemon-reload
