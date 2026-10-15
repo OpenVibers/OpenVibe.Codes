@@ -63,6 +63,7 @@ async function createApp(opts = {}) {
     const release = require('openvibe-shared/release').createRelease({ service: 'codes', root: path.join(__dirname, '..') });
     require('./render/layout').setRelease(release.release);
     const metrics = require('openvibe-shared/metrics').instrument(app, { service: 'codes', release: release.release });
+    app.use(require('openvibe-sdk/service').telemetryMiddleware);   // request telemetry: a no-op until server/index.js calls telemetry.init()
     app.locals.metrics = metrics.registry;
     app.locals.ctx = ctx;
     // Per-actor limits (http/actor-limits.js) at /api/v1, counted once the caller is known; the per-address

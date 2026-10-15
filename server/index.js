@@ -5,7 +5,8 @@
  * Listens on PORT (4900) behind nginx (deploy/).
  */
 const { createApp } = require('./app');
-const { gracefulStop } = require('openvibe-sdk/service');
+const { gracefulStop, telemetry } = require('openvibe-sdk/service');
+const { createPgTelemetrySink, startTelemetryRetention } = require('openvibe-sdk/telemetry');
 const { startSubscriptions } = require('openvibe-sdk/account-data');
 
 /**
@@ -16,7 +17,7 @@ const { startSubscriptions } = require('openvibe-sdk/account-data');
 function createLifecycle({ server, ctx, exit, signals }) {
     return gracefulStop({
         name: 'Codes', server, deadlineExitCode: 0, exit, signals,
-        close: [() => ctx.keys.client.stop(), () => ctx.store.close()],
+        close: [() => ctx.keys.client.stop(), async () => { if (ctx.telemetryRetention) await ctx.telemetryRetention.stop(); await telemetry.stop(); }, () => ctx.store.close()],
     });
 }
 
@@ -29,6 +30,10 @@ async function start() {
         console.log(`[Codes] ${ctx.harnesses.list().length} harnesses in the catalog; the developer console's addresses redirect to openvibe.services`);
     });
     server.keepAliveTimeout = 65_000;
+    // Request telemetry (openvibe-sdk/service, plan T1): one aggregated sample per route template, method and status
+    // class each 15 s, stored in this service's telemetry_samples table; rows older than 30 days go daily.
+    telemetry.init({ service: 'codes', sink: createPgTelemetrySink({ db: ctx.store.db, log: console }), skipPrefixes: ['/shared'] });
+    ctx.telemetryRetention = startTelemetryRetention({ db: ctx.store.db, log: console });
     // Keep the JWKS cache fresh in the background (openvibe-sdk/auth): one client per URL, the last
     // good keys through outages, exponential backoff, unknown-kid floods throttled, an unref'd timer.
     ctx.keys.client.start();
