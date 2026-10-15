@@ -57,6 +57,8 @@ const BOOST = /<script src="\/shared\/boost\.js\?v=[0-9a-f]{12}" data-main="#mai
     await check('the navbar config uses the {path} login template, not the path baked in', async () => {
         const r = await t.get('/harnesses');
         assert.match(r.text, /"loginUrl":"\/auth\/login\?next=\{path\}"/);
+        // A table scrolls sideways on a phone: its wrapper is a focusable, named region (axe scrollable-region-focusable).
+        assert.ok(r.text.includes('<div class="table-wrap" tabindex="0" role="region" aria-label="Table: '), 'focusable table region');
         assert.ok(!/"loginUrl":"\/auth\/login\?next=%2F/.test(r.text), 'loginUrl still has the current path baked in');
     });
 
