@@ -40,6 +40,8 @@ const BOOST = /<script src="\/shared\/boost\.js\?v=[0-9a-f]{12}" data-main="#mai
         assert.strictEqual(r.status, 200);
         const head = r.text.slice(0, r.text.indexOf('</head>'));
         assert.strictEqual((r.text.match(/<title>/g) || []).length, 1, 'exactly one <title>');
+        // A code block that scrolls sideways on a phone is a region the keyboard must reach (axe scrollable-region-focusable).
+        assert.ok(!/<pre(?![^>]*tabindex)[\s>]/.test(r.text), 'every <pre> is focusable');
         assert.ok(head.includes('<title>OpenVibe.Codes: code with any agent</title>'), 'home title');
         assert.ok(head.includes('<link rel="canonical" href="https://openvibe.codes/">'), 'canonical');
         assert.ok(head.includes('<meta name="robots" content="index, follow">'), 'robots');
