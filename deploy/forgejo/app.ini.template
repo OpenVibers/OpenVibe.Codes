@@ -1,4 +1,4 @@
-; OpenVibe Git: Forgejo at https://openvibe.codes/git/ (deploy/forgejo/install.sh writes /etc/forgejo/app.ini from this).
+; OpenVibe Git: Forgejo at https://git.openvibe.codes/ (deploy/forgejo/install.sh writes /etc/forgejo/app.ini from this).
 ; @VALUES@ are filled in on the host; the secrets are generated there and never leave it.
 APP_NAME = OpenVibe Git
 RUN_USER = forgejo
@@ -9,9 +9,9 @@ WORK_PATH = /var/lib/forgejo
 PROTOCOL = http
 HTTP_ADDR = 127.0.0.1
 HTTP_PORT = 5060
-DOMAIN = openvibe.codes
-ROOT_URL = https://openvibe.codes/git/
-; Cloning and pushing are over HTTPS only: openvibe.codes is behind Cloudflare's proxy, which carries no SSH.
+DOMAIN = git.openvibe.codes
+ROOT_URL = https://git.openvibe.codes/
+; Cloning and pushing are over HTTPS only: git.openvibe.codes is behind Cloudflare's proxy, which carries no SSH.
 DISABLE_SSH = true
 START_SSH_SERVER = false
 LANDING_PAGE = explore

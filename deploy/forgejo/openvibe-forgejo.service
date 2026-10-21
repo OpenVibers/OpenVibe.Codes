@@ -1,5 +1,5 @@
 [Unit]
-Description=OpenVibe Git (Forgejo) at https://openvibe.codes/git/
+Description=OpenVibe Git (Forgejo) at https://git.openvibe.codes/
 After=network.target postgresql.service
 Wants=postgresql.service
 
