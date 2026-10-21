@@ -8,7 +8,7 @@
 **License:** AGPL-3.0 (same as every OpenVibe service).
 
 
-**OpenVibe Git** (since 2026-10-15): Forgejo at [openvibe.codes/git](https://openvibe.codes/git/), signed in with your OpenVibe account, with read mirrors of the OpenVibers GitHub repositories. Install and operations: [deploy/forgejo](deploy/forgejo/README.md).
+**OpenVibe Git** (since 2026-10-15): Forgejo at [git.openvibe.codes](https://git.openvibe.codes/) (its first address, openvibe.codes/git, redirects there), signed in with your OpenVibe account, with read mirrors of the OpenVibers GitHub repositories. Install and operations: [deploy/forgejo](deploy/forgejo/README.md).
 ## Purpose
 
 One place to send a coding task to the agent that fits it — by what the task needs first, then by cost — hand it over when one agent gets stuck, and keep the run in one place; and the front door for anyone who wants to improve OpenVibe itself. The agents run on people's own machines or OpenVibe's; Codes routes, records and hands off, and never holds a person's provider keys in the clear.
