@@ -43,6 +43,12 @@ function load(env = process.env) {
         networkUrl,
         networkInternalUrl: trim(env.OV_NETWORK_INTERNAL_URL || 'http://127.0.0.1:4000'),
         networkIssuer: trim(env.OV_NETWORK_ISSUER || networkUrl),
+        // OpenVibe Git (Forgejo, deploy/forgejo): its loopback address for the home page's repository list (public
+        // repositories only, no token), and the public address people use.
+        git: {
+            internalUrl: trim(env.CODES_GIT_INTERNAL_URL || 'http://127.0.0.1:5060'),
+            publicUrl: trim(env.CODES_GIT_URL || 'https://git.openvibe.codes'),
+        },
         // The audience of the Network service tokens a first-party service calls /api/v1/tasks with (codes.task.*).
         serviceAudience: env.CODES_AUDIENCE || 'openvibe.codes',
         oauth: {

@@ -24,6 +24,8 @@ const { html, raw, table, notice } = require('../render/html');
 const { send } = require('../render/layout');
 const { markdown } = require('../render/markdown');
 const placement = require('../domain/harness-placement');
+const home = require('./home');
+const seo = require('openvibe-shared/seo');
 
 const ROOT = path.join(__dirname, '..', '..');
 const GITHUB = 'https://github.com/OpenVibers';
@@ -76,12 +78,16 @@ function createPageRoutes(ctx) {
     const PUBLIC_CACHE = cache.htmlHeaders({ maxAge: 300 });
     const governance = loadGovernance();
     const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, ...o });
+    // OpenVibe Git's public repositories for the home (read in the background, never awaited here); tests set ctx.git.
+    const gitReader = home.createGitReader({ internalUrl: config.git.internalUrl, publicUrl: config.git.publicUrl, enabled: config.nodeEnv !== 'test' });
 
     // ── Home: code with any agent ───────────────────────────
     r.get('/', (req, res) => {
         const offers = harnesses.list();
         const tasks = Object.keys(placement.TASKS);
-        const snippet = `$ openvibe-codes run "add a test for the date parser"
+        // What a run prints (bin/openvibe-codes.js), as an example: Codex hits its limit and Claude Code finishes.
+        const snippet = `# an example run: one agent hits its limit, the next one finishes
+$ openvibe-codes run "add a test for the date parser"
 run run_20261008… · ~/my-project
 ▶ codex · session 0199…
 ! You have hit your usage limit.
@@ -93,7 +99,7 @@ Added test/date.test.js: three cases, all pass.
 ✔ done (48 s · $0.0400 · 31k in / 1.2k out)`;
         page(req, res, {
             index: true, cache: PUBLIC_CACHE,
-            jsonLd: homeJsonLd(config),
+            jsonLd: [...homeJsonLd(config), seo.jsonLd.faq(home.faqPairs())],
             styles: [showcase.STYLESHEET],
             body: html`${raw(showcase.hero({
                 eyebrow: 'OpenVibe.Codes · the open coding-agent harness · alpha',
@@ -116,6 +122,8 @@ ${raw(showcase.steps({
                     { title: 'Hand-offs', text: 'When an agent fails, hits its usage limit or goes quiet, the task moves to the next one with a note: the task, the files touched and the state of the tree.' },
                 ],
             }))}
+${raw(home.quickStart({ install: INSTALL }))}
+${raw(home.gitSection((ctx.git || gitReader).peek()))}
 <section class="sc-sec" aria-labelledby="h-improve"><h2 id="h-improve">Improve OpenVibe</h2>
 <p class="sc-lede">OpenVibe is built in the open, ${repositories().running.length} services and their shared libraries, every one on GitHub. Pick a repository, describe the change, and send a pull request; the harness's job is to make that one step.</p>
 <p><a class="sc-btn sc-primary" href="/improve">Start contributing</a> <a class="sc-btn" href="/policy/contributing">Read the guide</a></p></section>
@@ -127,7 +135,9 @@ ${table(['Piece', 'State'], [
                 [html`<a href="/harnesses">The agent catalog</a>`, 'Live: every harness and model with its capabilities, prices and limits.'],
                 [html`<code>GET /api/v1/harnesses</code>, <code>POST /api/v1/harnesses/route</code>`, 'Live: public, no key needed; per-address and per-caller limits.'],
                 [html`<a href="/improve">Improve OpenVibe</a>: a repository, a change on a branch with its test, a pull request that CI checks and a maintainer reviews`, 'Live: by hand, or with the harness doing the change on your machine.'],
+                [html`<a href="${config.git.publicUrl}/">OpenVibe Git</a>: OpenVibe's own code forge`, 'Live: every public OpenVibe repository, mirrored from GitHub hourly, with OpenVibe sign-in and HTTPS cloning. GitHub stays canonical until a repository moves here.'],
             ])}</section>
+${raw(home.faq())}
 ${raw(showcase.cta({ title: 'Building an app instead?', text: 'Projects, keys, grants and the API docs of every OpenVibe service live on OpenVibe.Services.', actions: [{ label: 'Open the developer platform', href: SERVICES_ORIGIN, primary: true }, { label: 'Meet the agents', href: '/harnesses' }] }))}`,
         });
     });
