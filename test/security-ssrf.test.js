@@ -43,6 +43,7 @@ const INTERNAL = [`http://127.0.0.1:3000${PROBE}`, `http://2130706433${PROBE}`, 
             'server/auth/sso.js': 'Network OAuth token and revoke (configured)',
             'server/domain/run-client.js': 'OpenVibe.Run (CODES_RUN_URL, configured) and the Network token endpoint; job ids only, never a URL from a person',
             'server/http/run.js': 'Network projects API (configured) with the viewer\'s token, and the Run job stream URL run-client.js builds on its own base',
+            'server/http/home.js': 'OpenVibe Git\'s public repository search (CODES_GIT_INTERNAL_URL, configured loopback Forgejo) for the home page; no token',
         };
         const root = path.join(__dirname, '..');
         const found = [];
