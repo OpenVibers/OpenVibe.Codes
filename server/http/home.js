@@ -10,7 +10,24 @@ const showcase = require('openvibe-shared/showcase');
 
 const esc = showcase.esc;
 
-function createGitReader({ internalUrl, publicUrl, enabled = true, fetchImpl = globalThis.fetch, ttlMs = 10 * 60_000, timeoutMs = 3000, limit = 8 } = {}) {
+// Forgejo listens on 127.0.0.1:5060, a port the Fetch standard blocks (SIP), so Node's fetch refuses it ("bad port"):
+// the read goes through node:http instead, which has no such list.
+function getJson(url, timeoutMs) {
+    return new Promise((resolve, reject) => {
+        const u = new URL(url);
+        const lib = u.protocol === 'https:' ? require('https') : require('http');
+        const req = lib.get(u, { headers: { Accept: 'application/json' }, timeout: timeoutMs }, (res) => {
+            let body = '';
+            res.setEncoding('utf8');
+            res.on('data', (c) => { body += c; if (body.length > 2_000_000) req.destroy(new Error('too large')); });
+            res.on('end', () => { try { resolve({ status: res.statusCode, total: Number(res.headers['x-total-count']) || null, body: JSON.parse(body) }); } catch (e) { reject(e); } });
+        });
+        req.on('timeout', () => req.destroy(new Error('timeout')));
+        req.on('error', reject);
+    });
+}
+
+function createGitReader({ internalUrl, publicUrl, enabled = true, ttlMs = 10 * 60_000, retryMs = 60_000, timeoutMs = 3000, limit = 8 } = {}) {
     let value = null;
     let at = 0;
     let inflight = null;
@@ -19,17 +36,17 @@ function createGitReader({ internalUrl, publicUrl, enabled = true, fetchImpl = g
         if (inflight) return inflight;
         inflight = (async () => {
             try {
-                const res = await fetchImpl(`${String(internalUrl).replace(/\/+$/, '')}/api/v1/repos/search?limit=${limit}&sort=updated&order=desc`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) });
-                if (res.ok) {
-                    const body = await res.json();
-                    const total = Number(res.headers.get('x-total-count')) || null;
+                const res = await getJson(`${String(internalUrl).replace(/\/+$/, '')}/api/v1/repos/search?limit=${limit}&sort=updated&order=desc`, timeoutMs);
+                if (res.status === 200) {
+                    const { body, total } = res;
                     const repos = (Array.isArray(body.data) ? body.data : [])
                         .filter((r) => r && !r.private && /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(String(r.full_name || '')))
                         .map((r) => ({ name: r.full_name, url: `${pub}/${r.full_name}`, updated: r.updated_at || null, language: r.language || '' }));
                     if (repos.length) value = { total: total && total >= repos.length ? total : null, repos, publicUrl: pub };
                 }
             } catch { /* keep the last answer */ }
-            at = Date.now();
+            // A failed read is tried again after a minute, not after the full ten.
+            at = value ? Date.now() : Date.now() - ttlMs + retryMs;
             return value;
         })().finally(() => { inflight = null; });
         return inflight;
