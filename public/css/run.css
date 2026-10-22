@@ -23,13 +23,13 @@
 .run-log li { overflow-wrap: anywhere; white-space: pre-wrap; }
 .run-log .tool, .run-log .step { color: var(--text-muted, #7386a3); }
 .run-log .agent, .run-log .handoff { font-weight: 700; }
-.run-log .note { color: var(--warning, #f59e0b); }
+.run-log .note { color: var(--warning-text, var(--warning, #f59e0b)); }
 .run-files td { padding: 2px 10px 2px 0; }
-.run-files .add { color: var(--success, #22c55e); }
-.run-files .del { color: var(--danger, #e5484d); }
+.run-files .add { color: var(--success-text, var(--success, #22c55e)); }
+.run-files .del { color: var(--danger-text, var(--danger, #e5484d)); }
 .run-patch { overflow: auto; max-height: 70vh; padding: 12px; border-radius: 12px; background: var(--bg-primary, #0a0f1c); border: 1px solid var(--border, #1f2d47); font-size: 13px; }
-.run-patch .add { color: var(--success, #22c55e); }
-.run-patch .del { color: var(--danger, #e5484d); }
+.run-patch .add { color: var(--success-text, var(--success, #22c55e)); }
+.run-patch .del { color: var(--danger-text, var(--danger, #e5484d)); }
 .run-patch .hunk { color: var(--accent-light, #60a5fa); }
 .run-repo { overflow-wrap: break-word; }
 .run-host { display: block; font-size: 0.55em; font-weight: 500; color: var(--text-muted, #8b9bb4); }
