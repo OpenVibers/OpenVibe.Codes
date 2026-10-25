@@ -31,7 +31,7 @@ table.caps tr:has(a.grantable) { background: color-mix(in srgb, var(--success, #
 .facts dt { color: var(--text-secondary, #96a7c2); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
 ul.plain { list-style: none; padding: 0; margin: 0; }
-ul.cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+ul.cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 12px; }
 ul.cards li { border: 1px solid var(--border, #1f2d47); border-radius: 10px; padding: 12px 14px; background: var(--bg-card, #131c2e); display: flex; flex-direction: column; gap: 4px; }
 ul.cards span { color: var(--text-secondary, #96a7c2); font-size: .9rem; }
 ol.steps li { margin: .4rem 0; }

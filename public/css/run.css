@@ -16,10 +16,10 @@
 .run-pill-running, .run-pill-placed { border-color: var(--accent, #3b82f6); }
 .run-pill-succeeded { border-color: var(--success, #22c55e); }
 .run-pill-failed, .run-pill-expired { border-color: var(--danger, #e5484d); }
-.run-tasks { list-style: none; padding: 0; display: grid; gap: 6px; max-width: 820px; }
+.run-tasks { list-style: none; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; max-width: 820px; }
 .run-tasks a { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; text-decoration: none; color: inherit; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border, #1f2d47); }
 .run-prompt, .run-summary { white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid var(--border-light, #2c3d5c); padding: 4px 12px; margin: 12px 0; font: inherit; }
-.run-log { list-style: none; padding: 12px; margin: 0; border-radius: 12px; background: var(--bg-primary, #0a0f1c); border: 1px solid var(--border, #1f2d47); font-size: 14px; display: grid; gap: 4px; max-height: 60vh; overflow: auto; }
+.run-log { list-style: none; padding: 12px; margin: 0; border-radius: 12px; background: var(--bg-primary, #0a0f1c); border: 1px solid var(--border, #1f2d47); font-size: 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; max-height: 60vh; overflow: auto; }
 .run-log li { overflow-wrap: anywhere; white-space: pre-wrap; }
 .run-log .tool, .run-log .step { color: var(--text-muted, #7386a3); }
 .run-log .agent, .run-log .handoff { font-weight: 700; }
