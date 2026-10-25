@@ -54,7 +54,7 @@ const { boot, check, done } = require('./helpers/boot');
             t.ctx.git = { peek: () => ({ total: 52, publicUrl: 'https://git.openvibe.codes', repos: [{ name: 'OpenVibers/OpenVibe.Codes', url: 'https://git.openvibe.codes/OpenVibers/OpenVibe.Codes', updated: new Date().toISOString(), language: 'JavaScript' }] }) };
             r = await t.get('/');
             assert.match(r.text, /52 repositories on OpenVibe&#39;s own code forge|52 repositories on OpenVibe's own code forge/);
-            assert.ok(r.text.includes('href="https://git.openvibe.codes/OpenVibers/OpenVibe.Codes"') && r.text.includes('<small>Code with any agent</small>'), 'a repository with its service tagline');
+            assert.ok(r.text.includes('href="https://git.openvibe.codes/OpenVibers/OpenVibe.Codes"') && r.text.includes('<small>Build and fix apps with AI</small>'), 'a repository with its service tagline');
         });
     } finally { await t.close(); }
     done();
