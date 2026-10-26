@@ -138,6 +138,7 @@ ${table(['Piece', 'State'], [
                 [html`<a href="${config.git.publicUrl}/">OpenVibe Git</a>: OpenVibe's own code forge`, 'Live: every public OpenVibe repository, mirrored from GitHub hourly, with OpenVibe sign-in and HTTPS cloning. GitHub stays canonical until a repository moves here.'],
             ])}</section>
 ${raw(home.faq())}
+${raw(showcase.network({ service: 'codes' }))}
 ${raw(showcase.cta({ title: 'Building an app instead?', text: 'Projects, keys, grants and the API docs of every OpenVibe service live on OpenVibe.Services.', actions: [{ label: 'Open the developer platform', href: SERVICES_ORIGIN, primary: true }, { label: 'Meet the agents', href: '/harnesses' }] }))}`,
         });
     });
