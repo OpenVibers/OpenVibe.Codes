@@ -1,8 +1,9 @@
 'use strict';
 /**
  * The released contracts (the pinned openvibe-contracts tag) describe what the code does. Since 0.113.0 the codes
- * service manifest declares the coding-task capabilities (codes.task.*, Contracts 0.162) and no event: the developer console moved to OpenVibe.Services, which owns
- * services.release.* and services.app.*, and the codes.* forms are retired. The harness catalog's rows are the
+ * service manifest declares the coding-task capabilities (codes.task.*, Contracts 0.162): the developer console moved to
+ * OpenVibe.Services, which owns services.release.* and services.app.*, and the codes.* forms are retired. Since 0.232.0
+ * it produces codes.task.queued|running|succeeded|failed|cancelled and consumes run.job.*. The harness catalog's rows are the
  * contracts' platform.harness-offer@1 and platform.agent-offer@1 (checked at boot by server/domain/harnesses.js).
  */
 const assert = require('assert');
@@ -14,7 +15,7 @@ const { check, done } = require('./helpers/boot');
 (async () => {
     const manifest = contracts.services.get('codes');
 
-    await check('the codes service manifest is released as alpha, live, with the coding-task capabilities and no event', async () => {
+    await check('the codes service manifest is released as alpha, live, with the coding-task capabilities', async () => {
         assert.ok(manifest);
         assert.strictEqual(manifest.status, 'alpha');
         assert.deepStrictEqual(manifest.domains, ['openvibe.codes']);
@@ -23,7 +24,6 @@ const { check, done } = require('./helpers/boot');
         // and reads their Action Center items (http/actions-api.js).
         assert.deepStrictEqual(manifest.capabilities, ['codes.task.start', 'codes.task.read', 'codes.task.cancel', 'codes.actions.read']);
         for (const id of manifest.capabilities) assert.strictEqual(contracts.capabilities.get(id).status, 'active', id);
-        assert.deepStrictEqual(manifest.eventsProduced, []);
         const range = manifest.contractRanges['openvibe-contracts'];
         assert.ok(require('openvibe-sdk/core').satisfiesRange(require('openvibe-contracts/package.json').version, range));
     });
@@ -48,11 +48,31 @@ const { check, done } = require('./helpers/boot');
         }
     });
 
-    await check('no proposal left behind: everything proposed is released', async () => {
-        const docs = path.join(__dirname, '..', 'docs');
-        assert.ok(!fs.existsSync(path.join(docs, 'capabilities-proposal')));
-        assert.ok(!fs.existsSync(path.join(docs, 'service-manifest-proposal.json')));
-        assert.ok(!fs.existsSync(path.join(docs, 'contracts-proposal')));
+    await check('every codes.task.* payload validates against the pinned contracts, and the manifest names the topics', async () => {
+        const contracts = require('openvibe-contracts');
+        const { TOPICS, payloadOf } = require('../server/events/outbox');
+        const row = { id: 'tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3', agent: 'claude', repo: 'https://github.com/OpenVibers/OpenVibe.Codes.git',
+            started_at: '2026-10-28T16:00:00.000Z', finished_at: null, error: null, result: null };
+        const rows = [
+            { ...row, state: 'queued', started_at: null },
+            { ...row, state: 'placed' },
+            { ...row, state: 'succeeded', finished_at: new Date('2026-10-28T16:04:00Z'), result: { cost_usd: 0.42, files: ['a.js', 'b.js'] } },
+            { ...row, state: 'expired', finished_at: '2026-10-28T17:00:00.000Z', error: 'run.job_expired: no machine took the job' },
+            { ...row, state: 'cancelled', repo: 'not a url', agent: null },
+        ];
+        for (const r of rows) {
+            const payload = payloadOf(r);
+            const topic = `codes.task.${payload.state}`;
+            assert.ok(TOPICS.includes(topic), topic);
+            const v = contracts.validate(topic, payload);
+            assert.ok(v.valid, `${topic}: ${JSON.stringify(v.errors)}`);
+        }
+        assert.strictEqual(payloadOf(rows[2]).repo, 'OpenVibers/OpenVibe.Codes');
+        assert.strictEqual(payloadOf(rows[2]).files_changed, 2);
+        const manifest = require('openvibe-contracts/manifests/services/codes.json');
+        assert.deepStrictEqual(manifest.eventsProduced, TOPICS);
+        assert.ok(manifest.eventsConsumed.includes('run.job.succeeded') && manifest.eventsConsumed.includes('network.account.deleted'));
+        assert.ok(!fs.existsSync(path.join(__dirname, '..', 'docs', 'contracts-proposal')), 'the proposal moved to Contracts 0.232.0');
     });
 
     done();

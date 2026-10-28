@@ -16,9 +16,9 @@ const items = require('../actions/items');
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const RUNNING = ['queued', 'placed', 'running'];
 
-function createActionsApi({ config, store, keys, run, actorLimits, log = console }) {
+function createActionsApi({ config, store, keys, run, actorLimits, tasks = null, log = console }) {
     const r = asyncRouter();
-    const tasks = createRunTasks({ store, run, config, log });
+    const taskStore = tasks || createRunTasks({ store, run, config, log });
     const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
 
     const guard = async (req, res, next) => {
@@ -46,7 +46,7 @@ function createActionsApi({ config, store, keys, run, actorLimits, log = console
             WHERE subject = $1 AND (state = ANY($2) OR updated_at >= $3)
             ORDER BY updated_at DESC
             LIMIT 50`, [req.principal.subject, RUNNING, cutoff]);
-        res.json({ items: rows.map((row) => items.toItem(row, tasks.present(row))) });
+        res.json({ items: rows.map((row) => items.toItem(row, taskStore.present(row))) });
     });
 
     return r;

@@ -24,10 +24,10 @@ const { createRunTasks, TERMINAL } = require('../domain/run-tasks');
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 
-function createTasksApi({ config, store, keys, run, harnesses, actorLimits, log = console }) {
+function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
-    const tasks = createRunTasks({ store, run, config, log });
+    const taskStore = tasks || createRunTasks({ store, run, config, log });
     const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
     const json = express.json({ limit: '32kb' });
 
@@ -66,7 +66,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, log 
         const key = b.idempotency_key || null;
         if (key) {
             const seen = await byKey(p, key);
-            if (seen) return res.status(200).json({ task: tasks.present(await tasks.refresh(seen)), created: false });
+            if (seen) return res.status(200).json({ task: taskStore.present(await taskStore.refresh(seen)), created: false });
         }
         let args;
         try {
@@ -77,37 +77,37 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, log 
         } catch (e) {
             return problem(req, res, 422, 'codes.task_invalid', e.message);
         }
-        const project = await tasks.latestProject(p.subject);
+        const project = await taskStore.latestProject(p.subject);
         if (!project) {
             return problem(req, res, 409, 'codes.no_project', `this person has not run a task on ${config.baseUrl}/run yet: a service's task runs in the project of their latest one there, on a machine of theirs (openvibe.bot/machines)`);
         }
         let row;
         try {
-            row = await tasks.start({ subject: p.subject, project, args, via: p.via, key });
+            row = await taskStore.start({ subject: p.subject, project, args, via: p.via, key });
         } catch (e) {
             // Two requests with one key at once: the unique index lets one in; the other answers with it.
             const seen = key && e && e.code === '23505' ? await byKey(p, key) : null;
             if (!seen) throw e;
-            return res.status(200).json({ task: tasks.present(seen), created: false });
+            return res.status(200).json({ task: taskStore.present(seen), created: false });
         }
         log.info(`[Codes] task ${row.id} started by ${p.via} for ${p.subject}: ${row.state}`);
-        return res.status(201).json({ task: tasks.present(row), created: true });
+        return res.status(201).json({ task: taskStore.present(row), created: true });
     });
 
     r.get('/tasks/:id', guard('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
         const row = await mine(req);
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
-        return res.json(tasks.present(await tasks.refresh(row)));
+        return res.json(taskStore.present(await taskStore.refresh(row)));
     });
 
     r.post('/tasks/:id/cancel', guard('codes.task.cancel'), actorLimits.budget('codes.task.start'), async (req, res) => {
         let row = await mine(req);
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
         if (row.job_id && !TERMINAL.has(row.state)) {
-            try { await run.cancel(row.job_id, tasks.who(row)); } catch (e) { log.warn(`[Codes] cancel ${row.id}: ${e.message}`); }
-            row = await tasks.refresh(row);
+            try { await run.cancel(row.job_id, taskStore.who(row)); } catch (e) { log.warn(`[Codes] cancel ${row.id}: ${e.message}`); }
+            row = await taskStore.refresh(row, { force: true });
         }
-        return res.json(tasks.present(row));
+        return res.json(taskStore.present(row));
     });
 
     return r;
