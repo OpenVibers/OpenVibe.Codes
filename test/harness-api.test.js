@@ -161,6 +161,21 @@ const toolResults = (events) => events.filter((e) => e.type === 'user').flatMap(
         assert.ok(toolResults(events).some((c) => c.content.trim() === fs.realpathSync(work)));
     });
 
+    // A command's output reaches the stream while it runs (tool_progress), before its result: a long test run is seen
+    // moving (the owner, 2026-10-28: the Claude app said "Output unavailable" for a running command).
+    await check('a running command\'s output streams before its result; edits carry their change', async () => {
+        api.set([{ calls: [['run_command', { command: 'echo first; sleep 0.4; echo second' }], ['write_file', { path: 'note.txt', content: 'hello' }]] }, { content: 'ok' }]);
+        const events = await collect(h.run({ prompt: 'run it', agent: 'openai-compatible', cwd: work, permission: 'full', handoff: false }));
+        const progress = events.filter((e) => e.type === 'system' && e.subtype === 'tool_progress');
+        const resultAt = events.findIndex((e) => e.type === 'user' && e.message.content.some((c) => /second/.test(c.content)));
+        assert.ok(progress.length >= 1 && /first/.test(progress[0].text), JSON.stringify(progress));
+        assert.ok(events.indexOf(progress[0]) < resultAt, 'the first output came before the command ended');
+        assert.ok(progress.every((p) => p.tool_use_id === progress[0].tool_use_id), 'every chunk names its step');
+        const write = events.find((e) => e.type === 'assistant' && e.message.content.some((c) => c.type === 'tool_use' && c.name !== 'Bash' && /note\.txt/.test(JSON.stringify(c.input))));
+        const input = write.message.content.find((c) => c.type === 'tool_use').input;
+        assert.deepStrictEqual([input.file_path, input.content], ['note.txt', 'hello'], 'a new file shows what it holds');
+    });
+
     await check('an HTTP error ends the run with the server\'s message', async () => {
         api.set([{ status: 429, error: 'rate limited, slow down' }]);
         const events = await collect(h.run({ prompt: 'x', agent: 'openai-compatible', cwd: work, handoff: false }));

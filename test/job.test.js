@@ -11,7 +11,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
-const { runJob, parseArgs, compact, scrub, githubRepo, JOB_PROTOCOL } = require('../harness/job');
+const { runJob, parseArgs, compact, sessionLog, scrub, githubRepo, JOB_PROTOCOL } = require('../harness/job');
 const { check, done } = require('./helpers/boot');
 
 const sh = (cwd, ...args) => execFileSync('git', args, { cwd, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
@@ -125,7 +125,35 @@ function fakeHarness({ fail = false } = {}) {
         assert.strictEqual(scrub('token ghs_abcdefghijklmnopqrstuvwxyz0123 leaked'), 'token *** leaked');
         assert.deepStrictEqual(githubRepo('https://github.com/OpenVibers/OpenVibe.Codes.git'), { owner: 'OpenVibers', name: 'OpenVibe.Codes' });
         assert.strictEqual(githubRepo('https://gitlab.com/a/b'), null);
-        assert.deepStrictEqual(compact({ type: 'result', is_error: false, result: 'ok', duration_ms: 5 }), { t: 'done', ok: true, text: 'ok', duration_ms: 5, cost_usd: 0 });
+        assert.deepStrictEqual(compact({ type: 'result', is_error: false, result: 'ok', duration_ms: 5 }), { t: 'done', ok: true, text: 'ok', duration_ms: 5, cost_usd: 0, turns: 0 });
+    });
+
+    // Lines 1.1 (openvibe-shared/agent-session.js reads them): a step keeps its id and what a reader needs of its input,
+    // a result its output, a helper's line its parent; secrets never pass, in any string.
+    await check('lines 1.1: steps with their input, results with their output, helpers nested, secrets scrubbed', () => {
+        const [said, step] = compact({ type: 'assistant', parent_tool_use_id: 'T1', message: { content: [{ type: 'text', text: 'key sk-abcdefghijklmnopqrstuv' }, { type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'curl -H "Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123" https://x', description: 'Call the API', timeout: 5 } }] } });
+        assert.deepStrictEqual(said, { t: 'text', text: 'key [redacted]', parent: 'T1' });
+        assert.deepStrictEqual([step.t, step.id, step.name, step.parent, Object.keys(step.input).sort()], ['tool', 'b1', 'Bash', 'T1', ['command', 'description']], 'only what a reader needs of the input');
+        assert.ok(!/ghp_/.test(JSON.stringify(step)), 'no token in the command');
+        const [edit] = compact({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: 'a.js', old_string: 'x', new_string: 'y' } }] } });
+        assert.deepStrictEqual(edit.input, { file_path: 'a.js', old_string: 'x', new_string: 'y' }, 'an edit carries its change');
+        assert.deepStrictEqual(compact({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'b1', is_error: true, content: [{ type: 'text', text: 'boom ghs_abcdefghijklmnopqrstuvwxyz0123' }] }] } }),
+            [{ t: 'tool_result', id: 'b1', ok: false, output: 'boom [redacted]' }], 'a result with its output, scrubbed');
+        assert.deepStrictEqual(compact({ type: 'system', subtype: 'tool_progress', tool_use_id: 'b1', text: 'line\n' }), { t: 'tool_progress', id: 'b1', chunk: 'line\n' });
+        assert.deepStrictEqual(compact({ type: 'system', subtype: 'handoff', from: 'claude', to: 'codex', reason: 'limit' }), { t: 'handoff', from: 'claude', to: 'codex', reason: 'limit' });
+        const todos = compact({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'p', name: 'TodoWrite', input: { todos: [{ content: 'A', status: 'in_progress', activeForm: 'Doing A' }] } }] } })[0];
+        assert.deepStrictEqual(todos.input.todos, [{ content: 'A', status: 'in_progress', activeForm: 'Doing A' }], 'the plan travels');
+    });
+
+    await check('the session log a result keeps fits: outputs are cut shorter first, the steps survive', () => {
+        const lines = [];
+        for (let i = 0; i < 120; i++) { lines.push({ t: 'tool', id: `s${i}`, name: 'Bash', what: 'npm test', input: { command: 'npm test' } }); lines.push({ t: 'tool_progress', id: `s${i}`, chunk: 'p'.repeat(3000) }); lines.push({ t: 'tool_result', id: `s${i}`, ok: true, output: 'o'.repeat(4000) }); }
+        const kept = sessionLog(lines);
+        assert.ok(JSON.stringify(kept).length <= 250000, 'within the result\'s room');
+        assert.strictEqual(kept.filter((l) => l.t === 'tool').length, 120, 'every step is still there');
+        assert.ok(!kept.some((l) => l.t === 'tool_progress'), 'progress whose step ended goes first');
+        assert.ok(kept.every((l) => l.t !== 'tool_result' || l.output.length <= 1500), 'outputs cut shorter');
+        assert.deepStrictEqual(sessionLog([{ t: 'text', text: 'hi' }]), [{ t: 'text', text: 'hi' }], 'a short session is kept as it is');
     });
 
     await check('the command reads its input on stdin and prints its result when fd 3 is not open', () => {

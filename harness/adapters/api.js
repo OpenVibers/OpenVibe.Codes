@@ -125,12 +125,12 @@ function runTool(name, args, cwd) {
     return [`unknown tool ${name}`, true];
 }
 
-/** run_command, asynchronously (the only tool that waits on something else). */
-function runCommand(command, cwd, signal) {
+/** run_command, asynchronously (the only tool that waits on something else); onChunk(text) hears its output as it comes. */
+function runCommand(command, cwd, signal, onChunk) {
     return new Promise((resolve) => {
         const child = spawn('bash', ['-lc', String(command)], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
         let out = '';
-        const add = (d) => { out = (out + d.toString()).slice(-16_000); };
+        const add = (d) => { out = (out + d.toString()).slice(-16_000); if (onChunk) { try { onChunk(d.toString()); } catch { /* a listener never stops the command */ } } };
         child.stdout.on('data', add); child.stderr.on('data', add);
         const timer = setTimeout(() => child.kill('SIGKILL'), 120_000);
         const abort = () => child.kill('SIGKILL');
@@ -138,6 +138,16 @@ function runCommand(command, cwd, signal) {
         child.on('close', (code) => { clearTimeout(timer); resolve([`${out.trim()}${code ? `\n(exit ${code})` : ''}` || '(no output)', code !== 0]); });
         child.on('error', (err) => { clearTimeout(timer); resolve([err.message, true]); });
     });
+}
+
+/** What a step shows of its input: an edit its change and a new file its start (clipped, secrets scrubbed), so a
+ *  reader sees the diff; everything else as the agent gave it. */
+function shownInput(name, args) {
+    const cut = (s, n) => ev.clip(ev.scrub(s == null ? '' : s), n);
+    if (name === 'edit_file') return { file_path: args.path, old_string: cut(args.old_string, 4000), new_string: cut(args.new_string, 4000) };
+    if (name === 'write_file') return { file_path: args.path, content: cut(args.content, 4000) };
+    if (name === 'run_command') return { command: cut(args.command, 2000) };
+    return args;
 }
 
 /**
@@ -206,12 +216,25 @@ function apiAgent(spec) {
                             const name = call.function && call.function.name;
                             let args = {};
                             try { args = JSON.parse((call.function && call.function.arguments) || '{}'); } catch { /* answered as an error below */ }
-                            yield ev.toolUse(call.id, SHOWN_AS[name] || name, name === 'edit_file' || name === 'write_file' ? { file_path: args.path } : args, model);
+                            yield ev.toolUse(call.id, SHOWN_AS[name] || name, shownInput(name, args), model);
                             let out;
                             const def = TOOL_DEFS[name];
                             if (!def) out = [`unknown tool ${name}`, true];
                             else if (LEVELS[def.level] > level) out = [`${name} needs the ${def.level} permission level`, true];
-                            else if (name === 'run_command') out = await runCommand(args.command, t.cwd, controller.signal);
+                            else if (name === 'run_command') {
+                                // The command's output reaches the stream as it comes (batched every 150 ms), so a
+                                // reader sees a long test run move instead of waiting for its end.
+                                const chunks = []; let wake = null; let finished = null;
+                                const nudge = () => { if (wake) { const w = wake; wake = null; w(); } };
+                                runCommand(args.command, t.cwd, controller.signal, (d) => { chunks.push(d); nudge(); }).then((r) => { finished = r; nudge(); });
+                                while (!finished) {
+                                    await new Promise((r) => { wake = r; if (finished || chunks.length) nudge(); });
+                                    if (!finished) await new Promise((r) => setTimeout(r, 150));
+                                    if (chunks.length) yield ev.toolProgress(call.id, chunks.splice(0).join(''));
+                                }
+                                if (chunks.length) yield ev.toolProgress(call.id, chunks.splice(0).join(''));
+                                out = finished;
+                            }
                             else { try { out = runTool(name, args, t.cwd); } catch (err) { out = [err.message, true]; } }
                             yield ev.toolResult(call.id, out[0], out[1]);
                             messages.push({ role: 'tool', tool_call_id: call.id, content: String(out[0]).slice(0, 16_000) });
