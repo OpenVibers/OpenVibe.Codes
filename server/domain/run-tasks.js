@@ -55,6 +55,20 @@ function presentResult(d) {
     });
 }
 
+// The job lines a session log may hold (harness/job.js, lines 1.1; openvibe-shared/agent-session.js reads them).
+const LINE_KINDS = new Set(['agent', 'text', 'tool', 'tool_progress', 'tool_result', 'handoff', 'note', 'usage', 'done', 'step']);
+/**
+ * The session a finished task's result keeps (`log`), for its page: the lines whose kind is known, at most 4000, each a
+ * plain object no larger than 20 KB. Not part of codes.task@1 (the API passes the result's contract fields only).
+ */
+function sessionLogOf(row) {
+    let d = row && row.result;
+    if (typeof d === 'string') { try { d = JSON.parse(d); } catch { return null; } }
+    if (!d || !Array.isArray(d.log)) return null;
+    const lines = d.log.filter((l) => l && typeof l === 'object' && !Array.isArray(l) && LINE_KINDS.has(l.t) && JSON.stringify(l).length <= 20000).slice(0, 4000);
+    return lines.length ? lines : null;
+}
+
 function createRunTasks({ store, run, config, log = console }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
@@ -103,4 +117,4 @@ function createRunTasks({ store, run, config, log = console }) {
     return { start, refresh, latestProject, present, who };
 }
 
-module.exports = { createRunTasks, presentResult, TERMINAL, STATE_LABEL };
+module.exports = { createRunTasks, presentResult, TERMINAL, STATE_LABEL, sessionLogOf };

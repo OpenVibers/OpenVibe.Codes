@@ -18,7 +18,7 @@ const { send } = require('../render/layout');
 const { html, raw, esc } = require('../render/html');
 
 const { parseArgs } = require('../../harness/job');
-const { createRunTasks, TERMINAL, STATE_LABEL } = require('../domain/run-tasks');
+const { createRunTasks, TERMINAL, STATE_LABEL, sessionLogOf } = require('../domain/run-tasks');
 
 const DELEGABLE = new Set(['owner', 'admin']);
 const MACHINES_URL = 'https://openvibe.bot/machines';
@@ -158,7 +158,9 @@ ${tasksHtml(recent)}`;
         return res.redirect(303, `/run/tasks/${row.id}`);
     });
 
-    function resultHtml(row) {
+    /** The end of a task: the verdict, what the agents said, the files and the patch. With the session on the page (`session`),
+     *  its closing card already says how it ended and the agents' last words, so only a failure keeps its notice. */
+    function resultHtml(row, { session = false } = {}) {
         const d = row.result || {};
         const files = Array.isArray(d.files) ? d.files : [];
         const push = d.push || null;
@@ -166,8 +168,9 @@ ${tasksHtml(recent)}`;
             ? html`<p class="run-notice run-notice-error">${row.state === 'expired' ? 'No machine of yours took the task in time. Is it online on openvibe.bot/machines, with the Codes job runner?' : row.error || STATE_LABEL[row.state]}</p>`
             : d.ok ? html`<p class="run-notice run-notice-ok">The agents finished the task${d.agents && d.agents.length ? ` (${d.agents.join(' → ')})` : ''}.</p>`
                 : html`<p class="run-notice run-notice-error">The task ended without success${d.error ? `: ${d.error}` : ''}.</p>`;
-        return html`<section class="run-result">${verdict}
-${d.summary ? html`<h2>What the agent said</h2><pre tabindex="0" class="run-summary">${d.summary}</pre>` : ''}
+        const ended = !(session && row.state === 'succeeded' && d.ok);
+        return html`<section class="run-result">${ended ? verdict : ''}
+${d.summary && !session ? html`<h2>What the agent said</h2><pre tabindex="0" class="run-summary">${d.summary}</pre>` : ''}
 ${push ? (push.pushed ? html`<p>Pushed <a href="${push.branch_url}">${push.branch}</a>${push.pull_request ? html` · <a href="${push.pull_request}">pull request</a>` : ''}${push.pull_request_error ? html` · the pull request was not opened (${push.pull_request_error})` : ''}</p>` : html`<p class="muted">Not pushed: ${push.reason}</p>`) : ''}
 ${files.length ? html`<h2>Changed files</h2><table class="run-files"><tbody>${files.map((f) => html`<tr><td><code>${f.path}</code></td><td class="add">+${f.added == null ? '·' : f.added}</td><td class="del">−${f.removed == null ? '·' : f.removed}</td></tr>`)}</tbody></table>` : (row.state === 'succeeded' ? html`<p class="muted">No files changed.</p>` : '')}
 ${d.patch ? html`<h2>The patch${d.patch_truncated ? ' (cut)' : ''}</h2><pre tabindex="0" class="run-patch" data-patch>${d.patch}</pre>` : ''}
@@ -181,13 +184,18 @@ ${typeof d.duration_ms === 'number' ? html`<p class="muted">${Math.round(d.durat
         if (!row) return page(req, res, { title: 'Not found', body: html`<h1>Not found</h1><p>No such task of yours. <a href="/run">Your tasks</a></p>` }, 404);
         row = await refresh(row);
         const live = !TERMINAL.has(row.state);
+        // The agents' session (openvibe-shared/agent-session.js, js/run.js mounts it): live from the job's stream, and
+        // after the end from the log the result keeps (a machine on an older Codes keeps none: the summary stands).
+        const lines = live ? null : sessionLogOf(row);
+        const title = String(row.prompt || '').split('\n')[0].slice(0, 90);
+        const session = lines ? html`<section class="run-session" data-session data-title="${title}" data-state="${row.state}"><h2>The session</h2><div data-session-view></div><script type="application/json" data-session-log>${raw(JSON.stringify(lines).replace(/</g, '\\u003c'))}</script></section>` : '';
         const body = html`<p class="crumbs"><a href="/run">Run on your machine</a></p>
 <h1 class="run-repo">${repoName(row.repo)}${row.ref ? html` <small>${row.ref}</small>` : ''}</h1>
 <p><span class="run-pill run-pill-${row.state}" data-state>${STATE_LABEL[row.state] || row.state}</span>${row.agent ? html` <span class="run-pill">${row.agent}</span>` : ''}</p>
 <pre tabindex="0" class="run-prompt">${row.prompt}</pre>
-${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events" aria-live="polite"><h2>Live</h2><ol class="run-log" data-log></ol></section>
-<form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : resultHtml(row)}`;
-        return page(req, res, { title: 'Task', body });
+${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events" data-title="${title}" aria-live="polite"><h2>Live</h2><ol class="run-log" data-log></ol></section>
+<form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : html`${session}${resultHtml(row, { session: !!lines })}`}`;
+        return page(req, res, { title: 'Task', body, sharedScripts: ['agent-session.js'] });
     });
 
     r.get('/run/tasks/:id/events', async (req, res) => {

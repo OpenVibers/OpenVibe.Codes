@@ -18,10 +18,13 @@ const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 
-const JOB_PROTOCOL = '1.0.0';
+const JOB_PROTOCOL = '1.0.0';   // the job's contract with the Node (stdin, stdout lines, fd 3): unchanged by 1.1's lines
+const LINES = '1.1';            // 1.1: lines carry step ids, inputs, results, progress, helpers; the result keeps `log`
 const MAX_PROMPT = 16_000;
 const MAX_PATCH = 180_000;
 const MAX_TEXT = 2_000;
+const MAX_OUTPUT = 4_000;    // a step's output on a line (live)
+const MAX_LOG = 240_000;     // the session log kept in the result (its outputs cut shorter when it would not fit)
 const BRANCH = /^[A-Za-z0-9._/-]{1,100}$/;
 
 /** git with no prompt and no credential helper; rejects with the command's stderr (tokens scrubbed). */
@@ -88,28 +91,93 @@ function parseArgs(raw, env = process.env) {
     };
 }
 
-/** One harness event as a short line the page can show (long text cut, tool inputs reduced to what they touch). */
+/** A step's input as a reader needs it: what it ran or touched, an edit's change, the plan; every string cut and
+ *  scrubbed of credentials, everything else left out. */
+function stepInput(input) {
+    const i = input && typeof input === 'object' ? input : {};
+    const str = (v, n) => (typeof v === 'string' ? clean(cutTo(v, n)) : undefined);
+    const out = {};
+    const put = (k, v) => { if (v !== undefined && v !== '') out[k] = v; };
+    put('command', str(i.command || i.cmd, 2000));
+    put('description', str(i.description, 300));
+    put('file_path', str(i.file_path || i.path || i.notebook_path, 300));
+    put('pattern', str(i.pattern, 300));
+    put('glob', str(i.glob, 200));
+    put('query', str(i.query, 300));
+    put('url', str(i.url, 500));
+    put('old_string', str(i.old_string, MAX_OUTPUT));
+    put('new_string', str(i.new_string, MAX_OUTPUT));
+    put('content', str(i.content, MAX_OUTPUT));
+    put('prompt', str(i.prompt, 1600));
+    put('subagent_type', str(i.subagent_type, 60));
+    if (Array.isArray(i.edits)) out.edits = i.edits.slice(0, 20).map((e) => ({ old_string: str(e && e.old_string, 2000) || '', new_string: str(e && e.new_string, 2000) || '' }));
+    if (Array.isArray(i.todos)) out.todos = i.todos.slice(0, 30).map((t) => ({ content: str(t && t.content, 200) || '', status: str(t && t.status, 20) || 'pending', activeForm: str(t && t.activeForm, 200) }));
+    return out;
+}
+// Every string a line carries goes through both scrubbers: the events one (provider keys, tokens, JWTs, private keys,
+// key=… pairs) and this file's (credentials in URLs, GitHub tokens): CLI agents' output reaches here unscrubbed.
+const clean = (s) => scrub(require('./events').scrub(s));
+const cutTo = (s, n) => { const t = String(s == null ? '' : s); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+const resultText = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => (x && typeof x.text === 'string' ? x.text : '')).join('\n') : c == null ? '' : String(c));
+
+/**
+ * One harness event as the lines a reader shows (job protocol 1.1, openvibe-shared/agent-session.js reads them):
+ * agent, text, tool (with its id and input), tool_progress, tool_result (with its output), handoff, note, usage, done.
+ * A line from a helper agent carries `parent`, the id of the Task step that started it. 1.0 readers keep working: the
+ * fields they read are where they were.
+ */
 function compact(e) {
-    const cut = (s) => { const t = String(s || ''); return t.length > MAX_TEXT ? `${t.slice(0, MAX_TEXT)}…` : t; };
+    const cut = (s) => cutTo(s, MAX_TEXT);
+    const parent = e.parent_tool_use_id ? { parent: String(e.parent_tool_use_id) } : {};
     if (e.type === 'system' && e.subtype === 'init') return { t: 'agent', agent: e.agent, model: e.model || null };
-    if (e.type === 'system' && e.subtype === 'handoff') return { t: 'handoff', from: e.from, reason: cut(e.reason) };
-    if (e.type === 'system' && (e.subtype === 'error' || e.subtype === 'warning')) return { t: 'note', text: cut(e.text) };
+    if (e.type === 'system' && e.subtype === 'handoff') return { t: 'handoff', from: e.from, ...(e.to ? { to: e.to } : {}), reason: cut(e.reason) };
+    if (e.type === 'system' && (e.subtype === 'error' || e.subtype === 'warning')) return { t: 'note', level: e.subtype, text: cut(e.text) };
+    if (e.type === 'system' && e.subtype === 'tool_progress') return { t: 'tool_progress', id: String(e.tool_use_id || ''), chunk: clean(cutTo(e.text, MAX_OUTPUT)) };
+    if (e.type === 'system' && e.subtype === 'usage' && e.usage) return { t: 'usage', input_tokens: e.usage.input_tokens || 0, output_tokens: e.usage.output_tokens || 0 };
     if (e.type === 'assistant') {
         const out = [];
         for (const c of (e.message && e.message.content) || []) {
-            if (c.type === 'text' && c.text) out.push({ t: 'text', text: cut(c.text) });
+            if (c.type === 'text' && c.text) out.push({ t: 'text', text: clean(cut(c.text)), ...parent });
             if (c.type === 'tool_use') {
                 const i = c.input || {};
                 const what = i.command || i.file_path || i.path || i.pattern || i.query || i.description || '';
-                out.push({ t: 'tool', name: String(c.name || ''), what: cut(String(what).split('\n')[0]).slice(0, 200) });
+                out.push({ t: 'tool', id: String(c.id || ''), name: String(c.name || ''), what: clean(cut(String(what).split('\n')[0]).slice(0, 200)), input: stepInput(i), ...parent });
             }
         }
         return out;
     }
+    if (e.type === 'user' && e.message && Array.isArray(e.message.content)) {
+        return e.message.content.filter((c) => c && c.type === 'tool_result')
+            .map((c) => ({ t: 'tool_result', id: String(c.tool_use_id || ''), ok: !c.is_error, output: clean(cutTo(resultText(c.content), MAX_OUTPUT)), ...parent }));
+    }
     if (e.type === 'result') {
-        return { t: 'done', ok: !e.is_error, text: cut(e.result), duration_ms: e.duration_ms || 0, cost_usd: e.total_cost_usd || 0 };
+        return { t: 'done', ok: !e.is_error, text: cut(e.result), duration_ms: e.duration_ms || 0, cost_usd: e.total_cost_usd || 0, turns: e.num_turns || 0 };
     }
     return null;
+}
+
+/**
+ * The session log a result keeps: every line, in order, up to MAX_LOG bytes. When it would not fit, outputs and
+ * progress are cut shorter first (progress is dropped where its step's result has the output), so the steps and what
+ * the agents said survive whole.
+ */
+function sessionLog(lines) {
+    const size = (l) => JSON.stringify(l).length + 1;
+    let list = lines.slice();
+    let total = list.reduce((n, l) => n + size(l), 0);
+    if (total <= MAX_LOG) return list;
+    const ended = new Set(list.filter((l) => l.t === 'tool_result').map((l) => l.id));
+    list = list.filter((l) => !(l.t === 'tool_progress' && ended.has(l.id)));
+    for (const n of [1500, 600, 200]) {
+        total = list.reduce((m, l) => m + size(l), 0);
+        if (total <= MAX_LOG) return list;
+        list = list.map((l) => (l.t === 'tool_result' || l.t === 'tool_progress') ? { ...l, [l.t === 'tool_result' ? 'output' : 'chunk']: cutTo(l.output || l.chunk, n) } : l.t === 'tool' && l.input && (l.input.content || l.input.old_string) ? { ...l, input: { ...l.input, content: l.input.content && cutTo(l.input.content, n), old_string: l.input.old_string && cutTo(l.input.old_string, n), new_string: l.input.new_string && cutTo(l.input.new_string, n) } } : l);
+    }
+    const kept = [];
+    total = 0;
+    for (const l of list) { total += size(l); if (total > MAX_LOG) break; kept.push(l); }
+    kept.push({ t: 'note', level: 'warning', text: 'The rest of this session was too long to keep.' });
+    return kept;
 }
 
 /** What changed: per-file counts and the patch (new files included), cut to fit the result channel. */
@@ -175,7 +243,8 @@ async function pushBranch(dir, job, { env, fetchImpl, base }) {
  */
 async function runJob({ input, harness, emit, writeResult, env = process.env, tmp = os.tmpdir(), fetchImpl = globalThis.fetch }) {
     const started = Date.now();
-    const say = (doc) => emit(JSON.stringify(doc));
+    const log = [];
+    const say = (doc) => { if (doc && doc.t && doc.t !== 'result_doc') log.push(doc); emit(JSON.stringify(doc)); };
     let job;
     try {
         job = parseArgs(input, env);
@@ -226,6 +295,8 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         result.duration_ms = Date.now() - started;
         fs.rmSync(dir, { recursive: true, force: true });
     }
+    result.lines = LINES;
+    result.log = sessionLog(log);
     writeResult(result);
     return result;
 }
@@ -242,4 +313,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { runJob, parseArgs, compact, resultWriter, scrub, githubRepo, pushTarget, JOB_PROTOCOL };
+module.exports = { runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, JOB_PROTOCOL };

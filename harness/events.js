@@ -10,6 +10,8 @@
  *                                    usage? } }                        what the agent said or called
  *   { type: 'user', message: { content: [ { type: 'tool_result', tool_use_id, content, is_error } ] } }   a tool's answer
  *   { type: 'system', subtype: 'usage' | 'warning' | 'error' | 'stderr' | 'handoff', ... }               along the way
+ *   { type: 'system', subtype: 'tool_progress', tool_use_id, text }     a step's output while it runs (the agents whose
+ *                                                                       steps the harness runs itself: the API loop)
  *   { type: 'result', subtype: 'success' | 'error', is_error, result, session_id, model, duration_ms, num_turns,
  *     total_cost_usd, usage: { input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens } }
  *                                                                       the end: exactly one per agent run
@@ -39,6 +41,7 @@ function scrub(s) {
 const init = (sessionId, agent, model) => ({ type: 'system', subtype: 'init', session_id: sessionId || null, agent, model: model || null });
 const text = (t, model, usage) => ({ type: 'assistant', message: { model: model || null, content: [{ type: 'text', text: scrub(t) }], ...(usage ? { usage } : {}) } });
 const toolUse = (id, name, input, model) => ({ type: 'assistant', message: { model: model || null, content: [{ type: 'tool_use', id: String(id), name, input: input || {} }] } });
+const toolProgress = (id, chunk) => ({ type: 'system', subtype: 'tool_progress', tool_use_id: String(id), text: clip(scrub(chunk), 4000) });
 const toolResult = (id, content, isError) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: String(id), content: clip(scrub(content), 4000), is_error: !!isError }] } });
 const usageEvent = (agent, usage) => ({ type: 'system', subtype: 'usage', agent, usage });
 const warning = (t) => ({ type: 'system', subtype: 'warning', text: clip(scrub(t), 500) });
@@ -85,4 +88,4 @@ function createTally() {
     return { add, get: () => t };
 }
 
-module.exports = { init, text, toolUse, toolResult, usageEvent, warning, error, stderr, usage, result, createTally, clip, scrub };
+module.exports = { init, text, toolUse, toolProgress, toolResult, usageEvent, warning, error, stderr, usage, result, createTally, clip, scrub };
