@@ -21,12 +21,14 @@ const { html, raw, esc } = require('./html');
 const NETWORK_URL = 'https://openvibe.network';
 const SITE_NAME = 'OpenVibe.Codes';
 const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public');
+// The product's own places: the main ones carry an icon (phones get them as the bottom tab bar), the rest fold into
+// the navbar's More (Shared 4.22). Search is the navbar's magnifier and What shipped is the footer's.
 const NAV = [
-    { label: 'Get started', href: '/start' },
-    { label: 'Run on your machine', href: '/run' },
-    { label: 'Agents', href: '/harnesses' },
-    { label: 'Improve OpenVibe', href: '/improve' },
-    { label: 'Community', href: '/policy' },
+    { label: 'Get started', href: '/start', icon: 'fa-play' },
+    { label: 'Run on your machine', href: '/run', icon: 'fa-microchip' },
+    { label: 'Agents', href: '/harnesses', icon: 'fa-robot' },
+    { label: 'Improve OpenVibe', href: '/improve', icon: 'fa-code', more: true },
+    { label: 'Community', href: '/policy', icon: 'fa-people-group', more: true },
 ];
 
 const hashes = new Map();
@@ -58,7 +60,8 @@ function renderPage(o) {
     const nav = {
         service: 'codes',
         apiBase: NETWORK_URL,
-        links: NAV.map((l) => ({ label: l.label, href: l.href, active: pathNow === l.href || pathNow.startsWith(`${l.href}/`) })),
+        links: NAV.map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: pathNow === l.href || pathNow.startsWith(`${l.href}/`) })),
+        appBar: [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Start', href: '/start', icon: 'fa-play' }, { label: 'Run', href: '/run', icon: 'fa-microchip' }, { label: 'Agents', href: '/harnesses', icon: 'fa-robot' }],   // phones: the bottom tab bar (Shared 4.20)
         history: { type: 'page', title: o.title || SITE_NAME },
         silentLogin: `${o.config.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
