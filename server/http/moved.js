@@ -17,8 +17,9 @@ const SERVICES_ORIGIN = 'https://openvibe.services';
 // The console's paths (and everything under them), and the platform policy pages that moved with it.
 const MOVED_PREFIXES = ['/docs', '/projects', '/releases', '/apps', '/oauth', '/tools', '/manifests', '/staff'];
 const MOVED_EXACT = ['/policy/rfc', '/policy/compatibility', '/policy/licensing', '/policy/transparency'];
-// The console's API: everything under /api/v1 but the agent catalog and the coding tasks (codes.task.*).
-const API_STAYS = /^\/api\/v1\/(harnesses|tasks)(\/|$)/;
+// The console's API: everything under /api/v1 but the agent catalog, the coding tasks (codes.task.*) and the Action
+// Center read (codes.actions.read).
+const API_STAYS = /^\/api\/v1\/(harnesses|tasks|actions)(\/|$)/;
 
 const under = (p, prefix) => p === prefix || p.startsWith(`${prefix}/`);
 

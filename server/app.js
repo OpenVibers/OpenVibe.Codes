@@ -29,6 +29,7 @@ const { createHarnesses } = require('./domain/harnesses');
 const { createPageRoutes } = require('./http/pages');
 const { createRunRoutes } = require('./http/run');
 const { createTasksApi } = require('./http/tasks-api');
+const { createActionsApi } = require('./http/actions-api');
 const { createRunClient } = require('./domain/run-client');
 const { createApi } = require('./http/api');
 const { createMovedRoutes } = require('./http/moved');
@@ -151,6 +152,7 @@ async function createApp(opts = {}) {
     ctx.run = opts.run || createRunClient({ config, fetchImpl: fetchImpl || globalThis.fetch });
     app.use('/api/v1', createApi(ctx));
     app.use('/api/v1', createTasksApi({ config, store, keys, run: ctx.run, harnesses, actorLimits: ctx.actorLimits, log }));
+    app.use('/api/v1', createActionsApi({ config, store, keys, run: ctx.run, actorLimits: ctx.actorLimits, log }));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
 
     // ── Pages ───────────────────────────────────────────────
