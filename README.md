@@ -72,7 +72,7 @@ openvibe-codes resume <run id> "now add a test"
 - The harness catalog and the routing policy over it (placement itself is `openvibe-sdk/placement`, the one implementation every service uses).
 - Its pages and the community documents in this repository.
 - The harness package (`harness/`, `bin/`): adapters, the event format, hand-offs and the local run store.
-- Nothing in its database yet: migration 0002 dropped the console's tables when the console moved; hosted runs will live here.
+- Its database holds the runs people start on the site or through the API (`run_tasks`), their streamed session lines (`codes_session_lines`), inbound Run events and the `codes.task.*` outbox. The console's tables were dropped by migration 0002 when it moved.
 
 ## Does not own
 

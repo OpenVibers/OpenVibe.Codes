@@ -59,7 +59,15 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
 
     r.post('/tasks', guard('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
         const b = req.body;
-        const check = validate('codes.task-start-request@1', b);
+        // Actor back-reference: the contract does not carry these yet, so they are stripped before validation and stored
+        // separately. When the contract is amended, pass them through instead.
+        const actorRef = {};
+        if (typeof b.actor_task_id === 'string') actorRef.task_id = b.actor_task_id;
+        if (typeof b.actor_step_id === 'string') actorRef.step_id = b.actor_step_id;
+        const bodyForValidate = { ...b };
+        delete bodyForValidate.actor_task_id;
+        delete bodyForValidate.actor_step_id;
+        const check = validate('codes.task-start-request@1', bodyForValidate);
         if (!check.valid) return problem(req, res, 422, 'codes.task_invalid', check.errors.map((e) => `${e.instancePath || 'body'} ${e.message}`).join('; ').slice(0, 500));
         if (b.agent && !harnesses.list().some((a) => a.id === b.agent)) return problem(req, res, 422, 'codes.agent_unknown', 'agent is one of GET /api/v1/harnesses, or absent for the router to pick');
         const p = req.principal;
@@ -83,7 +91,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         }
         let row;
         try {
-            row = await taskStore.start({ subject: p.subject, project, args, via: p.via, key });
+            row = await taskStore.start({ subject: p.subject, project, args, via: p.via, key, actorRef: Object.keys(actorRef).length ? actorRef : null });
         } catch (e) {
             // Two requests with one key at once: the unique index lets one in; the other answers with it.
             const seen = key && e && e.code === '23505' ? await byKey(p, key) : null;

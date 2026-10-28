@@ -27,7 +27,7 @@
     "The agent catalog (server/data/harness-offers.json, validated at boot as platform.harness-offer@1 / platform.agent-offer@1): /harnesses and GET /api/v1/harnesses",
     "Routing a task over the catalog with openvibe-sdk/placement: POST /api/v1/harnesses/route { task, requirements? } → { selected, reasons, candidates } (the same router the command line uses)",
     "Getting started (/start): install, the agents and what each needs, commands, permission levels, hand-offs, the event format, using it from code",
-    "Improve OpenVibe (/improve): every repository from the pinned contracts' service manifests, and the contributor path",
+    "Improve OpenVibe (/improve): a guided run from repository choice to a task on your machine, plus the contributor path",
     "The community documents (code of conduct, contributing, contributor ladder, moderation) rendered from this repository",
     "Permanent redirects for every former console address (301 for reads, 308 for writes) to openvibe.services",
     "robots.txt, sitemap.xml, llms.txt and llms-full.txt; per-actor and per-address limits; truthful readiness"
@@ -35,7 +35,6 @@
   "notYet": [
     "A hosted runner (tasks on OpenVibe.Run workers for people who do not run agents themselves) with budgets and metering",
     "OpenVibe.Actor using Codes for its coding work",
-    "Improve OpenVibe as a guided run on this site (repository → change → tests → review → pull request); today it is the harness plus the contributor path on GitHub",
     "The OpenVibe agent pool (~/openvibe/agents) running on this package instead of its own adapters",
     "The community documents are drafts pending the owner's review"
   ],
@@ -50,7 +49,8 @@
     "Improve OpenVibe",
     "community documents",
     "redirects for the moved developer console",
-    "run a coding task on your own machine from any browser (/run; openvibe-codes job through OpenVibe Run and the person's own OpenVibe Node)"
+    "run a coding task on your own machine from any browser (/run; openvibe-codes job through OpenVibe Run and the person's own OpenVibe Node)",
+    "user JSON API for signed-in people to list, start, read and cancel their own tasks"
   ],
   "updated": "2026-10-28"
 }
