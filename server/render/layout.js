@@ -70,7 +70,7 @@ function renderPage(o) {
     // bar below is only for visitors without JavaScript).
     // Your projects and apps live on the developer platform (OpenVibe.Services).
     if (signedIn) nav.menu = { before: [{ label: 'Your projects', href: 'https://openvibe.services/projects', icon: 'fa-folder' }] };
-    const footer = { service: 'codes', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' };
+    const footer = { service: 'codes', variant: 'auto', path: o.path, mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' };   // full on the front page only (Shared 4.19)
     const account = signedIn
         ? html`Signed in as <strong>${viewer.displayName || viewer.username || 'you'}</strong> · <a href="/auth/logout?next=${loginNext}">Sign out</a>`
         : html`<a href="/auth/login?next=${loginNext}">Sign in with OpenVibe</a>`;
