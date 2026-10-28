@@ -13,15 +13,18 @@
  * places it: on a machine the person added on openvibe.bot/machines, never anyone else's (contracts 0.161.0).
  */
 const express = require('express');
+const { serviceAuth, capabilities, http } = require('openvibe-contracts');
 const { asyncRouter } = require('./router');
 const { send } = require('../render/layout');
 const { html, raw, esc } = require('../render/html');
 
 const { parseArgs } = require('../../harness/job');
-const { createRunTasks, TERMINAL, STATE_LABEL, sessionLogOf } = require('../domain/run-tasks');
+const { createRunTasks, TERMINAL, STATE_LABEL } = require('../domain/run-tasks');
+const { createSessionLines } = require('../domain/session-lines');
 
 const DELEGABLE = new Set(['owner', 'admin']);
 const MACHINES_URL = 'https://openvibe.bot/machines';
+const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 /** A repository URL as a heading: the host small, then owner/name, which may break after a slash but never mid-word. */
 function repoName(url) {
@@ -30,7 +33,7 @@ function repoName(url) {
     return html`<small class="run-host">${host}/</small>${path.map((part, i) => html`${i ? raw('/<wbr>') : ''}${part}`)}`;
 }
 
-function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globalThis.fetch, log = console }) {
+function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globalThis.fetch, log = console, tasks = null, sessions = null, keys = null }) {
     const r = asyncRouter();
     const db = store.db;
     const form = express.urlencoded({ extended: false, limit: '32kb' });
@@ -58,9 +61,10 @@ function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globa
         const row = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [id]);
         return row && row.subject === req.viewer.subject ? row : null;
     };
-    // A task not yet ended asks Run where its job is; an ended job's result is kept on the row (domain/run-tasks).
-    const tasks = createRunTasks({ store, run, config, log });
-    const { who, refresh } = tasks;
+    // A task reads Run only as the 10-minute fallback; its state now arrives from run.job.* events.
+    const taskStore = tasks || createRunTasks({ store, run, config, log });
+    const sessionStore = sessions || createSessionLines({ store, config, log });
+    const { who, refresh } = taskStore;
 
     function formHtml({ projects, values = {}, error = null }) {
         const agents = harnesses.list();
@@ -154,7 +158,7 @@ ${tasksHtml(recent)}`;
         }
         const projects = await projectsOf(req, res);
         if (!projects.some((p) => p.id === values.project)) return runPage(req, res, { values, error: 'Choose one of your projects.', status: 422 });
-        const row = await tasks.start({ subject: req.viewer.subject, project: values.project, args });
+        const row = await taskStore.start({ subject: req.viewer.subject, project: values.project, args });
         return res.redirect(303, `/run/tasks/${row.id}`);
     });
 
@@ -185,18 +189,43 @@ ${typeof d.duration_ms === 'number' ? html`<p class="muted">${Math.round(d.durat
         row = await refresh(row);
         const live = !TERMINAL.has(row.state);
         // The agents' session (openvibe-shared/agent-session.js, js/run.js mounts it): live from the job's stream, and
-        // after the end from the log the result keeps (a machine on an older Codes keeps none: the summary stands).
-        const lines = live ? null : sessionLogOf(row);
+        // after the end from codes_session_lines; a task from before this change falls back to the result's old log.
+        const lines = live ? null : await sessionStore.linesForRow(row);
         const title = String(row.prompt || '').split('\n')[0].slice(0, 90);
-        const session = lines ? html`<section class="run-session" data-session data-title="${title}" data-state="${row.state}"><h2>The session</h2><div data-session-view></div><script type="application/json" data-session-log>${raw(JSON.stringify(lines).replace(/</g, '\\u003c'))}</script></section>` : '';
+        const session = lines && lines.length ? html`<section class="run-session" data-session data-title="${title}" data-state="${row.state}"><h2>The session</h2><div data-session-view></div><script type="application/json" data-session-log>${raw(JSON.stringify(lines).replace(/</g, '\\u003c'))}</script></section>` : '';
         const body = html`<p class="crumbs"><a href="/run">Run on your machine</a></p>
 <h1 class="run-repo">${repoName(row.repo)}${row.ref ? html` <small>${row.ref}</small>` : ''}</h1>
 <p><span class="run-pill run-pill-${row.state}" data-state>${STATE_LABEL[row.state] || row.state}</span>${row.agent ? html` <span class="run-pill">${row.agent}</span>` : ''}</p>
 <pre tabindex="0" class="run-prompt">${row.prompt}</pre>
 ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events" data-title="${title}" aria-live="polite"><h2>Live</h2><ol class="run-log" data-log></ol></section>
-<form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : html`${session}${resultHtml(row, { session: !!lines })}`}`;
+<form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : html`${session}${resultHtml(row, { session: !!(lines && lines.length) })}`}`;
         return page(req, res, { title: 'Task', body, sharedScripts: ['agent-session.js'] });
     });
+
+    /**
+     * The service half of session.json: a Network service token holding codes.task.read, acting for the person named
+     * in X-OV-Subject. Unlike the task API's writes, a read here is not limited to the service that started the task:
+     * the capability and the person are the grant.
+     */
+    async function serviceOwn(req, id) {
+        if (!keys) return { status: 503, code: 'identity.unavailable', detail: 'the Network signing key is not available' };
+        const header = String(req.headers.authorization || '');
+        if (!header.startsWith('Bearer ')) return { status: 401, code: 'token.required', detail: 'codes.task.read needs a Network service token or a signed-in owner' };
+        if (!keys.loaded()) await keys.ensure();
+        const publicKey = keys.get();
+        if (!publicKey) return { status: 503, code: 'identity.unavailable', detail: 'the Network signing key is not loaded yet' };
+        const v = serviceAuth.verifyServiceToken(header.slice(7).trim(), { publicKey, issuer: config.networkIssuer, audience: config.serviceAudience });
+        if (!v.ok) return { status: 401, code: v.code || 'token.invalid', detail: v.reason || 'the service token is invalid' };
+        const sub = String(v.claims.sub || '');
+        if (!sub.startsWith('svc:')) return { status: 403, code: 'capability.denied', detail: 'codes.task.read is for first-party services' };
+        const decision = capabilities.check(v.claims, 'codes.task.read');
+        if (!decision.allowed) return { status: 403, code: decision.code || 'capability.denied', detail: decision.reason || 'codes.task.read not granted' };
+        const subject = String(req.get('X-OV-Subject') || '').trim();
+        if (!USER.test(subject)) return { status: 422, code: 'subject.required', detail: 'name the person in X-OV-Subject (usr_…)' };
+        if (!/^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(id))) return { status: 404, code: 'codes.task_not_found', detail: 'no such task for this person' };
+        const row = await db.maybe('SELECT * FROM run_tasks WHERE id = $1 AND subject = $2', [id, subject]);
+        return row ? { row } : { status: 404, code: 'codes.task_not_found', detail: 'no such task for this person' };
+    }
 
     r.get('/run/tasks/:id/events', async (req, res) => {
         if (!signedIn(req)) return res.status(401).end();
@@ -212,11 +241,44 @@ ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events
         } catch { return res.status(503).end(); }
         if (!resp.ok || !resp.body) return res.status(resp.status === 404 ? 404 : 503).end();
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
+        // The bytes go to the browser unchanged, and the same frames become codes_session_lines as they stream.
+        const recorder = sessionStore.recorder(row.id);
+        const decoder = new TextDecoder();
         try {
-            for await (const chunk of resp.body) { if (!res.write(chunk)) await new Promise((ok) => res.once('drain', ok)); }
+            for await (const chunk of resp.body) {
+                if (!res.write(chunk)) await new Promise((ok) => res.once('drain', ok));
+                try { await recorder.push(decoder.decode(chunk, { stream: true })); } catch (e) { log.warn(`[Codes] session ${row.id}: ${e.message}`); }
+            }
         } catch { /* the browser left, or Run closed the stream */ }
+        try { await recorder.push(decoder.decode()); await recorder.flush(); } catch (e) { log.warn(`[Codes] session ${row.id}: ${e.message}`); }
+        // The stream's end is the machine's result arriving: fetch it once, finalize the row and back-fill the log.
+        if (recorder.ended()) {
+            try {
+                const fresh = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [row.id]);
+                if (fresh) await taskStore.refresh(fresh, { force: true });
+            } catch (e) { log.warn(`[Codes] task ${row.id}: ${e.message}`); }
+        }
         res.end();
         return undefined;
+    });
+
+    /** Session replay: the same page's lines, after a seq, for the owner or a service with codes.task.read. */
+    r.get('/run/tasks/:id/session.json', async (req, res) => {
+        let row = null;
+        if (signedIn(req)) {
+            row = await own(req, req.params.id);
+        } else {
+            const out = await serviceOwn(req, req.params.id);
+            if (!out.row) return http.sendProblem(res, out.status, out.code, { detail: out.detail, ctx: req.ov });
+            row = out.row;
+        }
+        if (!row) return http.sendProblem(res, 404, 'codes.task_not_found', { detail: 'no such task of yours', ctx: req.ov });
+        const raw = String(req.query.after == null ? '0' : req.query.after);
+        const after = /^\d+$/.test(raw) ? Number(raw) : NaN;
+        if (!Number.isSafeInteger(after)) return http.sendProblem(res, 422, 'codes.after_invalid', { detail: 'after is a line sequence number (0 or more)', ctx: req.ov });
+        const replay = await sessionStore.replay(row, { after, limit: 500 });
+        res.set('Cache-Control', 'no-store');
+        return res.json(replay);
     });
 
     r.post('/run/tasks/:id/cancel', form, async (req, res) => {
@@ -226,6 +288,10 @@ ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events
         if (!row) return res.status(404).type('text/plain').send('No such task of yours.\n');
         if (row.job_id && !TERMINAL.has(row.state)) {
             try { await run.cancel(row.job_id, who(row)); } catch (e) { log.warn(`[Codes] cancel ${row.id}: ${e.message}`); }
+            try {
+                const fresh = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [row.id]);
+                if (fresh) await taskStore.refresh(fresh, { force: true });
+            } catch (e) { log.warn(`[Codes] cancel ${row.id}: ${e.message}`); }
         }
         return res.redirect(303, `/run/tasks/${row.id}`);
     });

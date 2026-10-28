@@ -85,6 +85,8 @@ const { boot, check, done } = require('./helpers/boot');
         assert.deepStrictEqual(stream[2], { subject: ada.subject, project });
         state = 'succeeded';
         result = { protocol: '1.0.0', lines: '1.1', log: [{ t: 'agent', agent: 'claude-code' }, { t: 'text', text: 'I fix <b>it</b></script>' }, { t: 'tool', id: 'e1', name: 'Edit', input: { file_path: 'README.md', old_string: 'teh', new_string: 'the' } }, { t: 'tool_result', id: 'e1', ok: true, output: 'ok' }, { t: 'mystery', x: 1 }, { t: 'done', ok: true, text: 'Fixed', duration_ms: 900 }], ok: true, agents: ['claude-code'], summary: 'Fixed <the> typo', files: [{ path: 'README.md', added: 1, removed: 1 }], patch: '@@ -1 +1 @@\n-teh\n+the\n', patch_truncated: false, push: { pushed: true, branch: 'openvibe-codes/x', branch_url: 'https://github.com/OpenVibers/OpenVibe.Codes/tree/openvibe-codes%2Fx', pull_request: 'https://github.com/OpenVibers/OpenVibe.Codes/pull/9' }, duration_ms: 42000 };
+        // The page view is not a poll: age the row past the 10-minute fallback so this read checks Run once.
+        await t.ctx.store.db.exec('UPDATE run_tasks SET updated_at = updated_at - $2 WHERE id = $1', [taskId, 11 * 60_000]);
         const done_ = await t.get(`/run/tasks/${taskId}`, { as: ada });
         // With the session on the page, its closing card says how it ended and what the agents said: the page does not repeat it.
         assert.ok(!done_.text.includes('The agents finished the task') && !done_.text.includes('What the agent said') && done_.text.includes('README.md'));
@@ -93,9 +95,9 @@ const { boot, check, done } = require('./helpers/boot');
         // the page's script early.
         assert.ok(done_.text.includes('data-session') && /<script src="[^"]*agent-session\.js[^"]*" defer>/.test(done_.text), 'the session and the component');
         const kept = JSON.parse(/<script type="application\/json" data-session-log>([\s\S]*?)<\/script>/.exec(done_.text)[1]);
-        assert.deepStrictEqual(kept.map((l) => l.t), ['agent', 'text', 'tool', 'tool_result', 'done'], 'lines of an unknown kind are left out');
+        assert.deepStrictEqual(kept.map((l) => l.t), ['step', 'agent', 'text', 'tool', 'tool_result', 'done'], 'the streamed line first, then the result log’s known lines');
         assert.ok(!/<\/script>I|<b>it/.test(/data-session-log>([\s\S]*?)<\/script>/.exec(done_.text)[1]), 'no markup inside the data');
-        assert.strictEqual(kept[1].text, 'I fix <b>it</b></script>', 'and the text reads back as it was');
+        assert.strictEqual(kept[2].text, 'I fix <b>it</b></script>', 'and the text reads back as it was');
         const api = await t.get(`/api/v1/tasks/${taskId}`, { as: ada });
         if (api.status === 200) assert.ok(!('log' in ((api.json && api.json.result) || {})), 'the task API passes codes.task@1\'s fields only');
         const row = await t.ctx.store.db.one('SELECT state, result FROM run_tasks WHERE id = $1', [taskId]);

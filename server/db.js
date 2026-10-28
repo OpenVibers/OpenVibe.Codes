@@ -3,9 +3,10 @@
 /**
  * OpenVibe.Codes' own PostgreSQL database (ADR-035, roadmap WS-X2): the schema is migrations/NNNN_*.sql, applied at boot.
  *
- * Codes holds no table today: the developer console's records (manifests, releases, trust tiers, playground logs)
- * moved to OpenVibe.Services on 2026-10-08 and migration 0002 dropped them here. The harness's runs, sessions and
- * hand-offs will live here when they arrive; nothing written here will ever contain a secret, token or credential.
+ * Codes holds its own tables (run_tasks, account_data_events, telemetry_samples, codes_session_lines,
+ * codes_events_inbox and codes_outbox): the developer console's records (manifests, releases, trust tiers, playground
+ * logs) moved to OpenVibe.Services on 2026-10-08 and migration 0002 dropped them here. Nothing written here will ever
+ * contain a secret, token or credential.
  */
 const fs = require('fs');
 const path = require('path');

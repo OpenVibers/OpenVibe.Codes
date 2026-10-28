@@ -25,6 +25,8 @@ function load(env = process.env) {
         nodeEnv,
         isProduction,
         baseUrl,
+        // Keep every background loop off in a drill (CODES_DRILL=1), the network's convention.
+        drill: env.CODES_DRILL === '1' || env.CODES_DRILL === 'true',
         trustProxy: env.TRUST_PROXY != null ? Number(env.TRUST_PROXY) : 2,
         // Per-actor limits (server/http/actor-limits.js, roadmap WS-R task 4): the reads one caller (an
         // app, a person, else an address) may make per minute and per hour. Writes set tighter numbers there.
@@ -61,10 +63,20 @@ function load(env = process.env) {
             sessionAudience: env.OV_SESSION_AUDIENCE || 'openvibe.network',
         },
         cookies: { secure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : isProduction },
-        // OpenVibe.Events (ADR-033): account export and deletion arrive at POST /internal/events, signed with one of these.
+        // OpenVibe.Events (ADR-033): account export and deletion arrive at POST /internal/events, signed with one of
+        // these; run.job.* subscriptions are created at boot. The outbox relay publishes codes.task.* with the
+        // service's events.event.publish token.
         events: {
-            url: trim(env.EVENTS_URL || ''),
+            url: trim(env.CODES_EVENTS_URL || env.EVENTS_URL || ''),
+            endpoint: env.CODES_EVENTS_ENDPOINT || '',
             secrets: String(env.CODES_EVENTS_SECRET || '').split(',').map((s) => s.trim()).filter(Boolean),
+            intervalMs: Math.max(500, int(env.CODES_EVENTS_INTERVAL_MS, 5000)),
+            scope: env.CODES_EVENTS_SCOPE || 'events.event.publish',
+        },
+        // Session lines in PostgreSQL: no total cap; finished tasks keep theirs for this many days (default 90).
+        sessions: {
+            retentionDays: Math.max(1, int(env.CODES_SESSION_RETENTION_DAYS, 90)),
+            retentionIntervalMs: Math.max(60_000, int(env.CODES_SESSION_RETENTION_INTERVAL_MS, 86_400_000)),
         },
         // OpenVibe.Run (plan T16): a coding task on the person's own machine is a Run job Codes starts for them.
         run: { url: trim(env.CODES_RUN_URL || 'http://127.0.0.1:4920') },

@@ -31,6 +31,10 @@ const { createRunRoutes } = require('./http/run');
 const { createTasksApi } = require('./http/tasks-api');
 const { createActionsApi } = require('./http/actions-api');
 const { createRunClient } = require('./domain/run-client');
+const { createRunTasks } = require('./domain/run-tasks');
+const { createSessionLines } = require('./domain/session-lines');
+const { createOutbox, createPublisher } = require('./events/outbox');
+const { createEventsConsumer } = require('./events-consumer');
 const { createApi } = require('./http/api');
 const { createMovedRoutes } = require('./http/moved');
 const { createCodesReadiness } = require('./observability');
@@ -56,7 +60,12 @@ async function createApp(opts = {}) {
     const sso = createSso({ config, keys, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log });
     // The harness catalog (server/data/harness-offers.json), read once: a bad seed row fails boot.
     const harnesses = createHarnesses();
-    const ctx = { config, store, keys, sso, harnesses, log };
+    // Sessions, the run.job.* consumer and the codes.task.* outbox share one store and one clock.
+    const sessions = createSessionLines({ store, config, log });
+    const outbox = createOutbox({ store, log });
+    const run = opts.run || createRunClient({ config, fetchImpl: fetchImpl || globalThis.fetch });
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox });
+    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks };
 
     const app = express();
     app.disable('x-powered-by');
@@ -103,15 +112,21 @@ async function createApp(opts = {}) {
     app.use(cookieParser());
 
     // ── OpenVibe.Events → Codes (loopback only: nginx answers 404 for /internal/) ──
-    // network.account.export_requested and network.account.deleted (ADR-033) for the coding tasks people started here.
-    // The consumer reads the raw body itself (the v2 signature covers it) and refuses a request that came through a proxy.
+    // run.job.* finalizes the coding tasks people started here; network.account.export_requested and
+    // network.account.deleted (ADR-033) go to openvibe-sdk/account-data. The consumer reads the raw body itself (the
+    // v2 signature covers it) and refuses a request that came through a proxy.
     {
         const { createNetworkSender } = require('openvibe-sdk/account-data');
         const accountData = require('./account-data').create({ db: store.db, log });
         const accountSend = opts.accountSend || (config.oauth.clientSecret
             ? createNetworkSender({ networkInternalUrl: config.networkInternalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret, fetch: fetchImpl || globalThis.fetch })
             : null);
-        app.post('/internal/events', accountData.consumer({ secrets: config.events.secrets, send: accountSend, log }));
+        const consumer = createEventsConsumer({ config, store, tasks, run, accountData, accountSend, log });
+        ctx.accountData = accountData;
+        ctx.eventsConsumer = consumer;
+        ctx.publisher = createPublisher({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
+        ctx.sessionRetention = sessions.retention;
+        app.use('/internal/events', consumer.router);
     }
 
     // ── Machine endpoints ───────────────────────────────────
@@ -149,16 +164,15 @@ async function createApp(opts = {}) {
     // ── API ─────────────────────────────────────────────────
     // Run on your machine (plan T16): coding tasks on the person's own machine, through OpenVibe Run, from the /run
     // pages below or, for a first-party service acting for the person, from /api/v1/tasks (codes.task.*).
-    ctx.run = opts.run || createRunClient({ config, fetchImpl: fetchImpl || globalThis.fetch });
     app.use('/api/v1', createApi(ctx));
-    app.use('/api/v1', createTasksApi({ config, store, keys, run: ctx.run, harnesses, actorLimits: ctx.actorLimits, log }));
-    app.use('/api/v1', createActionsApi({ config, store, keys, run: ctx.run, actorLimits: ctx.actorLimits, log }));
+    app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, actorLimits: ctx.actorLimits, log }));
+    app.use('/api/v1', createActionsApi({ config, store, keys, run, tasks, actorLimits: ctx.actorLimits, log }));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
 
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.CODES_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));   // per address; tests raise it
     app.use(createPageRoutes(ctx));
-    app.use(createRunRoutes({ config, store, sso, harnesses, run: ctx.run, fetchImpl: fetchImpl || globalThis.fetch, log }));
+    app.use(createRunRoutes({ config, store, sso, harnesses, run, tasks, sessions, keys, fetchImpl: fetchImpl || globalThis.fetch, log }));
     app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try <a href="/harnesses">the agents</a>, <a href="/improve">Improve OpenVibe</a>, or the developer platform at <a href="https://openvibe.services">openvibe.services</a>.</p>` }));
 
     // eslint-disable-next-line no-unused-vars

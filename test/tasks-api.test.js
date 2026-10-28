@@ -88,6 +88,8 @@ const { boot, check, done } = require('./helpers/boot');
                 patch: '+line\n', cost_usd: 0.0011, duration_ms: 4200, push: { pushed: false, reason: 'no token', smuggled: '<script>' },
                 branch_url: 'javascript:alert(1)',
             };
+            // A read is not a poll: age the row past the 10-minute fallback so this one checks Run.
+            await db.exec('UPDATE run_tasks SET updated_at = updated_at - $2 WHERE id = $1', [task.id, 11 * 60_000]);
             const r = await call('GET', `/tasks/${task.id}`);
             assert.strictEqual(r.status, 200, JSON.stringify(r.json));
             const v = validate('codes.task@1', r.json);

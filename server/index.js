@@ -7,17 +7,24 @@
 const { createApp } = require('./app');
 const { gracefulStop, telemetry } = require('openvibe-sdk/service');
 const { createPgTelemetrySink, startTelemetryRetention } = require('openvibe-sdk/telemetry');
-const { startSubscriptions } = require('openvibe-sdk/account-data');
+const { startSubscriptions } = require('./events-consumer');
 
 /**
  * The process stop (openvibe-sdk/service, docs/service.md's 5 s family): the HTTP drain runs
- * (defaults 4000/5000), then the JWKS refresher stops and the store closes; past the deadline the process
- * exits 0, as the hand-rolled 5 s timer did. Exported so a test can inject `exit` and `signals: false`.
+ * (defaults 4000/5000), then the background loops, the JWKS refresher and the store close; past the deadline the
+ * process exits 0, as the hand-rolled 5 s timer did. Exported so a test can inject `exit` and `signals: false`.
  */
 function createLifecycle({ server, ctx, exit, signals }) {
     return gracefulStop({
         name: 'Codes', server, deadlineExitCode: 0, exit, signals,
-        close: [() => ctx.keys.client.stop(), async () => { if (ctx.telemetryRetention) await ctx.telemetryRetention.stop(); await telemetry.stop(); }, () => ctx.store.close()],
+        close: [
+            () => { if (ctx.subscriptions) ctx.subscriptions.stop(); },
+            () => { if (ctx.publisher) return ctx.publisher.stop(); return undefined; },
+            () => { if (ctx.sessionRetention) ctx.sessionRetention.stop(); },
+            () => ctx.keys.client.stop(),
+            async () => { if (ctx.telemetryRetention) await ctx.telemetryRetention.stop(); await telemetry.stop(); },
+            () => ctx.store.close(),
+        ],
     });
 }
 
@@ -37,12 +44,14 @@ async function start() {
     // Keep the JWKS cache fresh in the background (openvibe-sdk/auth): one client per URL, the last
     // good keys through outages, exponential backoff, unknown-kid floods throttled, an unref'd timer.
     ctx.keys.client.start();
-    // The two account subscriptions at OpenVibe.Events (ADR-033), created when missing; off without EVENTS_URL,
-    // CODES_EVENTS_SECRET or the client secret.
-    startSubscriptions({
-        eventsUrl: config.events.url, endpoint: `http://127.0.0.1:${config.port}/internal/events`, secret: config.events.secrets[0],
-        networkInternalUrl: config.networkInternalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+    // The run.job.* and account subscriptions at OpenVibe.Events, created when missing; off without EVENTS_URL,
+    // CODES_EVENTS_SECRET or the client secret (and under CODES_DRILL).
+    ctx.subscriptions = startSubscriptions({
+        config, port: config.port, secret: config.events.secrets[0] || '',
     });
+    // codes.task.* events: the outbox relay and the session-retention loop (both off under CODES_DRILL).
+    ctx.publisher.start();
+    ctx.sessionRetention.start();
 
     createLifecycle({ server, ctx });
     return { server, ctx };
