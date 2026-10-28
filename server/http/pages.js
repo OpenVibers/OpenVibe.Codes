@@ -13,6 +13,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const express = require('express');
 const contracts = require('openvibe-contracts');
 const ovServe = require('openvibe-shared/serve');
 const frame = require('openvibe-shared/frame');
@@ -24,6 +25,7 @@ const { html, raw, table, notice } = require('../render/html');
 const { send } = require('../render/layout');
 const { markdown } = require('../render/markdown');
 const placement = require('../domain/harness-placement');
+const { parseArgs } = require('../../harness/job');
 const home = require('./home');
 const seo = require('openvibe-shared/seo');
 
@@ -73,7 +75,7 @@ const FLAG_LABELS = { host_access: 'runs on your machine', mcp: 'MCP tools', lon
 const flagsOf = (c) => Object.keys(FLAG_LABELS).filter((k) => c && c[k]).map((k) => FLAG_LABELS[k]);
 
 function createPageRoutes(ctx) {
-    const { config, harnesses } = ctx;
+    const { config, harnesses, sso, store, run, log = console } = ctx;
     const r = asyncRouter();
     const PUBLIC_CACHE = cache.htmlHeaders({ maxAge: 300 });
     const governance = loadGovernance();
@@ -129,12 +131,12 @@ ${raw(home.gitSection((ctx.git || gitReader).peek()))}
 <p><a class="sc-btn sc-primary" href="/improve">Start contributing</a> <a class="sc-btn" href="/policy/contributing">Read the guide</a></p></section>
 <section class="sc-sec" aria-labelledby="h-status"><h2 id="h-status">What works today</h2>
 ${table(['Piece', 'State'], [
-                [html`<a href="/start">The harness on your machine</a> (<code>openvibe-codes</code>)`, `Live, ${VERSION}: runs a task on any of the seven agents with your CLIs and keys, streams one event format, keeps every run to show or resume.`],
+                [html`<a href="/start">The harness on your machine</a> (<code>openvibe-codes</code>)`, `Live, ${VERSION}: runs a task on any of the eight agents with your CLIs and keys, streams one event format, keeps every run to show or resume.`],
                 ['Hand-offs between agents', 'Live: a failed, rate-limited or silent agent hands the task to the next one with a note on what was done.'],
                 [html`<a href="/run">Run on your machine</a>: start a task in any browser, your phone included; your own computer runs it`, 'Live: add your machine on openvibe.bot/machines (one command), then watch the task live here and get the patch, a branch or a pull request. It runs only on your own machines, in the Node\'s job sandbox.'],
                 [html`<a href="/harnesses">The agent catalog</a>`, 'Live: every harness and model with its capabilities, prices and limits.'],
                 [html`<code>GET /api/v1/harnesses</code>, <code>POST /api/v1/harnesses/route</code>`, 'Live: public, no key needed; per-address and per-caller limits.'],
-                [html`<a href="/improve">Improve OpenVibe</a>: a repository, a change on a branch with its test, a pull request that CI checks and a maintainer reviews`, 'Live: by hand, or with the harness doing the change on your machine.'],
+                [html`<a href="/improve">Improve OpenVibe</a>: a repository, a change on a branch with its test, a pull request that CI checks and a maintainer reviews`, 'Live: pick a repository, describe the change, and start a guided run on your machine.'],
                 [html`<a href="${config.git.publicUrl}/">OpenVibe Git</a>: OpenVibe's own code forge`, 'Live: every public OpenVibe repository, mirrored from GitHub hourly, with OpenVibe sign-in and HTTPS cloning. GitHub stays canonical until a repository moves here.'],
             ])}</section>
 ${raw(home.faq())}
@@ -264,29 +266,160 @@ ${offers.map((o) => html`<h3>${o.name} <code>${o.id}</code></h3>${o.agents.lengt
     });
 
     // ── Improve OpenVibe ─────────────────────────────────────
+    const knownRepo = (owner, name) => {
+        const full = `${owner}/${name}`;
+        return contracts.services.manifests.find((m) => m && m.repository === `OpenVibers/${name}` && m.repository === `OpenVibers/${name}` ? full === m.repository : false) || null;
+    };
+    const repoMeta = () => contracts.services.manifests
+        .filter((m) => m && typeof m.repository === 'string' && /^OpenVibers\/[A-Za-z0-9._-]+$/.test(m.repository) && m.exposure && ['live', 'library'].includes(m.exposure.state));
+    const repoGroups = () => {
+        const rows = repoMeta();
+        const order = (m) => (m.site && m.site.position != null ? m.site.position : 50);
+        const running = rows.filter((m) => m.exposure.state === 'live').sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));
+        const libraries = rows.filter((m) => m.exposure.state === 'library').sort((a, b) => a.name.localeCompare(b.name));
+        return { running, libraries };
+    };
+    const signedIn = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
+    const sameOrigin = (req) => {
+        const origin = req.get('origin');
+        if (!origin) return true;
+        try { return new URL(origin).origin === new URL(config.baseUrl).origin; } catch { return false; }
+    };
+    const projectsOf = async (req, res) => {
+        const list = await sso.asViewer(req, res, async (token) => {
+            const out = await fetch(`${config.networkInternalUrl}/api/v1/projects`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+            if (out.status === 401) { const e = new Error('expired'); e.status = 401; throw e; }
+            if (!out.ok) throw new Error(`Network answered ${out.status}`);
+            return (await out.json()).projects || [];
+        });
+        const delegable = new Set(['owner', 'admin']);
+        return list.filter((p) => delegable.has(p.role) && !p.archived_at).map((p) => ({ id: p.id, name: p.name }));
+    };
+    const ensureProject = async (req, res) => {
+        const projects = await projectsOf(req, res);
+        if (projects.length) return projects[0].id;
+        const created = await sso.asViewer(req, res, async (token) => {
+            const out = await fetch(`${config.networkInternalUrl}/api/v1/projects`, {
+                method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({ name: 'My code' }), signal: AbortSignal.timeout(8000),
+            });
+            if (out.status === 401) { const e = new Error('expired'); e.status = 401; throw e; }
+            if (!out.ok) throw new Error(`Network answered ${out.status}`);
+            return out.json();
+        });
+        return created.id;
+    };
+    const repoForgejoUrl = (owner, name) => `${config.git.publicUrl}/${owner}/${name}`;
+    const repoCloneUrl = (owner, name) => `${config.git.publicUrl}/${owner}/${name}.git`;
+
     r.get('/improve', (req, res) => {
-        const { running, libraries } = repositories();
-        const repoCards = (list) => html`<ul class="cards">${list.map((m) => html`<li><a href="${GITHUB}/${m.repository.split('/')[1]}"><strong>${m.repository.split('/')[1]}</strong></a><span>${(m.site && (m.site.tagline || m.site.what)) || m.name}</span></li>`)}</ul>`;
+        const { running, libraries } = repoGroups();
+        const repoCards = (list) => html`<ul class="cards">${list.map((m) => html`<li><a href="/improve/${m.repository}"><strong>${m.repository.split('/')[1]}</strong></a><span>${(m.site && (m.site.tagline || m.site.what)) || m.name}</span></li>`)}</ul>`;
         page(req, res, {
             index: true, cache: PUBLIC_CACHE,
             title: 'Improve OpenVibe',
-            description: 'OpenVibe is open source: every service and library is on GitHub. How to pick a repository, make a change, run its tests and open a pull request, and the community rules that apply.',
+            description: 'OpenVibe is open source: every service and library is on GitHub. Pick a repository, describe the change, and send a pull request; the harness makes the change on your machine.',
             crumbs: [{ label: 'Improve OpenVibe' }],
             body: html`<h1>Improve OpenVibe</h1>
-<p>Every OpenVibe service and library is open source under <a href="${GITHUB}">OpenVibers</a> on GitHub, and changes arrive as pull requests that the owner approves. Every change takes the same path: repository → change → tests → independent review → pull request, never straight to <code>main</code>. Make it by hand, or let <a href="/start">the harness</a> make it on your machine with the agent you choose; you open the pull request.</p>
+<p>Every OpenVibe service and library is open source under <a href="${GITHUB}">OpenVibers</a>, and changes arrive as pull requests that the owner approves. Every change takes the same path: repository → change → tests → independent review → pull request, never straight to <code>main</code>. Pick a repository, describe the change, and start a run on your own machine.</p>
 <ol class="steps">
-<li><strong>Pick a repository</strong> from the lists below, or find the page you want to change and follow its "source" link.</li>
-<li><strong>Read its README</strong>: what it owns, how to run it, and its tests (<code>npm test</code> runs them on temporary databases; nothing needs a live service).</li>
-<li><strong>Make the change</strong> on a branch, with a test that would have failed before it.</li>
-<li><strong>Open a pull request</strong> that says what changes for people and why. CI runs the tests, an audit and a secret scan.</li>
-<li><strong>Review</strong>: a maintainer reviews it; the owner approves what ships. See the <a href="/policy/contributor-ladder">contributor ladder</a> for how reviewers and maintainers are chosen.</li>
+<li><strong>Pick a repository</strong> from the lists below.</li>
+<li><strong>Describe the change</strong> in plain language; the harness runs the tests your way.</li>
+<li><strong>Review the result</strong> on the task page, then open a pull request from the branch it pushed.</li>
+<li><strong>A maintainer reviews</strong>; the owner approves what ships. See the <a href="/policy/contributor-ladder">contributor ladder</a>.</li>
 </ol>
-<p>Before you start: the <a href="/policy/contributing">contributing guide</a> and the <a href="/policy/code-of-conduct">code of conduct</a>. Building your own app on OpenVibe instead? That is <a href="${SERVICES_ORIGIN}">OpenVibe.Services</a>.</p>
+<p>Before you start: the <a href="/policy/contributing">contributing guide</a> and the <a href="/policy/code-of-conduct">code of conduct</a>. Building your own app? That is <a href="${SERVICES_ORIGIN}">OpenVibe.Services</a>.</p>
 <h2>Services that run</h2>
 ${repoCards(running)}
 <h2>Shared libraries</h2>
 ${repoCards(libraries)}`,
         });
+    });
+
+    r.get('/improve/:owner/:name', async (req, res) => {
+        const { owner, name } = req.params;
+        const meta = repoMeta().find((m) => m.repository === `${owner}/${name}`);
+        if (!meta) return page(req, res, { title: 'Not found', body: html`<h1>Not found</h1><p>No such OpenVibe repository. <a href="/improve">All repositories</a></p>` }, 404);
+        let forgejoInfo = null;
+        let forgejoError = null;
+        try { forgejoInfo = await ctx.forgejo.getRepo(owner, name); } catch (e) { forgejoError = e.code === 'forgejo.unconfigured' ? null : e.message; }
+        const agents = harnesses.list();
+        const opt = (v, label, sel) => html`<option value="${v}"${sel ? raw(' selected') : ''}>${label}</option>`;
+        const signed = signedIn(req);
+        const form = signed ? html`<form class="run-card run-form" method="post" action="/improve/start">
+<input type="hidden" name="repo" value="${repoForgejoUrl(owner, name)}">
+<input type="hidden" name="ref" value="${(forgejoInfo && forgejoInfo.default_branch) || 'main'}">
+<h2>Start a guided run</h2>
+${forgejoError ? html`<p class="run-notice run-notice-error" role="alert">OpenVibe Git is not reachable right now (${forgejoError}); you can still start a run on your machine.</p>` : ''}
+<label class="run-field"><span>What should the agent change?</span><textarea name="prompt" rows="5" required maxlength="16000" placeholder="Add a test for the date parser and fix what it finds"></textarea></label>
+<div class="run-field-row">
+<label class="run-field"><span>Agent</span><select name="agent">${opt('', 'Any: the best fit, with hand-offs', true)}${agents.map((a) => opt(a.id, a.name))}</select></label>
+<label class="run-field"><span>It may</span><select name="permission">${opt('edit', 'Edit files', true)}${opt('full', 'Run anything (tests, installs)', false)}</select></label>
+</div>
+<label class="run-check"><input type="checkbox" name="push" value="1" checked> Push the change to a new branch on OpenVibe Git <small>(needs a token on your machine; never the branch it started from)</small></label>
+<label class="run-check"><input type="checkbox" name="pull_request" value="1" checked> and open a pull request</label>
+<button class="run-btn run-btn-primary" type="submit">Start on my machine</button>
+</form>` : html`<p><a class="run-btn run-btn-primary" href="/auth/login?next=${encodeURIComponent(req.originalUrl)}">Sign in to start a run</a></p>`;
+        page(req, res, {
+            index: true, cache: PUBLIC_CACHE,
+            title: `Improve ${name}`,
+            description: `Contribute to ${meta.name}: describe a change and run it on your machine through OpenVibe.Codes.`,
+            crumbs: [{ label: 'Improve OpenVibe', href: '/improve' }, { label: meta.name }],
+            body: html`<h1>${meta.name}</h1>
+<p class="lead">${(meta.site && (meta.site.tagline || meta.site.what)) || meta.name}. The source lives at <a href="${repoForgejoUrl(owner, name)}">${repoForgejoUrl(owner, name)}</a> and is mirrored from <a href="${GITHUB}/${name}">GitHub</a>.</p>
+<pre tabindex="0" class="codes-clone"><code>git clone ${repoCloneUrl(owner, name)}</code></pre>
+<h2>The path from a change to a pull request</h2>
+<ol class="steps">
+<li>The harness clones the repository onto <strong>your machine</strong> and checks out the default branch.</li>
+<li>The agent makes the change you described and runs the tests.</li>
+<li>If you asked it to push, it commits to a new branch and opens a pull request on OpenVibe Git.</li>
+<li>You review the result, then the maintainers review the pull request.</li>
+</ol>
+${form}`,
+        });
+    });
+
+    r.post('/improve/start', express.urlencoded({ extended: false, limit: '32kb' }), async (req, res) => {
+        if (!signedIn(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/improve')}`);
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
+        const b = req.body || {};
+        const repo = String(b.repo || '').trim();
+        const m = /^https:\/\/([^/]+)\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/?$/.exec(repo);
+        const meta = m && repoMeta().find((x) => x.repository === `${m[2]}/${m[3]}`);
+        if (!meta) return page(req, res, { title: 'Not found', body: html`<h1>Not found</h1><p>Pick a repository from <a href="/improve">Improve OpenVibe</a>.</p>` }, 404);
+        const owner = m[2];
+        const name = m[3];
+        const prompt = String(b.prompt || '');
+        const agent = String(b.agent || '').trim();
+        const permission = b.permission === 'full' ? 'full' : 'edit';
+        const push = b.push === '1';
+        const pullRequest = push && b.pull_request === '1';
+        let args;
+        try {
+            if (agent && !harnesses.list().some((a) => a.id === agent)) throw new Error('choose an agent from the list');
+            args = parseArgs(JSON.stringify({
+                repo, ref: String(b.ref || '').trim() || null, prompt, agent: agent || null, permission,
+                ...(push ? { push: { branch: `openvibe-codes/improve-${Date.now().toString(36)}`, pull_request: pullRequest } } : {}),
+            }));
+        } catch (e) {
+            return page(req, res, {
+                title: `Improve ${name}`,
+                body: html`<h1>Improve ${name}</h1><p class="run-notice run-notice-error">Check the form: ${e.message}.</p><p><a href="/improve/${owner}/${name}">Back</a></p>`,
+            }, 422);
+        }
+        let project;
+        try {
+            project = await ensureProject(req, res);
+        } catch (e) {
+            return page(req, res, {
+                title: `Improve ${name}`,
+                body: html`<h1>Improve ${name}</h1><p class="run-notice run-notice-error">Could not get or create a project (${e.message}).</p><p><a href="/improve/${owner}/${name}">Back</a></p>`,
+            }, e.status === 401 ? 401 : 502);
+        }
+        const { createRunTasks } = require('../domain/run-tasks');
+        const taskStore = createRunTasks({ store, run, config, log });
+        const row = await taskStore.start({ subject: req.viewer.subject, project, args });
+        return res.redirect(303, `/run/tasks/${row.id}`);
     });
 
     // ── Community documents and the update log ───────────────

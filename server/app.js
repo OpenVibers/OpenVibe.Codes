@@ -36,9 +36,11 @@ const { createSessionLines } = require('./domain/session-lines');
 const { createOutbox, createPublisher } = require('./events/outbox');
 const { createEventsConsumer } = require('./events-consumer');
 const { createApi } = require('./http/api');
+const { createMeApi } = require('./http/me-api');
 const { createMovedRoutes } = require('./http/moved');
 const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
+const { createForgejoClient } = require('./domain/forgejo');
 const { assetVersion, send } = require('./render/layout');
 const { html } = require('./render/html');
 
@@ -66,6 +68,7 @@ async function createApp(opts = {}) {
     const run = opts.run || createRunClient({ config, fetchImpl: fetchImpl || globalThis.fetch });
     const tasks = createRunTasks({ store, run, config, log, sessions, outbox });
     const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks };
+    ctx.forgejo = createForgejoClient({ config, log });
 
     const app = express();
     app.disable('x-powered-by');
@@ -166,6 +169,7 @@ async function createApp(opts = {}) {
     // pages below or, for a first-party service acting for the person, from /api/v1/tasks (codes.task.*).
     app.use('/api/v1', createApi(ctx));
     app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, actorLimits: ctx.actorLimits, log }));
+    app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createActionsApi({ config, store, keys, run, tasks, actorLimits: ctx.actorLimits, log }));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
 

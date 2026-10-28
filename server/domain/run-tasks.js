@@ -128,13 +128,14 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         });
     }
 
-    async function start({ subject, project, args, via = null, key = null }) {
+    async function start({ subject, project, args, via = null, key = null, actorRef = null }) {
         const id = store.newId('tsk');
         const at = store.now();
+        const actorRefValue = actorRef && typeof actorRef === 'object' && !Array.isArray(actorRef) ? JSON.stringify(actorRef) : null;
         await store.tx(async () => {
-            const inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12, $12) RETURNING *`,
-            [id, subject, project, args.repo, args.ref, args.prompt, args.agent, !!args.push, !!(args.push && args.push.pull_request), via, key, at]);
+            const inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $13) RETURNING *`,
+            [id, subject, project, args.repo, args.ref, args.prompt, args.agent, !!args.push, !!(args.push && args.push.pull_request), via, key, actorRefValue, at]);
             await taskOutbox.emitTask(inserted, null);
             return inserted;
         });

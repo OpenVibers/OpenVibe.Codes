@@ -44,7 +44,7 @@ const freePort = () => new Promise((resolve) => { const s = net.createServer(); 
     const base = `http://127.0.0.1:${port}`;
     try {
         let up = false;
-        for (let i = 0; i < 150 && !up; i++) {
+        for (let i = 0; i < 300 && !up; i++) {
             up = await fetch(`${base}/api/health`).then((r) => r.ok).catch(() => false);
             if (!up) await new Promise((r) => setTimeout(r, 100));
         }

@@ -65,13 +65,27 @@
         source.addEventListener('state', function (e) {
             try {
                 var s = JSON.parse(e.data).state;
+                if (LABEL[s]) lastState = s;
                 if (pill && LABEL[s]) { pill.textContent = LABEL[s]; pill.className = 'run-pill run-pill-' + s; }
                 if (view) view.status(s, LABEL[s]);
             } catch (err) { /* ignore */ }
         });
+        var lastState = section.getAttribute('data-state') || 'queued';
         source.addEventListener('end', function () {
             source.close();
-            setTimeout(function () { window.location.reload(); }, 800);
+            // Switch from live streaming to replay without a full reload: the session lines are read back from
+            // /run/tasks/:id/session.json and pushed into the same agent-session view.
+            if (view && window.fetch) {
+                var sessionUrl = section.getAttribute('data-events').replace('/events', '/session.json') + '?after=0';
+                fetch(sessionUrl, { credentials: 'same-origin' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (!data || !Array.isArray(data.lines)) return;
+                        view.pushAll(data.lines.map(function (l) { return l.body; }));
+                        view.status(lastState, LABEL[lastState] || lastState);
+                    })
+                    .catch(function () { /* leave the streamed lines as they are */ });
+            }
         });
         source.onerror = function () {
             // The stream ended or could not open (Run busy or down): the page itself shows where the task is, so it is
