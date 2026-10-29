@@ -84,6 +84,27 @@ function describePage(pathname, { governance = [] }) {
     return { title: pathname, text: '' };
 }
 
+/**
+ * llms.txt: the shared kit's llmsTxt, with one thing it cannot say. A POST-only endpoint is not a
+ * page to fetch — a link to it is a URL that answers 404 to a GET, and a language model that
+ * follows it gets nothing. So a section may carry notes: plain lines that describe such an
+ * endpoint (POST /api/v1/route — ...) instead of linking it. Every real GET link stays a link.
+ */
+function llmsTxt({ name, summary, details, sections = [] }) {
+    const out = [`# ${name}`, '', `> ${String(summary || '').replace(/\s+/g, ' ').trim()}`, ''];
+    if (details) out.push(String(details).trim(), '');
+    for (const sec of sections) {
+        if (!sec) continue;
+        const links = (sec.links || []).map((l) => '- [' + l.title + '](' + l.url + ')' + (l.note ? ': ' + String(l.note).replace(/\s+/g, ' ').trim() : ''));
+        const notes = (sec.notes || []).map((n) => String(n).replace(/\s+/g, ' ').trim());
+        if (!links.length && !notes.length) continue;
+        out.push('## ' + sec.title, '');
+        if (links.length) out.push(...links, '');
+        if (notes.length) out.push(...notes, '');
+    }
+    return out.join('\n');
+}
+
 function createDiscoveryRoutes(ctx) {
     const { config, governance = [] } = ctx;
     const r = asyncRouter();
@@ -99,7 +120,7 @@ function createDiscoveryRoutes(ctx) {
     });
 
     r.get('/llms.txt', (_req, res) => {
-        res.type('text/plain').set('Cache-Control', TEXT).send(seo.llmsTxt({
+        res.type('text/plain').set('Cache-Control', TEXT).send(llmsTxt({
             name: SITE_NAME,
             summary: 'OpenVibe.Codes: the open coding-agent harness. openvibe-codes runs a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or your own OpenAI-compatible model, hands it to the next agent when one fails, and keeps every run; plus a public catalog and routing API, and the way to improve OpenVibe itself.',
             details: `Every page is server-rendered and readable without JavaScript. The harness is a command-line tool and a Node.js module that runs on your machine with your agents and keys (install: ${INSTALL_HINT}). Every agent's output becomes one event stream in Claude Code's stream-json shape. The catalog and the router are public: GET /api/v1/harnesses lists every harness with its models, and POST /api/v1/harnesses/route picks one for a task by capability first, then cost. A hosted runner comes next. The developer console that used to live here (projects, apps, keys, the API reference, OAuth and webhook tools, releases) is OpenVibe.Services at ${SERVICES_ORIGIN}.`,
@@ -117,10 +138,12 @@ function createDiscoveryRoutes(ctx) {
                 ] },
                 { title: 'Machine-readable', links: [
                     { title: 'The agent catalog (JSON)', url: abs('/api/v1/harnesses'), note: 'every harness with its agents (platform.harness-offer@1 rows)' },
-                    { title: 'Route a task', url: abs('/api/v1/harnesses/route'), note: 'POST { task, requirements? } → { selected, reasons, candidates }' },
+                    { title: 'The agent manifest (JSON)', url: abs('/.well-known/agent.json'), note: 'what this site tells an agent about itself' },
                     { title: 'Sitemap', url: abs('/sitemap.xml'), note: 'the public pages, each with a real lastmod' },
                     { title: 'Full text for language models', url: abs('/llms-full.txt'), note: 'every public page, one line each' },
                     { title: 'Release metadata (JSON)', url: abs('/release.json'), note: 'this service\'s current release, per ADR-016' },
+                ], notes: [
+                    'POST /api/v1/harnesses/route — pick a harness for a task: send { task, requirements? } and get { selected, reasons, candidates }. It answers POST only, so there is no page here to fetch; the catalog and the router are described at /harnesses and /start.',
                 ] },
                 { title: 'Elsewhere', links: [
                     { title: 'OpenVibe.Services', url: SERVICES_ORIGIN, note: 'the developer platform: projects, keys, grants and the API docs of every service' },
