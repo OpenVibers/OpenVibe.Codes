@@ -100,6 +100,16 @@ run run_20261008… · ~/my-project
   → Edit test/date.test.js
 Added test/date.test.js: three cases, all pass.
 ✔ done (48 s · $0.0400 · 31k in / 1.2k out)`;
+        // What works today: the state of each piece, read with how it works.
+        const statusTable = table(['Piece', 'State'], [
+            [html`<a href="/start">The harness on your machine</a> (<code>openvibe-codes</code>)`, `Live, ${VERSION}: runs a task on any of the eight agents with your CLIs and keys, streams one event format, keeps every run to show or resume.`],
+            ['Hand-offs between agents', 'Live: a failed, rate-limited or silent agent hands the task to the next one with a note on what was done.'],
+            [html`<a href="/run">Run on your machine</a>: start a task in any browser, your phone included; your own computer runs it`, 'Live: add your machine on openvibe.bot/machines (one command), then watch the task live here and get the patch, a branch or a pull request. It runs only on your own machines, in the Node\'s job sandbox.'],
+            [html`<a href="/harnesses">The agent catalog</a>`, 'Live: every harness and model with its capabilities, prices and limits.'],
+            [html`<code>GET /api/v1/harnesses</code>, <code>POST /api/v1/harnesses/route</code>`, 'Live: public, no key needed; per-address and per-caller limits.'],
+            [html`<a href="/improve">Improve OpenVibe</a>: a repository, a change on a branch with its test, a pull request that CI checks and a maintainer reviews`, 'Live: pick a repository, describe the change, and start a guided run on your machine.'],
+            [html`<a href="${config.git.publicUrl}/">OpenVibe Git</a>: OpenVibe's own code forge`, 'Live: every public OpenVibe repository, mirrored from GitHub hourly, with OpenVibe sign-in and HTTPS cloning. GitHub stays canonical until a repository moves here.'],
+        ]);
         return {
             agent: true, index: true, cache: PUBLIC_CACHE,
             jsonLd: [...homeJsonLd(config), seo.jsonLd.faq(home.faqPairs())],
@@ -108,7 +118,8 @@ Added test/date.test.js: three cases, all pass.
                 eyebrow: 'OpenVibe.Codes · the open coding-agent harness · alpha',
                 title: 'Code with', accent: 'any agent',
                 lede: 'One open harness for Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API and models you host yourself: send a coding task to the agent that fits it, hand it over when one gets stuck, and keep the whole run in one place. Then point it at OpenVibe itself.',
-                actions: [{ label: 'Install the harness', href: '/start', primary: true }, { label: 'Run on your machine from the web', href: '/run' }, { label: 'Meet the agents', href: '/harnesses' }],
+                // Two, so they sit side by side on a phone; the agents are the next section.
+                actions: [{ label: 'Install the harness', href: '/start', primary: true }, { label: 'Run on your machine from the web', href: '/run' }],
                 note: `Open source (AGPL-3.0). Version ${VERSION} runs on your machine with the agents and keys you already have, from your terminal or started from this site in any browser; the list below says exactly what works.`,
                 aside: { html: `<pre tabindex="0" class="codes-hero-code"><code>${showcase.esc(snippet)}</code></pre>` },
             }))}
@@ -116,7 +127,7 @@ ${raw(showcase.features({
                 id: 'agents', title: 'The agents', lede: `${offers.length} harnesses in the catalog, each with the models it runs. Routing picks one by what the task needs first, then by cost.`,
                 items: offers.map((o) => ({ title: o.name, text: [o.provider, ...flagsOf(o.capabilities).slice(0, 3)].join(' · '), href: `/harnesses#${o.id}` })),
             }))}
-${raw(showcase.steps({
+<section class="sc-sec" aria-labelledby="h-how"><details class="codes-fold"><summary><h2 id="h-how">How it works</h2><span>routing, the quick start, what works today</span></summary>${raw(showcase.steps({
                 title: 'How a task finds its agent',
                 items: [
                     { title: 'Describe the task', text: `One of ${tasks.join(', ')}, plus anything it must have: a capability, a runtime, a ceiling on cost.` },
@@ -126,23 +137,14 @@ ${raw(showcase.steps({
                 ],
             }))}
 ${raw(home.quickStart({ install: INSTALL }))}
+<section class="sc-sec" aria-labelledby="h-status"><h3 id="h-status">What works today</h3>
+${raw(statusTable)}</section></details></section>
 ${raw(home.gitSection((ctx.git || gitReader).peek()))}
 <section class="sc-sec" aria-labelledby="h-improve"><h2 id="h-improve">Improve OpenVibe</h2>
 <p class="sc-lede">OpenVibe is built in the open, ${repositories().running.length} services and their shared libraries, every one on GitHub. Pick a repository, describe the change, and send a pull request; the harness's job is to make that one step.</p>
 <p><a class="sc-btn sc-primary" href="/improve">Start contributing</a> <a class="sc-btn" href="/policy/contributing">Read the guide</a></p></section>
-<section class="sc-sec" aria-labelledby="h-status"><h2 id="h-status">What works today</h2>
-${table(['Piece', 'State'], [
-                [html`<a href="/start">The harness on your machine</a> (<code>openvibe-codes</code>)`, `Live, ${VERSION}: runs a task on any of the eight agents with your CLIs and keys, streams one event format, keeps every run to show or resume.`],
-                ['Hand-offs between agents', 'Live: a failed, rate-limited or silent agent hands the task to the next one with a note on what was done.'],
-                [html`<a href="/run">Run on your machine</a>: start a task in any browser, your phone included; your own computer runs it`, 'Live: add your machine on openvibe.bot/machines (one command), then watch the task live here and get the patch, a branch or a pull request. It runs only on your own machines, in the Node\'s job sandbox.'],
-                [html`<a href="/harnesses">The agent catalog</a>`, 'Live: every harness and model with its capabilities, prices and limits.'],
-                [html`<code>GET /api/v1/harnesses</code>, <code>POST /api/v1/harnesses/route</code>`, 'Live: public, no key needed; per-address and per-caller limits.'],
-                [html`<a href="/improve">Improve OpenVibe</a>: a repository, a change on a branch with its test, a pull request that CI checks and a maintainer reviews`, 'Live: pick a repository, describe the change, and start a guided run on your machine.'],
-                [html`<a href="${config.git.publicUrl}/">OpenVibe Git</a>: OpenVibe's own code forge`, 'Live: every public OpenVibe repository, mirrored from GitHub hourly, with OpenVibe sign-in and HTTPS cloning. GitHub stays canonical until a repository moves here.'],
-            ])}</section>
 ${raw(home.faq())}
-${raw(showcase.network({ service: 'codes' }))}
-${raw(showcase.cta({ title: 'Building an app instead?', text: 'Projects, keys, grants and the API docs of every OpenVibe service live on OpenVibe.Services.', actions: [{ label: 'Open the developer platform', href: SERVICES_ORIGIN, primary: true }, { label: 'Meet the agents', href: '/harnesses' }] }))}`,
+${raw(showcase.network({ service: 'codes' }))}`,
         };
     }
     r.get('/', (req, res) => page(req, res, homePage()));
