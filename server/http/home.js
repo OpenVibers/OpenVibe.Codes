@@ -117,6 +117,6 @@ function faqPairs() {
     const seen = new Set();
     return [...own, ...EXTRA_FAQ].filter((p) => !seen.has(p.q) && seen.add(p.q));
 }
-const faq = () => `<section class="sc-sec" id="faq" aria-labelledby="h-faq"><h2 id="h-faq">Questions people ask</h2><div class="codes-faq">${faqPairs().map((p) => `<div><h3>${esc(p.q)}</h3><p>${esc(p.a)}</p></div>`).join('')}</div></section>`;
+const faq = () => `<section class="sc-sec" id="faq" aria-labelledby="h-faq"><h2 id="h-faq">Questions people ask</h2><div class="codes-faq">${faqPairs().map((p, i) => `<details${i === 0 ? ' open' : ''}><summary><h3>${esc(p.q)}</h3></summary><p>${esc(p.a)}</p></details>`).join('')}</div></section>`;
 
 module.exports = { createGitReader, gitSection, quickStart, faq, faqPairs, ago };
