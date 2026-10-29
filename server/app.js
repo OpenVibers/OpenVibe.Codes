@@ -175,7 +175,21 @@ async function createApp(opts = {}) {
 
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.CODES_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));   // per address; tests raise it
-    app.use(createPageRoutes(ctx));
+    const pageRoutes = createPageRoutes(ctx);
+    // The agent layer (openvibe-shared/agent-layer): /.well-known/agent.json and the Markdown twins of the public
+    // pages. The pages themselves keep their own routes — a signed-in visitor's account bar and forms are theirs
+    // — so only the manifest and twin requests reach this mount; the pages advertise the twin themselves.
+    const agentLayer = express();
+    require('openvibe-shared/agent-layer').mount(agentLayer, {
+        descriptor: require('./agent-descriptor'),
+        render: require('./agent-pages').createAgentPages(ctx, pageRoutes.publicViews).renderPublicPage,
+    });
+    app.use((req, res, next) => {
+        const twin = req.path.endsWith('.md') || req.query.format === 'markdown' || String(req.headers.accept || '').includes('text/markdown');
+        if (req.path !== '/.well-known/agent.json' && !twin) return next();
+        return agentLayer(req, res, next);
+    });
+    app.use(pageRoutes);
     app.use(createRunRoutes({ config, store, sso, harnesses, run, tasks, sessions, keys, fetchImpl: fetchImpl || globalThis.fetch, log }));
     app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try <a href="/harnesses">the agents</a>, <a href="/improve">Improve OpenVibe</a>, or the developer platform at <a href="https://openvibe.services">openvibe.services</a>.</p>` }));
 
