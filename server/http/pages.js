@@ -340,7 +340,7 @@ ${offers.map((o) => html`<h3>${o.name} <code>${o.id}</code></h3>${o.agents.lengt
             : (services.length ? kit.list(services, { title: `Services · ${services.length}` }) : '') + (libs.length ? kit.list(libs, { title: `Shared libraries · ${libs.length}` }) : '');
         return {
             agent: true, index: !needle, cache: PUBLIC_CACHE,
-            styles: ['kit.css'], sharedScripts: ['kit-web.js'],
+            styles: ['kit.css', 'kit-data.css'], sharedScripts: ['kit-web.js'],
             title: 'Improve OpenVibe',
             description: 'OpenVibe is open source: every service and library is on GitHub. Pick a repository, describe the change, and send a pull request; the harness makes the change on your machine.',
             body: html`${raw(kit.head({ title: 'Improve OpenVibe', sub: 'All open source. Pick one, describe a change.', sticky: false }))}
@@ -381,7 +381,7 @@ ${forgejoError ? html`<p class="run-notice run-notice-error" role="alert">OpenVi
             title: `Improve ${name}`,
             description: `Contribute to ${meta.name}: describe a change and run it on your machine through OpenVibe.Codes.`,
             crumbs: [{ label: 'Improve OpenVibe', href: '/improve' }, { label: meta.name }],
-            styles: ['kit.css'], sharedScripts: ['kit-web.js'],
+            styles: ['kit.css', 'kit-data.css'], sharedScripts: ['kit-web.js'],
             body: html`${raw(kit.head({ title: meta.name, sub: tagline(meta), sticky: false }))}
 ${raw(improveSteps(1))}
 ${form}
