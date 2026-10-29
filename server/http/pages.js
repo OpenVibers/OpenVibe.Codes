@@ -22,6 +22,7 @@ const cache = require('openvibe-shared/cache-policy');
 const { asyncRouter } = require('./router');
 const { createDiscoveryRoutes, homeJsonLd, SERVICES_ORIGIN } = require('./discovery');
 const { html, raw, table, notice } = require('../render/html');
+const kit = require('openvibe-shared/kit');
 const { send } = require('../render/layout');
 const { markdown } = require('../render/markdown');
 const placement = require('../domain/harness-placement');
@@ -315,30 +316,41 @@ ${offers.map((o) => html`<h3>${o.name} <code>${o.id}</code></h3>${o.agents.lengt
     const repoForgejoUrl = (owner, name) => `${config.git.publicUrl}/${owner}/${name}`;
     const repoCloneUrl = (owner, name) => `${config.git.publicUrl}/${owner}/${name}.git`;
 
-    function improvePage() {
+    // The four steps of every change; the index is step 1, a repository's page is step 2.
+    const IMPROVE_STEPS = [
+        { label: 'Pick a repository', href: '/improve' },
+        { label: 'Describe the change', note: 'the harness runs it on your machine' },
+        { label: 'Review the result', note: 'then open the pull request' },
+        { label: 'A maintainer reviews', note: 'the owner approves what ships' },
+    ];
+    const improveSteps = (at) => kit.steps({ label: 'From a change to a pull request', current: at, items: IMPROVE_STEPS });
+    const shortName = (m) => m.repository.split('/')[1].replace(/^OpenVibe\./, '');
+    const tagline = (m) => (m.site && (m.site.tagline || m.site.what)) || m.name;
+
+    /** Step 1: pick the repository. One search box (it works without JavaScript: ?q=), then every repository as a row. */
+    function improvePage(q = '') {
         const { running, libraries } = repoGroups();
-        const repoCards = (list) => html`<ul class="cards">${list.map((m) => html`<li><a href="/improve/${m.repository}"><strong>${m.repository.split('/')[1]}</strong></a><span>${(m.site && (m.site.tagline || m.site.what)) || m.name}</span></li>`)}</ul>`;
+        const needle = String(q || '').trim().toLowerCase().slice(0, 60);
+        const hit = (m) => !needle || [m.repository, m.name, tagline(m)].some((t) => String(t || '').toLowerCase().includes(needle));
+        const rows = (list) => list.filter(hit).map((m) => kit.row({ href: `/improve/${m.repository}`, title: shortName(m), sub: tagline(m), trail: kit.icon('chevron') }));
+        const services = rows(running), libs = rows(libraries);
+        const found = services.length + libs.length;
+        const lists = !found
+            ? kit.empty({ icon: 'search', title: `No repository matches “${needle}”`, text: 'Try a site\'s name (chat, video, games) or what it does.', action: { href: '/improve', label: 'Every repository' } })
+            : (services.length ? kit.list(services, { title: `Services · ${services.length}` }) : '') + (libs.length ? kit.list(libs, { title: `Shared libraries · ${libs.length}` }) : '');
         return {
-            agent: true, index: true, cache: PUBLIC_CACHE,
+            agent: true, index: !needle, cache: PUBLIC_CACHE,
+            styles: ['kit.css'], sharedScripts: ['kit-web.js'],
             title: 'Improve OpenVibe',
             description: 'OpenVibe is open source: every service and library is on GitHub. Pick a repository, describe the change, and send a pull request; the harness makes the change on your machine.',
-            crumbs: [{ label: 'Improve OpenVibe' }],
-            body: html`<h1>Improve OpenVibe</h1>
-<p>Every OpenVibe service and library is open source under <a href="${GITHUB}">OpenVibers</a>, and changes arrive as pull requests that the owner approves. Every change takes the same path: repository → change → tests → independent review → pull request, never straight to <code>main</code>. Pick a repository, describe the change, and start a run on your own machine.</p>
-<ol class="steps">
-<li><strong>Pick a repository</strong> from the lists below.</li>
-<li><strong>Describe the change</strong> in plain language; the harness runs the tests your way.</li>
-<li><strong>Review the result</strong> on the task page, then open a pull request from the branch it pushed.</li>
-<li><strong>A maintainer reviews</strong>; the owner approves what ships. See the <a href="/policy/contributor-ladder">contributor ladder</a>.</li>
-</ol>
-<p>Before you start: the <a href="/policy/contributing">contributing guide</a> and the <a href="/policy/code-of-conduct">code of conduct</a>. Building your own app? That is <a href="${SERVICES_ORIGIN}">OpenVibe.Services</a>.</p>
-<h2>Services that run</h2>
-${repoCards(running)}
-<h2>Shared libraries</h2>
-${repoCards(libraries)}`,
+            body: html`${raw(kit.head({ title: 'Improve OpenVibe', sub: 'All open source. Pick one, describe a change.', sticky: false }))}
+${raw(improveSteps(0))}
+${raw(kit.find({ action: '/improve', name: 'q', value: needle, placeholder: 'Find: chat, video, games…', label: 'Find a repository' }))}
+${raw(lists)}
+<p class="ovk-muted">Changes arrive as pull requests the owner approves — never straight to <code>main</code>. Before you start: the <a href="/policy/contributing">contributing guide</a>, the <a href="/policy/code-of-conduct">code of conduct</a> and the <a href="/policy/contributor-ladder">contributor ladder</a>. Building your own app instead? That is <a href="${SERVICES_ORIGIN}">OpenVibe.Services</a>.</p>`,
         };
     }
-    r.get('/improve', (req, res) => page(req, res, improvePage()));
+    r.get('/improve', (req, res) => page(req, res, improvePage(req.query && req.query.q)));
 
     async function improveRepoPage(owner, name, { signed = false } = {}) {
         const meta = repoMeta().find((m) => m.repository === `${owner}/${name}`);
@@ -363,23 +375,18 @@ ${forgejoError ? html`<p class="run-notice run-notice-error" role="alert">OpenVi
 <label class="run-check"><input type="checkbox" name="push" value="1" checked> Push the change to a new branch on OpenVibe Git <small>(needs a token on your machine; never the branch it started from)</small></label>
 <label class="run-check"><input type="checkbox" name="pull_request" value="1" checked> and open a pull request</label>
 <button class="run-btn run-btn-primary" type="submit">Start on my machine</button>
-</form>` : html`<p><a class="run-btn run-btn-primary" href="/auth/login?next=${encodeURIComponent(`/improve/${owner}/${name}`)}">Sign in to start a run</a></p>`;
+</form>` : html`<p class="ovk-muted">Say what should change, in plain words. The harness makes the change on your machine, runs the tests, and can open the pull request.</p><p>${raw(kit.button({ href: `/auth/login?next=${encodeURIComponent(`/improve/${owner}/${name}`)}`, label: 'Sign in to describe a change', icon: 'user' }))}</p>`;
         return {
             agent: true, index: true, cache: PUBLIC_CACHE,
             title: `Improve ${name}`,
             description: `Contribute to ${meta.name}: describe a change and run it on your machine through OpenVibe.Codes.`,
             crumbs: [{ label: 'Improve OpenVibe', href: '/improve' }, { label: meta.name }],
-            body: html`<h1>${meta.name}</h1>
-<p class="lead">${(meta.site && (meta.site.tagline || meta.site.what)) || meta.name}. The source lives at <a href="${repoForgejoUrl(owner, name)}">${repoForgejoUrl(owner, name)}</a> and is mirrored from <a href="${GITHUB}/${name}">GitHub</a>.</p>
-<pre tabindex="0" class="codes-clone"><code>git clone ${repoCloneUrl(owner, name)}</code></pre>
-<h2>The path from a change to a pull request</h2>
-<ol class="steps">
-<li>The harness clones the repository onto <strong>your machine</strong> and checks out the default branch.</li>
-<li>The agent makes the change you described and runs the tests.</li>
-<li>If you asked it to push, it commits to a new branch and opens a pull request on OpenVibe Git.</li>
-<li>You review the result, then the maintainers review the pull request.</li>
-</ol>
-${form}`,
+            styles: ['kit.css'], sharedScripts: ['kit-web.js'],
+            body: html`${raw(kit.head({ title: meta.name, sub: tagline(meta), sticky: false }))}
+${raw(improveSteps(1))}
+${form}
+${raw(kit.fold({ title: 'How the run works', body: '<ol class="steps"><li>The harness clones the repository onto <strong>your machine</strong> and checks out the default branch.</li><li>The agent makes the change you described and runs the tests.</li><li>If you asked it to push, it commits to a new branch and opens a pull request on OpenVibe Git.</li><li>You review the result, then the maintainers review the pull request.</li></ol>' }))}
+${raw(kit.fold({ title: 'Clone it yourself', meta: 'git clone', body: `${kit.snippet({ code: `git clone ${repoCloneUrl(owner, name)}`, id: 'clone-cmd' })}<p class="ovk-muted">Browse it at <a href="${kit.esc(repoForgejoUrl(owner, name))}">${kit.esc(repoForgejoUrl(owner, name))}</a> or on <a href="${kit.esc(`${GITHUB}/${name}`)}">GitHub</a>.</p>` }))}`,
         };
     }
     r.get('/improve/:owner/:name', async (req, res) => {

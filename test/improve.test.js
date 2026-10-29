@@ -29,6 +29,26 @@ const { boot, check, done } = require('./helpers/boot');
             assert.ok(r.text.includes('OpenVibe.Codes'));
         });
 
+        await check('the landing is step 1 of 4, and one search box narrows the repositories (no JavaScript needed)', async () => {
+            const all = await t.get('/improve');
+            assert.ok(all.text.includes('<nav class="ovk-steps"') && all.text.includes('Step 1 of 4') && all.text.includes('aria-current="step"'), 'the steps');
+            assert.ok(all.text.includes('<form class="ovk-find"') && all.text.includes('name="q"'), 'the search box');
+            assert.ok(all.text.includes('Services · ') && all.text.includes('Shared libraries · '), 'both groups, counted');
+            const some = await t.get('/improve?q=codes');
+            assert.ok(some.text.includes('href="/improve/OpenVibers/OpenVibe.Codes"'), 'a match stays');
+            assert.ok(!some.text.includes('href="/improve/OpenVibers/OpenVibe.Shared"'), 'a non-match goes');
+            assert.ok(/<meta name="robots" content="noindex/.test(some.text), 'a search result is not indexed');
+            const none = await t.get('/improve?q=zzzz-nothing');
+            assert.ok(none.text.includes('No repository matches') && none.text.includes('href="/improve"'), 'an empty search says so and offers every repository');
+        });
+
+        await check('a repository page is step 2: describe the change; the clone command and the run explanation fold', async () => {
+            const r = await t.get('/improve/OpenVibers/OpenVibe.Codes', { as: ada });
+            assert.ok(r.text.includes('Step 2 of 4') && r.text.includes('href="/improve"'), 'step 2, with step 1 linking back');
+            assert.ok(r.text.includes('Clone it yourself') && r.text.includes('git clone '), 'the clone command, folded');
+            assert.ok(r.text.indexOf('name="prompt"') < r.text.indexOf('How the run works'), 'the form comes before the explanation');
+        });
+
         await check('a repository page shows the guided path and asks guests to sign in', async () => {
             const r = await t.get('/improve/OpenVibers/OpenVibe.Codes');
             assert.strictEqual(r.status, 200);
