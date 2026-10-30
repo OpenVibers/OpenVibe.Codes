@@ -6,6 +6,7 @@
  */
 const assert = require('assert');
 const http = require('http');
+const { validate } = require('openvibe-contracts');
 const { parseArgs } = require('../harness/job');
 const { boot, check, done } = require('./helpers/boot');
 const { createPublisher } = require('../server/events/outbox');
@@ -13,11 +14,18 @@ const { createPublisher } = require('../server/events/outbox');
 (async () => {
     const received = [];
     let failNext = 0;
+    let refuseNext = 0;
     const events = http.createServer((req, res) => {
         let body = '';
         req.on('data', (c) => { body += c; });
         req.on('end', () => {
             if (failNext > 0) { failNext--; res.writeHead(503, { 'Content-Type': 'application/json' }); return res.end('{"code":"events.down"}'); }
+            // Events refuses an envelope it does not accept (a 422 that no retry can fix).
+            if (refuseNext > 0) {
+                refuseNext--;
+                res.writeHead(422, { 'Content-Type': 'application/json' });
+                return res.end('{"code":"events.invalid_envelope","detail":"/priority must be equal to one of the allowed values"}');
+            }
             const event = JSON.parse(body);
             received.push(event);
             res.writeHead(201, { 'Content-Type': 'application/json' });
@@ -97,6 +105,14 @@ const { createPublisher } = require('../server/events/outbox');
             assert.strictEqual(await t.ctx.publisher.pending(), 0);
         });
 
+        await check('the envelope is the one the contract describes, so OpenVibe.Events accepts it', async () => {
+            assert.ok(received.length >= 2, 'events were published');
+            for (const event of received) {
+                const v = validate('events.event-envelope@1', event);
+                assert.ok(v.valid, `the envelope matches events.event-envelope@1: ${JSON.stringify(v.errors)}`);
+            }
+        });
+
         await check('a failure records attempts/last_error, backs off, then retries the same id', async () => {
             const second = await t.ctx.tasks.start({ subject: ada.subject, project, args });
             const row = await db.one('SELECT * FROM codes_outbox WHERE payload->>\'task_id\' = $1', [second.id]);
@@ -116,6 +132,29 @@ const { createPublisher } = require('../server/events/outbox');
             assert.ok(after.published_at);
             assert.strictEqual(after.attempts, 1, 'the failed attempt stays recorded');
             assert.strictEqual(received.filter((x) => x.event_id === row.event_id).length, 1, 'one event under the fixed id');
+        });
+
+        await check('an event OpenVibe.Events refuses is dead after a fixed number of tries, not retried forever', async () => {
+            const third = await t.ctx.tasks.start({ subject: ada.subject, project, args });
+            const row = await db.one('SELECT * FROM codes_outbox WHERE payload->>\'task_id\' = $1', [third.id]);
+            refuseNext = 3;
+            for (let tries = 0; tries < 3; tries++) {
+                await db.exec("UPDATE codes_outbox SET next_attempt_at = now() - interval '1 second' WHERE event_id = $1", [row.event_id]);
+                const r = await t.ctx.publisher.runOnce();
+                assert.strictEqual(r.claimed, 1, 'the row is claimed');
+                assert.strictEqual(r.failed, 1, 'the refusal is a failure');
+            }
+            const dead = await db.one('SELECT * FROM codes_outbox WHERE event_id = $1', [row.event_id]);
+            assert.ok(dead.dead_at, 'the event is dead');
+            assert.strictEqual(dead.dead_reason, 'refused');
+            assert.strictEqual(dead.published_at, null);
+            assert.strictEqual(dead.attempts, 3, 'it got the tries it was given');
+            assert.match(dead.last_error, /events 422/);
+            assert.strictEqual(await t.ctx.publisher.pending(), 0, 'a dead event is not pending');
+            assert.strictEqual(await t.ctx.publisher.dead(), 1);
+            await db.exec("UPDATE codes_outbox SET next_attempt_at = now() - interval '1 second' WHERE event_id = $1", [row.event_id]);
+            assert.strictEqual((await t.ctx.publisher.runOnce()).claimed, 0, 'a dead event is never sent again');
+            refuseNext = 0;
         });
 
         await check('a restart over the same rows does not duplicate', async () => {

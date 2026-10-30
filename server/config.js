@@ -101,6 +101,10 @@ function load(env = process.env) {
             secrets: String(env.CODES_EVENTS_SECRET || '').split(',').map((s) => s.trim()).filter(Boolean),
             intervalMs: Math.max(500, int(env.CODES_EVENTS_INTERVAL_MS, 5000)),
             scope: env.CODES_EVENTS_SCOPE || 'events.event.publish',
+            // How many tries an event gets before it is marked dead: an event OpenVibe.Events refused (its envelope
+            // can never pass) fewer than one that keeps failing for another reason.
+            deadAfterRefusals: Math.max(1, int(env.CODES_EVENTS_DEAD_AFTER_REFUSALS, 3)),
+            deadAfterAttempts: Math.max(1, int(env.CODES_EVENTS_DEAD_AFTER_ATTEMPTS, 20)),
         },
         // Session lines in PostgreSQL: no total cap; finished tasks keep theirs for this many days (default 90).
         sessions: {
