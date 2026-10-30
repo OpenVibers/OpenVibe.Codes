@@ -86,6 +86,12 @@ function load(env = process.env) {
                 'OPENVIBE_AI_TOKEN', 'OPENVIBE_CODES_BASE_URL', 'OPENVIBE_CODES_API_KEY', 'OPENVIBE_CODES_MODEL',
                 'OPENVIBE_CODES_HEADERS'],
         },
+        bench: {
+            url: trim(env.CODES_BENCH_URL || 'https://bench.openvibe.services'),
+            renderOrigin: trim(env.CODES_BENCH_RENDER_ORIGIN || 'https://bench-render.openvibe.services'),
+            dailyTasks: Math.max(1, int(env.CODES_BENCH_DAILY_TASKS, 50)),
+            maxMatrixSize: Math.max(1, int(env.CODES_BENCH_MAX_MATRIX, 100)),
+        },
         // OpenVibe.Events (ADR-033): account export and deletion arrive at POST /internal/events, signed with one of
         // these; run.job.* subscriptions are created at boot. The outbox relay publishes codes.task.* with the
         // service's events.event.publish token.

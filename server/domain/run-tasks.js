@@ -140,7 +140,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -218,7 +218,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     async function recordState(row, next) {
         const state = STATES.has(next && next.state) ? next.state : null;
         if (!state || !row || !row.id) return row;
-        return await store.tx(async () => {
+        const saved = await store.tx(async () => {
             const current = await db.maybe('SELECT * FROM run_tasks WHERE id = $1 FOR UPDATE', [row.id]);
             if (!current) return row;
             if (RANK[state] < RANK[current.state]) return current;
@@ -264,6 +264,11 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             }
             return updated;
         });
+        if (TERMINAL.has(saved.state) && benchAttemptEnded && saved.actor_ref) {
+            const meta = asObject(saved.actor_ref);
+            if (meta && meta.bench) await benchAttemptEnded(saved).catch((e) => log.warn(`[Codes] benchmark publish failed for task ${saved.id}: ${String(e && e.message).slice(0, 200)}`));
+        }
+        return saved;
     }
 
     /**
@@ -288,7 +293,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         await store.tx(async () => {
             inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $13) RETURNING *`,
-            [id, subject, project, args.repo, args.ref, args.prompt, args.agent, !!args.push, !!(args.push && args.push.pull_request), via, key, actorRefValue, at]);
+            [id, subject, project, args.repo || 'bench://', args.ref, args.prompt, args.agent, !!args.push, !!(args.push && args.push.pull_request), via, key, actorRefValue, at]);
             await taskOutbox.emitTask(inserted, null);
             return inserted;
         });
@@ -388,6 +393,12 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         if (!row) return null;
         if (!TERMINAL.has(row.state)) return row;
         if (row.outcome === 'stopped') return row;      // a person stopped it: nothing carries it on
+        const actorRef = asObject(row.actor_ref);
+        if (actorRef && actorRef.bench) {
+            const done = row.state === 'succeeded';
+            return await db.one('UPDATE run_tasks SET outcome = $2, outcome_note = $3, updated_at = $4 WHERE id = $1 RETURNING *',
+                [row.id, done ? 'done' : 'unfinished', done ? 'benchmark attempt finished' : (row.error || 'benchmark attempt failed'), store.now()]);
+        }
         const attempts = await attemptStore.list(row.id);
         const ending = attempts[attempts.length - 1];
         if (!ending || !ENDED.has(ending.state)) return row;

@@ -63,6 +63,23 @@ function fakeHarness({ fail = false } = {}) {
         assert.strictEqual(parseArgs(JSON.stringify({ repo: 'file:///tmp/x', prompt: 'x' }), env).repo, 'file:///tmp/x');
     });
 
+    await check('a bench job accepts no repository and returns the model output without a repository diff', async () => {
+        const parsed = parseArgs(JSON.stringify({ kind: 'bench', prompt: 'Return a small HTML artifact', agent: 'claude-code', model: 'cheap-model', limits: { ms: 5000, tokens: 10000, usd: 0.05 } }));
+        assert.strictEqual(parsed.repo, null);
+        assert.strictEqual(parsed.kind, 'bench');
+        assert.deepStrictEqual(parsed.limits, { ms: 5000, tokens: 10000, usd: 0.05 });
+        const docs = [];
+        const harness = fakeHarness();
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codes-bench-tmp-'));
+        const doc = await runJob({ input: JSON.stringify({ kind: 'bench', prompt: 'Return a small HTML artifact' }), harness,
+            emit: () => {}, writeResult: (d) => docs.push(d), env, tmp });
+        assert.strictEqual(doc.kind, 'bench');
+        assert.strictEqual(doc.output, 'Done: README updated.');
+        assert.deepStrictEqual(doc.files, []);
+        assert.strictEqual(docs.length, 1);
+        fs.rmSync(tmp, { recursive: true, force: true });
+    });
+
     await check('a task clones, runs the agent there, streams short lines and hands over the patch once', async () => {
         const src = repository();
         const lines = [];

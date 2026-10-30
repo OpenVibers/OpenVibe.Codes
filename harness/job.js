@@ -95,11 +95,14 @@ function parseArgs(raw, env = process.env) {
     let a;
     try { a = JSON.parse(String(raw || '').trim() || '{}'); } catch { throw new Error('the job input is not JSON'); }
     if (!a || typeof a !== 'object' || Array.isArray(a)) throw new Error('the job input must be an object');
-    let repo;
-    try { repo = new URL(String(a.repo || '')); } catch { throw new Error('repo must be a repository URL'); }
-    const fileOk = env.OPENVIBE_CODES_ALLOW_FILE_REPO === '1' && repo.protocol === 'file:';
-    if (!fileOk && repo.protocol !== 'https:') throw new Error('repo must be an https URL');
-    if (repo.username || repo.password) throw new Error('repo must not carry credentials');
+    const kind = a.kind === 'bench' ? 'bench' : 'code';
+    let repo = null;
+    if (kind === 'code') {
+        try { repo = new URL(String(a.repo || '')); } catch { throw new Error('repo must be a repository URL'); }
+        const fileOk = env.OPENVIBE_CODES_ALLOW_FILE_REPO === '1' && repo.protocol === 'file:';
+        if (!fileOk && repo.protocol !== 'https:') throw new Error('repo must be an https URL');
+        if (repo.username || repo.password) throw new Error('repo must not carry credentials');
+    }
     const prompt = typeof a.prompt === 'string' ? a.prompt.trim() : '';
     if (!prompt || prompt.length > MAX_PROMPT) throw new Error(`prompt must be 1-${MAX_PROMPT} characters`);
     const ref = a.ref == null || a.ref === '' ? null : String(a.ref);
@@ -118,8 +121,14 @@ function parseArgs(raw, env = process.env) {
     const resumeIn = a.resume == null || a.resume === '' ? env.RESUME : a.resume;
     const resume = typeof resumeIn === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(resumeIn) ? resumeIn : null;
     const wanted = jobEnv(a);
+    const limits = kind === 'bench' && a.limits && typeof a.limits === 'object' ? {
+        ms: Number.isFinite(Number(a.limits.ms)) && Number(a.limits.ms) > 0 ? Math.min(300000, Number(a.limits.ms)) : null,
+        tokens: Number.isFinite(Number(a.limits.tokens)) && Number(a.limits.tokens) > 0 ? Math.min(1000000, Number(a.limits.tokens)) : null,
+        usd: Number.isFinite(Number(a.limits.usd)) && Number(a.limits.usd) > 0 ? Math.min(100, Number(a.limits.usd)) : null,
+    } : null;
     return {
-        repo: repo.toString(), ref, prompt, permission, push,
+        kind, repo: repo ? repo.toString() : null, ref, prompt, permission, push,
+        ...(limits ? { limits } : {}),
         ...(resume ? { resume } : {}),
         ...(Object.keys(wanted).length ? { env: wanted } : {}),
         agent: typeof a.agent === 'string' && /^[a-z0-9-]{1,40}$/.test(a.agent) ? a.agent : null,
@@ -292,13 +301,19 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
     }
     const dir = fs.mkdtempSync(path.join(tmp, 'codes-'));
     const work = path.join(dir, 'repo');
-    const result = { protocol: JOB_PROTOCOL, ok: false, repo: scrub(job.repo), ref: job.ref, agents: [], summary: '' };
+    const result = { protocol: JOB_PROTOCOL, ok: false, kind: job.kind, repo: job.repo ? scrub(job.repo) : null, ref: job.ref, agents: [], summary: '' };
+    let base = null;
     try {
-        say({ t: 'step', text: `Cloning ${scrub(job.repo)}${job.ref ? ` (${job.ref})` : ''}` });
-        await git(['clone', '--depth', '50', ...(job.ref ? ['--branch', job.ref] : []), '--', job.repo, work], { timeout: 300_000 });
-        const base = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: work })).trim();
-        result.base = base;
-        say({ t: 'step', text: `Working on ${base}` });
+        if (job.kind === 'code') {
+            say({ t: 'step', text: `Cloning ${scrub(job.repo)}${job.ref ? ` (${job.ref})` : ''}` });
+            await git(['clone', '--depth', '50', ...(job.ref ? ['--branch', job.ref] : []), '--', job.repo, work], { timeout: 300_000 });
+            base = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: work })).trim();
+            result.base = base;
+            say({ t: 'step', text: `Working on ${base}` });
+        } else {
+            fs.mkdirSync(work, { recursive: true });
+            say({ t: 'step', text: 'Preparing an empty benchmark workspace' });
+        }
         const run = harness.run({
             prompt: job.prompt, task: 'edit', agent: job.agent, model: job.model, cwd: work,
             permission: job.permission, handoff: !job.agent, maxAttempts: 3,
@@ -314,9 +329,13 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             if (e.type === 'system' && e.subtype === 'init' && e.agent && !result.agents.includes(e.agent)) result.agents.push(e.agent);
         }
         result.ok = !!(last && last.type === 'result' && !last.is_error);
-        result.summary = last && typeof last.result === 'string' ? last.result.slice(0, 4000) : '';
+        const answer = last && typeof last.result === 'string' ? last.result : '';
+        result.summary = answer.slice(0, 4000);
+        if (job.kind === 'bench') result.output = answer.slice(0, 200000);
         result.cost_usd = last && last.total_cost_usd ? last.total_cost_usd : 0;
-        Object.assign(result, await changes(work));
+        const usage = last && last.usage && typeof last.usage === 'object' ? last.usage : {};
+        result.tokens = Number(last && (last.total_tokens || last.tokens)) || (Number(usage.input_tokens) || 0) + (Number(usage.output_tokens) || 0);
+        Object.assign(result, job.kind === 'bench' ? { files: [], patch: '', patch_truncated: false } : await changes(work));
         say({ t: 'step', text: result.files.length ? `${result.files.length} file${result.files.length === 1 ? '' : 's'} changed` : 'No files changed' });
         // The proof of the change: the tests it reaches, the pages it touched, the diff, and a second model's opinion.
         // It is collected here, in the clone the agent worked in, so the evidence is about this machine's work.

@@ -52,7 +52,11 @@ function createRunClient({ config, fetchImpl = globalThis.fetch, now = () => Dat
     async function submit({ subject, project, args, key }) {
         const body = {
             class: 'code', artifact: { name: 'openvibe-codes', version: JOB_PROTOCOL }, args,
-            limits: { wall_ms: 30 * 60_000, cpu_ms: 30 * 60_000, mem_bytes: 4 * 1024 ** 3 },
+            limits: {
+                wall_ms: Math.max(1000, Math.min(30 * 60_000, Number(args.limits && args.limits.ms) || 30 * 60_000)),
+                cpu_ms: Math.max(1000, Math.min(30 * 60_000, Number(args.limits && args.limits.ms) || 30 * 60_000)),
+                mem_bytes: 4 * 1024 ** 3,
+            },
             ttl_ms: 45 * 60_000, egress: 'public',
             requirements: { kind: 'run.code', mobility: 'job', latency_class: 'background', objective: 'balanced', trust: ['user-owned'] },
         };
