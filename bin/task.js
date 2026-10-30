@@ -347,4 +347,4 @@ async function task(argv) {
     }
 }
 
-module.exports = { task, stateOf, repoOf, agentOf, EXIT };
+module.exports = { task, stateOf, repoOf, agentOf, auth, call, tokenOf, EXIT };

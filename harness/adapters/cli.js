@@ -56,11 +56,19 @@ function versionOf(bin, env = process.env, args = ['--version']) {
 const claudeCode = {
     id: 'claude-code', name: 'Claude Code', kind: 'cli', bin: 'claude',
     start(t, ctx = {}) {
-        const mode = { read: 'plan', edit: 'acceptEdits', full: 'bypassPermissions' }[t.permission] || 'plan';
+        const o = t.options && typeof t.options === 'object' ? t.options : {};
+        // The permission level is the shared vocabulary; a caller may name the CLI's own mode instead (the conductor's
+        // "ask" is Claude Code's `default`, where every risky call goes to its permission prompt tool).
+        const mode = o.permissionMode || { read: 'plan', edit: 'acceptEdits', full: 'bypassPermissions' }[t.permission] || 'plan';
         const args = ['-p', t.prompt, '--output-format', 'stream-json', '--verbose', '--permission-mode', mode];
         if (t.model) args.push('--model', t.model);
         if (t.resume) args.push('--resume', t.resume);
         if (t.maxTurns) args.push('--max-turns', String(t.maxTurns));
+        // MCP servers this session may use (the conductor's Codes tools): a config file, and the tools it may call
+        // without asking. The permission prompt tool is the MCP tool that asks the owner (C9b's approvals inbox).
+        if (o.mcpConfig) args.push('--mcp-config', o.mcpConfig);
+        if (Array.isArray(o.allowedTools) && o.allowedTools.length) args.push('--allowedTools', o.allowedTools.join(' '));
+        if (o.permissionPromptTool) args.push('--permission-prompt-tool', o.permissionPromptTool);
         // Even unattended, a run never pushes: publishing is the person's step.
         args.push('--disallowedTools', 'Bash(git push:*)');
         const parser = jsonLines(claudeCode, (o, emit, st) => {
