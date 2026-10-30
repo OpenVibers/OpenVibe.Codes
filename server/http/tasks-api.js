@@ -7,7 +7,8 @@
  * machine, in the project of their latest /run task.
  *
  *   POST /tasks              codes.task.start    codes.task-start-request@1 → codes.task-start-result@1 (201, or 200 again)
- *   GET  /tasks/:id          codes.task.read     → { task: codes.task@1, attempts: [...], outcome }
+ *   GET  /tasks/:id          codes.task.read     → codes.task@2 (the task as codes.task@1, with its attempts and
+ *                                                   its outcome added to it)
  *   POST /tasks/:id/cancel   codes.task.cancel   → codes.task@1
  *   GET  /tasks/:id/events   codes.task.read     → the task's event stream (server-sent events)
  *   POST /tasks/:id/continue codes.task.start    → the next attempt now (a switch when an agent is named)
@@ -18,9 +19,10 @@
  * and act on their own tasks without a token. The person's task page (the codes.task@1 url) shows every task they
  * own, whoever started it. Calls count against the person's own per-actor budget (actor-limits.js), not the service's.
  *
- * Stage C2: a task's timeline is its attempts. GET /tasks/:id returns them with the task's outcome in plain words
- * ("done", "unfinished" with what is left, or "stopped"), and GET /tasks/:id/events replays the session's lines in
- * order — resumable with Last-Event-ID, a heartbeat every 15 s — with the attempt each line belongs to.
+ * Stage C2: a task's timeline is its attempts. GET /tasks/:id answers codes.task@2: the task itself with the same
+ * fields it always had, and, added to them, its attempts and its outcome in plain words ("done", "unfinished" with
+ * what is left, or "stopped"). GET /tasks/:id/events replays the session's lines in order — resumable with
+ * Last-Event-ID, a heartbeat every 15 s — with the attempt each line belongs to.
  */
 const express = require('express');
 const { serviceAuth, capabilities, http, validate } = require('openvibe-contracts');
@@ -78,11 +80,11 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         return problem(req, res, 401, 'token.required', `${cap} needs a Network service token for ${config.serviceAudience}, or a signed-in owner`);
     };
 
-    /** The task, its attempts and its outcome in plain words. */
+    /** The task, its attempts and its outcome in plain words. The task's own fields stay at the top level. */
     const timeline = async (row) => {
         const attempts = await taskStore.attempts.list(row.id);
         return {
-            task: taskStore.present(row),
+            ...taskStore.present(row),
             attempts: attempts.map((a) => taskStore.attempts.present(a)),
             outcome: { state: row.outcome || null, note: row.outcome_note || null },
         };

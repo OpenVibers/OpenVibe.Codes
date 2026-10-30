@@ -92,13 +92,19 @@ const { boot, check, done } = require('./helpers/boot');
             await db.exec('UPDATE run_tasks SET updated_at = updated_at - $2 WHERE id = $1', [task.id, 11 * 60_000]);
             const r = await call('GET', `/tasks/${task.id}`);
             assert.strictEqual(r.status, 200, JSON.stringify(r.json));
-            // The read is the task, its attempts and its outcome (stage C2).
-            const v = validate('codes.task@1', r.json.task);
+            // The read is the task (its own fields at the top level, as codes.task@1 had them), with its
+            // attempts and its outcome added to it: codes.task@2 (stage C2).
+            const v = validate('codes.task@2', r.json);
             assert.ok(v.valid, JSON.stringify(v.errors));
-            assert.strictEqual(r.json.task.state, 'succeeded');
-            assert.strictEqual(r.json.task.result.summary.length, 4000);
-            assert.deepStrictEqual(r.json.task.result.files, [{ path: 'README', added: 1, removed: 0 }]);
-            assert.deepStrictEqual(r.json.task.result.push, { pushed: false, reason: 'no token' });
+            const v1doc = { ...r.json };
+            delete v1doc.attempts; delete v1doc.outcome;
+            const v1 = validate('codes.task@1', v1doc);
+            assert.ok(v1.valid, 'the task itself still answers codes.task@1');
+            assert.strictEqual(r.json.state, 'succeeded');
+            assert.strictEqual(r.json.id, task.id, 'the task at the top level, not wrapped');
+            assert.strictEqual(r.json.result.summary.length, 4000);
+            assert.deepStrictEqual(r.json.result.files, [{ path: 'README', added: 1, removed: 0 }]);
+            assert.deepStrictEqual(r.json.result.push, { pushed: false, reason: 'no token' });
             assert.strictEqual(r.json.attempts.length, 1, 'one attempt: the task as it was asked');
             assert.strictEqual(r.json.attempts[0].n, 1);
             assert.strictEqual(r.json.attempts[0].state, 'done');
