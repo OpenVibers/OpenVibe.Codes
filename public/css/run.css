@@ -32,4 +32,10 @@
 .run-patch .del { color: var(--danger-text, var(--danger, #e5484d)); }
 .run-patch .hunk { color: var(--accent-light, #60a5fa); }
 .run-repo { overflow-wrap: break-word; }
+.run-outcome { padding: 10px 14px; border-left: 3px solid var(--accent, #3b82f6); background: var(--bg-card, #131c2e); }
+.run-proof { max-width: 820px; border: 1px solid var(--border, #1f2d47); border-radius: 12px; padding: 12px 16px; margin: 16px 0; }
+.run-proof ul { list-style: none; padding: 0; display: grid; gap: 12px; }
+.run-proof li { overflow-wrap: anywhere; }
+.run-proof li p, .run-proof li pre { margin: 4px 0 0 1.5em; color: var(--text-muted, #7386a3); white-space: pre-wrap; }
+.run-proof-state { display: inline-block; width: 1.2em; }
 .run-host { display: block; font-size: 0.55em; font-weight: 500; color: var(--text-muted, #8b9bb4); }

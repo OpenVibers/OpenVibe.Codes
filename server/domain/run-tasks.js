@@ -32,6 +32,16 @@ const httpsUrl = (v) => {
 };
 const drop = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
 
+function presentProof(items) {
+    if (!Array.isArray(items)) return undefined;
+    return items.slice(0, 50).filter((item) => item && typeof item === 'object' && typeof item.label === 'string').map((item) => drop({
+        label: item.label.slice(0, 80), passed: item.passed === true,
+        command: str(item.command, 300), summary: str(item.summary, 4000), exit_code: Number.isInteger(item.exit_code) ? item.exit_code : undefined,
+        width: Number.isInteger(item.width) && item.width > 0 && item.width <= 10000 ? item.width : undefined,
+        path: str(item.path, 1000), family: str(item.family, 80), verdict: str(item.verdict, 40), stats: str(item.stats, 4000),
+    }));
+}
+
 /** The job's result document (harness/job.js) as codes.task@1's `result`, or undefined. */
 function presentResult(d) {
     if (!d || typeof d !== 'object' || Array.isArray(d)) return undefined;
@@ -49,6 +59,9 @@ function presentResult(d) {
         patch: str(d.patch, 262144),
         patch_truncated: d.patch_truncated === true || (typeof d.patch === 'string' && d.patch.length > 262144) ? true : undefined,
         push: p,
+        proof: presentProof(d.proof),
+        outcome: str(d.outcome, 100),
+        remaining: Array.isArray(d.remaining) ? d.remaining.slice(0, 50).filter((x) => typeof x === 'string').map((x) => x.slice(0, 80)) : undefined,
         cost_usd: typeof d.cost_usd === 'number' && Number.isFinite(d.cost_usd) && d.cost_usd >= 0 ? d.cost_usd : undefined,
         duration_ms: Number.isInteger(d.duration_ms) && d.duration_ms >= 0 ? d.duration_ms : undefined,
         error: str(d.error, 1000),
