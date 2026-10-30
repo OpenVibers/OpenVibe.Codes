@@ -50,9 +50,11 @@ function createRunClient({ config, fetchImpl = globalThis.fetch, now = () => Dat
     }
     /**
      * A coding job for `subject` in `project`, only on that person's own machine. A conductor's turn asks for more: its
-     * wall time (a session that works through a plan), its TTL and its own memory, all bounded here.
+     * wall time (a session that works through a plan), its TTL and its own memory, all bounded here; and when its
+     * machine is known (`node`, the OpenVibe.Bot device id `dev_…`), the job is pinned to it (contracts 0.249.0): Run
+     * runs it nowhere else, and refuses it `409 run.job.node_offline` when the machine is away.
      */
-    async function submit({ subject, project, args, key, limits = null, ttlMs = null }) {
+    async function submit({ subject, project, args, key, limits = null, ttlMs = null, node = null }) {
         const wall = Math.max(1000, Math.min(90 * 60_000, Number(limits && limits.wall_ms) || Number(args && args.limits && args.limits.ms) || 30 * 60_000));
         const body = {
             class: 'code', artifact: { name: 'openvibe-codes', version: JOB_PROTOCOL }, args,
@@ -64,6 +66,9 @@ function createRunClient({ config, fetchImpl = globalThis.fetch, now = () => Dat
             ttl_ms: Math.max(60_000, Math.min(86_400_000, Number(ttlMs) || 45 * 60_000)),
             egress: 'public',
             requirements: { kind: 'run.code', mobility: 'job', latency_class: 'background', objective: 'balanced', trust: ['user-owned'] },
+            // The machine the job runs on, pinned: a conductor's folder and memory are there (Codes C9c). Absent, Run
+            // places the job where it fits, as before.
+            ...(node ? { node: String(node).slice(0, 64) } : {}),
         };
         const out = await call('POST', '/api/v1/jobs', { subject, project, body, key });
         return out.job;

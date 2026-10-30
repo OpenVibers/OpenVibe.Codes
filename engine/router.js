@@ -38,6 +38,51 @@ const LADDER = {
 /** The tiers a brief can fall into. */
 const TIERS = ['basic', 'research', 'standard', 'hard', 'design'];
 
+/**
+ * How full a plan's window may be and still take a new job: 95%, not 100%. A task started with 4% of a week left would
+ * run out of it mid-way, and the portal's own "low" state treats a near-full window as spent (today Command Code is at
+ * 96% of its week and must not be chosen).
+ */
+const FULL_PCT = 95;
+
+/**
+ * A limit window is full when it has no room left, or when its reset is still ahead and it is at FULL_PCT or more.
+ * `used`/`limit` and `pct` are the two shapes providers report; `resets_at` may be an ISO string or epoch ms.
+ *
+ * @param {object} w a window: { name, used, limit, pct, resets_at }
+ * @param {number} [now] the clock
+ * @returns {boolean} may a new job be started in this window?
+ */
+function windowFull(w, now = Date.now()) {
+    if (!w || typeof w !== 'object') return false;
+    const resets = w.resets_at == null || w.resets_at === '' ? null : Date.parse(String(w.resets_at));
+    if (Number.isFinite(resets) && resets > 0 && resets <= now) return false;   // it has freed since it was read
+    let pct = Number(w.pct);
+    if (!Number.isFinite(pct)) {
+        const used = Number(w.used); const limit = Number(w.limit);
+        pct = Number.isFinite(used) && Number.isFinite(limit) && limit > 0 ? (used / limit) * 100 : NaN;
+    }
+    return Number.isFinite(pct) && pct >= FULL_PCT;
+}
+
+/**
+ * Whether a runner has room, from the fleet the person's machines reported. An agent the fleet does not name is
+ * unknown, not full: the ladder keeps working before any machine has reported (and for the API-key agents, which have no
+ * plan window at all).
+ *
+ * @param {object} [fleet] the fleet per runner: { [runner]: { signed_in, windows } }
+ * @param {string} runner the runner's id
+ * @param {number} [now] the clock
+ * @returns {boolean} may this runner take a job now
+ */
+function roomFor(fleet, runner, now = Date.now()) {
+    const f = fleet && fleet[runner];
+    if (!f) return true;
+    if (f.signed_in === false) return false;
+    const windows = Array.isArray(f.windows) ? f.windows : [];
+    return !windows.some((w) => windowFull(w, now));
+}
+
 // The brief a launch prompt points at: "read /…/agents/jobs/x.brief.md and follow it" is a pointer, not a task, so
 // the job is judged by the brief it names (2026-10-29: a pin job was routed as "a short question" to a free model
 // because its prompt was one sentence long). The job's own brief counts too (jobs/<name>.brief.md, jobs/<name>.task.md).
@@ -170,13 +215,14 @@ function connected(runner, connections) {
  * @param {string} [ctx.name] the job's own name
  * @param {object} [ctx.ladder] the ladder to use (the portal's by default)
  * @param {object} [ctx.connections] the person's connections, per runner (Codes C3)
+ * @param {object} [ctx.fleet] the fleet per runner: { [runner]: { signed_in, windows } } (Codes C9c)
  * @returns {{runner: string, model: string|null, effort: string|null, tier: string, brief: string|null, why: string}|null}
  */
-function pick(prompt, { cfg, health, counts, models, runs, JOBS, name, ladder, connections } = {}) {
+function pick(prompt, { cfg, health, counts, models, runs, JOBS, name, ladder, connections, fleet } = {}) {
     const c = classify(prompt, { JOBS, name });
     const rec = track(runs);
     const reliable = (r) => { const t = rec[r]; return !t || t.done + t.failed < 4 || t.done / (t.done + t.failed) >= 0.4; };
-    const usable = (r) => cfg.subagents[r] && cfg.subagents[r].enabled && (counts[r] || 0) < cfg.subagents[r].max && health[r] && health[r].state === 'ok' && reliable(r) && connected(r, connections);
+    const usable = (r) => cfg.subagents[r] && cfg.subagents[r].enabled && (counts[r] || 0) < cfg.subagents[r].max && health[r] && health[r].state === 'ok' && reliable(r) && connected(r, connections) && roomFor(fleet, r);
     for (const [runner, model, wanted] of (ladder || LADDER)[c.tier]) {
         if (!usable(runner)) continue;
         // A model the runner no longer lists is skipped for that runner's default (lists refresh from each provider).
@@ -188,4 +234,4 @@ function pick(prompt, { cfg, health, counts, models, runs, JOBS, name, ladder, c
     return null;
 }
 
-module.exports = { LADDER, TIERS, classify, classifyText, pick, track, briefFor, forcedTier, fitEffort, stepUp, EFFORTS, connected };
+module.exports = { LADDER, TIERS, FULL_PCT, classify, classifyText, pick, track, briefFor, forcedTier, fitEffort, stepUp, EFFORTS, connected, windowFull, roomFor };

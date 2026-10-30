@@ -54,6 +54,8 @@ const INTERNAL = [`http://127.0.0.1:3000${PROBE}`, `http://2130706433${PROBE}`, 
             'server/domain/machines.js': 'OpenVibe.Network (OV_NETWORK_INTERNAL_URL, configured) /api/v1/me/nodes with the person\'s own session token: their machines and a revoke; the path id is checked against a nod_ shape, never a URL from a person',
             'server/domain/conductor.js': 'OpenVibe.Network\'s projects API (OV_NETWORK_INTERNAL_URL, configured) with the person\'s own token, for the project a conductor runs in; and the Run job stream URL run-client.js builds on its own base. No URL from a person',
             'server/domain/github.js': 'api.github.com only, at fixed paths: the public repository search and a pull request\'s state. The owner/name/number come from a Codes-stored task result and are checked against GitHub\'s id shapes before they are put in a path',
+            'server/domain/fleet.js': 'OpenVibe.Bot (CODES_BOT_INTERNAL_URL, configured) /api/v1/machines with the person\'s own session token: their machines and the fleet their Nodes reported; the path is fixed, never a URL from a person',
+            'server/domain/ship.js': 'the service\'s own GET <publicOrigin>/release.json and api.github.com\'s compare, both at fixed paths: the origin is the contracts\' service manifest, never a URL from a person; the shas are checked hex',
             'server/events-consumer.js': 'OpenVibe.Events subscriptions (EVENTS_URL, configured) at boot; no URL from a person',
             'server/events/outbox.js': 'OpenVibe.Events publish (EVENTS_URL, configured) of fixed codes.task.* payloads; no URL from a person',
         };

@@ -39,6 +39,17 @@ const age = (value) => {
     const mins = Math.max(0, Math.floor((Date.now() - ms) / 60000));
     return mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.floor(mins / 60)}h ago` : `${Math.floor(mins / 1440)}d ago`;
 };
+/** When a limit window frees, in the one phrase the page uses: "frees Tue 14:00 UTC". */
+const whenUtc = (value) => {
+    const ms = Date.parse(String(value || ''));
+    if (!Number.isFinite(ms)) return null;
+    const text = new Date(ms).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }).replace(',', '');
+    return text ? `frees ${text} UTC` : null;
+};
+const FLEET_STATE = {
+    ok: ['Has room', 'ok'], low: ['Nearly full', 'skip'], login: ['Sign in', 'bad'], limited: ['Full', 'bad'],
+    absent: ['Not installed', 'skip'], unknown: ['Not reported', 'skip'],
+};
 const repoDetails = (repo) => {
     try {
         const url = new URL(String(repo || ''));
@@ -60,7 +71,7 @@ const PROVIDER_NAMES = { anthropic: 'Anthropic', openai: 'OpenAI', deepseek: 'De
 
 function createC4Routes(ctx) {
     const r = asyncRouter();
-    const { config, store, harnesses, tasks, sso, connections, machines, userSettings, github, usage, conductor, approvals } = ctx;
+    const { config, store, harnesses, tasks, sso, connections, machines, userSettings, github, usage, conductor, approvals, fleet } = ctx;
     const db = store.db;
     const form = express.urlencoded({ extended: false, limit: '16kb' });
     const page = (req, res, title, body, extra = {}) => {
@@ -228,10 +239,17 @@ ${patch ? `<details class="c4-fold c4-fold-wide"><summary><span class="c4-row-la
         }
         const pr = await github.pullRequest(href);
         const stateWord = pr.problem ? 'Not read' : (pr.state === 'merged' ? 'Merged' : pr.state === 'closed' ? 'Closed' : 'Open');
+        // The deploy: the service's own /release.json, the same signal `ovhost status` reads (Codes C9c).
+        const deploy = asObject(pr.deploy) || {};
+        const deployWord = ({ deployed: 'Deployed', pending: 'Not live yet', waiting: 'Waiting for the merge', unknown: 'Not read' })[deploy.state] || 'Not read';
+        const deployKind = deploy.state === 'deployed' ? 'ok' : (deploy.state === 'pending' ? 'open' : 'skip');
+        const deployNote = deploy.state === 'deployed'
+            ? `release ${esc(String(deploy.release || '').slice(0, 12))}${deploy.booted_at ? `, booted ${esc(age(deploy.booted_at))}` : ''}`
+            : (deploy.detail ? esc(deploy.detail) : (deploy.service ? esc(deploy.service) : ''));
         const stateKind = pr.problem ? 'skip' : (pr.state === 'merged' ? 'ok' : pr.state === 'closed' ? 'bad' : 'open');
         return `<div class="c4-rows"><div class="c4-row c4-row-flat"><span class="c4-row-dot c4-dot-${stateKind}" aria-hidden="true"></span><span class="c4-row-label">Pull request #${esc(pr.number || '')}</span><span class="c4-row-note">${esc(pr.title || `${pr.owner || ''}/${pr.name || ''}`)}</span>${pill(stateWord, stateKind)}</div>
 <div class="c4-pr-actions"><a class="c4-opill c4-opill-primary" href="${esc(href)}" rel="noopener noreferrer">${icon('<path d="M14 3h7v7M21 3l-9 9"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/>')}<span>Open on GitHub</span></a>${pr.branch ? `<span class="c4-chip">${esc(pr.branch)} → ${esc(pr.base || 'base')}</span>` : ''}</div>
-${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="c4-facts"><div><dt>CI</dt><dd>${pill(pr.ci || 'No checks reported', pr.ci === 'Passed' ? 'ok' : pr.ci === 'Failed' || pr.ci === 'Errored' ? 'bad' : 'skip')}</dd></div><div><dt>Merge</dt><dd>${pill(pr.merge || 'Open', pr.state === 'merged' ? 'ok' : pr.merge === 'Has conflicts' ? 'bad' : 'skip')}</dd></div><div><dt>Checked</dt><dd>${esc(age(pr.checked_at))}</dd></div></dl>`}</div>`;
+${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="c4-facts"><div><dt>CI</dt><dd>${pill(pr.ci || 'No checks reported', pr.ci === 'Passed' ? 'ok' : pr.ci === 'Failed' || pr.ci === 'Errored' ? 'bad' : 'skip')}</dd></div><div><dt>Merge</dt><dd>${pill(pr.merge || 'Open', pr.state === 'merged' ? 'ok' : pr.merge === 'Has conflicts' ? 'bad' : 'skip')}</dd></div><div><dt>Deploy</dt><dd>${pill(deployWord, deployKind)}${deployNote ? ` <span class="c4-hint">${deployNote}</span>` : ''}</dd></div><div><dt>Checked</dt><dd>${esc(age(pr.checked_at))}</dd></div></dl>`}</div>`;
     };
 
     // ── The conductor (C9b) ─────────────────────────────────────────────────────────────────────────────────────
@@ -485,6 +503,48 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
         return res.redirect(303, `/approvals?${out ? 'ok' : 'error'}=${encodeURIComponent(out ? (decision === 'allow' ? 'Allowed' : 'Denied') : 'that approval is gone')}`);
     });
 
+    // ── Agents: the fleet each machine reports, then the person's connections (keys live in OpenVibe.AI) ────────
+    /**
+     * One calm row per agent: its state, a meter for each limit window and when it frees. The fleet comes from the
+     * machines' heartbeats through Bot (`fleet.refresh` writes it, `fleet.agents` reads it), so the page keeps the last
+     * reading when Bot or a machine does not answer.
+     */
+    const fleetCard = async (req) => {
+        let problem = null;
+        let refreshed = null;
+        if (fleet) {
+            try {
+                refreshed = await sso.asViewer(req, res, (token) => fleet.refresh(req.viewer.subject, token));
+                if (refreshed && refreshed.problem) problem = refreshed.problem;
+            } catch (e) {
+                problem = { detail: String((e && e.message) || 'the fleet could not be read').slice(0, 240) };
+            }
+        }
+        const rows = fleet ? await fleet.agents(req.viewer.subject, harnesses).catch(() => []) : [];
+        const latest = fleet ? await fleet.latest(req.viewer.subject).catch(() => ({ at: null })) : { at: null };
+        const meter = (w) => {
+            const pct = Math.max(0, Math.min(100, Number(w.pct) || 0));
+            const full = Number(w.pct) >= 95;
+            const free = whenUtc(w.resets_at);
+            const used = w.used != null && w.limit != null ? `${w.used} of ${w.limit}` : (w.pct != null ? `${Math.round(Number(w.pct))}% used` : '');
+            return `<div class="c4-meter"><span class="c4-meter-name">${esc(w.name || 'window')}</span><span class="c4-meter-track" role="img" aria-label="${esc(`${w.name || 'window'}: ${Math.round(pct)}% used${full ? ', full' : ''}`)}"><span class="c4-meter-fill${full ? ' is-full' : ''}" style="width:${pct}%"></span></span><span class="c4-meter-note">${esc(free || used || 'no reading')}</span></div>`;
+        };
+        const list = rows.map((row) => {
+            const [label, kind] = FLEET_STATE[row.state] || FLEET_STATE.unknown;
+            const where = (row.machines || []).map((m) => m.name || m.machine).filter(Boolean).slice(0, 3).join(', ');
+            const windows = row.windows && row.windows.length
+                ? row.windows.map(meter).join('')
+                : '<div class="c4-meter c4-meter-quiet"><span class="c4-meter-name">No limit window</span><span class="c4-meter-note">the agent did not report one</span></div>';
+            return `<li class="c4-row c4-fleet-row"><span class="c4-row-dot${row.state === 'ok' ? ' c4-dot-ok' : row.state === 'login' || row.state === 'limited' ? ' c4-dot-bad' : ''}" aria-hidden="true"></span><span class="c4-row-label">${esc(row.name)}</span><span class="c4-row-note">${esc(where || 'on your machine')}${row.signed_in ? '' : ' · not signed in'}</span>${pill(label, kind)}<div class="c4-fleet-windows">${windows}</div></li>`;
+        }).join('');
+        const at = latest && latest.at ? `Last reported ${age(latest.at)}.` : '';
+        return `<section class="c4-card" id="fleet"><div class="c4-card-head"><h2>Your fleet</h2><span class="c4-muted">${esc(at)}</span></div>
+<p class="c4-sub">What each agent on your machines has left. A machine reports it with its heartbeat; no key or account name leaves it.</p>
+${problem ? note(`The fleet could not be refreshed: ${esc(problem.detail || 'Bot did not answer')}. ${latest && latest.at ? 'The last reading is below.' : ''}`, 'bad') : ''}
+${list ? `<ul class="c4-rows c4-fleet">${list}</ul>` : `<div class="c4-emptyline">No machine has reported its agents yet. <a href="/machines">Pair a machine</a>, and its agents appear here while it is connected.</div>`}
+</section>`;
+    };
+
     // ── Agents: the person's connections (keys live in OpenVibe.AI) ────────────────────────────────────────────
     const connectionsCard = async (req) => {
         let list = { keys: [], plans: [] };
@@ -512,7 +572,7 @@ ${rows || plans ? `<ul class="c4-rows">${rows}${plans}</ul>` : `<div class="c4-e
     };
 
     r.get('/agents', async (req, res) => {
-        const content = `${header('Agents', 'The agents your tasks can run, and the keys behind them.')}${viewer(req) ? `${flash(req)}${await connectionsCard(req)}` : signIn(req)}`;
+        const content = `${header('Agents', 'The agents your tasks can run, what they have left, and the keys behind them.')}${viewer(req) ? `${flash(req)}${await fleetCard(req)}${await connectionsCard(req)}` : signIn(req)}`;
         page(req, res, 'Agents', wrap('/agents', content, !!viewer(req)));
     });
     r.post('/agents/connections', form, async (req, res) => {

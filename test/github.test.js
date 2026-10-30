@@ -39,6 +39,22 @@ const json = (status, body) => ({ ok: status >= 200 && status < 300, status, jso
         assert.strictEqual(calls.length, 2, 'the second read comes from the cache');
     });
 
+    await check('a pull request carries its merge commit and the deploy state of the service it builds', async () => {
+        const fetchImpl = async (url) => {
+            if (url.endsWith('/pulls/12')) return json(200, { state: 'closed', merged: true, merge_commit_sha: 'a1b2c3d4e5f6', title: 'Ship it', head: { sha: 'abcdef1234', ref: 'codes/x' }, base: { ref: 'main' } });
+            if (url.includes('/status')) return json(200, { state: 'success' });
+            return json(404, {});
+        };
+        const seen = [];
+        const ship = { async deployOf(what) { seen.push(what); return { state: 'deployed', service: 'codes', release: 'a1b2c3d4e5f6' }; } };
+        const gh = createGitHub({ config: {}, fetchImpl, ship, log: { warn() {} } });
+        const pr = await gh.pullRequest('https://github.com/OpenVibers/OpenVibe.Codes/pull/12');
+        assert.strictEqual(pr.merged, true);
+        assert.strictEqual(pr.merge_commit_sha, 'a1b2c3d4e5f6');
+        assert.strictEqual(pr.deploy.state, 'deployed');
+        assert.deepStrictEqual(seen, [{ repo: 'OpenVibers/OpenVibe.Codes', mergeCommitSha: 'a1b2c3d4e5f6', merged: true }]);
+    });
+
     await check('a pull request GitHub does not answer is a problem, never a guessed state', async () => {
         const gh = createGitHub({ config: {}, fetchImpl: async () => json(404, { message: 'Not Found' }), log: { warn() {} } });
         const pr = await gh.pullRequest('https://github.com/o/private/pull/3');

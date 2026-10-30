@@ -18,6 +18,8 @@
  * anywhere but api.github.com.
  */
 
+const { createShip } = require('./ship');
+
 const OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,38})$/;
 const NAME = /^[A-Za-z0-9._-]{1,100}$/;
 const PR_URL = /^https:\/\/github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/pull\/(\d{1,10})\/?$/;
@@ -58,10 +60,12 @@ function ciWord(status) {
     return ({ success: 'Passed', failure: 'Failed', error: 'Errored', pending: 'Running' })[state] || null;
 }
 
-function createGitHub({ config = {}, store = null, fetchImpl = globalThis.fetch, log = console } = {}) {
+function createGitHub({ config = {}, store = null, fetchImpl = globalThis.fetch, log = console, ship = null } = {}) {
     const token = String((config.github && config.github.token) || '').trim();
     const cache = new Map();
     const searches = new Map();
+    // The host's own deploy signal: the service's /release.json, which `ovhost status` reads too (Codes C9c).
+    const deployments = ship || createShip({ config, fetchImpl, log });
 
     const headers = () => ({
         Accept: 'application/vnd.github+json',
@@ -171,10 +175,14 @@ function createGitHub({ config = {}, store = null, fetchImpl = globalThis.fetch,
                     url, number: parts.number, owner: parts.owner, name: parts.name,
                     state: doc.merged ? 'merged' : (doc.state === 'closed' ? 'closed' : 'open'),
                     merge: mergeWord(doc),
+                    merged: !!doc.merged,
+                    merge_commit_sha: doc.merge_commit_sha ? String(doc.merge_commit_sha).slice(0, 40) : null,
                     ci,
                     title: doc.title ? String(doc.title).slice(0, 200) : null,
                     branch: doc.head && doc.head.ref ? String(doc.head.ref).slice(0, 120) : null,
                     base: doc.base && doc.base.ref ? String(doc.base.ref).slice(0, 120) : null,
+                    // CI, merge, then the deploy the host reports for the service this repository builds.
+                    deploy: await deployments.deployOf({ repo: `${parts.owner}/${parts.name}`, mergeCommitSha: doc.merge_commit_sha || null, merged: !!doc.merged }),
                     checked_at: new Date().toISOString(),
                 };
             }

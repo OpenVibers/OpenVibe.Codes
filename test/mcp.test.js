@@ -177,13 +177,19 @@ async function fakeGitHub() {
                 assert.strictEqual(typeof a.installed, 'boolean');
                 assert.ok(Array.isArray(a.windows));
             }
+            // Codes answers with every machine's stored report; Bot is not running here, and the answer says so.
+            assert.ok(Array.isArray(out.machines), 'the stored fleet of every machine');
+            assert.ok(out.problem && /bot|answer|refused|fetch/i.test(JSON.stringify(out.problem)), JSON.stringify(out.problem));
         });
 
-        await check('codes_ship_status: a pull request\'s CI and merge state, from GitHub', async () => {
+        await check('codes_ship_status: a pull request\'s CI, merge and deploy state, from GitHub', async () => {
             const out = await mcp.call('codes_ship_status', { repo: 'octocat/Hello-World', pr: 7 });
             assert.strictEqual(out.state, 'open');
             assert.strictEqual(out.ci, 'Passed');
+            assert.strictEqual(out.merged, false);
             assert.strictEqual(out.title, 'Codes C9b: the conductor');
+            assert.strictEqual(out.deploy.state, 'unknown', 'Codes knows no service for this repository');
+            assert.strictEqual(out.deploy.service, null);
         });
 
         await check('codes_approve without a conductor task says so, instead of asking nothing', async () => {

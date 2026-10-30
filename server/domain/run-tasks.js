@@ -140,7 +140,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -164,7 +164,22 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     // The answer is cached for a minute, so a task that ends does not ask again for every attempt.
     const connectionCache = new Map();
     const CONNECTION_TTL_MS = 60_000;
+    // The fleet the person's machines reported (Codes C9c), cached for a minute like the connections: one task's
+    // routing and its follow-ups read the same reading, and a page view does not ask Bot for every task.
+    const fleetCache = new Map();
+    const FLEET_TTL_MS = 60_000;
     let providerMap = null;
+    async function fleetFor(subject) {
+        if (!fleet || !subject) return null;
+        const hit = fleetCache.get(subject);
+        if (hit && hit.until > store.now()) return hit.value;
+        let value = null;
+        try { value = await fleet.forRouter(subject, (agent) => attemptStore.RUNNER_OF[agent] || null); } catch (e) {
+            log.warn(`[Codes] the fleet of ${subject} could not be read: ${String((e && e.message) || e).slice(0, 200)}`);
+        }
+        fleetCache.set(subject, { value, until: store.now() + FLEET_TTL_MS });
+        return value;
+    }
     async function personConnections(subject) {
         if (!connections || !subject) return null;
         const hit = connectionCache.get(subject);
@@ -364,41 +379,53 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     async function start({ subject, project, args, via = null, key = null, actorRef = null }) {
         const id = store.newId('tsk');
         const at = store.now();
+        // A task with no agent named is `auto` (Codes C9c): the router reads the fleet — who is signed in, whose window
+        // still has room — and the task is started on the agent it picks. Never a fixed agent, and never an Anthropic one.
+        let agent = args.agent || null;
+        let model = args.model || null;
+        let why = agent ? `the first try, with ${attemptStore.nameOf(agent)}` : 'the first try, with the agent that fits the task';
+        if (!agent) {
+            const f = await fleetFor(subject);
+            const picked = attemptStore.nextAgent(args.prompt, { ...attemptStore.routing(f), fleet: f }, null);
+            if (picked) { agent = picked.agent; model = picked.model || null; why = picked.why || why; }
+        }
+        const runArgs = { ...args, agent, model };
         const actorRefValue = actorRef && typeof actorRef === 'object' && !Array.isArray(actorRef) ? JSON.stringify(actorRef) : null;
         let inserted;
         await store.tx(async () => {
             inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $13) RETURNING *`,
-            [id, subject, project, args.repo || 'bench://', args.ref, args.prompt, args.agent, !!args.push, !!(args.push && args.push.pull_request), via, key, actorRefValue, at]);
+            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, at]);
             await taskOutbox.emitTask(inserted, null);
             return inserted;
         });
         // The task's first attempt: every Run job is one attempt, and this one is the task as it was asked.
         // The budget of the attempt: the task's limits (a benchmark's per-task limits) or the person's default.
-        const budget = budgetFor(args.limits);
+        const budget = budgetFor(runArgs.limits);
         const first = await attemptStore.create({
-            task: inserted, agent: args.agent || null, model: args.model || null,
-            why: args.agent ? `the first try, with ${attemptStore.nameOf(args.agent)}` : 'the first try, with the agent that fits the task',
+            task: inserted, agent: agent || null, model: model || null, why,
             kind: 'first', state: 'queued', budget,
         });
         let job;
         try {
             // The job's harness runs with a short-lived run token that names the person (Codes C3): the environment
             // travels with the job's input and the machine's worker hands it to the harness.
-            const env = await harnessEnv({ subject, taskId: id, attemptId: first.attempt.id, agent: args.agent || null, limits: args.limits });
-            job = await run.submit({ subject, project, args: env ? { ...args, env } : args, key: id });
+            const env = await harnessEnv({ subject, taskId: id, attemptId: first.attempt.id, agent: agent || null, limits: runArgs.limits });
+            job = await run.submit({ subject, project, args: env ? { ...runArgs, env } : runArgs, key: id });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             await attemptStore.end(first.attempt.id, { state: 'failed', reason: 'error', finished_at: store.iso() });
-            return await store.tx(async () => {
-                const failed = await db.one(`UPDATE run_tasks SET state = 'failed', error = $2, outcome = 'unfinished', outcome_note = $3, finished_at = $4::timestamptz, updated_at = $5
+            const failed = await store.tx(async () => {
+                const row = await db.one(`UPDATE run_tasks SET state = 'failed', error = $2, outcome = 'unfinished', outcome_note = $3, finished_at = $4::timestamptz, updated_at = $5
                     WHERE id = $1 RETURNING *`, [id, why, `the task could not start: ${why}`, store.iso(), store.now()]);
-                await taskOutbox.emitTask(failed, 'queued');
+                await taskOutbox.emitTask(row, 'queued');
                 if (benchAttemptEnded && actorRef && asObject(actorRef).bench) {
-                    await benchAttemptEnded(failed).catch((publishError) => log.warn(`[Codes] benchmark publish failed for task ${failed.id}: ${String(publishError && publishError.message).slice(0, 200)}`));
+                    await benchAttemptEnded(row).catch((publishError) => log.warn(`[Codes] benchmark publish failed for task ${row.id}: ${String(publishError && publishError.message).slice(0, 200)}`));
                 }
-                return failed;
+                return row;
             });
+            if (notices) await notices.needs(failed, `the task could not start: ${why}`);
+            return failed;
         }
         await attemptStore.bind(first.attempt.id, { job_id: job.id, state: 'queued' });
         return await store.tx(async () => {
@@ -462,6 +489,21 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     }
 
     /**
+     * Tell the person once about a task's outcome (Codes C9c): done, or needs them. The notice module claims the task
+     * and state before it sends, so a redelivered event or a second caller changes nothing. A stopped task is the
+     * person's own act and tells them nothing.
+     */
+    async function notifyOutcome(row) {
+        if (!notices || !row) return;
+        if (row.outcome === 'done') {
+            const summary = String((asObject(row.result) || {}).summary || '').trim();
+            await notices.done(row, summary || row.outcome_note || 'the task finished');
+        } else if (row.outcome === 'unfinished') {
+            await notices.needs(row, row.outcome_note || row.error || 'the task needs a person to carry on');
+        }
+    }
+
+    /**
      * An attempt ended: the engine decides what happens next (server/domain/attempts.js) and this carries the
      * decision out — a follow-up attempt, or the task's outcome in plain words.
      *
@@ -484,20 +526,24 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             const note = ended && ended.reason === 'budget' && ['usd', 'tokens'].includes(ended.budget_hit)
                 ? attemptStore.budgetNote(ended)
                 : (done ? 'benchmark attempt finished' : (row.error || 'benchmark attempt failed'));
-            return await db.one('UPDATE run_tasks SET outcome = $2, outcome_note = $3, updated_at = $4 WHERE id = $1 RETURNING *',
+            const saved = await db.one('UPDATE run_tasks SET outcome = $2, outcome_note = $3, updated_at = $4 WHERE id = $1 RETURNING *',
                 [row.id, done ? 'done' : 'unfinished', note, store.now()]);
+            await notifyOutcome(saved);
+            return saved;
         }
         const attempts = await attemptStore.list(row.id);
         const ending = attempts[attempts.length - 1];
         if (!ending || !ENDED.has(ending.state)) return row;
         // The proof this attempt's machine collected: the items are kept, and each one is an event on the stream.
         const collected = await recordProof(row, ending);
-        const plan = await attemptStore.decide({ task: row, attempts, ending, result: row.result });
+        const plan = await attemptStore.decide({ task: row, attempts, ending, result: row.result, fleet: await fleetFor(row.subject) });
         if (plan.outcome) {
             // The outcome in plain words: what the engine decided, and what the proof says about it.
             const outcome = taskProof.outcomeOf(collected, { state: plan.outcome, note: plan.note });
-            return await db.one('UPDATE run_tasks SET outcome = $2, outcome_note = $3, updated_at = $4 WHERE id = $1 RETURNING *',
+            const saved = await db.one('UPDATE run_tasks SET outcome = $2, outcome_note = $3, updated_at = $4 WHERE id = $1 RETURNING *',
                 [row.id, outcome.state, outcome.note, store.now()]);
+            await notifyOutcome(saved);
+            return saved;
         }
         if (!plan.kind) return row;
         const done = await startFollowUp(row, plan, ending);
@@ -542,6 +588,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             await attemptStore.end(attempt.id, { state: 'failed', reason: 'error', finished_at: store.iso() });
             const failed = await db.one(`UPDATE run_tasks SET outcome = 'unfinished', outcome_note = $2, updated_at = $3 WHERE id = $1 RETURNING *`,
                 [row.id, `the next attempt could not be prepared: ${e.message}`, store.now()]);
+            await notifyOutcome(failed);
             return { attempt, created: true, row: failed, error: e.message };
         }
         let job;
@@ -552,6 +599,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             await attemptStore.end(attempt.id, { state: 'failed', reason: 'error', finished_at: store.iso() });
             const failed = await db.one(`UPDATE run_tasks SET outcome = 'unfinished', outcome_note = $2, updated_at = $3 WHERE id = $1 RETURNING *`,
                 [row.id, `the next attempt could not start: ${why}`, store.now()]);
+            await notifyOutcome(failed);
             return { attempt, created: true, row: failed, error: why };
         }
         await attemptStore.bind(attempt.id, { job_id: job.id, state: 'queued' });
@@ -613,6 +661,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             await attemptStore.end(attempt.id, { state: 'failed', reason: 'error', finished_at: store.iso() });
             const failed = await db.one(`UPDATE run_tasks SET state = 'failed', error = $2, outcome = 'unfinished', outcome_note = $3, finished_at = $4::timestamptz, updated_at = $5 WHERE id = $1 RETURNING *`,
                 [row.id, why, `the next attempt could not start: ${why}`, store.iso(), store.now()]);
+            await notifyOutcome(failed);
             return { error: why, row: failed, attempt };
         }
         await attemptStore.bind(attempt.id, { job_id: job.id, state: 'queued' });

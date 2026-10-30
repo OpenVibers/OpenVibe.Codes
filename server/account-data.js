@@ -28,12 +28,15 @@ const TASK_ROWS_MAX = 20000;
 const TABLES = [
     {
         table: 'run_tasks', subject: 'subject', file: 'run-tasks.json', order: 'created_at',
-        columns: ['id', 'project_id', 'job_id', 'repo', 'ref', 'prompt', 'agent', 'push', 'pull_request', 'state', 'result', 'error', 'started_at', 'finished_at', 'created_at', 'updated_at'],
+        columns: ['id', 'project_id', 'job_id', 'repo', 'ref', 'prompt', 'agent', 'push', 'pull_request', 'state', 'result', 'error', 'started_at', 'finished_at', 'created_at', 'updated_at', 'machine', 'pin'],
         // Erased by extraErase below, after the rows that point at these task ids (the SDK deletes the table's rows
         // before calling it, so a default delete here would lose the ids first).
         erase: { keep: 'erased with its task-keyed rows by the service extraErase' },
     },
     { table: 'codes_user_settings', subject: 'subject', file: 'settings.json', order: 'updated_at' },
+    // What each of the person's machines reported with its heartbeat (Codes C9c): labels, numbers and times only, no
+    // key, token or account name. Theirs to export and to erase.
+    { table: 'codes_machine_fleet', subject: 'subject', file: 'fleet.json', order: 'machine', columns: ['machine', 'node_id', 'name', 'agent', 'installed', 'signed_in', 'windows', 'online', 'reported_at', 'updated_at'] },
     // The token itself is never stored; its jti is an internal handle and stays out of the export.
     { table: 'codes_run_tokens', subject: 'subject', file: 'run-tokens.json', order: 'created_at', columns: ['id', 'task_id', 'attempt_id', 'provider', 'expires_at', 'created_at'] },
     { table: 'codes_outbox', subject: 'subject', file: 'events-sent.json', order: 'created_at', columns: ['event_id', 'topic', 'created_at', 'published_at'] },
@@ -54,6 +57,8 @@ const TASK_KEYED = [
     // The approvals the person decided, and the ones still waiting when their account is erased.
     { table: 'codes_approvals', file: 'approvals.json', columns: 'l.id, l.task_id, l.tool, l.summary, l.decision, l.message, l.created_at, l.decided_at', order: 'l.created_at ASC', kind: 'approvals', max: TASK_ROWS_MAX },
     { table: 'codes_events_inbox', file: null, kind: 'events_received' },
+    // The one notice sent per task and state (Codes C9c): no content of its own, erased with the task, not exported.
+    { table: 'codes_notices', file: null, kind: 'notices' },
 ];
 
 async function exists(q, table) {

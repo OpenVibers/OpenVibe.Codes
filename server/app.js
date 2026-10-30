@@ -51,6 +51,8 @@ const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
 const { createForgejoClient } = require('./domain/forgejo');
 const { createMachines } = require('./domain/machines');
+const { createFleet } = require('./domain/fleet');
+const { createNotices } = require('./domain/notices');
 const { createUserSettings } = require('./domain/user-settings');
 const { createGitHub } = require('./domain/github');
 const { createUsage } = require('./domain/usage');
@@ -85,18 +87,22 @@ async function createApp(opts = {}) {
     const runTokens = createRunTokens({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The task's attempts (stage C2): every Run job is one attempt, and the engine decides what happens next.
     const attempts = createAttempts({ store, config, log, harnesses });
+    // The fleet (C9c): each machine's agents and limit windows, reported with its heartbeat and read from Bot.
+    const fleet = createFleet({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log, now: store.now });
+    // A person's choices (their notification switches) and the notices a task sends once (C9c).
+    const userSettings = createUserSettings({ store });
+    const notify = opts.notify || createNotify({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    const notices = createNotices({ store, config, notify, userSettings, log });
     const benchPublisher = createBenchPublisher({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
-    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens, attempts, benchPublisher };
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
+    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher };
     ctx.forgejo = createForgejoClient({ config, log });
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
-    ctx.userSettings = createUserSettings({ store });
     ctx.github = createGitHub({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
     ctx.usage = createUsage({ store });
     // The conductor (Codes C9b) and its approvals inbox. The conductor starts Run jobs and reads their events through
     // tasks, so the two are wired to each other here, not in a constructor (which would be a cycle).
-    ctx.notify = opts.notify || createNotify({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     ctx.approvals = createApprovals({ store, config, log, notify: ctx.notify, userSettings: ctx.userSettings });
     ctx.conductor = createConductor({
         store, config, log, run, attempts, tasks, sessions, approvals: ctx.approvals, notify: ctx.notify,
@@ -202,7 +208,7 @@ async function createApp(opts = {}) {
     // Run on your machine (plan T16): coding tasks on the person's own machine, through OpenVibe Run, from the /run
     // pages below or, for a first-party service acting for the person, from /api/v1/tasks (codes.task.*).
     app.use('/api/v1', createApi(ctx));
-    app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, actorLimits: ctx.actorLimits, log }));
+    app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, fleet: ctx.fleet, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, github: ctx.github, actorLimits: ctx.actorLimits, log }));
     // A person's connections: their own provider keys (stored in OpenVibe.AI, never here) and their machines' plans.
     app.use('/api/v1', createConnectionsApi({ config, store, connections, actorLimits: ctx.actorLimits, log }));
@@ -210,7 +216,7 @@ async function createApp(opts = {}) {
     // The conductor's own routes (Codes C9b): its turns, sub-tasks, and the approvals inbox the MCP tools speak to.
     app.use('/api/v1', createConductorApi({
         config, store, keys, harnesses, tasks, conductor: ctx.conductor, approvals: ctx.approvals,
-        machines: ctx.machines, actorLimits: ctx.actorLimits, log,
+        machines: ctx.machines, fleet: ctx.fleet, actorLimits: ctx.actorLimits, log,
     }));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
 

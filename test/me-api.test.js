@@ -48,7 +48,9 @@ const { boot, check, done } = require('./helpers/boot');
             // The harness's environment (Codes C3) is not part of the task's own arguments: it carries the run token.
             const { env, ...submitted } = submit.args;
             const args = Object.fromEntries(['repo', 'ref', 'prompt', 'permission', 'push', 'agent', 'model'].map((key) => [key, submitted[key]]));
-            assert.deepStrictEqual(args, { repo: ask.repo, ref: null, prompt: ask.prompt, permission: 'edit', push: null, agent: null, model: null });
+            // A task with no agent named is auto (Codes C9c): the router names the agent it picked, so the task and its
+            // first attempt carry it (no fleet has been reported here, so the standard ladder starts at MiniMax).
+            assert.deepStrictEqual(args, { repo: ask.repo, ref: null, prompt: ask.prompt, permission: 'edit', push: null, agent: 'minimax-code', model: null });
             assert.deepStrictEqual(Object.keys(env || {}).sort(), ['OPENAI_API_KEY', 'OPENAI_BASE_URL'], 'the harness gets a run token and OpenVibe.AI\'s address');
         });
 

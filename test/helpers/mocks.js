@@ -390,4 +390,28 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
     };
 }
 
-module.exports = { startNetwork, signJwt };
+/**
+ * An in-process stand-in for the part of OpenVibe.Bot Codes reads (Codes C9c): GET /api/v1/machines, the person's own
+ * machines with their fleet and their Network id. `machines` are seeded with addMachine({ id: 'dev_…', node_id,
+ * name, online, fleet, fleet_at }) — the device id is what Run pins a job to, the node id what Network knows it by.
+ * Every request is recorded, with its Bearer, so a test can assert who read what.
+ */
+async function startBot() {
+    const st = { machines: [], requests: [], down: false };
+    const srv = await listen((req, raw, json) => {
+        const url = new URL(req.url, 'http://x');
+        st.requests.push({ method: req.method, path: url.pathname, authorization: String(req.headers.authorization || '') });
+        if (st.down) return json(503, { code: 'bot.unavailable', detail: 'Bot is restarting' });
+        if (url.pathname !== '/api/v1/machines') return json(404, { code: 'route.not_found', detail: 'no such route' });
+        if (!String(req.headers.authorization || '').startsWith('Bearer ')) return json(401, { code: 'auth.required', detail: 'sign in to see your machines' });
+        return json(200, { machines: st.machines });
+    });
+    return {
+        url: srv.url, state: st, requests: st.requests,
+        addMachine(m) { const row = { online: true, fleet: null, fleet_at: null, ...m }; st.machines.push(row); return row; },
+        setDown(v) { st.down = v; },
+        close: srv.close,
+    };
+}
+
+module.exports = { startNetwork, startBot, signJwt };

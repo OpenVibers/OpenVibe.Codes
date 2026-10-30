@@ -107,6 +107,9 @@ function load(env = process.env) {
             retentionDays: Math.max(1, int(env.CODES_SESSION_RETENTION_DAYS, 90)),
             retentionIntervalMs: Math.max(60_000, int(env.CODES_SESSION_RETENTION_INTERVAL_MS, 86_400_000)),
         },
+        // OpenVibe.Bot (Codes C9c): a person's machines, the fleet each one reports with its heartbeat, and the device
+        // id Run places a job on. Codes reads it with the person's own token, on the loopback.
+        bot: { internalUrl: trim(env.CODES_BOT_INTERNAL_URL || 'http://127.0.0.1:4630') },
         // OpenVibe.Run (plan T16): a coding task on the person's own machine is a Run job Codes starts for them.
         run: { url: trim(env.CODES_RUN_URL || 'http://127.0.0.1:4920') },
 
@@ -133,7 +136,7 @@ function load(env = process.env) {
         // Anthropic one: the conductor is the only Anthropic session).
         conductor: {
             wallMs: Math.max(60_000, int(env.CODES_CONDUCTOR_TURN_MS, 4 * 60 * 60_000)),
-            subagentAgent: String(env.CODES_CONDUCTOR_SUBAGENT_AGENT || 'codex').trim() || 'codex',
+            subagentAgent: String(env.CODES_CONDUCTOR_SUBAGENT_AGENT || 'auto').trim() || 'auto',
         },
         // The event stream of a task (GET /api/v1/tasks/:id/events): the heartbeat that keeps a connection alive.
         sse: { heartbeatMs: Math.max(1000, int(env.CODES_SSE_HEARTBEAT_MS, 15_000)) },

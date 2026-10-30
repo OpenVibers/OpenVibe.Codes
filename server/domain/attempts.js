@@ -25,19 +25,21 @@
 const { chain, budget, router } = require('../../engine');
 
 /** Codes' harness ids and the engine's short runner ids for the same harness. */
-const RUNNER_OF = { 'claude-code': 'claude', codex: 'cx', 'command-code': 'cc', opencode: 'oc', deepseek: 'dsh' };
-const HARNESS_OF = { claude: 'claude-code', cx: 'codex', cc: 'command-code', oc: 'opencode', dsh: 'deepseek' };
+const RUNNER_OF = { 'claude-code': 'claude', codex: 'cx', 'command-code': 'cc', opencode: 'oc', deepseek: 'dsh', 'minimax-code': 'mm' };
+const HARNESS_OF = { claude: 'claude-code', cx: 'codex', cc: 'command-code', oc: 'opencode', dsh: 'deepseek', mm: 'minimax-code' };
 
-/** The order a runner switch tries the harnesses in (the ladder's order, flattened). */
-const FALLBACK_ORDER = ['cx', 'claude', 'cc', 'oc', 'dsh'];
+/** The order a runner switch tries the harnesses in (the ladder's order, flattened). Never Claude: a sub-task is never
+ *  an Anthropic one (Codes C9b's rule), so the conductor's session stays the only Anthropic work. */
+const FALLBACK_ORDER = ['cx', 'mm', 'cc', 'oc', 'dsh'];
 
-/** Which harnesses may take which kind of task, cheapest first (the engine's ladder, Codes' harnesses). */
+/** Which harnesses may take which kind of task, cheapest first (the engine's ladder, Codes' harnesses). Claude Code is
+ *  absent on purpose: it is the conductor's own session, never a sub-task's. */
 const TIER_ORDER = {
-    basic: ['opencode', 'command-code', 'deepseek'],
-    research: ['codex', 'opencode', 'deepseek'],
-    standard: ['codex', 'claude-code', 'command-code', 'opencode', 'deepseek'],
-    hard: ['codex', 'claude-code', 'deepseek'],
-    design: ['codex', 'claude-code', 'opencode'],
+    basic: ['opencode', 'command-code', 'minimax-code', 'deepseek'],
+    research: ['codex', 'minimax-code', 'deepseek', 'opencode'],
+    standard: ['minimax-code', 'codex', 'command-code', 'opencode', 'deepseek'],
+    hard: ['codex', 'minimax-code', 'deepseek'],
+    design: ['codex', 'minimax-code', 'opencode', 'deepseek'],
 };
 const TIER_EFFORT = { basic: 'low', research: 'medium', standard: 'high', hard: 'high', design: 'high' };
 
@@ -213,13 +215,14 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
         );
     }
 
-    /** The engine's own vocabulary for Codes' harnesses: the ladder, the health and the catalogs it routes with. */
-    function routing() {
+    /** The engine's own vocabulary for Codes' harnesses: the ladder, the health, the catalogs and the fleet it routes
+     *  with. Claude Code is off here: a sub-task is never an Anthropic one (the conductor's session is the exception). */
+    function routing(fleet = null) {
         const subagents = {}; const models = {}; const runners = [];
         for (const [harnessId, runner] of Object.entries(RUNNER_OF)) {
             const offer = catalog.get(harnessId);
             if (!offer) continue;
-            subagents[runner] = { enabled: true, max: 4, model: null };
+            subagents[runner] = { enabled: harnessId !== 'claude-code', max: 4, model: null };
             models[runner] = (offer.agents || []).map((a) => a.model).filter(Boolean);
             runners.push(runner);
         }
@@ -229,14 +232,14 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
         for (const tier of router.TIERS) {
             ladder[tier] = (TIER_ORDER[tier] || []).map((id) => {
                 const runner = RUNNER_OF[id];
-                const offer = catalog.get(id);
-                const agent = offer && offer.agents && offer.agents[0];
-                return [runner, agent ? agent.model : null, TIER_EFFORT[tier]];
-            }).filter(([runner, model]) => subagents[runner] && (!model || models[runner].includes(model)));
+                // No model: each harness runs its own default (the offer's model is the harness's own label, not a
+                // model id to pass on the command line). A caller that names a model still gets it through args.model.
+                return [runner, null, TIER_EFFORT[tier]];
+            }).filter(([runner]) => subagents[runner]);
         }
         return {
-            cfg: { subagents, budget: config.budget || {}, fallback: { order: FALLBACK_ORDER.filter((r) => subagents[r]) } },
-            health, counts: {}, models, runners, ladder,
+            cfg: { subagents, budget: config.budget || {}, fallback: { order: FALLBACK_ORDER.filter((r) => subagents[r] && subagents[r].enabled) } },
+            health, counts: {}, models, runners, ladder, fleet,
         };
     }
 
@@ -250,7 +253,9 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
             if (!sub || !sub.enabled) return false;
             if ((ctx.counts[runner] || 0) >= sub.max) return false;
             const h = ctx.health[runner];
-            return !!h && h.state === 'ok';
+            if (!h || h.state !== 'ok') return false;
+            // The fleet: no job goes to an agent whose window is full or that is not signed in on any machine.
+            return router.roomFor(ctx.fleet, runner);
         };
         const picked = router.pick(prompt, ctx);
         const tier = picked ? picked.tier : router.classify(prompt).tier;
@@ -356,8 +361,8 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
      * @param {object} [what.result] the job's result (what it changed and what it said)
      * @returns {object} the plan: an outcome ('done', 'unfinished', 'stopped') or a follow-up attempt
      */
-    function decide({ task, attempts, ending, result = null }) {
-        const ctx = routing();
+    function decide({ task, attempts, ending, result = null, fleet = null }) {
+        const ctx = routing(fleet);
         const upto = (attempts || []).filter((a) => Number(a.n) <= Number(ending.n));
         const facts = factsOf(result);
         const engineAttempts = upto.map((a) => engineAttempt(a, upto, a.id === ending.id ? facts : null));
