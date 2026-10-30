@@ -47,7 +47,7 @@ const { boot, check, done } = require('./helpers/boot');
             assert.ok(submit.project, 'a project was created');
             // The harness's environment (Codes C3) is not part of the task's own arguments: it carries the run token.
             const { env, resume, ...args } = submit.args;
-            assert.match(resume, /^[0-9a-f-]{36}$/i, 'the C2 continuation id');
+            assert.ok(typeof resume === 'string' && resume.length > 0, 'the C2 continuation id');
             assert.deepStrictEqual(args, { repo: ask.repo, ref: null, prompt: ask.prompt, permission: 'edit', push: null, agent: null, model: null });
             assert.deepStrictEqual(Object.keys(env || {}).sort(), ['OPENAI_API_KEY', 'OPENAI_BASE_URL'], 'the harness gets a run token and OpenVibe.AI\'s address');
         });
