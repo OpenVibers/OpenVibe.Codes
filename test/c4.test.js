@@ -12,7 +12,7 @@ const { boot, check, done } = require('./helpers/boot');
                 const r = await t.get(path);
                 assert.strictEqual(r.status, 200, `${path} status`);
                 assert.ok(r.text.includes(label), `${path} content`);
-                assert.ok(r.text.includes('c4-mobile'), `${path} workspace navigation`);
+                assert.ok(r.text.includes('ov-workspace'), `${path} reserves the Frame app bar's height`);
             }
             const task = await t.get('/tasks/tsk_01ARZ3NDEKTSV4RRFFQ69G5FAV');
             assert.strictEqual(task.status, 200);

@@ -155,6 +155,26 @@ const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
             assert.strictEqual(subRow.via, 'conductor');
         });
 
+        await check('the start form: a model list the login offers, and the folders the machine has worked in', async () => {
+            const res = await get('/conductor');
+            assert.strictEqual(res.status, 200);
+            assert.match(res.text, /<select name="model" data-c4-model>/, 'the model is a list');
+            for (const label of ['Opus 5.5 (default)', 'Sonnet 5.5', 'Haiku 5.5', 'Other…']) assert.ok(res.text.includes(label), `${label} is offered`);
+            assert.match(res.text, /data-c4-folder-pick/, 'the recent folders are a choice beside the typed path');
+            assert.ok(res.text.includes(`data-machine="${NODE}"`), 'this conductor&rsquo;s folder is one, on its machine');
+            assert.ok(res.text.includes('/home/ada/openvibe'), 'and it is the folder this person has used');
+        });
+
+        await check('a recent folder and a model the person named start a conductor', async () => {
+            const res = await t.get('/conductor', { as: ada, form: { folder: '', folder_pick: '/home/ada/openvibe', machine: NODE, model: 'other', model_other: 'claude-opus-5-5', safety: 'ask' } });
+            assert.strictEqual(res.status, 303, res.text);
+            const id = decodeURIComponent(String(res.headers.get('location') || '').split('/').pop());
+            const row = await rowOf(id);
+            assert.strictEqual(row.folder, '/home/ada/openvibe', 'the picked folder');
+            assert.strictEqual(row.model, 'claude-opus-5-5', 'the model behind Other…');
+            await post(`/api/v1/conductor/${id}/stop`, {});
+        });
+
         await check('the page: the conductor is a conversation, not a diff', async () => {
             const res = await get(`/tasks/${taskId}`);
             assert.strictEqual(res.status, 200);

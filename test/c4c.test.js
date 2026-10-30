@@ -70,15 +70,23 @@ const split = (links) => ({
             assert.ok(!top.includes('Machines'), 'and the workspace&rsquo;s sections are not');
         });
 
-        await check('the phone page reserves the tab bar&rsquo;s height, so nothing hides under it', async () => {
+        await check('the phone page reserves the Frame app bar&rsquo;s height, and has no bar of its own', async () => {
             const page = await t.get('/settings', { as: ada });
             assert.ok(page.text.includes('<body class="ov-workspace">'), 'the workspace page says it carries a tab bar');
+            assert.ok(!page.text.includes('c4-mobile'), 'and it draws no second bar of its own');
             const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'c4.css'), 'utf8');
-            assert.ok(/body\.ov-workspace\{[^}]*--c4-tabs-h:calc\(58px \+ env\(safe-area-inset-bottom,0px\)\)/.test(css),
-                'the tab bar&rsquo;s height is its own height plus the safe area');
-            assert.ok(/body\.ov-workspace\{[^}]*padding-bottom:var\(--c4-tabs-h\)/.test(css),
-                'and the page reserves it at the bottom');
-            assert.ok(/\.c4-mobile\{[^}]*height:var\(--c4-tabs-h\)/.test(css), 'the bar itself is that tall');
+            assert.ok(/body\.ov-workspace\{[^}]*padding-bottom:var\(--ovnav-appbar-h,calc\(58px \+ env\(safe-area-inset-bottom,0px\)\)\)/.test(css),
+                'the page reserves the Frame bar&rsquo;s height, its safe area included');
+        });
+
+        await check('the Frame&rsquo;s app bar is the workspace&rsquo;s sections for a signed-in person, and the product&rsquo;s for a visitor', async () => {
+            const signedIn = await t.get('/tasks', { as: ada });
+            assert.strictEqual(navbarOf(signedIn.text).appBar, true,
+                'the bar takes the navbar&rsquo;s own sections: the first four and More (Shared appbar.js)');
+            const visitor = await t.get('/tasks');
+            const bar = navbarOf(visitor.text).appBar;
+            assert.ok(Array.isArray(bar) && bar.length <= 5, 'a visitor&rsquo;s bar is at most five places');
+            assert.deepStrictEqual(bar.map((l) => l.label), ['Home', 'Start', 'Run', 'Agents'], 'and they are the product&rsquo;s');
         });
 
         await check('a card&rsquo;s muted note sits under its heading, not beside it', async () => {
