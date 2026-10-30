@@ -63,6 +63,25 @@ function load(env = process.env) {
             sessionAudience: env.OV_SESSION_AUDIENCE || 'openvibe.network',
         },
         cookies: { secure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : isProduction },
+        // OpenVibe.AI (Codes C3): where a person's own provider key is sealed (it never leaves AI) and where the
+        // harnesses run. Codes talks to it with its own Network token (audience openvibe.ai).
+        ai: {
+            url: trim(env.CODES_AI_URL || 'https://ai.openvibe.services'),
+            audience: 'openvibe.ai',
+            // The scopes Codes asks Network for: it stores a person's key with the first and runs a test request
+            // (and the harnesses' requests) with the second.
+            scope: 'ai.credential.manage ai.run.create',
+        },
+        // A run token (Codes C3): the short-lived Network token an attempt's harness carries, so that AI knows whose
+        // key and whose budget the run is. Two hours is the longest a coding attempt may run.
+        runTokens: {
+            ttlSeconds: Math.min(7200, Math.max(60, int(env.CODES_RUN_TOKEN_TTL_S, 7200))),
+            // The harness env variable names a job may set (harness/job.js): the model APIs' own names, nothing else.
+            envNames: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_CUSTOM_HEADERS', 'OPENAI_BASE_URL',
+                'OPENAI_API_KEY', 'OPENAI_CUSTOM_HEADERS', 'DEEPSEEK_BASE_URL', 'DEEPSEEK_API_KEY', 'OPENVIBE_AI_URL',
+                'OPENVIBE_AI_TOKEN', 'OPENVIBE_CODES_BASE_URL', 'OPENVIBE_CODES_API_KEY', 'OPENVIBE_CODES_MODEL',
+                'OPENVIBE_CODES_HEADERS'],
+        },
         // OpenVibe.Events (ADR-033): account export and deletion arrive at POST /internal/events, signed with one of
         // these; run.job.* subscriptions are created at boot. The outbox relay publishes codes.task.* with the
         // service's events.event.publish token.

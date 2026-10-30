@@ -45,7 +45,10 @@ const { boot, check, done } = require('./helpers/boot');
             const submit = calls.find((c) => c[0] === 'submit')[1];
             assert.strictEqual(submit.subject, ada.subject);
             assert.ok(submit.project, 'a project was created');
-            assert.deepStrictEqual(submit.args, { repo: ask.repo, ref: null, prompt: ask.prompt, permission: 'edit', push: null, agent: null, model: null });
+            // The harness's environment (Codes C3) is not part of the task's own arguments: it carries the run token.
+            const { env, ...args } = submit.args;
+            assert.deepStrictEqual(args, { repo: ask.repo, ref: null, prompt: ask.prompt, permission: 'edit', push: null, agent: null, model: null });
+            assert.deepStrictEqual(Object.keys(env || {}).sort(), ['OPENAI_API_KEY', 'OPENAI_BASE_URL'], 'the harness gets a run token and OpenVibe.AI\'s address');
         });
 
         await check('the task is listed and readable by its owner, not by another person', async () => {

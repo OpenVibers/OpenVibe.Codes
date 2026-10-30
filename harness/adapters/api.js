@@ -151,6 +151,26 @@ function shownInput(name, args) {
 }
 
 /**
+ * The extra headers a job's environment asks for (Codes C3): OPENVIBE_CODES_HEADERS is a JSON object of header names
+ * and values (the credential header that says whose key the request uses). Only header names and short values are
+ * read, and a name that is not a header is refused, so nothing else can ride this way.
+ */
+function extraHeaders(env) {
+    const raw = String((env && env.OPENVIBE_CODES_HEADERS) || '').trim();
+    if (!raw || raw.length > 2000) return {};
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { return {}; }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out = {};
+    for (const [name, value] of Object.entries(parsed)) {
+        if (!/^[A-Za-z0-9-]{1,64}$/.test(name)) continue;
+        if (typeof value !== 'string' || !value || value.length > 300) continue;
+        out[name] = value;
+    }
+    return out;
+}
+
+/**
  * apiAgent({ id, name, baseUrl, keyEnv, model, priceIn, priceOut, token }) → an adapter.
  * extra(env) → fields added to every request body (OpenVibe.AI's x_openvibe.provider: the project's own provider).
  * token(env, fetch) → a bearer, asked before every request (OpenVibe.AI takes a five-minute Network token, refreshed by
@@ -193,7 +213,7 @@ function apiAgent(spec) {
                         const bearer = spec.token ? await spec.token(env, doFetch) : key;
                         const res = await doFetch(`${base}/chat/completions`, {
                             method: 'POST',
-                            headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+                            headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...extraHeaders(env) },
                             body: JSON.stringify({ ...(spec.extra ? spec.extra(env) : {}), model, messages, tools, tool_choice: 'auto' }),
                             signal: controller.signal,
                         });
@@ -257,4 +277,4 @@ function apiAgent(spec) {
     return adapter;
 }
 
-module.exports = { apiAgent, runTool, inside, TOOL_DEFS, SYSTEM };
+module.exports = { apiAgent, extraHeaders, runTool, inside, TOOL_DEFS, SYSTEM };

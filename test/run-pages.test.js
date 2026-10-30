@@ -67,7 +67,11 @@ const { boot, check, done } = require('./helpers/boot');
         const [kind, sent] = calls.find((c) => c[0] === 'submit');
         assert.strictEqual(kind, 'submit');
         assert.deepStrictEqual([sent.subject, sent.project, sent.key], [ada.subject, project, taskId]);
-        assert.deepStrictEqual(sent.args, { repo: 'https://github.com/OpenVibers/OpenVibe.Codes', ref: 'main', prompt: 'Fix the typo in README', permission: 'edit', push: { branch: null, pull_request: true }, agent: 'claude-code', model: null });
+        // The harness's environment (Codes C3) is not part of the task's own arguments: it carries the run token.
+        const { env, ...args } = sent.args;
+        assert.deepStrictEqual(args, { repo: 'https://github.com/OpenVibers/OpenVibe.Codes', ref: 'main', prompt: 'Fix the typo in README', permission: 'edit', push: { branch: null, pull_request: true }, agent: 'claude-code', model: null });
+        assert.deepStrictEqual(Object.keys(env || {}).sort(), ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL']);
+        assert.ok(env.ANTHROPIC_AUTH_TOKEN && env.ANTHROPIC_BASE_URL, 'the harness gets a run token and OpenVibe.AI\'s address');
         const row = await t.ctx.store.db.one('SELECT subject, project_id, job_id, state FROM run_tasks WHERE id = $1', [taskId]);
         assert.deepStrictEqual({ ...row }, { subject: ada.subject, project_id: project, job_id: 'job_01J8Z3Q4R5S6T7V8W9X0Y1Z2J1', state: 'queued' });
     });
