@@ -186,7 +186,7 @@ function printTask(task) {
 }
 
 /** The task's event stream as readable lines; resolves when the server ends it (the outcome is known). */
-async function follow(c, id, printable) {
+async function follow(c, id) {
     let res;
     try {
         res = await fetch(`${c.base}/api/v1/tasks/${encodeURIComponent(id)}/events`, {
@@ -239,7 +239,7 @@ async function follow(c, id, printable) {
             if (frame.trim()) handle(frame);
         }
     }
-    return printable;
+    return undefined;
 }
 
 async function cmdStart(o, c) {
