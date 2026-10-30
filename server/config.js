@@ -111,6 +111,16 @@ function load(env = process.env) {
             retentionDays: Math.max(1, int(env.CODES_SESSION_RETENTION_DAYS, 90)),
             retentionIntervalMs: Math.max(60_000, int(env.CODES_SESSION_RETENTION_INTERVAL_MS, 86_400_000)),
         },
+        // OpenVibe.Media: the private objects a task's pictures live in. A proof screenshot can show anything on the
+        // person's screen, so it is never public: the bytes go to Media as a private object of the person, and the
+        // session shows a short-lived signed URL that only that person can use. Without a key there are no pictures.
+        media: {
+            url: trim(env.CODES_MEDIA_URL || 'https://openvibe.media'),
+            key: String(env.CODES_MEDIA_KEY || '').trim(),
+            app: trim(env.CODES_MEDIA_APP || 'codes'),
+            ttl: int(env.CODES_MEDIA_URL_TTL, 600),
+        },
+
         // OpenVibe.Run (plan T16): a coding task on the person's own machine is a Run job Codes starts for them.
         run: { url: trim(env.CODES_RUN_URL || 'http://127.0.0.1:4920') },
 

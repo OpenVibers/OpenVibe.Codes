@@ -76,7 +76,7 @@ async function createApp(opts = {}) {
     // The harness catalog (server/data/harness-offers.json), read once: a bad seed row fails boot.
     const harnesses = createHarnesses();
     // Sessions, the run.job.* consumer and the codes.task.* outbox share one store and one clock.
-    const sessions = createSessionLines({ store, config, log });
+    const sessions = createSessionLines({ store, config, log, media: require('./media').createMedia({ config, log }) });
     const outbox = createOutbox({ store, log });
     const run = opts.run || createRunClient({ config, fetchImpl: fetchImpl || globalThis.fetch });
     // A person's own connections (Codes C3): their provider keys live in OpenVibe.AI, and their harnesses run with a

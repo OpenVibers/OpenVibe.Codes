@@ -67,7 +67,7 @@ function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globa
     };
     // A task reads Run only as the 10-minute fallback; its state now arrives from run.job.* events.
     const taskStore = tasks || createRunTasks({ store, run, config, log });
-    const sessionStore = sessions || createSessionLines({ store, config, log });
+    const sessionStore = sessions || createSessionLines({ store, config, log, media: require('../media').createMedia({ config, log }) });
     const { who, refresh } = taskStore;
 
     function formHtml({ projects, values = {}, error = null }) {
@@ -298,7 +298,7 @@ ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events
         // The bytes go to the browser unchanged, and the same frames become codes_session_lines as they stream.
         const attempts = await taskStore.attempts.list(row.id);
         const attemptN = attempts.length ? Number(attempts[attempts.length - 1].n) : null;
-        const recorder = sessionStore.recorder(row.id, { attemptN });
+        const recorder = sessionStore.recorder(row.id, { attemptN, subject: row.subject });
         const decoder = new TextDecoder();
         try {
             for await (const chunk of resp.body) {

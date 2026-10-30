@@ -149,7 +149,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
-    const sessionLines = sessions || require('./session-lines').createSessionLines({ store, config, log });
+    const sessionLines = sessions || require('./session-lines').createSessionLines({ store, config, log, media: require('../media').createMedia({ config, log }) });
     const taskOutbox = outbox || require('../events/outbox').createOutbox({ store, log });
     // The proof of a finished task (stage C8): the tests, the pages, the diff and the second model's opinion.
     const taskProof = proof || require('./proof').createProof({ store, config, log });
