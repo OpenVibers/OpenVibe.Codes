@@ -7,6 +7,7 @@
  * machine, in the project of their latest /run task.
  *
  *   POST /tasks              codes.task.start    codes.task-start-request@1 → codes.task-start-result@1 (201, or 200 again)
+ *   GET  /tasks              codes.task.read     → { tasks: codes.task@1 … with its outcome } (the person's own; ?state=)
  *   GET  /tasks/:id          codes.task.read     → codes.task@2 (the task as codes.task@1, with its attempts and
  *                                                   its outcome added to it)
  *   POST /tasks/:id/cancel   codes.task.cancel   → codes.task@1
@@ -16,8 +17,10 @@
  *
  * A Network service token for audience openvibe.codes (CODES_AUDIENCE), from a svc: principal holding the route's
  * capability. A service sees only the tasks it started, for that person; anything else is 404. The owner may read
- * and act on their own tasks without a token. The person's task page (the codes.task@1 url) shows every task they
- * own, whoever started it. Calls count against the person's own per-actor budget (actor-limits.js), not the service's.
+ * and act on their own tasks without a token (the session cookie), or with their own Network access token as a Bearer
+ * — the token openvibe.codes signs a person in with, and the one `openvibe-codes task` reads from OPENVIBE_TOKEN.
+ * A person sees every task they own, whoever started it. Calls count against the person's own per-actor budget
+ * (actor-limits.js), not the service's.
  *
  * Stage C2: a task's timeline is its attempts. GET /tasks/:id answers codes.task@2: the task itself with the same
  * fields it always had, and, added to them, its attempts and its outcome in plain words ("done", "unfinished" with
@@ -67,12 +70,48 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         if (req.principal.owner) return db.maybe('SELECT * FROM run_tasks WHERE id = $1 AND subject = $2', [req.params.id, req.principal.subject]);
         return db.maybe('SELECT * FROM run_tasks WHERE id = $1 AND subject = $2 AND via = $3', [req.params.id, req.principal.subject, req.principal.via]);
     };
-    const byKey = (p, key) => db.maybe('SELECT * FROM run_tasks WHERE subject = $1 AND via = $2 AND idempotency_key = $3', [p.subject, p.via, key]);
+    const byKey = (p, key) => db.maybe('SELECT * FROM run_tasks WHERE subject = $1 AND via IS NOT DISTINCT FROM $2 AND idempotency_key = $3', [p.subject, p.via, key]);
 
-    /** The owner (signed in), or a service token with the capability acting for the person in X-OV-Subject. */
+    /** The owner (signed in, or their own access token as a Bearer), or a service token with the capability acting
+     *  for the person in X-OV-Subject. */
     const signedIn = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
+
+    /** A service, app, module or node token: its sub says so. Read (not verified) to send it to the service guard,
+     *  so a principal token is never tried (and logged) as a person's. */
+    const principalToken = (token) => {
+        const parts = String(token || '').split('.');
+        if (parts.length !== 3) return true;
+        try {
+            const c = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+            return ['service', 'app', 'mod', 'node'].includes(c.actor_type) || /^(svc|app|mod|node):/.test(String(c.sub || ''));
+        } catch { return true; }
+    };
+
+    /**
+     * The person a Network access token belongs to, or null. A person's token is issued for their session audience
+     * (openvibe.network) and, when the Network is asked for the Codes audience, for openvibe.codes: either is accepted
+     * here. A person token carries no capability claim: being that person is what authorizes their own tasks.
+     */
+    const personOf = async (token) => {
+        if (!keys.loaded()) await keys.ensure();
+        const v = await keys.verifyUser(token, { issuer: config.networkIssuer, audience: [config.oauth.sessionAudience, config.serviceAudience] });
+        if (!v.ok) return null;
+        const subject = typeof v.claims.subject_id === 'string' ? v.claims.subject_id : null;
+        return USER.test(subject || '') ? subject : null;
+    };
+
     const guardAny = (cap) => async (req, res, next) => {
-        if (String(req.headers.authorization || '').startsWith('Bearer ')) return guard(cap)(req, res, next);
+        const header = String(req.headers.authorization || '');
+        if (header.startsWith('Bearer ')) {
+            const token = header.slice(7).trim();
+            if (principalToken(token)) return guard(cap)(req, res, next);
+            const subject = await personOf(token);
+            if (subject) {
+                req.principal = { sub: `user:${subject}`, subject, via: 'user', owner: true };
+                return next();
+            }
+            return problem(req, res, 401, 'token.invalid', 'that token is not a person’s Network access token');
+        }
         if (signedIn(req)) {
             req.principal = { sub: `user:${req.viewer.subject}`, subject: req.viewer.subject, via: null, owner: true };
             return next();
@@ -90,7 +129,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         };
     };
 
-    r.post('/tasks', guard('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
+    r.post('/tasks', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
         const b = req.body;
         // Actor back-reference: the contract does not carry these yet, so they are stripped before validation and stored
         // separately. When the contract is amended, pass them through instead.
@@ -133,6 +172,25 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         }
         log.info(`[Codes] task ${row.id} started by ${p.via} for ${p.subject}: ${row.state}`);
         return res.status(201).json({ task: taskStore.present(row), created: true });
+    });
+
+    /**
+     * The caller's tasks, newest first: the person's own (whoever started them), or the ones this service started for
+     * the person. ?state=narrows it to the words `openvibe-codes task list` prints: running (queued, placed, running),
+     * needs (the engine left it unfinished for the person), done (ended, and not unfinished).
+     */
+    const LIST_LIMIT = 100;
+    r.get('/tasks', guardAny('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
+        const p = req.principal;
+        const state = String(req.query.state || '').trim();
+        if (state && !['running', 'needs', 'done'].includes(state)) return problem(req, res, 422, 'codes.task_invalid', 'state is running, needs or done');
+        const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), LIST_LIMIT);
+        const where = p.owner ? { sql: 'subject = $1', args: [p.subject] } : { sql: 'subject = $1 AND via = $2', args: [p.subject, p.via] };
+        if (state === 'running') where.sql += " AND state IN ('queued', 'placed', 'running')";
+        if (state === 'needs') where.sql += " AND outcome = 'unfinished'";
+        if (state === 'done') where.sql += " AND state IN ('succeeded', 'failed', 'cancelled', 'expired') AND outcome IS DISTINCT FROM 'unfinished'";
+        const rows = await db.many(`SELECT * FROM run_tasks WHERE ${where.sql} ORDER BY created_at DESC LIMIT $${where.args.length + 1}`, [...where.args, limit]);
+        return res.json({ tasks: rows.map((row) => ({ ...taskStore.present(row), outcome: { state: row.outcome || null, note: row.outcome_note || null } })) });
     });
 
     r.get('/tasks/:id', guardAny('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {

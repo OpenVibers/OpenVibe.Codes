@@ -103,7 +103,9 @@ function parseArgs(raw, env = process.env) {
     if (!prompt || prompt.length > MAX_PROMPT) throw new Error(`prompt must be 1-${MAX_PROMPT} characters`);
     const ref = a.ref == null || a.ref === '' ? null : String(a.ref);
     if (ref && !BRANCH.test(ref)) throw new Error('ref must be a branch or tag name');
-    const permission = a.permission === 'full' ? 'full' : 'edit';
+    // review is a read-only task (research, an audit, a review): the harness's own `read` level.
+    const asked = a.permission === 'review' || a.permission === 'read' ? 'read' : a.permission;
+    const permission = asked === 'full' ? 'full' : asked === 'read' ? 'read' : 'edit';
     const push = a.push && typeof a.push === 'object' ? {
         branch: a.push.branch == null ? null : String(a.push.branch),
         pull_request: a.push.pull_request === true,

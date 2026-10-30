@@ -135,6 +135,69 @@ const { boot, check, done } = require('./helpers/boot');
             assert.strictEqual(calls.filter((x) => x[0] === 'cancel').length, before);
         });
 
+        // The person's own Network access token, as `openvibe-codes task` sends it: the same routes, as the owner.
+        const asAda = async (method, path, body, token = t.network.userToken(ada)) => {
+            const headers = { Accept: 'application/json', Authorization: `Bearer ${token}` };
+            if (body !== undefined) headers['Content-Type'] = 'application/json';
+            const res = await fetch(`${t.base}/api/v1${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'manual' });
+            return { status: res.status, json: await res.json().catch(() => null) };
+        };
+
+        let own;
+        await check('a person’s own token starts a read-only task (permission review), read at the harness level', async () => {
+            state = 'queued';
+            result = null;
+            const r = await asAda('POST', '/tasks', { repo: 'https://github.com/octocat/Hello-World', prompt: 'Audit the auth flow.', permission: 'review', idempotency_key: 'cli:audit-1' });
+            assert.strictEqual(r.status, 201, JSON.stringify(r.json));
+            own = r.json.task;
+            assert.strictEqual(own.state, 'queued');
+            const submit = calls.filter((c) => c[0] === 'submit').pop()[1];
+            assert.strictEqual(submit.subject, ada.subject, 'the person the token belongs to, with no X-OV-Subject');
+            assert.strictEqual(submit.args.permission, 'read', 'review runs read-only');
+            const again = await asAda('POST', '/tasks', { repo: 'https://github.com/octocat/Hello-World', prompt: 'Audit the auth flow.', permission: 'review', idempotency_key: 'cli:audit-1' });
+            assert.strictEqual(again.status, 200);
+            assert.strictEqual(again.json.created, false);
+            assert.strictEqual(again.json.task.id, own.id);
+        });
+
+        await check('a token for the Codes audience is accepted as the same person', async () => {
+            const r = await asAda('GET', '/tasks', undefined, t.network.userToken(ada, { audience: ['openvibe.codes'] }));
+            assert.strictEqual(r.status, 200, JSON.stringify(r.json));
+        });
+
+        await check('the person lists, reads, continues and stops their own tasks; another person’s token is 404', async () => {
+            const list = await asAda('GET', '/tasks?state=running');
+            assert.strictEqual(list.status, 200, JSON.stringify(list.json));
+            assert.ok(list.json.tasks.some((x) => x.id === own.id), 'the new task is running');
+            assert.ok(list.json.tasks.every((x) => ['queued', 'placed', 'running'].includes(x.state)));
+            const all = await asAda('GET', '/tasks');
+            assert.ok(all.json.tasks.some((x) => x.id === 'tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2T1'), 'the one started by hand is the person’s too');
+            const read = await asAda('GET', `/tasks/${own.id}`);
+            assert.strictEqual(read.status, 200);
+            assert.strictEqual(read.json.id, own.id);
+            assert.ok(Array.isArray(read.json.attempts));
+            const other = await asAda('GET', `/tasks/${own.id}`, undefined, t.network.userToken(bo));
+            assert.strictEqual(other.status, 404, 'someone else’s task');
+            // A continue starts the next attempt on a task that has ended; stop ends the running one for good.
+            await db.exec("UPDATE run_tasks SET state = 'failed', outcome = 'unfinished' WHERE id = $1", [own.id]);
+            const carried = await asAda('POST', `/tasks/${own.id}/continue`, { note: 'and the tests' });
+            assert.strictEqual(carried.status, 200, JSON.stringify(carried.json));
+            assert.ok(carried.json.attempts.length >= 2, 'the continue is the next attempt');
+            const stopped = await asAda('POST', `/tasks/${own.id}/stop`);
+            assert.strictEqual(stopped.status, 200, JSON.stringify(stopped.json));
+            assert.strictEqual(stopped.json.outcome.state, 'stopped');
+        });
+
+        await check('list filters: needs is the task the engine left unfinished, done is the rest', async () => {
+            await db.exec("UPDATE run_tasks SET outcome = 'unfinished' WHERE id = $1", ['tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2T1']);
+            const needs = await asAda('GET', '/tasks?state=needs');
+            assert.ok(needs.json.tasks.some((x) => x.id === 'tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2T1'));
+            assert.ok(needs.json.tasks.every((x) => x.outcome.state === 'unfinished'));
+            const done = await asAda('GET', '/tasks?state=done');
+            assert.ok(done.json.tasks.every((x) => x.outcome.state !== 'unfinished' && !['queued', 'placed', 'running'].includes(x.state)));
+            assert.strictEqual((await asAda('GET', '/tasks?state=later')).status, 422);
+        });
+
         await check('the person’s own /run page lists the task a service started for them', async () => {
             const page = await t.get('/run', { as: ada });
             assert.ok(page.text.includes(`/run/tasks/${task.id}`));
