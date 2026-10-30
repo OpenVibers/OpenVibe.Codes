@@ -98,7 +98,7 @@ function createSessionLines({ store, config = {}, log = console }) {
     const retentionDays = Math.max(1, Number(config.sessions && config.sessions.retentionDays) || 90);
 
     /** Insert lines in order; an existing (task_id, seq) wins, so a replay never duplicates. → rows inserted. */
-    async function append(taskId, lines) {
+    async function append(taskId, lines, attemptN = null) {
         if (!taskId || !Array.isArray(lines) || !lines.length) return 0;
         const clean = [];
         for (const line of lines) {
@@ -114,12 +114,12 @@ function createSessionLines({ store, config = {}, log = console }) {
             const values = [];
             const params = [];
             chunk.forEach((line, j) => {
-                const b = j * 5;
-                values.push(`($${b + 1}, $${b + 2}, $${b + 3}::timestamptz, $${b + 4}, $${b + 5}::jsonb)`);
-                params.push(taskId, line.seq, line.at, line.kind, JSON.stringify(line.body));
+                const b = j * 6;
+                values.push(`($${b + 1}, $${b + 2}, $${b + 3}::timestamptz, $${b + 4}, $${b + 5}::jsonb, $${b + 6})`);
+                params.push(taskId, line.seq, line.at, line.kind, JSON.stringify(line.body), attemptN);
             });
             inserted += await db.exec(
-                `INSERT INTO codes_session_lines (task_id, seq, at, kind, body) VALUES ${values.join(', ')}
+                `INSERT INTO codes_session_lines (task_id, seq, at, kind, body, attempt_n) VALUES ${values.join(', ')}
                  ON CONFLICT (task_id, seq) DO NOTHING`, params);
         }
         return inserted;
@@ -127,7 +127,7 @@ function createSessionLines({ store, config = {}, log = console }) {
 
     /** All rows of a task in stream order. */
     async function allRows(taskId) {
-        return await db.many('SELECT seq, at, kind, body FROM codes_session_lines WHERE task_id = $1 ORDER BY seq ASC', [taskId]);
+        return await db.many('SELECT seq, at, kind, body, attempt_n FROM codes_session_lines WHERE task_id = $1 ORDER BY seq ASC', [taskId]);
     }
 
     /**
@@ -135,7 +135,7 @@ function createSessionLines({ store, config = {}, log = console }) {
      * into the job's JSON lines; state and end frames become their own lines. The stream's seq is the base, so the
      * same event replayed after a reconnect maps to the same rows.
      */
-    function recorder(taskId) {
+    function recorder(taskId, { attemptN = null } = {}) {
         let frameBuffer = '';
         let outputBuffer = '';
         let fallbackSeq = 0;
@@ -196,7 +196,7 @@ function createSessionLines({ store, config = {}, log = console }) {
                 frameBuffer = `${frameBuffer}${String(text == null ? '' : text)}`.replace(/\r\n/g, '\n');
                 const out = [];
                 drainFrames(out);
-                if (out.length) await append(taskId, out);
+                if (out.length) await append(taskId, out, attemptN);
             },
             async flush() {
                 const out = [];
@@ -208,7 +208,7 @@ function createSessionLines({ store, config = {}, log = console }) {
                     out.push({ seq: (lastBase || 0) + PARTIAL_LINE_INDEX, at: store.iso(), kind: line.kind, body: line.body });
                     outputBuffer = '';
                 }
-                if (out.length) await append(taskId, out);
+                if (out.length) await append(taskId, out, attemptN);
             },
             ended: () => ended,
         };
@@ -219,7 +219,7 @@ function createSessionLines({ store, config = {}, log = console }) {
      * JSON, so a reconnect or a second result never adds a line twice; the new seqs sit after the streamed output and
      * before the terminal state/end line.
      */
-    async function backfill(row, result) {
+    async function backfill(row, result, attemptN = null) {
         if (!row || !row.id) return 0;
         const rows = await allRows(row.id);
         const harness = rows.filter((r) => r && r.body && typeof r.body === 'object' && !Array.isArray(r.body)
@@ -242,7 +242,7 @@ function createSessionLines({ store, config = {}, log = console }) {
         const at = atIso(row.finished_at) || (row.updated_at ? iso(row.updated_at) : store.iso());
         return await append(row.id, missing.map((body, i) => ({
             seq: start + i, at, kind: typeof body.t === 'string' ? body.t : 'text', body,
-        })));
+        })), attemptN);
     }
 
     async function complete(taskId) {
@@ -252,8 +252,8 @@ function createSessionLines({ store, config = {}, log = console }) {
         );
     }
 
-    async function backfillAndComplete(row, result) {
-        const inserted = await backfill(row, result);
+    async function backfillAndComplete(row, result, attemptN = null) {
+        const inserted = await backfill(row, result, attemptN);
         await complete(row.id);
         return inserted;
     }
@@ -276,11 +276,11 @@ function createSessionLines({ store, config = {}, log = console }) {
         let source;
         if (rows.length) {
             source = 'session';
-            lines = rows.filter((r) => Number(r.seq) > from).map((r) => ({ seq: Number(r.seq), at: r.at, kind: r.kind, body: r.body }));
+            lines = rows.filter((r) => Number(r.seq) > from).map((r) => ({ seq: Number(r.seq), at: r.at, kind: r.kind, body: r.body, attempt_n: r.attempt_n == null ? null : Number(r.attempt_n) }));
         } else {
             source = 'result.log';
             const at = row.created_at ? iso(row.created_at) : store.iso();
-            lines = (sessionLogOf(row) || []).map((body, i) => ({ seq: i + 1, at, kind: typeof body.t === 'string' ? body.t : 'text', body }))
+            lines = (sessionLogOf(row) || []).map((body, i) => ({ seq: i + 1, at, kind: typeof body.t === 'string' ? body.t : 'text', body, attempt_n: 1 }))
                 .filter((line) => line.seq > from);
         }
         const page = lines.slice(0, max);

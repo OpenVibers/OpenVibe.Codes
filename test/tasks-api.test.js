@@ -92,12 +92,18 @@ const { boot, check, done } = require('./helpers/boot');
             await db.exec('UPDATE run_tasks SET updated_at = updated_at - $2 WHERE id = $1', [task.id, 11 * 60_000]);
             const r = await call('GET', `/tasks/${task.id}`);
             assert.strictEqual(r.status, 200, JSON.stringify(r.json));
-            const v = validate('codes.task@1', r.json);
+            // The read is the task, its attempts and its outcome (stage C2).
+            const v = validate('codes.task@1', r.json.task);
             assert.ok(v.valid, JSON.stringify(v.errors));
-            assert.strictEqual(r.json.state, 'succeeded');
-            assert.strictEqual(r.json.result.summary.length, 4000);
-            assert.deepStrictEqual(r.json.result.files, [{ path: 'README', added: 1, removed: 0 }]);
-            assert.deepStrictEqual(r.json.result.push, { pushed: false, reason: 'no token' });
+            assert.strictEqual(r.json.task.state, 'succeeded');
+            assert.strictEqual(r.json.task.result.summary.length, 4000);
+            assert.deepStrictEqual(r.json.task.result.files, [{ path: 'README', added: 1, removed: 0 }]);
+            assert.deepStrictEqual(r.json.task.result.push, { pushed: false, reason: 'no token' });
+            assert.strictEqual(r.json.attempts.length, 1, 'one attempt: the task as it was asked');
+            assert.strictEqual(r.json.attempts[0].n, 1);
+            assert.strictEqual(r.json.attempts[0].state, 'done');
+            assert.ok(r.json.attempts[0].why, 'the attempt says why it happened');
+            assert.strictEqual(r.json.outcome.state, 'done');
         });
 
         await check('another person, another service, or a task the person started by hand: 404', async () => {
