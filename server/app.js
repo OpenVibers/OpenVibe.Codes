@@ -31,6 +31,7 @@ const { createRunRoutes } = require('./http/run');
 const { createTasksApi } = require('./http/tasks-api');
 const { createConnectionsApi } = require('./http/connections-api');
 const { createActionsApi } = require('./http/actions-api');
+const { createConductorApi } = require('./http/conductor-api');
 const { createRunClient } = require('./domain/run-client');
 const { createRunTasks } = require('./domain/run-tasks');
 const { createConnections } = require('./domain/connections');
@@ -38,6 +39,9 @@ const { createRunTokens } = require('./domain/run-tokens');
 const { createAttempts } = require('./domain/attempts');
 const { createBenchPublisher } = require('./domain/bench-publisher');
 const { createSessionLines } = require('./domain/session-lines');
+const { createConductor } = require('./domain/conductor');
+const { createApprovals } = require('./domain/approvals');
+const { createNotify } = require('./domain/notify');
 const { createOutbox, createPublisher } = require('./events/outbox');
 const { createEventsConsumer } = require('./events-consumer');
 const { createApi } = require('./http/api');
@@ -90,6 +94,15 @@ async function createApp(opts = {}) {
     ctx.userSettings = createUserSettings({ store });
     ctx.github = createGitHub({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
     ctx.usage = createUsage({ store });
+    // The conductor (Codes C9b) and its approvals inbox. The conductor starts Run jobs and reads their events through
+    // tasks, so the two are wired to each other here, not in a constructor (which would be a cycle).
+    ctx.notify = opts.notify || createNotify({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    ctx.approvals = createApprovals({ store, config, log, notify: ctx.notify, userSettings: ctx.userSettings });
+    ctx.conductor = createConductor({
+        store, config, log, run, attempts, tasks, sessions, approvals: ctx.approvals, notify: ctx.notify,
+        fetchImpl: fetchImpl || globalThis.fetch,
+    });
+    tasks.setConductor(ctx.conductor);
 
     const app = express();
     app.disable('x-powered-by');
@@ -194,6 +207,11 @@ async function createApp(opts = {}) {
     // A person's connections: their own provider keys (stored in OpenVibe.AI, never here) and their machines' plans.
     app.use('/api/v1', createConnectionsApi({ config, store, connections, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createActionsApi({ config, store, keys, run, tasks, actorLimits: ctx.actorLimits, log }));
+    // The conductor's own routes (Codes C9b): its turns, sub-tasks, and the approvals inbox the MCP tools speak to.
+    app.use('/api/v1', createConductorApi({
+        config, store, keys, harnesses, tasks, conductor: ctx.conductor, approvals: ctx.approvals,
+        machines: ctx.machines, actorLimits: ctx.actorLimits, log,
+    }));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
 
     // ── Pages ───────────────────────────────────────────────
