@@ -229,3 +229,33 @@
    z-index 10010, 120-280 px down). The page's own title stays above them: a once-a-day decoration may pass behind a
    heading, never across it. Reported to Shared so every site's heading is clear of the fall. */
 .c4 h1{position:relative;z-index:10011}
+
+/* The Memory page (OpenVibe Memory M2b): the sources, the notes, their menus and the tabs that choose a view. */
+.c4-tabs a[aria-current=page]{color:var(--c4-accent);border-color:var(--c4-accent);font-weight:650}
+.c4-chip[aria-current=page]{background:var(--c4-quiet-bg);color:var(--c4-ink)}
+.c4-source{grid-template-columns:12px minmax(0,1fr) auto}
+.c4-source > .c4-opill{grid-column:3;grid-row:1/3;justify-self:end;align-self:center}
+.c4-note{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 10px;padding:12px 0;border-top:1px solid var(--c4-line);min-width:0}
+.c4-rows > .c4-note:first-child{border-top:0;padding-top:2px}
+.c4-note-text{grid-column:1;grid-row:1;margin:0;font-size:13px;line-height:1.5;color:var(--c4-ink);min-width:0;overflow-wrap:anywhere}
+.c4-note-meta{grid-column:1;grid-row:2;margin:0;font-size:12px;line-height:1.45;color:var(--c4-muted);display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.c4-note > .c4-actions{grid-column:1;grid-row:3;margin-top:8px}
+.c4-menu{grid-column:2;grid-row:1/3;position:relative}
+.c4-menu > summary{list-style:none;cursor:pointer;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;border-radius:8px;color:var(--c4-muted);font-size:15px;line-height:1}
+.c4-menu > summary::-webkit-details-marker{display:none}
+.c4-menu > summary::marker{content:""}
+.c4-menu-body{position:absolute;right:0;top:calc(100% - 2px);z-index:5;width:min(300px,calc(100vw - 64px));background:var(--c4-surface);border:1px solid var(--c4-line);border-radius:10px;padding:12px;display:grid;gap:8px}
+.c4-menu-body .c4-form{margin-top:0}
+.c4-menu-body .c4-button{justify-self:start}
+.c4-form textarea{background:#fff;border:1px solid var(--c4-line);border-radius:7px;padding:9px;color:var(--c4-ink);font:inherit;font-size:13px;width:100%;min-height:76px;min-width:0;resize:vertical}
+.c4-profile-text{margin:0;font-size:13px;line-height:1.55;color:var(--c4-ink);overflow-wrap:anywhere}
+.c4-conflict-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.c4-conflict-side{display:grid;gap:8px;align-content:start;padding:12px;border:1px solid var(--c4-line);border-radius:10px;min-width:0}
+.c4-conflict-side form{margin:0}
+.c4-conflict-side .c4-opill{justify-self:start}
+@media(max-width:760px){
+ .c4-chip[href]{min-height:44px}
+ .c4-note-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+ .c4-conflict-pair{grid-template-columns:1fr}
+}
+:root[data-theme-mode="dark"] .c4-form textarea{background:#11181b;color:var(--c4-ink)}
