@@ -35,7 +35,7 @@ const split = (links) => ({
             assert.strictEqual(page.status, 200);
             const links = navbarOf(page.text).links;
             const { top, more } = split(links);
-            assert.deepStrictEqual(top, ['Home', 'Tasks', 'Conductor', 'Agents', 'Machines', 'Usage', 'Settings'], 'the sections are the navbar');
+            assert.deepStrictEqual(top, ['Home', 'Tasks', 'Conductor', 'Agents', 'Machines', 'Memory', 'Usage', 'Settings'], 'the sections are the navbar');
             assert.ok(more.includes('Get started') && more.includes('Run on your machine'), 'the product&rsquo;s places fold into More');
             assert.ok(!top.includes('Agents') || top.filter((l) => l === 'Agents').length === 1, 'Agents is in one place only');
             const tasks = links.find((l) => l.href === '/tasks');
