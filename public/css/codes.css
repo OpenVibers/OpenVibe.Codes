@@ -115,3 +115,6 @@ meter.headroom { width: 8rem; max-width: 100%; vertical-align: middle; }
   .codes-repos > li:nth-child(n+5) { display: none; }
   .codes-fold > summary span { display: none; }
 }
+
+/* Touch targets on phones (fleet audit 2026-10-29): the touch-only hit area for this group. Nothing moves with a mouse. */
+@media (pointer: coarse) { .codes-faq details > summary { min-height: 44px; } }
