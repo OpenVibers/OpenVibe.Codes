@@ -188,6 +188,8 @@ for await (const event of harness.run({ prompt: 'fix the failing test', cwd: '.'
 <p>Install any of them; the harness uses what is there and says why the rest are not.</p>
 ${table(['Agent', 'What it needs'], [
                 [html`<a href="/harnesses#claude-code">Claude Code</a>`, html`<code>claude</code> on PATH, signed in`],
+                [html`<a href="/harnesses#claude-other">Claude Code (another provider)</a>`, html`<code>claude</code> on PATH, plus your own Anthropic-compatible endpoint in <code>ANTHROPIC_BASE_URL</code>, its token in <code>ANTHROPIC_AUTH_TOKEN</code> and the model id in <code>ANTHROPIC_MODEL</code>`],
+                [html`<a href="/harnesses#minimax-code">MiniMax Code</a>`, html`<code>mcode</code> on PATH, signed in to your own MiniMax account`],
                 [html`<a href="/harnesses#codex">Codex</a>`, html`<code>codex</code> on PATH, signed in`],
                 [html`<a href="/harnesses#opencode">OpenCode</a>`, html`<code>opencode</code> on PATH`],
                 [html`<a href="/harnesses#command-code">Command Code</a>`, html`<code>cmd</code> on PATH`],

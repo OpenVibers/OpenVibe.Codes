@@ -57,6 +57,10 @@ function projectProvider(env) {
 function adaptersFor(env) {
     return {
         'claude-code': cli.claudeCode,
+        // Claude Code on the person's own endpoint: the same CLI, the connection's environment (Codes C3).
+        'claude-other': cli.claudeOther,
+        // MiniMax Code: the person's own MiniMax sign-in on this machine.
+        'minimax-code': cli.minimaxCode,
         codex: cli.codex,
         opencode: cli.opencode,
         'command-code': cli.commandCode,
@@ -82,7 +86,17 @@ function availability(adapter, env) {
     if (!adapter) return { available: false, reason: 'no adapter for this harness yet' };
     if (adapter.kind === 'cli') {
         const where = onPath(adapter.bin, env);
-        return where ? { available: true, where } : { available: false, reason: `\`${adapter.bin}\` is not on PATH (install ${adapter.name})` };
+        if (!where) return { available: false, reason: `\`${adapter.bin}\` is not on PATH (install ${adapter.name})` };
+        // A harness that needs something else besides the binary (Claude Code on another provider needs its endpoint
+        // and its token) says so in its own words.
+        if (adapter.check) {
+            const c = adapter.check(env) || {};
+            if (!c.available) return { available: false, reason: c.reason || `${adapter.name} is not set up here` };
+        }
+        const out = { available: true, where };
+        // The version the binary reports about itself, when it answers.
+        if (adapter.version) { const v = adapter.version(env); if (v) out.version = v; }
+        return out;
     }
     if (adapter.id === 'openvibe-ai') return env.OPENVIBE_AI_TOKEN || (env.OPENVIBE_APP_ID && env.OPENVIBE_APP_SECRET) ? { available: true, where: adapter.baseUrl } : { available: false, reason: 'set OPENVIBE_APP_ID and OPENVIBE_APP_SECRET (an app of your project on openvibe.services with ai.app.run)' };
     if (adapter.id === 'openai-compatible') return env.OPENVIBE_CODES_BASE_URL ? { available: true, where: env.OPENVIBE_CODES_BASE_URL } : { available: false, reason: 'set OPENVIBE_CODES_BASE_URL (and OPENVIBE_CODES_MODEL) to your server' };
