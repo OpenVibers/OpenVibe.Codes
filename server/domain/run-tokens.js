@@ -16,9 +16,16 @@
  * The credential header (x-openvibe-credential) names the provider whose key the run uses, when the person has one.
  *
  *   createRunTokens({ config, store, fetchImpl, log })
- *     mint({ subject, task, attempt, harness, provider, ownKey }) → { token, expiresAt, jti, env }
- *     record({ subject, task, attempt, provider, jti, expiresAt }) → the row (no token in it)
+ *     mint({ subject, task, attempt, harness, provider, ownKey, budget }) → { token, expiresAt, jti, env }
+ *     record({ subject, task, attempt, provider, jti, expiresAt, budget }) → the row (no token in it)
+ *     spend(jti) → what the run spent, per OpenVibe.AI (null when it cannot be read)
+ *
+ * The budget of a run token (the hard spend cap): the token's jti is registered with OpenVibe.AI, which counts
+ * every request of that token and refuses the next one when the budget is spent. The budget is a row in AI, keyed by
+ * the jti, not a claim in the token: the holder of a token can neither raise the budget nor name another run's.
  */
+
+const { createServiceTokenClient } = require('openvibe-sdk/auth');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -37,6 +44,11 @@ function claims(token) {
 /** The base URL of OpenVibe.AI, without a trailing slash. */
 function aiBase(config) {
     return String((config.ai && config.ai.url) || 'https://ai.openvibe.services').replace(/\/+$/, '');
+}
+
+/** The address Codes itself reaches OpenVibe.AI at (the vault is host-local: the internal address). */
+function aiInternal(config) {
+    return String((config.ai && (config.ai.internalUrl || config.ai.url)) || 'https://ai.openvibe.services').replace(/\/+$/, '');
 }
 
 /**
@@ -68,12 +80,18 @@ function envFor({ config, harness, token, provider, ownKey }) {
 
 function createRunTokens({ config, store = null, fetchImpl = globalThis.fetch, log = console } = {}) {
     const ttl = Math.min(7200, Math.max(60, Number((config.runTokens && config.runTokens.ttlSeconds) || 7200)));
+    // Codes' own token for OpenVibe.AI (ai.run.create): the budget of a run token is registered there, under the
+    // token's jti, and the counter of what the run spent is read back from it.
+    const scope = (config.ai && config.ai.scope) || 'ai.credential.manage ai.run.create';
+    const tokens = config.oauth && config.oauth.clientSecret
+        ? createServiceTokenClient({ tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret, audience: 'openvibe.ai', scope, fetch: fetchImpl })
+        : null;
 
     /**
      * Mint a run token for one attempt of one task of one person.
      * → { token, expiresAt, jti, env }; the token is in the answer and nowhere else.
      */
-    async function mint({ subject, task = null, attempt = null, harness = null, provider = null, ownKey = false } = {}) {
+    async function mint({ subject, task = null, attempt = null, harness = null, provider = null, ownKey = false, budget = null } = {}) {
         if (!USER.test(String(subject || ''))) throw Object.assign(new Error('subject must be a usr_ subject'), { status: 400, code: 'subject.required' });
         const clientId = config.oauth && config.oauth.clientId;
         const clientSecret = config.oauth && config.oauth.clientSecret;
@@ -109,19 +127,72 @@ function createRunTokens({ config, store = null, fetchImpl = globalThis.fetch, l
             env: envFor({ config, harness, token, provider, ownKey }),
         };
         require('./redact').remember(token);
-        await record({ subject, task, attempt, provider, jti: out.jti, expiresAt: out.expiresAt });
+        // The budget of the token: OpenVibe.AI holds the counter for it. A token with a budget that cannot be
+        // registered is not handed out: a run that spends without a cap is a hole in the owner's money.
+        if (budget && (Number(budget.usd) > 0 || Number(budget.tokens) > 0)) await registerBudget(out.jti, budget, out.expiresAt);
+        await record({ subject, task, attempt, provider, jti: out.jti, expiresAt: out.expiresAt, budget });
         return out;
     }
 
+    /**
+     * Register the budget of a run token with OpenVibe.AI, under the token's jti. The budget is a row there: the
+     * holder of the token cannot change it, and only Codes (with its own token) writes it.
+     */
+    async function registerBudget(jti, budget, expiresAt) {
+        if (!jti) throw Object.assign(new Error('the run token has no id, so its budget cannot be registered'), { status: 503, code: 'run_token.budget_unavailable' });
+        if (!tokens) throw Object.assign(new Error('Codes has no Network client secret, so it cannot register a run budget'), { status: 503, code: 'run_token.budget_unavailable' });
+        const expires = expiresAt ? Math.floor(Date.parse(expiresAt) / 1000) : Math.floor(Date.now() / 1000) + ttl;
+        let res;
+        try {
+            res = await fetchImpl(`${aiInternal(config)}/api/v1/run-budgets/${encodeURIComponent(jti)}`, {
+                method: 'PUT',
+                headers: { ...(await tokens.authHeaders()), Accept: 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ budget_usd: Number(budget.usd) > 0 ? Number(budget.usd) : null, budget_tokens: Number(budget.tokens) > 0 ? Math.round(Number(budget.tokens)) : null, expires_at: expires }),
+                signal: AbortSignal.timeout(20_000),
+            });
+        } catch (e) {
+            throw Object.assign(new Error(`OpenVibe.AI did not answer: ${e.message}`), { status: 503, code: 'run_token.budget_unavailable' });
+        }
+        if (!res.ok) {
+            const doc = await res.json().catch(() => null);
+            throw Object.assign(new Error((doc && (doc.detail || doc.title)) || `OpenVibe.AI answered ${res.status}`), { status: 503, code: 'run_token.budget_unavailable' });
+        }
+        return true;
+    }
+
+    /** What a run token has spent, per OpenVibe.AI (the counter of its jti): null when it cannot be read. */
+    async function spend(jti) {
+        if (!jti || !tokens) return null;
+        try {
+            const res = await fetchImpl(`${aiInternal(config)}/api/v1/run-budgets/${encodeURIComponent(jti)}`, {
+                method: 'GET', headers: { ...(await tokens.authHeaders()), Accept: 'application/json' }, signal: AbortSignal.timeout(15_000),
+            });
+            if (!res.ok) return null;
+            const doc = await res.json().catch(() => null);
+            if (!doc) return null;
+            return {
+                budget_usd: doc.budget_usd == null ? null : Number(doc.budget_usd),
+                budget_tokens: doc.budget_tokens == null ? null : Number(doc.budget_tokens),
+                spent_usd: Number(doc.spent_usd) || 0,
+                spent_tokens: Number(doc.spent_tokens) || 0,
+                reached: Boolean(doc.reached),
+            };
+        } catch (e) {
+            log.warn(`[Codes] the spend of a run token could not be read: ${String(e && e.message).slice(0, 200)}`);
+            return null;
+        }
+    }
+
     /** The row that says a run token was minted for a task: its jti and its expiry, never the token. */
-    async function record({ subject, task = null, attempt = null, provider = null, jti = null, expiresAt = null } = {}) {
+    async function record({ subject, task = null, attempt = null, provider = null, jti = null, expiresAt = null, budget = null } = {}) {
         if (!store || !store.db) return null;
         try {
             return await store.db.one(
-                `INSERT INTO codes_run_tokens (id, task_id, attempt_id, subject, provider, jti, expires_at, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8::timestamptz) RETURNING *`,
+                `INSERT INTO codes_run_tokens (id, task_id, attempt_id, subject, provider, jti, expires_at, budget_usd, budget_tokens, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8, $9, $10::timestamptz) RETURNING *`,
                 [store.newId('rtk'), task || null, attempt || null, subject || null, provider || null, jti || null,
-                    expiresAt || null, store.iso()],
+                    expiresAt || null, budget && Number(budget.usd) > 0 ? Number(budget.usd) : null,
+                    budget && Number(budget.tokens) > 0 ? Math.round(Number(budget.tokens)) : null, store.iso()],
             );
         } catch (e) {
             // The row is a trace, not the point: a database that cannot take it must not stop the run.
@@ -137,7 +208,7 @@ function createRunTokens({ config, store = null, fetchImpl = globalThis.fetch, l
         return rows.map((r) => ({ id: r.id, task_id: r.task_id, attempt_id: r.attempt_id, subject: r.subject, provider: r.provider, jti: r.jti, expires_at: r.expires_at, created_at: r.created_at }));
     }
 
-    return { mint, record, forTask, envFor, ttl };
+    return { mint, record, forTask, envFor, ttl, spend, registerBudget };
 }
 
 module.exports = { createRunTokens, envFor, ANTHROPIC_HARNESSES };
