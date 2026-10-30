@@ -33,6 +33,35 @@ function limitsFor(cfg, runner, override) {
     return out;
 }
 
+/** The harness's own caps sit this far above the owner's limits, so the wrap-up turn still runs. */
+const TURN_MARGIN = 25;
+const MINUTE_MARGIN = 5;
+/** No limit: the harnesses' own cap is effectively none (the portal's 100000 turns). */
+const NO_TURN_CAP = 100000;
+
+/**
+ * The caps the harness itself runs under, derived from the task's limits (Settings → Limits).
+ *
+ * A step limit puts the harness's turn cap 25 above it, so the portal's clean wrap-up comes first; no step limit means
+ * no turn cap (100000). A time limit is the wall clock in milliseconds, five minutes longer than the owner's limit; no
+ * time limit means no timer at all (`timeoutMs` 0). `timeout` is the same clock in the form MiniMax Code takes.
+ *
+ * @param {{steps?: number|null, minutes?: number|null}} [limits] the task's limits
+ * @returns {{maxTurns: number, timeoutMs: number, timeout: string}} the harness's caps
+ */
+function caps(limits = {}) {
+    const steps = Number(limits && limits.steps);
+    const minutes = Number(limits && limits.minutes);
+    const hasSteps = Number.isFinite(steps) && steps > 0;
+    const hasMinutes = Number.isFinite(minutes) && minutes > 0;
+    const timeoutMs = hasMinutes ? (Math.round(minutes * 60) + MINUTE_MARGIN * 60) * 1000 : 0;
+    return {
+        maxTurns: hasSteps ? Math.round(steps) + TURN_MARGIN : NO_TURN_CAP,
+        timeoutMs,
+        timeout: timeoutMs ? `${Math.ceil(timeoutMs / 60000)}m` : `${NO_TURN_CAP}m`,
+    };
+}
+
 /**
  * Compare what a task spent with its limits. The first limit reached wins (steps, then minutes, then dollars).
  *
@@ -99,4 +128,4 @@ function wrapUp(hit, opts = {}) {
     return { action: 'wrap-up', prompt: wrapUpPrompt(hit), why: `one last turn to land the work after the ${hit} limit` };
 }
 
-module.exports = { STATES, limitsFor, evaluate, state, wrapUp, wrapUpPrompt };
+module.exports = { STATES, TURN_MARGIN, MINUTE_MARGIN, NO_TURN_CAP, limitsFor, caps, evaluate, state, wrapUp, wrapUpPrompt };

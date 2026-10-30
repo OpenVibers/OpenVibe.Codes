@@ -43,7 +43,7 @@ const TIER_EFFORT = { basic: 'low', research: 'medium', standard: 'high', hard: 
 
 /** The attempt's own states, and the reasons it may have ended. */
 const STATES = ['queued', 'running', 'done', 'failed', 'stopped', 'budget-stopped', 'interrupted'];
-const REASONS = ['limit', 'auth', 'capacity', 'refused', 'error', 'budget', 'stopped', 'hung', 'context'];
+const REASONS = ['limit', 'auth', 'capacity', 'refused', 'error', 'budget', 'stopped', 'hung', 'context', 'turns'];
 const KINDS = ['first', 'continue', 'switch', 'wrap-up', 'restart', 'manual'];
 
 /** The engine's own words for a reason: the timeline reads like a person wrote it. */
@@ -63,6 +63,7 @@ const ERROR_TEXT = {
     stopped: 'stopped on purpose',
     context: 'the context window is too big',
     hung: 'it went quiet for too long',
+    turns: 'the harness reached max_turns',
 };
 
 /** The engine's status for our state (the two vocabularies are the same, except 'queued' and 'running'). */

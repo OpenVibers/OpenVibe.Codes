@@ -19,9 +19,43 @@
  */
 
 const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const readline = require('readline');
 const { ORDER } = require('../effort');
 const { scrubDeep } = require('../redact');
+
+/** No limit: the turn cap a harness gets when the owner set none (the portal's 100000). */
+const NO_TURN_CAP = 100000;
+
+/**
+ * The harness's own turn cap, from the task's limits (Settings → Limits): the portal's `--max-turns` value.
+ * A missing or zero cap means no limit, never the old 150/200 hard-coded ones.
+ *
+ * @param {number|string} [value] the cap the job runner derived (steps + 25, or none)
+ * @returns {string} the number the CLI's argv carries
+ */
+function turnCap(value) {
+    const n = Number(value);
+    return String(Number.isFinite(n) && n > 0 ? Math.round(n) : NO_TURN_CAP);
+}
+
+/**
+ * Whether this machine has the shared Know MCP server (`ov_know`) registered for Claude Code, so the harness may call
+ * its tools (`mcp__ov_know`): `~/.claude.json` → `mcpServers.ov_know`, the portal's own registration.
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.file] the Claude Code config to read (a test, or a Node's own path)
+ * @returns {boolean} true when the server is registered
+ */
+function knowRegistered({ file } = {}) {
+    const config = file || process.env.OPENVIBE_CLAUDE_CONFIG || path.join(os.homedir(), '.claude.json');
+    try {
+        const doc = JSON.parse(fs.readFileSync(config, 'utf8'));
+        return !!(doc && doc.mcpServers && doc.mcpServers.ov_know);
+    } catch { return false; }
+}
 
 /** The reasoning levels each harness accepts (the portal's ds-limits.js / engine/effort.js). */
 const EFFORT_LEVELS = {
@@ -73,13 +107,13 @@ function childEnv(extra = {}) {
  * @param {string} [opts.cwd] the working directory
  * @param {object} [opts.env] the environment
  * @param {string} [opts.stdin] what the CLI reads (the brief, for the harnesses that take it on stdin)
- * @param {number} [opts.timeoutMs] how long it may run
+ * @param {number} [opts.timeoutMs] how long it may run; 0 (the default) is no limit
  * @param {AbortSignal} [opts.signal] stops it
  * @param {function} opts.onLine every stdout line
  * @param {function} [opts.onEnd] when the process ended ({ code, signal, timedOut, stderr })
  * @returns {{cancel: function, done: Promise<object>}} the run
  */
-function runCli({ cmd, argv, cwd, env, stdin, timeoutMs = 45 * 60_000, signal, onLine, onEnd }) {
+function runCli({ cmd, argv, cwd, env, stdin, timeoutMs = 0, signal, onLine, onEnd }) {
     let child;
     let stderrBuf = '';
     let timedOut = false;
@@ -101,8 +135,9 @@ function runCli({ cmd, argv, cwd, env, stdin, timeoutMs = 45 * 60_000, signal, o
             try { child.kill('SIGTERM'); } catch { /* gone */ }
             setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, 5000).unref();
         };
-        const timer = setTimeout(() => { timedOut = true; cancel(); }, timeoutMs);
-        timer.unref();
+        // A wall clock the owner set (the cap is its limit plus five minutes); no limit is no timer at all.
+        const timer = timeoutMs > 0 ? setTimeout(() => { timedOut = true; cancel(); }, timeoutMs) : null;
+        if (timer) timer.unref();
         if (signal) {
             if (signal.aborted) cancel();
             else signal.addEventListener('abort', cancel, { once: true });
@@ -176,4 +211,4 @@ const TOOL_NAMES = {
     task: 'Task', todowrite: 'TodoWrite', todo_list: 'TodoWrite',
 };
 
-module.exports = { EFFORT_LEVELS, effortFor, runCli, claudeFeed, childEnv, emitter, TOOL_NAMES };
+module.exports = { EFFORT_LEVELS, NO_TURN_CAP, effortFor, turnCap, knowRegistered, runCli, claudeFeed, childEnv, emitter, TOOL_NAMES };
