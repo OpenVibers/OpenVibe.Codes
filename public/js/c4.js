@@ -144,6 +144,43 @@
             if (stream.readyState === EventSource.CLOSED) { stream.close(); window.clearInterval(timer); }
         });
     });
+    // The conductor's start form: the folders this machine has worked in, and a model picked from the ones the plan
+    // login offers (Other… opens a field for one). Both work without this script — the pick has its own name and the
+    // server reads it — this only makes them visible and keeps the two in step.
+    document.querySelectorAll('form[action="/conductor"]').forEach((form) => {
+        const machine = form.querySelector('[data-c4-machine]');
+        const pick = form.querySelector('[data-c4-folder-pick]');
+        const folder = form.querySelector('#c4-folder');
+        if (pick) {
+            const options = Array.from(pick.options);
+            const filter = () => {
+                const want = machine ? machine.value : '';
+                const at = pick.selectedIndex;
+                options.forEach((o, i) => {
+                    if (i === 0) return;                       // "A recent folder…"
+                    const forMachine = (o.getAttribute('data-machine') || '');
+                    o.hidden = !!want && !!forMachine && forMachine !== want;
+                });
+                if (at > 0 && pick.options[at].hidden) { pick.selectedIndex = 0; if (folder) folder.value = ''; }
+                else pick.selectedIndex = at;
+            };
+            filter();
+            if (machine) machine.addEventListener('change', filter);
+            pick.addEventListener('change', () => { if (pick.value && folder) folder.value = pick.value; });
+        }
+        const model = form.querySelector('[data-c4-model]');
+        const other = form.querySelector('[data-c4-model-other]');
+        const otherInput = other && other.querySelector('input');
+        if (model && other && otherInput) {
+            const toggle = () => {
+                const custom = model.value === 'other';
+                other.hidden = !custom;
+                if (custom) otherInput.focus();
+            };
+            toggle();
+            model.addEventListener('change', toggle);
+        }
+    });
     // The conductor (Codes C9b): a message with images goes through the JSON API (the form alone sends the words), and
     // the live turn's lines fill the transcript. When the turn ends the page reloads once, so the turn's answer and its
     // state are the server's own words.

@@ -91,7 +91,10 @@ function renderPage(o) {
         brandName: SITE_NAME,
         apiBase: NETWORK_URL,
         links,
-        appBar: c4Workspace ? false : [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Start', href: '/start', icon: 'fa-play' }, { label: 'Run', href: '/run', icon: 'fa-microchip' }, { label: 'Agents', href: '/harnesses', icon: 'fa-robot' }],   // phones: the bottom tab bar (Shared 4.20)
+        // Phones: one tab bar, the Frame's own (Shared 4.20). On a workspace page a signed-in person gets the workspace's
+        // sections there — the first four (Home, Tasks, Conductor, Agents) and More, which opens the navbar's drawer with
+        // the rest; the section the person is in is marked. Everyone else keeps the product's four.
+        appBar: c4Workspace && signedIn ? true : [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Start', href: '/start', icon: 'fa-play' }, { label: 'Run', href: '/run', icon: 'fa-microchip' }, { label: 'Agents', href: '/harnesses', icon: 'fa-robot' }],
         history: { type: 'page', title: o.title || SITE_NAME },
         silentLogin: `${o.config.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
