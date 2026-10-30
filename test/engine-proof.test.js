@@ -13,13 +13,14 @@ const { check, done } = require('./helpers/boot');
 
 (async () => {
     /** A fake machine: the repo's package.json, a passing test run, a clean page and a second model's opinion. */
-    const machine = ({ pkg = { scripts: { test: 'node test/run.js' } }, files = [], testExit = 0, review = null, shots = [] } = {}) => {
+    const machine = ({ pkg = { scripts: { test: 'node test/run.js' } }, files = [], testExit = 0, testOutput = null, review = null, shots = [] } = {}) => {
         const calls = [];
+        const output = testOutput == null ? (testExit === 0 ? '12/12 test files passed' : 'FAIL test/foo.test.js\nAssertionError') : testOutput;
         const run = async (argv, options) => {
             calls.push(argv);
             if (argv[0] === 'node' && argv[1] === '-e') return { code: 0, output: JSON.stringify(pkg) };
-            if (argv[0] === 'node' && argv[1] === 'test/run.js') return { code: testExit, output: testExit === 0 ? '12/12 test files passed' : 'FAIL test/foo.test.js\nAssertionError' };
-            if (argv[0] === 'npm') return { code: testExit, output: testExit === 0 ? '12/12 test files passed' : 'FAIL test/foo.test.js\nAssertionError' };
+            if (argv[0] === 'node' && argv[1] === 'test/run.js') return { code: testExit, output };
+            if (argv[0] === 'npm') return { code: testExit, output };
             return { code: 0, output: '' };
         };
         return {
@@ -67,6 +68,25 @@ const { check, done } = require('./helpers/boot');
             const allowed = testPlan({ pkg: { scripts: { test: 'node test/run.js' } }, files: ['package.json'], env: { CODES_PROOF_FULL_SUITE: '1' } });
             assert.strictEqual(allowed.mode, 'full');
             assert.deepStrictEqual(allowed.args, ['test/run.js']);
+        });
+
+        await check('a change no test name reaches does not run the whole suite unguarded', async () => {
+            const plan = testPlan({ pkg: { scripts: { test: 'node test/run.js' } }, files: ['engine/index.js'], env: {} });
+            assert.strictEqual(plan.mode, 'none');
+            assert.ok(/full suite is not allowed/.test(plan.reason), plan.reason);
+            const allowed = testPlan({ pkg: { scripts: { test: 'node test/run.js' } }, files: ['engine/index.js'], env: { CODES_PROOF_FULL_SUITE: '1' } });
+            assert.strictEqual(allowed.mode, 'full');
+        });
+
+        await check('a narrowed run that matches no test is a skip, not a failed proof', async () => {
+            const m = machine({ files: ['README.md'], testExit: 1, testOutput: 'no test files matched' });
+            const proof = await collectProof({ cwd: '/repo', adapters: m.adapters });
+            const test = proof.items.find((i) => i.kind === 'tests');
+            assert.strictEqual(test.ok, true);
+            assert.strictEqual(test.skipped, true);
+            assert.ok(/no test matches/.test(test.summary), test.summary);
+            assert.strictEqual(proof.outcome.state, 'done');
+            assert.ok(/tests was skipped/.test(proof.outcome.note), proof.outcome.note);
         });
 
         await check('a repo with no test command of its own says so instead of failing', async () => {

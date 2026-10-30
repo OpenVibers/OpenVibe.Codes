@@ -253,8 +253,15 @@ function aiRoot(env = {}) {
     if (env.OPENVIBE_AI_URL) return env.OPENVIBE_AI_URL;
     if (env.OPENAI_BASE_URL) return env.OPENAI_BASE_URL;
     if (env.DEEPSEEK_BASE_URL) return env.DEEPSEEK_BASE_URL;
+    if (env.OPENVIBE_CODES_BASE_URL) return env.OPENVIBE_CODES_BASE_URL;
     if (env.ANTHROPIC_BASE_URL) return String(env.ANTHROPIC_BASE_URL).replace(/\/+$/, '') + '/v1';
     return '';
+}
+
+/** The token C3 put in the job's input, under the name the attempt's harness was given. */
+function runTokenOf(jobEnv = {}) {
+    return jobEnv.OPENVIBE_AI_TOKEN || jobEnv.OPENAI_API_KEY || jobEnv.ANTHROPIC_AUTH_TOKEN
+        || jobEnv.DEEPSEEK_API_KEY || jobEnv.OPENVIBE_CODES_API_KEY || '';
 }
 
 /**
@@ -267,9 +274,9 @@ function aiRoot(env = {}) {
  */
 function reviewAdapter({ env = {}, jobEnv = {}, fetchImpl = globalThis.fetch, baseUrl, models = [] } = {}) {
     return async function review({ patch = '', summary = '', tests = null, model = null, family = null } = {}) {
-        // The token the attempt's own harness carries: any of the names C3 gives, that harness's provider first.
-        const runToken = jobEnv.OPENVIBE_AI_TOKEN || jobEnv.OPENAI_API_KEY || jobEnv.ANTHROPIC_AUTH_TOKEN || jobEnv.DEEPSEEK_API_KEY || '';
-        const token = runToken || env.OPENVIBE_CODES_TASK_TOKEN || env.OPENVIBE_AI_TOKEN || '';
+        // The token the attempt's own harness carries: only the job's own input, under the name C3 gave that harness.
+        // The machine's own OPENVIBE_AI_TOKEN names its owner, not this task's person, so it is never spent here.
+        const token = runTokenOf(jobEnv);
         if (!token) {
             const err = new Error('no task token is connected yet, so no model could review this change');
             err.code = 'review.no_token';

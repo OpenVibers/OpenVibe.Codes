@@ -17,8 +17,8 @@
  * The four steps, in order:
  *
  *   tests        the repo's own runner, narrowed to the tests the change reaches. The whole suite runs only when
- *                the change touches what every test shares and the owner's guard allows it (CODES_PROOF_FULL_SUITE=1):
- *                a machine may not spend an hour of its owner's battery on every task.
+ *                the owner's guard allows it (CODES_PROOF_FULL_SUITE=1): a machine may not spend an hour of its
+ *                owner's battery on every task. A filter that matches no test is a skip, not a failure.
  *   screenshots  phone (390) and desktop (1440) of the pages the diff touches, because a page that overflows is a
  *                bug the diff alone never shows.
  *   diff         the stats: what changed, how many lines, which files.
@@ -36,6 +36,9 @@ const PAGE_FILE = /^(?:public\/|server\/render\/|server\/http\/)|\.(?:html?|css)
 
 /** The files that make every test matter: the shared ones. A change here runs the whole suite (when allowed). */
 const SHARED_FILE = /^(?:package\.json|package-lock\.json|engine\/index\.js|server\/app\.js|server\/db\.js|server\/config\.js)$/;
+
+/** The runners' own words for "the filter matched no test": not a failure, nothing ran. */
+const NO_TEST_MATCH = /no test files? (?:matched|found)|no tests? (?:found|ran|to run)|running 0 tests/i;
 
 /** The kinds of proof item, in the order they are collected. */
 const KINDS = ['tests', 'screenshots', 'diff', 'review'];
@@ -94,7 +97,8 @@ function nodeTestScript(script) {
  *
  * The runner is the repo's: 'npm test' when package.json has it (or the file it runs, when that is `node <file>`),
  * then pytest, go and cargo. The suite is narrowed to the tests the change reaches; the whole suite runs only when
- * the change touches what every test shares and the owner's guard allows it (CODES_PROOF_FULL_SUITE=1).
+ * the owner's guard allows it (CODES_PROOF_FULL_SUITE=1) — a change that touches what every test shares, or one no
+ * test name reaches.
  *
  * @param {object} what
  * @param {object} what.pkg the repo's package.json (or null)
@@ -117,10 +121,13 @@ function testPlan({ pkg = null, files = [], env = {} } = {}) {
         const base = direct ? { command: 'node', args: [direct] } : { command: 'npm', args: ['test'] };
         const narrowed = direct ? [direct, ...words] : ['test', '--', ...words];
         if (shared && allowFull) return { ...base, mode: 'full', reason: 'the change touches what every test shares, and the full suite is allowed' };
-        if (!shared) {
-            if (!words.length) return { ...base, mode: 'targeted', reason: 'no test name matches the changed files, so the suite runs as it is' };
-            return { command: base.command, args: narrowed, mode: 'targeted', reason: 'only the tests the change reaches (' + words.join(', ') + ')' };
+        if (!words.length) {
+            // Nothing in the diff names a test, so there is nothing to narrow to. The whole suite is not run without
+            // the owner's guard: a machine may not spend an hour of its owner's battery on every task.
+            if (allowFull) return { ...base, mode: 'full', reason: 'no test name matches the changed files, and the full suite is allowed' };
+            return { command: '', args: [], mode: 'none', reason: 'no test name matches the changed files, and the full suite is not allowed (CODES_PROOF_FULL_SUITE=1)' };
         }
+        if (!shared) return { command: base.command, args: narrowed, mode: 'targeted', reason: 'only the tests the change reaches (' + words.join(', ') + ')' };
         return { command: base.command, args: narrowed, mode: 'targeted', reason: 'the change touches what every test shares, but the full suite is not allowed (CODES_PROOF_FULL_SUITE=1)' };
     }
     if (pkg && (pkg.go || (pkg.dependencies && pkg.dependencies.go))) return { command: 'go', args: ['test', './...'], mode: 'full', reason: "the repo's own Go suite" };
@@ -210,10 +217,14 @@ async function collectProof({ cwd, files = [], adapters = {}, author = null, emi
         const result = await run([plan.command, ...plan.args], { cwd, timeoutMs: adapters.testTimeoutMs || 600000 });
         const output = String((result && result.output) || '');
         const ok = !!result && result.code === 0;
+        // The runner's filter matched nothing: no test reaches the change by name, so nothing is proved and nothing
+        // failed. Saying "the tests failed" would be a false alarm on a docs or asset change.
+        const noMatch = !ok && NO_TEST_MATCH.test(output);
         await say({
-            kind: 'tests', label: 'tests', ok, skipped: false, mode: plan.mode, reason: plan.reason,
+            kind: 'tests', label: 'tests', ok: noMatch ? true : ok, skipped: noMatch, mode: plan.mode, reason: plan.reason,
             command: [plan.command, ...plan.args].join(' '),
-            summary: ok ? plan.reason : (output.trim().split('\n').slice(-6).join(' ') || 'the tests failed (exit ' + result.code + ')'),
+            summary: noMatch ? 'no test matches the changed files, so none ran'
+                : (ok ? plan.reason : (output.trim().split('\n').slice(-6).join(' ') || 'the tests failed (exit ' + result.code + ')')),
         });
     }
 
