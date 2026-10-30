@@ -136,7 +136,7 @@ async function createApp(opts = {}) {
     app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'openvibe-codes', version: VERSION }));
     // GET /release.json (ADR-016) and POST /release-metrics: open tabs' update reports into /metrics.
     release.mount(app, { registry: metrics.registry });
-    const readiness = createCodesReadiness({ store, harnesses, config, release: release.release, valkey: ctx.valkey });
+    const readiness = createCodesReadiness({ store, harnesses, config, release: release.release, valkey: ctx.valkey, sso});
     app.get('/api/ready', readiness.handler);
 
     // ── The developer console's addresses: permanent redirects to OpenVibe.Services ──
