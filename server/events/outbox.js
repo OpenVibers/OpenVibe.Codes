@@ -9,17 +9,26 @@
  *
  * The fixed evt_ id is chosen at insert, so a retry or a restart never makes a second event. The publisher claims due
  * rows with a short lease (two processes never send one row at once), sends each envelope once under that id, records
- * a failure's attempt and backoff, and leaves it for the next pass. Under CODES_DRILL no loop starts.
+ * a failure's attempt and backoff, and leaves it for the next pass. An event OpenVibe.Events refuses (its envelope
+ * can never pass) is marked dead after a fixed number of tries instead of being retried forever. Under CODES_DRILL
+ * no loop starts.
  *
  *   { task_id, state, agent, repo, cost_usd, files_changed, started_at, finished_at, error }
  */
-const { ids, serviceAuth } = require('openvibe-contracts');
+const { ids, serviceAuth, validate } = require('openvibe-contracts');
 
 const TOPICS = Object.freeze([
     'codes.task.queued', 'codes.task.running', 'codes.task.succeeded', 'codes.task.failed', 'codes.task.cancelled',
 ]);
 const TOPIC_SET = new Set(TOPICS);
 const MAX_BACKOFF_MS = 5 * 60_000;
+// The envelope contract (events.event-envelope@1): the envelope Codes sends has to match it, or OpenVibe.Events
+// refuses the event with a 422 and the row is retried forever.
+const ENVELOPE_CONTRACT = 'events.event-envelope@1';
+// An event Events refused (4xx: its envelope can never pass) is dead after this many tries; an event that keeps
+// failing for another reason is dead after this many. A dead event is not sent again.
+const DEAD_AFTER_REFUSALS = 3;
+const DEAD_AFTER_ATTEMPTS = 20;
 
 /** queued | running | succeeded | failed | cancelled: the five states codes.task.* announces. */
 function groupOf(state) {
@@ -114,7 +123,11 @@ function createPublisher({ config, store, fetchImpl = globalThis.fetch, log = co
         scope: (config.events && config.events.scope) || 'events.event.publish',
         fetch: fetchImpl,
     }) : null;
-    const stats = { published: 0, failed: 0, last_error: null };
+    const stats = { published: 0, failed: 0, dead: 0, last_error: null };
+    // How many tries an event gets before it is marked dead: a refusal (its envelope can never pass) fewer than a
+    // failure of another kind.
+    const deadAfterRefusals = Math.max(1, Number((config.events && config.events.deadAfterRefusals) || DEAD_AFTER_REFUSALS));
+    const deadAfterAttempts = Math.max(1, Number((config.events && config.events.deadAfterAttempts) || DEAD_AFTER_ATTEMPTS));
     let timer = null;
     let running = false;
     let active = false;
@@ -130,7 +143,7 @@ function createPublisher({ config, store, fetchImpl = globalThis.fetch, log = co
             `UPDATE codes_outbox o SET claimed_at = $1::timestamptz, claimed_by = $2
              WHERE o.event_id IN (
                  SELECT o2.event_id FROM codes_outbox o2
-                 WHERE o2.published_at IS NULL AND o2.next_attempt_at <= $1::timestamptz
+                 WHERE o2.published_at IS NULL AND o2.dead_at IS NULL AND o2.next_attempt_at <= $1::timestamptz
                    AND (o2.claimed_at IS NULL OR o2.claimed_at < $3::timestamptz)
                  ORDER BY o2.created_at ASC, o2.event_id ASC
                  LIMIT $4
@@ -141,6 +154,10 @@ function createPublisher({ config, store, fetchImpl = globalThis.fetch, log = co
         );
     }
 
+    /**
+     * The envelope OpenVibe.Events is given (events.event-envelope@1): the priority is one of the contract's own
+     * three words (critical | important | low), never a word of Codes' own.
+     */
     function envelope(row) {
         return {
             event_id: row.event_id,
@@ -150,16 +167,35 @@ function createPublisher({ config, store, fetchImpl = globalThis.fetch, log = co
             actor: { type: 'user', id: row.subject },
             subject: { type: 'user', id: row.subject },
             timestamp: store.iso(),
-            priority: 'normal',
+            priority: 'important',
             visibility: 'internal',
             payload: row.payload,
         };
     }
 
+    /**
+     * What is wrong with an envelope, per the contract itself: null when it matches. It is a warning, not a refusal:
+     * OpenVibe.Events is the authority on what it accepts, and an envelope that does not match here is sent anyway
+     * (and refused there, which is what marks the row dead).
+     */
+    function envelopeIssue(doc) {
+        try {
+            const out = validate(ENVELOPE_CONTRACT, doc);
+            if (!out || out.valid) return null;
+            const errors = Array.isArray(out.errors) ? out.errors : [];
+            return errors.map((e) => `${e.path || ''} ${e.message || ''}`.trim()).join('; ') || 'the envelope does not match the contract';
+        } catch (e) {
+            return null;   // the contract is not in the pinned version: nothing to say about it
+        }
+    }
+
     async function send(row) {
         const headers = { 'Content-Type': 'application/json', Accept: 'application/json', ...(await tokens.authHeaders()) };
+        const doc = envelope(row);
+        const issue = envelopeIssue(doc);
+        if (issue) log.warn(`[Codes] outbox ${row.event_id} does not match ${ENVELOPE_CONTRACT}: ${issue}`);
         const res = await fetchImpl(`${eventsUrl}/api/v1/events`, {
-            method: 'POST', headers, body: JSON.stringify(envelope(row)), signal: AbortSignal.timeout(15_000),
+            method: 'POST', headers, body: JSON.stringify(doc), signal: AbortSignal.timeout(15_000),
         });
         if (!res.ok) {
             const text = await res.text().catch(() => '');
@@ -190,6 +226,21 @@ function createPublisher({ config, store, fetchImpl = globalThis.fetch, log = co
                     const message = String((err && err.message) || err).slice(0, 500);
                     stats.last_error = message;
                     const attempts = Number(row.attempts) + 1;
+                    // A refusal (4xx) is the envelope being turned down: it can never pass, so it dies after a fixed
+                    // number of tries. Another failure is worth more tries, and dies too in the end.
+                    const status = Number(err && err.status) || 0;
+                    const refused = status >= 400 && status < 500;
+                    const deadAfter = refused ? deadAfterRefusals : deadAfterAttempts;
+                    if (attempts >= deadAfter) {
+                        await db.exec(
+                            `UPDATE codes_outbox SET attempts = attempts + 1, last_error = $1, dead_at = $2::timestamptz, dead_reason = $3,
+                               claimed_at = NULL, claimed_by = NULL WHERE event_id = $4`,
+                            [message, store.iso(), refused ? 'refused' : 'failed', row.event_id],
+                        );
+                        stats.dead++;
+                        log.warn(`[Codes] outbox ${row.event_id} is dead after ${attempts} tries: ${message}`);
+                        continue;
+                    }
                     const next = new Date(store.now() + backoffMs(attempts)).toISOString();
                     await db.exec(
                         `UPDATE codes_outbox SET attempts = attempts + 1, last_error = $1, claimed_at = NULL, claimed_by = NULL,
@@ -217,10 +268,16 @@ function createPublisher({ config, store, fetchImpl = globalThis.fetch, log = co
         configured, runOnce,
         start() { if (!configured || config.drill || timer) return false; active = true; schedule(0); return true; },
         stop() { active = false; if (timer) clearTimeout(timer); timer = null; return Promise.resolve(); },
-        pending: async () => Number(await db.value('SELECT COUNT(*)::int AS n FROM codes_outbox WHERE published_at IS NULL')) || 0,
-        status: async () => ({ enabled: configured, pending: await db.value('SELECT COUNT(*)::int AS n FROM codes_outbox WHERE published_at IS NULL'), last_error: stats.last_error }),
+        pending: async () => Number(await db.value('SELECT COUNT(*)::int AS n FROM codes_outbox WHERE published_at IS NULL AND dead_at IS NULL')) || 0,
+        dead: async () => Number(await db.value('SELECT COUNT(*)::int AS n FROM codes_outbox WHERE dead_at IS NOT NULL')) || 0,
+        status: async () => ({
+            enabled: configured,
+            pending: await db.value('SELECT COUNT(*)::int AS n FROM codes_outbox WHERE published_at IS NULL AND dead_at IS NULL'),
+            dead: await db.value('SELECT COUNT(*)::int AS n FROM codes_outbox WHERE dead_at IS NOT NULL'),
+            last_error: stats.last_error,
+        }),
         stats: () => ({ ...stats }),
     };
 }
 
-module.exports = { createOutbox, createPublisher, TOPICS, TOPIC_SET, topicFor, groupOf, payloadOf, repoSlug, MAX_BACKOFF_MS };
+module.exports = { createOutbox, createPublisher, TOPICS, TOPIC_SET, topicFor, groupOf, payloadOf, repoSlug, MAX_BACKOFF_MS, DEAD_AFTER_REFUSALS, DEAD_AFTER_ATTEMPTS };

@@ -77,7 +77,7 @@ async function createApp(opts = {}) {
     const run = opts.run || createRunClient({ config, fetchImpl: fetchImpl || globalThis.fetch });
     // A person's own connections (Codes C3): their provider keys live in OpenVibe.AI, and their harnesses run with a
     // short-lived run token that names them.
-    const connections = createConnections({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    const connections = opts.connections || createConnections({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     const runTokens = createRunTokens({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The task's attempts (stage C2): every Run job is one attempt, and the engine decides what happens next.
     const attempts = createAttempts({ store, config, log, harnesses });
