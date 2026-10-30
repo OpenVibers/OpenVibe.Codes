@@ -78,7 +78,7 @@ async function createApp(opts = {}) {
     // The task's attempts (stage C2): every Run job is one attempt, and the engine decides what happens next.
     const attempts = createAttempts({ store, config, log, harnesses });
     const benchPublisher = createBenchPublisher({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, benchAttemptEnded: benchPublisher.onTaskTerminal });
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
     const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens, attempts, benchPublisher };
     ctx.forgejo = createForgejoClient({ config, log });
 
