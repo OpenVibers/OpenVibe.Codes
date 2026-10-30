@@ -144,6 +144,87 @@
             if (stream.readyState === EventSource.CLOSED) { stream.close(); window.clearInterval(timer); }
         });
     });
+    // The conductor (Codes C9b): a message with images goes through the JSON API (the form alone sends the words), and
+    // the live turn's lines fill the transcript. When the turn ends the page reloads once, so the turn's answer and its
+    // state are the server's own words.
+    document.querySelectorAll('[data-c4-conductor-form]').forEach((node) => {
+        const form = node.closest('form');
+        const input = form.querySelector('[data-c4-images]');
+        const status = form.querySelector('[data-c4-message-status]');
+        if (!form || !input) return;
+        const say = (text, bad) => { if (status) { status.textContent = text; status.classList.toggle('is-bad', !!bad); } };
+        const asData = (file) => new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve({ name: file.name, mime: file.type, data: String(reader.result || '') });
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(file);
+        });
+        form.addEventListener('submit', async (event) => {
+            const files = Array.from(input.files || []).slice(0, 4);
+            if (!files.length) return;                 // words alone: the plain form post works without this script
+            event.preventDefault();
+            const button = form.querySelector('button[type="submit"]');
+            if (button) button.disabled = true;
+            say(files.length === 1 ? 'Sending the image…' : `Sending ${files.length} images…`);
+            try {
+                const attachments = (await Promise.all(files.map(asData))).filter(Boolean);
+                const text = (form.querySelector('textarea[name="text"]') || {}).value || '';
+                const res = await fetch(node.dataset.conductorApi, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ text, attachments }),
+                });
+                const doc = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(doc.detail || `the message was refused (${res.status})`);
+                window.location.reload();
+            } catch (e) {
+                say(String((e && e.message) || 'the message could not be sent'), true);
+                if (button) button.disabled = false;
+            }
+        });
+    });
+
+    document.querySelectorAll('[data-c4-conductor]').forEach((root) => {
+        const out = root.querySelector('[data-task-log]');
+        const label = root.querySelector('[data-live-label]');
+        const live = root.dataset.c4Conductor === 'live';
+        const url = root.dataset.c4ConductorStream;
+        if (!live || !window.EventSource || !url) return;   // between turns the lines are drawn on the server
+        const stream = new EventSource(url);
+        const textOf = (line) => {
+            const b = line && line.body;
+            if (typeof b === 'string') return b;
+            if (!b || typeof b !== 'object') return String(b ?? '');
+            if (b.t === 'tool') return `→ ${b.name || ''} ${String((b.input && (b.input.command || b.input.file_path)) || b.what || '')}`.trim();
+            if (b.t === 'tool_result') return `  ${b.ok === false ? '✗' : '·'} ${String(b.output || '').split('\n')[0]}`;
+            return b.text || b.message || '';
+        };
+        stream.addEventListener('line', (event) => {
+            let line;
+            try { line = JSON.parse(event.data); } catch { return; }
+            const text = textOf(line).trim();
+            if (!text || !out) return;
+            out.textContent += `${text}\n`;
+            out.scrollTop = out.scrollHeight;
+            if (label) label.textContent = 'Working…';
+        });
+        let reloaded = false;
+        stream.addEventListener('error', () => {
+            // The server ends the stream when the turn ends. Reload once so the turn's answer and the box are fresh —
+            // but not twice in five seconds, so a conductor that ends at once cannot make the page reload in a loop.
+            if (reloaded || !live || stream.readyState === EventSource.CLOSED) return;
+            const key = `c4-conductor-reload:${root.dataset.task || ''}`;
+            let last = 0;
+            try { last = Number(window.sessionStorage.getItem(key) || 0); } catch { last = 0; }
+            if (Date.now() - last < 5000) return;
+            try { window.sessionStorage.setItem(key, String(Date.now())); } catch { /* storage may be off */ }
+            reloaded = true;
+            stream.close();
+            window.setTimeout(() => window.location.reload(), 1200);
+        });
+        stream.addEventListener('end', () => { if (label) label.textContent = 'The turn ended.'; });
+    });
     // The repository picker: the person's own repositories first, then GitHub's public answer for what they type.
     // Server-rendered options already hold the saved ones, so the field works with this script blocked.
     document.querySelectorAll('[data-c4-repo-search]').forEach((input) => {

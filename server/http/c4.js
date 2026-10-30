@@ -23,6 +23,7 @@ const { homeJsonLd } = require('./discovery');
 const LINKS = [
     ['Home', '/', '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>'],
     ['Tasks', '/tasks', '<path d="M8 6h12M8 12h12M8 18h12M3 6h.01M3 12h.01M3 18h.01"/>'],
+    ['Conductor', '/conductor', '<path d="M4 17V9m4 8V5m4 12v-6m4 6V8m4 9v-4"/>'],
     ['Agents', '/agents', '<circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0M12 2v3M3 8h3m12 0h3"/>'],
     ['Machines', '/machines', '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/>'],
     ['Usage', '/usage', '<path d="M4 19V5m0 14h17M8 15v-4m5 4V7m5 8v-6"/>'],
@@ -59,7 +60,7 @@ const PROVIDER_NAMES = { anthropic: 'Anthropic', openai: 'OpenAI', deepseek: 'De
 
 function createC4Routes(ctx) {
     const r = asyncRouter();
-    const { config, store, harnesses, tasks, sso, connections, machines, userSettings, github, usage } = ctx;
+    const { config, store, harnesses, tasks, sso, connections, machines, userSettings, github, usage, conductor, approvals } = ctx;
     const db = store.db;
     const form = express.urlencoded({ extended: false, limit: '16kb' });
     const page = (req, res, title, body, extra = {}) => {
@@ -233,11 +234,67 @@ ${patch ? `<details class="c4-fold c4-fold-wide"><summary><span class="c4-row-la
 ${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="c4-facts"><div><dt>CI</dt><dd>${pill(pr.ci || 'No checks reported', pr.ci === 'Passed' ? 'ok' : pr.ci === 'Failed' || pr.ci === 'Errored' ? 'bad' : 'skip')}</dd></div><div><dt>Merge</dt><dd>${pill(pr.merge || 'Open', pr.state === 'merged' ? 'ok' : pr.merge === 'Has conflicts' ? 'bad' : 'skip')}</dd></div><div><dt>Checked</dt><dd>${esc(age(pr.checked_at))}</dd></div></dl>`}</div>`;
     };
 
+    // ── The conductor (C9b) ─────────────────────────────────────────────────────────────────────────────────────
+    const conductorState = (row) => (['queued', 'placed', 'running'].includes(row.state)
+        ? (row.state === 'queued' ? 'Getting ready' : 'Working')
+        : row.outcome === 'stopped' ? 'Stopped' : row.outcome === 'unfinished' ? 'Needs you' : 'Waiting for you');
+    const conductorKind = (row) => (row.outcome === 'stopped' ? 'bad' : row.outcome === 'unfinished' ? 'bad' : ['queued', 'placed', 'running'].includes(row.state) ? 'open' : 'ok');
+
+    /** One stored session line, as the transcript shows it (the same shape public/js/c4.js draws live). */
+    const lineText = (l) => {
+        const b = l.body || {};
+        if (typeof b === 'string') return b;
+        if (b.t === 'tool') return `→ ${b.name || ''} ${String((b.input && (b.input.command || b.input.file_path)) || b.what || '')}`.trim();
+        if (b.t === 'tool_result') return `  ${b.ok === false ? '✗' : '·'} ${String(b.output || '').split('\n')[0]}`;
+        if (b.t === 'done') return `done${b.ok === false ? ' (failed)' : ''}: ${String(b.text || '').split('\n')[0].slice(0, 300)}`;
+        return String(b.text || b.message || '').split('\n')[0].slice(0, 300);
+    };
+
+    /** One turn: what the person said, and what the turn answered. The first turn is the hand-over brief. */
+    const turnRow = (m, taskId) => {
+        const word = { queued: 'Waiting', running: 'Working', done: 'Answered', failed: "Didn't finish", stopped: 'Stopped' }[m.state] || m.state;
+        const kind = m.state === 'done' ? 'ok' : m.state === 'failed' ? 'bad' : m.state === 'running' ? 'open' : 'skip';
+        const files = (m.attachments || []).length
+            ? `<p class="c4-turn-files">${m.attachments.map((a) => `<a class="c4-chip" href="/api/v1/tasks/${encodeURIComponent(taskId)}/messages/${encodeURIComponent(m.id)}/attachments/${m.attachments.indexOf(a)}" rel="noopener">${esc(a.name)}</a>`).join('')}</p>`
+            : '';
+        const answer = m.result && m.result.summary ? `<pre class="c4-turn-answer" tabindex="0">${esc(m.result.summary)}</pre>` : '';
+        const error = m.error ? `<p class="c4-turn-error">${esc(m.error)}</p>` : '';
+        return `<li class="c4-turn c4-turn-${esc(m.state)}"><div class="c4-turn-head"><span class="c4-turn-who">${m.n === 1 ? 'Hand-over brief' : esc(`You · turn ${m.n}`)}</span>${pill(word, kind)}</div><div class="c4-turn-text">${esc(m.prompt)}</div>${files}${answer}${error}</li>`;
+    };
+
+    /** One waiting approval: the command the person reads, and the two answers. */
+    const approvalCard = (a, action) => `<div class="c4-approval"><div class="c4-approval-head"><span class="c4-row-label">${esc(a.tool || 'a tool')}</span><span class="c4-muted">asked ${esc(age(a.created_at))}</span></div><code class="c4-approval-cmd" tabindex="0">${esc(a.summary || 'a tool wants to run')}</code>${a.task_prompt ? `<p class="c4-approval-task">on ${esc(String(a.task_prompt).split('\n')[0].slice(0, 120))}</p>` : ''}<form class="c4-approval-actions" method="post" action="${esc(action)}"><button class="c4-opill c4-opill-primary" name="decision" value="allow" type="submit">Allow</button><button class="c4-opill" name="decision" value="deny" type="submit">Deny</button></form></div>`;
+
+    /** The conductor's page: its turns, what needs the person, and the box that writes the next turn. */
+    async function conductorPage(req, res, row, machineLabel) {
+        const view = await conductor.view(row);
+        const last = await db.maybe('SELECT max(seq) AS seq FROM codes_session_lines WHERE task_id = $1', [row.id]);
+        const lastSeq = last && last.seq != null ? Number(last.seq) : 0;
+        const live = ['queued', 'placed', 'running'].includes(row.state);
+        // Nothing is streaming between turns, so the last turn's lines are read here: the person can see what it did.
+        const recent = live ? [] : await db.many('SELECT body FROM codes_session_lines WHERE task_id = $1 ORDER BY seq DESC LIMIT 60', [row.id]);
+        const lastLines = recent.reverse().map(lineText).filter(Boolean).join('\n');
+        const api = `/api/v1/tasks/${encodeURIComponent(row.id)}`;
+        const pending = view.approvals || [];
+        const turns = (view.messages || []).map((m) => turnRow(m, row.id)).join('');
+        const approvals = pending.length
+            ? `<section class="c4-card c4-approvals" id="approvals"><div class="c4-card-head"><h2>Needs you</h2><span class="c4-muted">Your conductor is waiting</span></div>${pending.map((a) => approvalCard(a, `/tasks/${encodeURIComponent(row.id)}/approvals/${encodeURIComponent(a.id)}`)).join('')}</section>`
+            : '';
+        const outcome = row.outcome === 'unfinished' || row.outcome === 'stopped'
+            ? `<div class="c4-outcome"><span class="c4-obadge" aria-hidden="true">${icon('<path d="m18 6-12 12M6 6l12 12"/>')}</span><div class="c4-outcome-copy"><b>${row.outcome === 'stopped' ? 'Stopped' : 'The last turn did not finish'}</b><span>${esc(row.outcome_note || row.error || 'Write a message to carry on.')}</span></div></div>` : '';
+        const transcript = `<section class="c4-card c4-transcript" data-c4-conductor-stream="${esc(`${api}/events?last_event_id=${lastSeq}`)}" data-task="${esc(row.id)}" data-started-at="${esc(row.started_at || row.created_at || '')}" data-c4-conductor="${live ? 'live' : 'idle'}"><div class="c4-card-head"><h2>${live ? 'This turn, live' : 'The last turn'}</h2><span class="c4-muted" data-live-label>${live ? 'Connecting…' : 'Nothing is running'}</span></div><pre class="c4-log" data-task-log aria-live="polite" tabindex="0">${esc(lastLines)}</pre></section>`;
+        const composer = row.outcome === 'stopped' ? '' : `<section class="c4-card c4-conductor-composer"><form method="post" action="/tasks/${encodeURIComponent(row.id)}/messages" data-c4-conductor-form data-conductor-api="/api/v1/conductor/${encodeURIComponent(row.id)}/messages"><label for="c4-message">${live ? 'Say something: it is the next turn' : 'What next?'}</label><textarea id="c4-message" name="text" rows="3" placeholder="Tell your conductor what to do next, or ask what it is doing" required></textarea><div class="c4-conductor-actions"><label class="c4-file">Attach an image<input type="file" accept="image/*" multiple data-c4-images></label><button class="c4-button" type="submit">Send</button></div><p class="c4-hint" data-c4-message-status role="status">${live ? 'A message waits until the current turn ends; it is not lost.' : ''}</p></form></section>`;
+        const content = `${outcome}<section class="c4-card c4-conductor-head"><div class="c4-task-heading"><div class="c4-task-title-wrap"><h1>Conductor</h1></div><span class="c4-status c4-${esc(row.state)}">${esc(conductorState(row))}</span></div><div class="c4-chips" aria-label="Conductor details"><span class="c4-chip">${esc(row.folder || 'a folder')}</span><span class="c4-chip">${esc(row.model || 'opus')}</span><span class="c4-chip">safety: ${esc(row.safety || 'ask')}</span><span class="c4-chip">${esc(machineLabel || 'your machine')}</span></div><p class="c4-hint">One Claude Code session on your own machine, with your own login. Each message is the next turn of the same conversation; its work is carried out through the Codes tools, on your other agents.</p></section>${approvals}<section class="c4-card c4-turns"><div class="c4-card-head"><h2>Turns</h2><span class="c4-muted">${(view.messages || []).length} so far</span></div>${turns ? `<ol class="c4-turn-list">${turns}</ol>` : '<div class="c4-emptyline">Its first turn is starting.</div>'}</section>${transcript}${composer}`;
+        page(req, res, 'Conductor', wrap('/tasks', content, true));
+    }
+
     // ── Home ────────────────────────────────────────────────────────────────────────────────────────────────────
     r.get('/', async (req, res) => {
         const rows = await ownTasks(req, 8);
         const signedIn = !!viewer(req);
         const settings = signedIn ? await userSettings.get(req.viewer.subject) : null;
+        const waiting = signedIn ? await approvals.inbox(req.viewer.subject) : [];
+        const conductors = rows.filter((x) => x.kind === 'conductor');
         const repos = signedIn ? await recentRepos(req) : [];
         const mine = signedIn ? await machinesOf(req, res) : { ok: false, machines: [] };
         const used = signedIn ? await lastUsedMachines(req) : [];
@@ -247,7 +304,8 @@ ${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="
         const saved = repos.map((repo) => `<a class="c4-chip" href="/?repo=${encodeURIComponent(repo.url)}#c4-prompt" data-c4-saved-repo="${esc(repo.url)}">${icon('<path d="M4 4h16v16l-8-4-8 4z"/>')}${esc(repo.full_name)}</a>`).join('');
         const content = `${header(signedIn ? 'Home' : 'Every coding agent. One place.', signedIn ? '' : 'Your keys, your machines. Tell an agent what to do and follow the work from your phone.')}
 <section class="c4-card c4-composer"><form method="post" action="/start"><label for="c4-prompt">What should an agent do?</label><textarea id="c4-prompt" name="prompt" placeholder="Describe the change, question or fix" required></textarea><div class="c4-controls"><label class="c4-field-repo">Project<input type="url" name="repo" value="${esc(String(req.query.repo || ''))}" placeholder="Paste a repository URL" autocomplete="url" list="c4-repo-options" data-c4-repo-search data-c4-repo-url="/api/v1/me/repos"><datalist id="c4-repo-options">${repos.map((repo) => `<option value="${esc(repo.url)}">${esc(repo.full_name)}</option>`).join('')}</datalist></label><label>Agent <select name="agent"><option value="">Auto</option>${agentOptions}</select></label><label>Machine <select name="machine"><option value="">Auto</option>${machineOptions}</select></label><label>Cost cap <select name="cap"><option>$1.00</option><option>$5.00</option></select></label><button class="c4-button" type="submit">Start a task</button></div><p class="c4-hint">Run places the task on one of your own machines; the machine and agent you pick are saved as your defaults.<span class="c4-hint-status" data-c4-repo-status role="status"></span></p>${saved ? `<div class="c4-chips c4-saved" aria-label="Saved repositories">${saved}</div>` : ''}</form></section>
-<div class="c4-grid"><section class="c4-card"><div class="c4-card-head"><h2>Running</h2><a href="/tasks?state=running">All tasks</a></div>${rows.filter((x) => !['done', 'succeeded', 'failed', 'cancelled'].includes(x.state)).slice(0, 4).map(rowHtml).join('') || '<div class="c4-emptyline">No tasks running yet. <a href="/#c4-prompt">Start a task</a></div>'}</section><section class="c4-card"><div class="c4-card-head"><h2>Needs you</h2></div><p class="c4-sub">Approvals and questions</p><div class="c4-emptyline">Nothing needs your attention. <a href="/tasks">View tasks</a></div></section></div>
+<div class="c4-grid"><section class="c4-card"><div class="c4-card-head"><h2>Running</h2><a href="/tasks?state=running">All tasks</a></div>${rows.filter((x) => !['done', 'succeeded', 'failed', 'cancelled'].includes(x.state)).slice(0, 4).map(rowHtml).join('') || '<div class="c4-emptyline">No tasks running yet. <a href="/#c4-prompt">Start a task</a></div>'}</section><section class="c4-card"><div class="c4-card-head"><h2>Needs you</h2>${waiting.length ? '<a href="/approvals">The inbox</a>' : ''}</div><p class="c4-sub">Approvals and questions</p>${waiting.length ? waiting.slice(0, 3).map((a) => `<a class="c4-task" href="/approvals"><span class="c4-status-dot c4-running" aria-label="Waiting"></span><span class="c4-task-title">${esc(a.tool || 'a tool')}</span><span class="c4-task-meta">${esc(String(a.summary || '').slice(0, 120))}</span></a>`).join('') : '<div class="c4-emptyline">Nothing needs your attention. <a href="/tasks">View tasks</a></div>'}</section></div>
+${signedIn ? `<section class="c4-card c4-conductor-cta"><div class="c4-card-head"><h2>Your conductor</h2><a href="/conductor">${conductors.length ? 'Open' : 'Set it up'}</a></div><p class="c4-muted">One Claude Code session on your own machine, carrying the plan forward and handing the work to your other agents. Each message you send is its next turn${conductors.length ? `: ${conductors.length} running or waiting` : ''}.</p><p><a class="c4-button" href="/conductor">${conductors.length ? 'Open your conductor' : 'Start your conductor'}</a></p></section>` : ''}
 <section class="c4-card"><div class="c4-card-head"><h2>Recent tasks</h2><a href="/tasks">View all</a></div>${rows.slice(0, 5).map(rowHtml).join('') || '<div class="c4-emptyline">No tasks yet. <a href="/#c4-prompt">Start a task</a></div>'}</section>
 ${signedIn && !mine.ok && mine.problem ? note(`Your machines could not be read, so the machine picker has only Auto. ${esc(mine.problem.detail || '')}`, 'bad') : ''}
 ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h2><div class="c4-grid">${[['Any agent', 'Bring a key or plan. Auto picks a good fit and can hand over when one gets stuck.'], ['Your computer or ours', 'Pair your computer with one command. A hosted sandbox is coming soon.'], ['Proof you can inspect', 'See the changes, tests, screenshots and review before you approve.'], ['A cost you can follow', 'Track task costs and plan limits. Set caps that stop with a wrap-up.']].map(([a, b]) => `<article><h3>${a}</h3><p>${b}</p></article>`).join('')}</div></section>`}`;
@@ -295,6 +353,16 @@ ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h
         if (!safeId(req.params.id)) return res.status(404).send('Not found');
         const row = await db.maybe('SELECT * FROM run_tasks WHERE id = $1 AND subject = $2', [req.params.id, req.viewer.subject]);
         if (!row) return res.status(404).send('Not found');
+        // A conductor is not a coding task: its page is its conversation, not a diff.
+        if (row.kind === 'conductor') {
+            let label = null;
+            if (row.machine) {
+                const known = await machinesOf(req, res);
+                const hit = (known.machines || []).find((m) => m.id === row.machine || m.node_id === row.machine);
+                label = hit ? (hit.name || hit.node_id) : (/^nod_/.test(row.machine) ? 'your machine' : row.machine);
+            }
+            return await conductorPage(req, res, row, label);
+        }
         const live = ['queued', 'placed', 'running'].includes(row.state);
         const attempts = tasks?.attempts ? await tasks.attempts.list(row.id) : [];
         const attemptItems = attempts.map((attempt) => {
@@ -325,6 +393,96 @@ ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h
         const prPanel = await pullRequestPanel(row);
         const content = `<section class="c4-card c4-task-detail" data-task-api="${esc(taskApi)}" data-retry-url="${esc(retry)}" data-switch-url="${esc(switchAgent)}">${outcomeRow(row)}<div class="c4-task-heading"><div class="c4-task-title-wrap"><h1 class="c4-brief" data-brief>${esc(row.prompt || 'Task')}</h1><button class="c4-brief-expand" type="button" hidden>Show the whole brief</button></div>${row.outcome === 'unfinished' || row.error ? '' : stateChip(row.state)}</div>${taskChips(row, machineName)}${progress}<nav class="c4-tabs" aria-label="Task details">${[['live', 'Live'], ['changes', 'Changes'], ['proof', 'Proof'], ['pull-request', 'Pull request']].map(([id, label]) => `<a href="#${id}" role="tab" aria-selected="${id === preferredTab}" data-c4-tab="${id}">${label}</a>`).join('')}</nav><section id="live" class="c4-panel" role="tabpanel"><div id="live-content" class="c4-progress-content" data-c4-stream="${esc(events)}" data-task="${esc(row.id)}" data-started-at="${esc(row.started_at || row.created_at || '')}" data-live="${live ? 'true' : 'false'}"><div class="c4-progress-inner"><p data-live-label>${live ? 'Connecting to the live task…' : 'This task has finished.'}</p><ol class="c4-attempts" data-c4-attempts aria-live="polite">${attemptItems}</ol><pre class="c4-log" data-task-log aria-live="polite" hidden></pre></div></div></section><section id="changes" class="c4-panel" role="tabpanel">${changesPanel(row)}</section><section id="proof" class="c4-panel" role="tabpanel">${proofPanel}</section><section id="pull-request" class="c4-panel" role="tabpanel">${prPanel}</section>${live ? `<div class="c4-actions"><form method="post" action="/run/tasks/${encodeURIComponent(row.id)}/cancel"><button class="c4-button c4-button-light">Stop task</button></form></div>` : ''}</section>`;
         page(req, res, 'Task', wrap('/tasks', content, true));
+    });
+
+    // ── The conductor's pages (C9b): start one, write to it, answer what it asks ────────────────────────────────
+    r.get('/conductor', async (req, res) => {
+        if (!viewer(req)) return page(req, res, 'Conductor', wrap('/conductor', `${header('Conductor')}${signIn(req)}`));
+        const settings = await userSettings.get(req.viewer.subject);
+        const mine = await machinesOf(req, res);
+        const used = await lastUsedMachines(req);
+        const machineOptions = orderMachines((mine.machines || []).filter((m) => m.state !== 'revoked'), used)
+            .map((m) => `<option value="${esc(m.id)}"${settings.default_machine === m.id ? ' selected' : ''}>${esc(m.name || m.node_id || m.id)}</option>`).join('');
+        const folders = await db.many(
+            `SELECT folder, max(created_at) AS at FROM run_tasks WHERE subject = $1 AND kind = 'conductor' AND folder IS NOT NULL
+              GROUP BY folder ORDER BY at DESC LIMIT 8`, [req.viewer.subject],
+        );
+        const existing = await db.many("SELECT * FROM run_tasks WHERE subject = $1 AND kind = 'conductor' ORDER BY created_at DESC LIMIT 4", [req.viewer.subject]);
+        const list = existing.map((row) => `<a class="c4-task" href="${taskHref(row)}"><span class="c4-status-dot c4-${esc(row.state)}" aria-label="${esc(conductorState(row))}"></span><span class="c4-task-title">${esc(row.folder || 'Conductor')}</span><span class="c4-task-meta">${esc([row.model || 'opus', conductorState(row), age(row.created_at)].join(' · '))}</span></a>`).join('');
+        const content = `${header('Conductor', 'Your orchestrator, running here: one Claude Code session on your machine, on your own login, carrying the plan forward through the other agents.')}${flash(req)}
+<section class="c4-card c4-composer"><form method="post" action="/conductor">
+<label for="c4-folder">Working folder</label><input id="c4-folder" name="folder" required placeholder="/home/you/project" value="${esc(String(req.query.folder || ''))}" list="c4-folders" autocomplete="off" spellcheck="false"><datalist id="c4-folders">${folders.map((f) => `<option value="${esc(f.folder)}"></option>`).join('')}</datalist>
+<div class="c4-controls"><label>Machine <select name="machine"><option value="">Your default</option>${machineOptions}</select></label><label>Model <input name="model" value="opus" autocomplete="off" spellcheck="false"></label><label>Safety <select name="safety">${[['ask', 'Ask me'], ['project', 'Auto in the project'], ['full', 'Full access']].map(([v, l]) => `<option value="${v}"${settings.safety === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div>
+<label class="c4-note-field" for="c4-conductor-note">What should it pick up? <small>Optional. It starts from the hand-over note and the plan; say here what you want first.</small></label><textarea id="c4-conductor-note" name="note" rows="2" placeholder="e.g. carry on with the next piece of the plan"></textarea>
+<p class="c4-hint">It opens that folder, so it loads that project's memory and AGENTS.md. It runs with your own Claude Code login on that machine, and never with a key of ours.${mine.problem ? ` ${esc(mine.problem.detail || '')}` : ''}</p>
+<div class="c4-conductor-actions"><span class="c4-hint">One conductor is enough: it hands the work to the other agents through the Codes tools.</span><button class="c4-button" type="submit">Start your conductor</button></div>
+</form></section>
+${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors</h2><a href="/tasks">All tasks</a></div>${list}</section>` : ''}`;
+        page(req, res, 'Conductor', wrap('/conductor', content, true));
+    });
+
+    r.post('/conductor', form, async (req, res) => {
+        if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/conductor')}`);
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
+        const b = req.body || {};
+        try {
+            const project = await conductor.projectFor(req.viewer.token || null, req.viewer.subject);
+            if (!project) throw Object.assign(new Error(`start one task at ${config.baseUrl}/run first: a conductor runs in your project, on your machine`), { status: 409 });
+            const made = await conductor.create({
+                subject: req.viewer.subject, project,
+                folder: String(b.folder || '').trim(), machine: b.machine || null,
+                model: b.model || 'opus', safety: b.safety || 'ask', note: b.note || null,
+            });
+            await userSettings.save(req.viewer.subject, { safety: b.safety || 'ask', ...(b.machine ? { default_machine: b.machine } : {}) }).catch(() => {});
+            return res.redirect(303, `/tasks/${encodeURIComponent(made.task.id)}`);
+        } catch (e) {
+            return res.redirect(303, `/conductor?error=${encodeURIComponent(String((e && e.message) || 'the conductor could not start').slice(0, 180))}`);
+        }
+    });
+
+    /** A message from the task page: text only (an attached image goes through the JSON API, with this script). */
+    r.post('/tasks/:id/messages', form, async (req, res) => {
+        if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
+        if (!safeId(req.params.id)) return res.status(404).send('Not found');
+        const row = await db.maybe("SELECT * FROM run_tasks WHERE id = $1 AND subject = $2 AND kind = 'conductor'", [req.params.id, req.viewer.subject]);
+        if (!row) return res.status(404).send('Not found');
+        try {
+            await conductor.message(row, { text: (req.body || {}).text });
+            return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}`);
+        } catch (e) {
+            return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}?error=${encodeURIComponent(String((e && e.message) || 'the message could not be sent').slice(0, 180))}`);
+        }
+    });
+
+    /** The decision on a task's page: allow or deny one waiting approval. */
+    r.post('/tasks/:id/approvals/:aid', form, async (req, res) => {
+        if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
+        if (!safeId(req.params.id)) return res.status(404).send('Not found');
+        const row = await db.maybe('SELECT * FROM run_tasks WHERE id = $1 AND subject = $2', [req.params.id, req.viewer.subject]);
+        if (!row) return res.status(404).send('Not found');
+        const decision = (req.body || {}).decision === 'allow' ? 'allow' : 'deny';
+        const out = await approvals.decide(row.id, req.params.aid, { decision });
+        const word = !out ? 'that approval is gone' : decision === 'allow' ? 'Allowed' : 'Denied';
+        return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}?${out ? 'ok' : 'error'}=${encodeURIComponent(word)}`);
+    });
+
+    /** The approvals inbox: what the person's conductors are waiting on, from anywhere. */
+    r.get('/approvals', async (req, res) => {
+        if (!viewer(req)) return page(req, res, 'Approvals', wrap('/approvals', `${header('Approvals')}${signIn(req)}`));
+        const rows = await approvals.inbox(req.viewer.subject);
+        const cards = rows.map((a) => `<li class="c4-approval-item">${approvalCard(a, `/approvals/${encodeURIComponent(a.id)}`)}<p class="c4-hint"><a href="/tasks/${encodeURIComponent(a.task_id)}">Open the conductor</a></p></li>`).join('');
+        const content = `${header('Approvals', 'What your conductors are waiting on.')}${flash(req)}<section class="c4-card"><div class="c4-card-head"><h2>Waiting for you</h2><span class="c4-muted">${rows.length} decision${rows.length === 1 ? '' : 's'}</span></div>${cards ? `<ul class="c4-approval-list">${cards}</ul>` : '<div class="c4-emptyline">Nothing needs your attention.</div>'}</section>`;
+        page(req, res, 'Approvals', wrap('/approvals', content, true), { notificationsRealtime: true });
+    });
+
+    r.post('/approvals/:id', form, async (req, res) => {
+        if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/approvals')}`);
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
+        const decision = (req.body || {}).decision === 'allow' ? 'allow' : 'deny';
+        const out = await approvals.decideAny(req.viewer.subject, req.params.id, { decision });
+        return res.redirect(303, `/approvals?${out ? 'ok' : 'error'}=${encodeURIComponent(out ? (decision === 'allow' ? 'Allowed' : 'Denied') : 'that approval is gone')}`);
     });
 
     // ── Agents: the person's connections (keys live in OpenVibe.AI) ────────────────────────────────────────────

@@ -152,6 +152,37 @@
  .c4-chip[href]{min-height:44px;align-items:center;padding:8px 12px}
  .c4-card-head a{display:inline-flex;align-items:center;min-height:44px}
 }
+/* C9b: the conductor. Its page is a conversation: turns, the live turn, the box that writes the next one. */
+.c4-conductor-head .c4-task-heading{margin-bottom:8px}
+.c4-conductor-cta{border-color:#d5e4df;background:linear-gradient(140deg,#fff,#f8fcfa)}
+.c4-conductor-cta .c4-button{display:inline-flex;align-items:center;min-height:44px}
+.c4-turn-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.c4-turn{border:1px solid var(--c4-line);border-radius:11px;padding:12px 14px;background:var(--c4-ghost)}
+.c4-turn-running{border-color:#bfdcd5;background:var(--c4-open-bg)}
+.c4-turn-failed{border-color:var(--c4-bad-line);background:var(--c4-bad-bg)}
+.c4-turn-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.c4-turn-who{font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--c4-muted)}
+.c4-turn-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.55;max-height:320px;overflow:auto}
+.c4-turn-answer{white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0 0;padding:10px 12px;background:var(--c4-surface);border:1px solid var(--c4-line);border-radius:9px;font:inherit;font-size:13.5px;line-height:1.55;max-height:360px;overflow:auto}
+.c4-turn-error{margin:8px 0 0;color:var(--c4-bad-ink);font-size:13px}
+.c4-turn-files{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0}
+.c4-conductor-composer textarea{width:100%;min-height:84px;font:inherit;padding:10px 12px;border:1px solid var(--c4-line);border-radius:9px;background:var(--c4-surface);color:var(--c4-ink)}
+.c4-conductor-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;flex-wrap:wrap}
+.c4-file{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--c4-muted);min-height:44px}
+.c4-file input{font-size:12px;max-width:220px}
+.c4-transcript .c4-log{margin:0;max-height:44vh}
+.c4-approval{border:1px solid #e7d3bf;background:#fffaf4;border-radius:11px;padding:12px 14px;display:grid;gap:8px;margin:0 0 10px}
+.c4-approval-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.c4-approval-cmd{display:block;overflow-wrap:anywhere;background:var(--c4-surface);border:1px solid var(--c4-line);border-radius:7px;padding:8px 10px;font-size:12.5px;max-height:140px;overflow:auto}
+.c4-approval-task{margin:0;font-size:12px;color:var(--c4-muted)}
+.c4-approval-actions{display:flex;gap:8px}
+.c4-approval-actions button{min-height:44px}
+.c4-approval-list{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+.c4-note-field{display:block;margin:2px 0 4px;font-size:14px;font-weight:650}
+.c4-note-field small{display:block;font-weight:400;color:var(--c4-muted);font-size:12.5px;margin:2px 0 6px}
+.c4-composer textarea[name="note"]{width:100%;font:inherit;padding:9px 11px;border:1px solid var(--c4-line);border-radius:9px;background:var(--c4-surface);color:var(--c4-ink)}
+:root[data-theme-mode="dark"] .c4-approval{background:#241d16;border-color:#4a3a2a}
+:root[data-theme-mode="dark"] .c4-turn-answer,:root[data-theme-mode="dark"] .c4-approval-cmd{background:#11181b}
 /* C4c: the phone tab bar's own height, and the page's bottom inset for it (openvibe.design/patterns/bottom-tabs).
    The workspace's tab bar is fixed at the bottom, so the scrollable content reserves its height and the safe area:
    the last line of the page and the footer clear it when the page is scrolled to the end. */
