@@ -100,6 +100,17 @@ const router = require('../engine/router');
             assert.ok(router.pick(prompt, base), 'without a map of connections the ladder is as it was');
         });
 
+        await check('a run on Claude Code (another provider) gets the Anthropic-shaped environment', async () => {
+            // claude-other is the same claude CLI, so it reads ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN, and the
+            // credential header names the provider the person's key is kept under (custom: their own endpoint).
+            const minted = await t.ctx.runTokens.mint({ subject: ada.subject, task: null, attempt: null, harness: 'claude-other', provider: 'custom', ownKey: true });
+            assert.ok(minted.token, 'a run token was minted');
+            assert.ok(minted.env.ANTHROPIC_BASE_URL, 'the harness gets OpenVibe.AI\'s address');
+            assert.ok(minted.env.ANTHROPIC_AUTH_TOKEN, 'and the run token');
+            assert.strictEqual(minted.env.ANTHROPIC_CUSTOM_HEADERS, 'x-openvibe-credential: custom');
+            assert.strictEqual('OPENAI_BASE_URL' in minted.env, false, 'not the OpenAI-shaped environment');
+        });
+
         await check('the run token is redacted by the transcript normaliser', async () => {
             const minted = await t.ctx.runTokens.mint({ subject: ada.subject, task: null, attempt: null, harness: 'claude-code', provider: 'anthropic', ownKey: true });
             assert.ok(minted.token, 'a run token was minted');
