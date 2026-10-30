@@ -38,7 +38,7 @@ const NAV = [
 const WORKSPACE_NAV = [
     { label: 'Home', href: '/', icon: 'fa-house' },
     { label: 'Tasks', href: '/tasks', icon: 'fa-list' },
-    { label: 'Conductor', href: '/conductor', icon: 'fa-chart-simple' },
+    { label: 'Conductor', href: '/conductor', icon: 'fa-diagram-project' },
     { label: 'Agents', href: '/agents', icon: 'fa-robot' },
     { label: 'Machines', href: '/machines', icon: 'fa-display' },
     { label: 'Usage', href: '/usage', icon: 'fa-chart-line' },
