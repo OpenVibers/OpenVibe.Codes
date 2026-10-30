@@ -102,12 +102,14 @@ async function shootPage({ playwright, chromePath, url, width, outDir, route }) 
         await page.goto(url, { waitUntil: 'load', timeout: 30000 });
         await page.waitForTimeout(600);
         const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
-        const file = path.join(outDir, `proof-${(route || '/').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'home'}-${width}.png`);
-        await page.screenshot({ path: file, fullPage: true });
+        const file = path.join(outDir, `proof-${(route || '/').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'home'}-${width}.jpg`);
+        // A JPEG, not a PNG: the picture travels back to Codes in the job result, and Run's JSON body is 768 KB.
+        await page.screenshot({ path: file, fullPage: true, type: 'jpeg', quality: 70 });
         const overflow = Number(scrollWidth) > width;
         const ok = !overflow && !errors.length;
         return {
             ok, path: file, width, route: route || '/', errors, console_errors: consoleErrors, overflow, url,
+            name: path.basename(file), mime: 'image/jpeg',
             final_url: typeof page.url === 'function' ? page.url() : url,
             summary: ok ? 'the page renders clean'
                 : [overflow ? 'the page is ' + scrollWidth + 'px wide, so it scrolls sideways on a ' + width + 'px screen' : null]

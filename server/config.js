@@ -101,6 +101,10 @@ function load(env = process.env) {
             secrets: String(env.CODES_EVENTS_SECRET || '').split(',').map((s) => s.trim()).filter(Boolean),
             intervalMs: Math.max(500, int(env.CODES_EVENTS_INTERVAL_MS, 5000)),
             scope: env.CODES_EVENTS_SCOPE || 'events.event.publish',
+            // How many tries an event gets before it is marked dead: an event OpenVibe.Events refused (its envelope
+            // can never pass) fewer than one that keeps failing for another reason.
+            deadAfterRefusals: Math.max(1, int(env.CODES_EVENTS_DEAD_AFTER_REFUSALS, 3)),
+            deadAfterAttempts: Math.max(1, int(env.CODES_EVENTS_DEAD_AFTER_ATTEMPTS, 20)),
         },
         // Session lines in PostgreSQL: no total cap; finished tasks keep theirs for this many days (default 90).
         sessions: {
@@ -110,6 +114,16 @@ function load(env = process.env) {
         // OpenVibe.Bot (Codes C9c): a person's machines, the fleet each one reports with its heartbeat, and the device
         // id Run places a job on. Codes reads it with the person's own token, on the loopback.
         bot: { internalUrl: trim(env.CODES_BOT_INTERNAL_URL || 'http://127.0.0.1:4630') },
+        // OpenVibe.Media: the private objects a task's pictures live in. A proof screenshot can show anything on the
+        // person's screen, so it is never public: the bytes go to Media as a private object of the person, and the
+        // session shows a short-lived signed URL that only that person can use. Without a key there are no pictures.
+        media: {
+            url: trim(env.CODES_MEDIA_URL || 'https://openvibe.media'),
+            key: String(env.CODES_MEDIA_KEY || '').trim(),
+            app: trim(env.CODES_MEDIA_APP || 'codes'),
+            ttl: int(env.CODES_MEDIA_URL_TTL, 600),
+        },
+
         // OpenVibe.Run (plan T16): a coding task on the person's own machine is a Run job Codes starts for them.
         run: { url: trim(env.CODES_RUN_URL || 'http://127.0.0.1:4920') },
 

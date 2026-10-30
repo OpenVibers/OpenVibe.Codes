@@ -23,6 +23,11 @@
  * the engine decides what happens next — done, a continue in the same session, a switch to another agent, a wrap-up or
  * an unfinished task — and this module carries the decision out. One ending starts at most one follow-up: the
  * follow-up's follow_up_of is unique, so two racing ticks never carry one job on twice.
+ *
+ * Every attempt that calls models through OpenVibe.AI runs on a run token of its own, carrying what is left of the
+ * task's budget: the task's budget minus what the earlier attempts spent, as OpenVibe.AI counted it. When nothing
+ * is left of it, the follow-up does not start and the task ends at its budget. An attempt on the person's own plan
+ * (their CLI subscription on their machine) needs no token at all; the attempt's run_mode says which it was.
  */
 const { RunError } = require('./run-client');
 const { chain, budget } = require('../../engine');
@@ -144,7 +149,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
-    const sessionLines = sessions || require('./session-lines').createSessionLines({ store, config, log });
+    const sessionLines = sessions || require('./session-lines').createSessionLines({ store, config, log, media: require('../media').createMedia({ config, log }) });
     const taskOutbox = outbox || require('../events/outbox').createOutbox({ store, log });
     // The proof of a finished task (stage C8): the tests, the pages, the diff and the second model's opinion.
     const taskProof = proof || require('./proof').createProof({ store, config, log });
@@ -169,6 +174,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     const fleetCache = new Map();
     const FLEET_TTL_MS = 60_000;
     let providerMap = null;
+    let harnessInfoCache = null;
     async function fleetFor(subject) {
         if (!fleet || !subject) return null;
         const hit = fleetCache.get(subject);
@@ -197,20 +203,45 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     }
 
     /**
-     * The environment the job's harness gets (Codes C3): a run token that names the person and says where to
-     * send its requests. A failure to mint one is not fatal: the job runs as it did before, without the token.
+     * The environment an attempt's harness gets (Codes C3): a run token that names the person, says where to send
+     * its requests and carries the budget that is left for this attempt. A failure to mint one is not fatal: the
+     * job runs as it did before, without the token.
+     *
+     * An attempt on the person's own plan (the CLI's own login on their machine) needs no token at all: the CLI
+     * signs in itself, and nothing of it is metered by the task's budget. The attempt says which of the two it was.
+     *
+     * → { env, mode } with mode 'ai' (through OpenVibe.AI), 'plan' (the person's own subscription) or 'none'
      */
-    async function harnessEnv({ subject, taskId, attemptId = null, agent = null, limits = null }) {
-        if (!runTokens) return null;
+    async function attemptEnv({ subject, taskId, attemptId = null, agent = null, budget = null }) {
+        if (!runTokens) return { env: null, mode: 'none' };
         try {
             const provider = providerFor(agent);
             const own = provider ? await hasOwnKey(subject, provider) : false;
-            const minted = await runTokens.mint({ subject, task: taskId, attempt: attemptId, harness: agent, provider, ownKey: own, budget: budgetFor(limits) });
-            return minted.env;
+            // The person's own key wins: it is the credential they chose, and the run is metered all the same.
+            if (!own && await planFor(subject, agent)) return { env: null, mode: 'plan' };
+            const minted = await runTokens.mint({ subject, task: taskId, attempt: attemptId, harness: agent, provider, ownKey: own, budget: budget || budgetFor(null) });
+            return { env: minted.env, mode: 'ai' };
         } catch (e) {
             log.warn(`[Codes] no run token for task ${taskId}: ${String(e && e.message).slice(0, 200)}`);
-            return null;
+            return { env: null, mode: 'none' };
         }
+    }
+
+    /**
+     * The person's own plan for a harness: the CLI's own login on their machine (their Claude plan, their ChatGPT
+     * plan, …). It is not OpenVibe.AI, so an attempt on it spends nothing the task's budget can run out of. Only a
+     * CLI can sign in itself: an API harness always needs a token.
+     */
+    async function planFor(subject, agent) {
+        const info = harnessInfo(agent);
+        if (!info.provider || info.kind !== 'cli') return null;
+        const conns = await personConnections(subject);
+        if (!conns || !conns.plans || !conns.plans.length) return null;
+        return conns.plans.find((p) => {
+            if (!p || typeof p !== 'object') return false;
+            const names = [p.provider, p.harness, p.id].filter(Boolean).map((v) => String(v).toLowerCase());
+            return names.includes(info.provider.toLowerCase()) || names.includes(String(agent).toLowerCase());
+        }) || null;
     }
 
     /**
@@ -242,6 +273,66 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         return await runTokens.spend(row.jti);
     }
 
+    /**
+     * What the task's attempts spent through OpenVibe.AI: the sum of what AI counted for each of their run tokens
+     * (GET /api/v1/run-budgets/:jti). An attempt on the person's own plan has no token and spends nothing here.
+     */
+    async function taskSpend(taskId) {
+        const out = { usd: 0, tokens: 0, known: true };
+        if (!runTokens || !taskId) return out;
+        const tokens = await runTokens.forTask(taskId);
+        for (const t of tokens) {
+            const s = await runTokens.spend(t.jti);
+            if (s) {
+                out.usd += Number(s.spent_usd) || 0;
+                out.tokens += Number(s.spent_tokens) || 0;
+                continue;
+            }
+            // AI cannot say (its row goes with the token): what the harness reported is the next best thing.
+            out.known = false;
+            const a = t.attempt_id ? await attemptStore.get(t.attempt_id) : null;
+            out.usd += Number(a && a.cost_usd) || 0;
+            out.tokens += Number(a && a.tokens) || 0;
+        }
+        return out;
+    }
+
+    /**
+     * The budget of the task and what is left of it: the task's budget (the first attempt's) minus what the earlier
+     * attempts spent, as OpenVibe.AI counted it. A task with no budget at all has nothing to run out of.
+     */
+    async function remainingBudget(taskId) {
+        const attempts = await attemptStore.list(taskId);
+        const first = attempts[0] || null;
+        const cap = {
+            usd: first && first.budget_usd != null ? Number(first.budget_usd) : null,
+            tokens: first && first.budget_tokens != null ? Number(first.budget_tokens) : null,
+        };
+        if (cap.usd == null && cap.tokens == null) {
+            const fallback = budgetFor(null);   // a task written before the budgets: the person's default
+            cap.usd = fallback.usd;
+            cap.tokens = fallback.tokens;
+        }
+        if (cap.usd == null && cap.tokens == null) {
+            return { cap, spent: { usd: 0, tokens: 0 }, left: { usd: null, tokens: null }, capped: false, exhausted: false };
+        }
+        const spent = await taskSpend(taskId);
+        const left = {
+            usd: cap.usd == null ? null : Math.max(0, Math.round((cap.usd - spent.usd) * 10000) / 10000),
+            tokens: cap.tokens == null ? null : Math.max(0, cap.tokens - spent.tokens),
+        };
+        const exhausted = (cap.usd != null && left.usd <= 0) || (cap.tokens != null && left.tokens <= 0);
+        return { cap, spent, left, capped: true, exhausted };
+    }
+
+    /** What a task that ran out of budget says, in plain words. */
+    function budgetLeftNote(left) {
+        const parts = [];
+        if (left.cap.usd != null) parts.push(`$${(left.spent.usd || 0).toFixed(4)} of $${left.cap.usd.toFixed(2)}`);
+        if (left.cap.tokens != null) parts.push(`${left.spent.tokens || 0} of ${left.cap.tokens} tokens`);
+        return parts.length ? `stopped at its budget: ${parts.join(', ')} spent` : 'stopped at its budget';
+    }
+
     /** Whether the run was refused for its budget (OpenVibe.AI said 402 ai.run_budget_reached). */
     function budgetRefused(result, error) {
         return /ai\.run_budget_reached/.test(budgetText(result, error));
@@ -262,12 +353,18 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
 
     /** The provider a harness runs on: the catalog's own word for it (anthropic, openai, deepseek, …). */
     function providerFor(agent) {
-        if (!agent) return null;
-        if (!providerMap) {
-            providerMap = {};
-            for (const offer of require('./harnesses').createHarnesses().list()) providerMap[offer.id] = offer.provider;
+        return harnessInfo(agent).provider;
+    }
+
+    /** What the catalog says about a harness: its provider, and whether it is a CLI (which can sign in itself). */
+    function harnessInfo(agent) {
+        if (!harnessInfoCache) {
+            harnessInfoCache = {};
+            for (const offer of require('./harnesses').createHarnesses().list()) {
+                harnessInfoCache[offer.id] = { provider: offer.provider || null, kind: (offer.address && offer.address.kind) || null };
+            }
         }
-        return providerMap[agent] || null;
+        return harnessInfoCache[agent] || { provider: null, kind: null };
     }
 
     /** Whether the person keeps their own key for this provider. */
@@ -410,8 +507,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         try {
             // The job's harness runs with a short-lived run token that names the person (Codes C3): the environment
             // travels with the job's input and the machine's worker hands it to the harness.
-            const env = await harnessEnv({ subject, taskId: id, attemptId: first.attempt.id, agent: agent || null, limits: runArgs.limits });
-            job = await run.submit({ subject, project, args: env ? { ...runArgs, env } : runArgs, key: id });
+            const funding = await attemptEnv({ subject, taskId: id, attemptId: first.attempt.id, agent: agent || null, budget });
+            await attemptStore.bind(first.attempt.id, { run_mode: funding.mode });
+            job = await run.submit({ subject, project, args: funding.env ? { ...runArgs, env: funding.env } : runArgs, key: id });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             await attemptStore.end(first.attempt.id, { state: 'failed', reason: 'error', finished_at: store.iso() });
@@ -573,11 +671,21 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     /**
      * The next attempt: a Run job for the task with the engine's plan in it. The attempt is written first and the job
      * second, so the fence (follow_up_of) is in place before anything is started.
+     *
+     * The attempt gets a run token of its own, carrying what is left of the task's budget: the task's budget minus
+     * what the earlier attempts spent, as OpenVibe.AI counted it. When nothing is left, the follow-up does not start
+     * and the task ends there, at its budget.
      */
     async function startFollowUp(row, plan, ending) {
+        const left = await remainingBudget(row.id);
+        if (left.exhausted) {
+            const stopped = await db.one(`UPDATE run_tasks SET outcome = 'unfinished', outcome_note = $2, updated_at = $3 WHERE id = $1 RETURNING *`,
+                [row.id, budgetLeftNote(left), store.now()]);
+            return { attempt: null, created: false, row: stopped, error: 'the task has no budget left' };
+        }
         const { attempt, created } = await attemptStore.create({
             task: row, agent: plan.agent || null, model: plan.model || null, session: plan.session || null,
-            why: plan.why || null, kind: plan.kind || 'manual', followUpOf: ending.id, state: 'queued',
+            why: plan.why || null, kind: plan.kind || 'manual', followUpOf: ending.id, state: 'queued', budget: left.left,
         });
         // Someone else already started the follow-up of this ending: no second job.
         if (!created) return { attempt, created: false, row };
@@ -593,7 +701,11 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         }
         let job;
         try {
-            job = await run.submit({ subject: row.subject, project: row.project_id, args, key: attempt.id });
+            // The follow-up runs on a run token of its own, with the budget that is left: a follow-up that spends
+            // through AI is capped like any other attempt.
+            const funding = await attemptEnv({ subject: row.subject, taskId: row.id, attemptId: attempt.id, agent: plan.agent || null, budget: left.left });
+            await attemptStore.bind(attempt.id, { run_mode: funding.mode });
+            job = await run.submit({ subject: row.subject, project: row.project_id, args: funding.env ? { ...args, env: funding.env } : args, key: attempt.id });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             await attemptStore.end(attempt.id, { state: 'failed', reason: 'error', finished_at: store.iso() });
@@ -639,13 +751,25 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                 why: text ? `carried on by the owner: ${text.slice(0, 200)}` : 'carried on by the owner',
             };
         let attempt = null;
+        const before = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [row.id]);
+        if (!before) return { error: 'no such task' };
+        if (!TERMINAL.has(before.state)) return { error: 'the task is still running' };
+        if (before.outcome === 'stopped') return { error: 'the task was stopped on purpose' };
+        // The next attempt gets a run token of its own, with what is left of the task's budget. When nothing is left
+        // of it, the attempt does not start and the task ends at its budget.
+        const left = await remainingBudget(row.id);
+        if (left.exhausted) {
+            const stopped = await db.one(`UPDATE run_tasks SET outcome = 'unfinished', outcome_note = $2, updated_at = $3 WHERE id = $1 RETURNING *`,
+                [row.id, budgetLeftNote(left), store.now()]);
+            return { error: 'the task has no budget left', row: stopped };
+        }
         const locked = await store.tx(async () => {
             const current = await db.maybe('SELECT * FROM run_tasks WHERE id = $1 FOR UPDATE', [row.id]);
             if (!current) return { error: 'no such task' };
             if (!TERMINAL.has(current.state)) return { error: 'the task is still running' };
             if (current.outcome === 'stopped') return { error: 'the task was stopped on purpose' };
             const made = await attemptStore.create({
-                task: current, agent: plan.agent, model: plan.model, session: null, why: plan.why, kind: plan.kind, state: 'queued',
+                task: current, agent: plan.agent, model: plan.model, session: null, why: plan.why, kind: plan.kind, state: 'queued', budget: left.left,
             });
             attempt = made.attempt;
             await db.one(`UPDATE run_tasks SET state = 'queued', outcome = NULL, outcome_note = NULL, error = NULL, job_id = NULL, finished_at = NULL, updated_at = $2 WHERE id = $1 RETURNING *`,
@@ -655,7 +779,10 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         if (locked.error) return { error: locked.error };
         let job;
         try {
-            job = await run.submit({ subject: row.subject, project: row.project_id, args: followUpArgs(row, plan), key: attempt.id });
+            const funding = await attemptEnv({ subject: row.subject, taskId: row.id, attemptId: attempt.id, agent: plan.agent || null, budget: left.left });
+            await attemptStore.bind(attempt.id, { run_mode: funding.mode });
+            const args = followUpArgs(row, plan);
+            job = await run.submit({ subject: row.subject, project: row.project_id, args: funding.env ? { ...args, env: funding.env } : args, key: attempt.id });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             await attemptStore.end(attempt.id, { state: 'failed', reason: 'error', finished_at: store.iso() });

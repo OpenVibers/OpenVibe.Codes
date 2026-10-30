@@ -20,18 +20,12 @@ const { asyncRouter } = require('./router');
 const showcase = require('openvibe-shared/showcase');
 const { homeJsonLd } = require('./discovery');
 
-const LINKS = [
-    ['Home', '/', '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>'],
-    ['Tasks', '/tasks', '<path d="M8 6h12M8 12h12M8 18h12M3 6h.01M3 12h.01M3 18h.01"/>'],
-    ['Conductor', '/conductor', '<path d="M4 17V9m4 8V5m4 12v-6m4 6V8m4 9v-4"/>'],
-    ['Agents', '/agents', '<circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0M12 2v3M3 8h3m12 0h3"/>'],
-    ['Machines', '/machines', '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/>'],
-    ['Usage', '/usage', '<path d="M4 19V5m0 14h17M8 15v-4m5 4V7m5 8v-6"/>'],
-    ['Settings', '/settings', '<circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.7 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.7-1l-1.7.7-1.4-2.4 1.4-1.1a8 8 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.7-1l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.7 1l1.7-.7 1.4 2.4-1.4 1.1a8 8 0 0 1 0 2Z"/>'],
-];
 const stateLabel = (s) => ({ running: 'Running', queued: 'Queued', placed: 'On its way', done: 'Done', succeeded: 'Done', failed: "Didn't finish", cancelled: 'Stopped by you', expired: 'Expired' }[s] || s || 'Unknown');
 const safeId = (s) => /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(s || ''));
 const money = (n) => Number.isFinite(Number(n)) ? `$${Number(n).toFixed(2)}` : '—';
+// The models a Claude Code plan login offers; the alias is what the CLI is given, so it survives a point release.
+const MODELS = [['opus', 'Opus 5.5 (default)'], ['sonnet', 'Sonnet 5.5'], ['haiku', 'Haiku 5.5']];
+const modelLabel = (m) => ({ opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', haiku: 'Haiku 5.5' }[m] || m || 'Opus 5.5');
 const age = (value) => {
     const numeric = Number(value);
     const ms = Number.isFinite(numeric) && numeric > 0 ? numeric : new Date(value).getTime();
@@ -75,16 +69,16 @@ function createC4Routes(ctx) {
     const db = store.db;
     const form = express.urlencoded({ extended: false, limit: '16kb' });
     const page = (req, res, title, body, extra = {}) => {
-        const wantsScript = req.path === '/' || /^\/tasks\/tsk_/.test(req.path) || /^\/(agents|machines)/.test(req.path);
+        const wantsScript = req.path === '/' || /^\/tasks\/tsk_/.test(req.path) || /^\/(agents|machines|conductor)/.test(req.path);
         return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, ...(title ? { title: `${title} · Codes` } : {}), css: ['css/c4.css'], scripts: wantsScript ? ['js/c4.js'] : [], body: raw(body), ...extra });
     };
     const viewer = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     /**
-     * The page's frame. There is no sidebar: the shared Frame navbar carries the workspace's sections, so a page has
-     * one navigation (openvibe.design/patterns/single-navbar). On a phone the same sections are the tab bar at the
-     * bottom, and the page reserves its height (openvibe.design/patterns/bottom-tabs).
+     * The page's frame. There is no sidebar and no second tab bar: the Frame owns the navigation — its navbar on a
+     * wide screen, its app bar on a phone (openvibe.design/patterns/single-navbar, /bottom-tabs) — and the page only
+     * reserves the bar's height (openvibe.design/patterns/bottom-tabs).
      */
-    const wrap = (current, content, signedIn = false) => `<div class="c4"><main class="c4-main">${content}</main><nav class="c4-mobile" aria-label="Workspace">${LINKS.map(([label, href, svg]) => `<a href="${href}"${current === href ? ' aria-current="page"' : ''}>${icon(svg)}<span>${label}</span></a>`).join('')}</nav></div>`;
+    const wrap = (content) => `<div class="c4"><main class="c4-main">${content}</main></div>`;
     const signIn = (req) => `<section class="c4-card c4-empty"><h2>Sign in to see your work</h2><p>Your tasks, machines and usage belong to your OpenVibe account.</p><a class="c4-button" href="/auth/login?next=${encodeURIComponent(req.originalUrl || '/')}">Sign in</a></section>`;
     const sameOrigin = (req) => {
         const origin = req.get('origin');
@@ -302,8 +296,8 @@ ${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="
             ? `<div class="c4-outcome"><span class="c4-obadge" aria-hidden="true">${icon('<path d="m18 6-12 12M6 6l12 12"/>')}</span><div class="c4-outcome-copy"><b>${row.outcome === 'stopped' ? 'Stopped' : 'The last turn did not finish'}</b><span>${esc(row.outcome_note || row.error || 'Write a message to carry on.')}</span></div></div>` : '';
         const transcript = `<section class="c4-card c4-transcript" data-c4-conductor-stream="${esc(`${api}/events?last_event_id=${lastSeq}`)}" data-task="${esc(row.id)}" data-started-at="${esc(row.started_at || row.created_at || '')}" data-c4-conductor="${live ? 'live' : 'idle'}"><div class="c4-card-head"><h2>${live ? 'This turn, live' : 'The last turn'}</h2><span class="c4-muted" data-live-label>${live ? 'Connecting…' : 'Nothing is running'}</span></div><pre class="c4-log" data-task-log aria-live="polite" tabindex="0">${esc(lastLines)}</pre></section>`;
         const composer = row.outcome === 'stopped' ? '' : `<section class="c4-card c4-conductor-composer"><form method="post" action="/tasks/${encodeURIComponent(row.id)}/messages" data-c4-conductor-form data-conductor-api="/api/v1/conductor/${encodeURIComponent(row.id)}/messages"><label for="c4-message">${live ? 'Say something: it is the next turn' : 'What next?'}</label><textarea id="c4-message" name="text" rows="3" placeholder="Tell your conductor what to do next, or ask what it is doing" required></textarea><div class="c4-conductor-actions"><label class="c4-file">Attach an image<input type="file" accept="image/*" multiple data-c4-images></label><button class="c4-button" type="submit">Send</button></div><p class="c4-hint" data-c4-message-status role="status">${live ? 'A message waits until the current turn ends; it is not lost.' : ''}</p></form></section>`;
-        const content = `${outcome}<section class="c4-card c4-conductor-head"><div class="c4-task-heading"><div class="c4-task-title-wrap"><h1>Conductor</h1></div><span class="c4-status c4-${esc(row.state)}">${esc(conductorState(row))}</span></div><div class="c4-chips" aria-label="Conductor details"><span class="c4-chip">${esc(row.folder || 'a folder')}</span><span class="c4-chip">${esc(row.model || 'opus')}</span><span class="c4-chip">safety: ${esc(row.safety || 'ask')}</span><span class="c4-chip">${esc(machineLabel || 'your machine')}</span></div><p class="c4-hint">One Claude Code session on your own machine, with your own login. Each message is the next turn of the same conversation; its work is carried out through the Codes tools, on your other agents.</p></section>${approvals}<section class="c4-card c4-turns"><div class="c4-card-head"><h2>Turns</h2><span class="c4-muted">${(view.messages || []).length} so far</span></div>${turns ? `<ol class="c4-turn-list">${turns}</ol>` : '<div class="c4-emptyline">Its first turn is starting.</div>'}</section>${transcript}${composer}`;
-        page(req, res, 'Conductor', wrap('/tasks', content, true));
+        const content = `${outcome}<section class="c4-card c4-conductor-head"><div class="c4-task-heading"><div class="c4-task-title-wrap"><h1>Conductor</h1></div><span class="c4-status c4-${esc(row.state)}">${esc(conductorState(row))}</span></div><div class="c4-chips" aria-label="Conductor details"><span class="c4-chip">${esc(row.folder || 'a folder')}</span><span class="c4-chip">${esc(modelLabel(row.model))}</span><span class="c4-chip">safety: ${esc(row.safety || 'ask')}</span><span class="c4-chip">${esc(machineLabel || 'your machine')}</span></div><p class="c4-hint">One Claude Code session on your own machine, with your own login. Each message is the next turn of the same conversation; its work is carried out through the Codes tools, on your other agents.</p></section>${approvals}<section class="c4-card c4-turns"><div class="c4-card-head"><h2>Turns</h2><span class="c4-muted">${(view.messages || []).length} so far</span></div>${turns ? `<ol class="c4-turn-list">${turns}</ol>` : '<div class="c4-emptyline">Its first turn is starting.</div>'}</section>${transcript}${composer}`;
+        page(req, res, 'Conductor', wrap(content));
     }
 
     // ── Home ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -327,7 +321,7 @@ ${signedIn ? `<section class="c4-card c4-conductor-cta"><div class="c4-card-head
 <section class="c4-card"><div class="c4-card-head"><h2>Recent tasks</h2><a href="/tasks">View all</a></div>${rows.slice(0, 5).map(rowHtml).join('') || '<div class="c4-emptyline">No tasks yet. <a href="/#c4-prompt">Start a task</a></div>'}</section>
 ${signedIn && !mine.ok && mine.problem ? note(`Your machines could not be read, so the machine picker has only Auto. ${esc(mine.problem.detail || '')}`, 'bad') : ''}
 ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h2><div class="c4-grid">${[['Any agent', 'Bring a key or plan. Auto picks a good fit and can hand over when one gets stuck.'], ['Your computer or ours', 'Pair your computer with one command. A hosted sandbox is coming soon.'], ['Proof you can inspect', 'See the changes, tests, screenshots and review before you approve.'], ['A cost you can follow', 'Track task costs and plan limits. Set caps that stop with a wrap-up.']].map(([a, b]) => `<article><h3>${a}</h3><p>${b}</p></article>`).join('')}</div></section>`}`;
-        page(req, res, null, wrap('/', content, signedIn), signedIn ? {} : { index: true, styles: [showcase.STYLESHEET], jsonLd: homeJsonLd(config) });
+        page(req, res, null, wrap(content), signedIn ? {} : { index: true, styles: [showcase.STYLESHEET], jsonLd: homeJsonLd(config) });
     });
 
     /**
@@ -363,11 +357,11 @@ ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h
         ];
         const taskList = filtered.length ? groups.filter(([, items]) => items.length).map(([label, items]) => `<section class="c4-card"><div class="c4-card-head"><h2>${label}</h2></div>${items.map(rowHtml).join('')}</section>`).join('') : `<div class="c4-card c4-emptyline">${q ? 'No matching tasks.' : 'No tasks yet.'} <a href="${q ? '/tasks' : '/#c4-prompt'}">${q ? 'Clear search' : 'Start a task'}</a></div>`;
         const content = `${header('Tasks')}${viewer(req) ? `<form class="c4-search" method="get"><label for="task-search">Search your tasks</label><input id="task-search" name="q" value="${esc(q)}" placeholder="Search by task, project or agent"><button class="c4-button c4-button-light">Search</button></form>${taskList}` : signIn(req)}`;
-        page(req, res, 'Tasks', wrap('/tasks', content, !!viewer(req)));
+        page(req, res, 'Tasks', wrap(content));
     });
 
     r.get('/tasks/:id', async (req, res) => {
-        if (!viewer(req)) return page(req, res, 'Task', wrap('/tasks', `${header('Task')}${signIn(req)}`));
+        if (!viewer(req)) return page(req, res, 'Task', wrap(`${header('Task')}${signIn(req)}`));
         if (!safeId(req.params.id)) return res.status(404).send('Not found');
         const row = await db.maybe('SELECT * FROM run_tasks WHERE id = $1 AND subject = $2', [req.params.id, req.viewer.subject]);
         if (!row) return res.status(404).send('Not found');
@@ -410,33 +404,37 @@ ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h
             : `<p class="c4-muted">${live ? 'The proof is collected when the task ends: its tests, its pages, its diff and a second opinion.' : 'This task has no proof: it ended before proof was collected.'}</p>`;
         const prPanel = await pullRequestPanel(row);
         const content = `<section class="c4-card c4-task-detail" data-task-api="${esc(taskApi)}" data-retry-url="${esc(retry)}" data-switch-url="${esc(switchAgent)}">${outcomeRow(row)}<div class="c4-task-heading"><div class="c4-task-title-wrap"><h1 class="c4-brief" data-brief>${esc(row.prompt || 'Task')}</h1><button class="c4-brief-expand" type="button" hidden>Show the whole brief</button></div>${row.outcome === 'unfinished' || row.error ? '' : stateChip(row.state)}</div>${taskChips(row, machineName)}${progress}<nav class="c4-tabs" aria-label="Task details">${[['live', 'Live'], ['changes', 'Changes'], ['proof', 'Proof'], ['pull-request', 'Pull request']].map(([id, label]) => `<a href="#${id}" role="tab" aria-selected="${id === preferredTab}" data-c4-tab="${id}">${label}</a>`).join('')}</nav><section id="live" class="c4-panel" role="tabpanel"><div id="live-content" class="c4-progress-content" data-c4-stream="${esc(events)}" data-task="${esc(row.id)}" data-started-at="${esc(row.started_at || row.created_at || '')}" data-live="${live ? 'true' : 'false'}"><div class="c4-progress-inner"><p data-live-label>${live ? 'Connecting to the live task…' : 'This task has finished.'}</p><ol class="c4-attempts" data-c4-attempts aria-live="polite">${attemptItems}</ol><pre class="c4-log" data-task-log aria-live="polite" hidden></pre></div></div></section><section id="changes" class="c4-panel" role="tabpanel">${changesPanel(row)}</section><section id="proof" class="c4-panel" role="tabpanel">${proofPanel}</section><section id="pull-request" class="c4-panel" role="tabpanel">${prPanel}</section>${live ? `<div class="c4-actions"><form method="post" action="/run/tasks/${encodeURIComponent(row.id)}/cancel"><button class="c4-button c4-button-light">Stop task</button></form></div>` : ''}</section>`;
-        page(req, res, 'Task', wrap('/tasks', content, true));
+        page(req, res, 'Task', wrap(content));
     });
 
     // ── The conductor's pages (C9b): start one, write to it, answer what it asks ────────────────────────────────
     r.get('/conductor', async (req, res) => {
-        if (!viewer(req)) return page(req, res, 'Conductor', wrap('/conductor', `${header('Conductor')}${signIn(req)}`));
+        if (!viewer(req)) return page(req, res, 'Conductor', wrap(`${header('Conductor')}${signIn(req)}`));
         const settings = await userSettings.get(req.viewer.subject);
         const mine = await machinesOf(req, res);
         const used = await lastUsedMachines(req);
         const machineOptions = orderMachines((mine.machines || []).filter((m) => m.state !== 'revoked'), used)
             .map((m) => `<option value="${esc(m.id)}"${settings.default_machine === m.id ? ' selected' : ''}>${esc(m.name || m.node_id || m.id)}</option>`).join('');
+        // The folders this person's machines have worked in, newest first: the choices beside the typed path.
         const folders = await db.many(
-            `SELECT folder, max(created_at) AS at FROM run_tasks WHERE subject = $1 AND kind = 'conductor' AND folder IS NOT NULL
-              GROUP BY folder ORDER BY at DESC LIMIT 8`, [req.viewer.subject],
+            `SELECT folder, machine, max(created_at) AS at, max(kind) AS last_kind FROM run_tasks
+              WHERE subject = $1 AND folder IS NOT NULL
+              GROUP BY folder, machine ORDER BY at DESC LIMIT 40`, [req.viewer.subject],
         );
+        const machineName = new Map((mine.machines || []).map((m) => [m.id, m.name || m.node_id || m.id]));
+        const folderChoices = folders.map((f) => `<option value="${esc(f.folder)}" data-machine="${esc(f.machine || '')}">${esc(f.folder)}${f.machine ? ` · ${esc(machineName.get(f.machine) || f.machine)}` : ''}</option>`).join('');
         const existing = await db.many("SELECT * FROM run_tasks WHERE subject = $1 AND kind = 'conductor' ORDER BY created_at DESC LIMIT 4", [req.viewer.subject]);
-        const list = existing.map((row) => `<a class="c4-task" href="${taskHref(row)}"><span class="c4-status-dot c4-${esc(row.state)}" aria-label="${esc(conductorState(row))}"></span><span class="c4-task-title">${esc(row.folder || 'Conductor')}</span><span class="c4-task-meta">${esc([row.model || 'opus', conductorState(row), age(row.created_at)].join(' · '))}</span></a>`).join('');
+        const list = existing.map((row) => `<a class="c4-task" href="${taskHref(row)}"><span class="c4-status-dot c4-${esc(row.state)}" aria-label="${esc(conductorState(row))}"></span><span class="c4-task-title">${esc(row.folder || 'Conductor')}</span><span class="c4-task-meta">${esc([modelLabel(row.model), conductorState(row), age(row.created_at)].join(' · '))}</span></a>`).join('');
         const content = `${header('Conductor', 'Your orchestrator, running here: one Claude Code session on your machine, on your own login, carrying the plan forward through the other agents.')}${flash(req)}
 <section class="c4-card c4-composer"><form method="post" action="/conductor">
-<label for="c4-folder">Working folder</label><input id="c4-folder" name="folder" required placeholder="/home/you/project" value="${esc(String(req.query.folder || ''))}" list="c4-folders" autocomplete="off" spellcheck="false"><datalist id="c4-folders">${folders.map((f) => `<option value="${esc(f.folder)}"></option>`).join('')}</datalist>
-<div class="c4-controls"><label>Machine <select name="machine"><option value="">Your default</option>${machineOptions}</select></label><label>Model <input name="model" value="opus" autocomplete="off" spellcheck="false"></label><label>Safety <select name="safety">${[['ask', 'Ask me'], ['project', 'Auto in the project'], ['full', 'Full access']].map(([v, l]) => `<option value="${v}"${settings.safety === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div>
+<label for="c4-folder">Working folder</label><div class="c4-folder-row"><input id="c4-folder" name="folder" placeholder="/home/you/project" value="${esc(String(req.query.folder || ''))}" list="c4-folders" autocomplete="off" spellcheck="false"><select name="folder_pick" data-c4-folder-pick aria-label="Folders this machine has worked in"><option value="">A recent folder…</option>${folderChoices}</select></div><datalist id="c4-folders">${folders.map((f) => `<option value="${esc(f.folder)}"></option>`).join('')}</datalist>
+<div class="c4-controls"><label>Machine <select name="machine" data-c4-machine><option value="">Your default</option>${machineOptions}</select></label><label>Model <select name="model" data-c4-model>${MODELS.map(([v, l]) => `<option value="${v}"${(settings.model || 'opus') === v ? ' selected' : ''}>${l}</option>`).join('')}<option value="other">Other…</option></select></label><label class="c4-model-other" data-c4-model-other hidden>Other model <input name="model_other" placeholder="a model name or id" autocomplete="off" spellcheck="false"></label><label>Safety <select name="safety">${[['ask', 'Ask me'], ['project', 'Auto in the project'], ['full', 'Full access']].map(([v, l]) => `<option value="${v}"${settings.safety === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div>
 <label class="c4-note-field" for="c4-conductor-note">What should it pick up? <small>Optional. It starts from the hand-over note and the plan; say here what you want first.</small></label><textarea id="c4-conductor-note" name="note" rows="2" placeholder="e.g. carry on with the next piece of the plan"></textarea>
 <p class="c4-hint">It opens that folder, so it loads that project's memory and AGENTS.md. It runs with your own Claude Code login on that machine, and never with a key of ours.${mine.problem ? ` ${esc(mine.problem.detail || '')}` : ''}</p>
 <div class="c4-conductor-actions"><span class="c4-hint">One conductor is enough: it hands the work to the other agents through the Codes tools.</span><button class="c4-button" type="submit">Start your conductor</button></div>
 </form></section>
 ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors</h2><a href="/tasks">All tasks</a></div>${list}</section>` : ''}`;
-        page(req, res, 'Conductor', wrap('/conductor', content, true));
+        page(req, res, 'Conductor', wrap(content));
     });
 
     r.post('/conductor', form, async (req, res) => {
@@ -444,12 +442,17 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
         if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
         const b = req.body || {};
         try {
+            const folder = String(b.folder || b.folder_pick || '').trim();
+            const picked = String(b.model || 'opus');
+            const model = (picked === 'other' ? String(b.model_other || '') : picked).trim();
+            if (!model) throw Object.assign(new Error('name the model for Other: an alias such as opus, or a model id'), { status: 400 });
+            if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(model)) throw Object.assign(new Error('that is not a model name'), { status: 400 });
             const project = await conductor.projectFor(req.viewer.token || null, req.viewer.subject);
             if (!project) throw Object.assign(new Error(`start one task at ${config.baseUrl}/run first: a conductor runs in your project, on your machine`), { status: 409 });
             const made = await conductor.create({
                 subject: req.viewer.subject, project,
-                folder: String(b.folder || '').trim(), machine: b.machine || null,
-                model: b.model || 'opus', safety: b.safety || 'ask', note: b.note || null,
+                folder, machine: b.machine || null,
+                model, safety: b.safety || 'ask', note: b.note || null,
             });
             await userSettings.save(req.viewer.subject, { safety: b.safety || 'ask', ...(b.machine ? { default_machine: b.machine } : {}) }).catch(() => {});
             return res.redirect(303, `/tasks/${encodeURIComponent(made.task.id)}`);
@@ -488,11 +491,11 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
 
     /** The approvals inbox: what the person's conductors are waiting on, from anywhere. */
     r.get('/approvals', async (req, res) => {
-        if (!viewer(req)) return page(req, res, 'Approvals', wrap('/approvals', `${header('Approvals')}${signIn(req)}`));
+        if (!viewer(req)) return page(req, res, 'Approvals', wrap(`${header('Approvals')}${signIn(req)}`));
         const rows = await approvals.inbox(req.viewer.subject);
         const cards = rows.map((a) => `<li class="c4-approval-item">${approvalCard(a, `/approvals/${encodeURIComponent(a.id)}`)}<p class="c4-hint"><a href="/tasks/${encodeURIComponent(a.task_id)}">Open the conductor</a></p></li>`).join('');
         const content = `${header('Approvals', 'What your conductors are waiting on.')}${flash(req)}<section class="c4-card"><div class="c4-card-head"><h2>Waiting for you</h2><span class="c4-muted">${rows.length} decision${rows.length === 1 ? '' : 's'}</span></div>${cards ? `<ul class="c4-approval-list">${cards}</ul>` : '<div class="c4-emptyline">Nothing needs your attention.</div>'}</section>`;
-        page(req, res, 'Approvals', wrap('/approvals', content, true), { notificationsRealtime: true });
+        page(req, res, 'Approvals', wrap(content), { notificationsRealtime: true });
     });
 
     r.post('/approvals/:id', form, async (req, res) => {
@@ -573,7 +576,7 @@ ${rows || plans ? `<ul class="c4-rows">${rows}${plans}</ul>` : `<div class="c4-e
 
     r.get('/agents', async (req, res) => {
         const content = `${header('Agents', 'The agents your tasks can run, what they have left, and the keys behind them.')}${viewer(req) ? `${flash(req)}${await fleetCard(req)}${await connectionsCard(req)}` : signIn(req)}`;
-        page(req, res, 'Agents', wrap('/agents', content, !!viewer(req)));
+        page(req, res, 'Agents', wrap(content));
     });
     r.post('/agents/connections', form, async (req, res) => {
         if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/agents')}`);
@@ -638,7 +641,7 @@ ${badCode ? note('a pairing code is 8 letters and digits, like ABCD-1234', 'bad'
 ${code ? `<div class="c4-pair-command"><p class="c4-kv"><span>On the machine</span><code class="c4-code-inline">sudo openvibe-node pair ${esc(code)} --network https://openvibe.network</code></p><p class="c4-kv"><span>Or with the installer</span><code class="c4-code-inline">curl -fsSL https://openvibe.bot/install | sh -s -- --network https://openvibe.network --pairing <span class="c4-note-inline">pair_… from openvibe.bot</span> --code ${esc(code)} --worker</code></p><p class="c4-hint">The code is the one openvibe.bot gave you for this machine; Codes never mints it. Reload this page once the installer says it is paired.</p></div>` : ''}
 </section>`;
         const content = `${header('Machines', 'Your own computers, paired with your account.')}${viewer(req) ? `${flash(req)}<section class="c4-card"><div class="c4-card-head"><h2>Your machines</h2></div><p class="c4-sub">${(mine.machines || []).length} paired</p>${mine.ok ? (list ? `<ul class="c4-rows">${list}</ul>` : '<div class="c4-emptyline">No paired computers yet. Pair one below and it shows up here.</div>') : note(`Your machines could not be read. ${esc((mine.problem && mine.problem.detail) || 'Sign in again.')}`, 'bad')}</section>${pairCard}` : signIn(req)}`;
-        page(req, res, 'Machines', wrap('/machines', content, !!viewer(req)));
+        page(req, res, 'Machines', wrap(content));
     });
     r.post('/machines/:id/revoke', form, async (req, res) => {
         if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/machines')}`);
@@ -662,7 +665,7 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
 <p class="c4-hint">Runs are tasks, attempts are the tries inside them, minutes are the time an attempt was running, and tokens are what its session reported.</p>
 </section>
 <section class="c4-card"><div class="c4-card-head"><h2>Money</h2></div><p class="c4-muted">No prices are shown here. Money for model use belongs to OpenVibe.Billing, whose per-person usage read is not one Codes may make, so Codes shows what it knows — runs, minutes and tokens — and adds no ledger of its own.</p></section>` : signIn(req)}`;
-        page(req, res, 'Usage', wrap('/usage', content, !!viewer(req)));
+        page(req, res, 'Usage', wrap(content));
     });
 
     // ── Settings: remembered per person ────────────────────────────────────────────────────────────────────────
@@ -704,7 +707,7 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
 <div class="c4-safety" role="group" aria-label="Safety level">${SAFETY_OPTIONS.map(([value, title, desc]) => `<label class="c4-safety-card"><input type="radio" name="safety" value="${value}"${settings.safety === value ? ' checked' : ''}><span><b>${title}</b><small>${desc}</small></span></label>`).join('')}</div>
 <button class="c4-button" type="submit">Save settings</button>
 </form></section>` : signIn(req)}`;
-        page(req, res, 'Settings', wrap('/settings', content, !!viewer(req)));
+        page(req, res, 'Settings', wrap(content));
     });
     r.post('/settings', form, async (req, res) => {
         if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/settings')}`);

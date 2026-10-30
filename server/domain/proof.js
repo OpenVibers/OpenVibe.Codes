@@ -55,6 +55,7 @@ function createProof({ store, config = {}, log = console }) {
         const seen = new Set(known.map((r) => Number(r.n)));
         const attempt = attemptN == null ? 0 : Number(attemptN);
         const stored = [];
+        const byId = new Map();
         for (const item of list) {
             const kind = KINDS.includes(item && item.kind) ? item.kind : 'note';
             let n = stored.length + 1;
@@ -62,8 +63,16 @@ function createProof({ store, config = {}, log = console }) {
             seen.add(n);
             const id = store.newId('prf');
             const detail = item && item.detail !== undefined ? item.detail : item;
+            // The pictures of a proof item: their bytes go on the line, where Codes puts them in Media as private
+            // objects of the person. The stored detail keeps what the picture is, never its bytes.
+            const shots = detail && Array.isArray(detail.shots) ? detail.shots : [];
+            const pictures = shots.filter((s) => s && s.data).map((s) => ({
+                url: `data:${String(s.mime || 'image/jpeg')};base64,${String(s.data)}`,
+                name: String(s.name || ''), mime: String(s.mime || 'image/jpeg'), kind: 'image', role: 'output',
+            }));
+            const kept = shots.length ? { ...detail, shots: shots.map((s) => { const c = { ...s }; delete c.data; return c; }) } : detail;
             let body = null;
-            try { body = JSON.stringify(detail); } catch { body = null; }
+            try { body = JSON.stringify(kept); } catch { body = null; }
             if (body && body.length > MAX_DETAIL) body = body.slice(0, MAX_DETAIL);
             const row = await db.maybe(
                 'INSERT INTO codes_task_proof (id, task_id, attempt_n, n, kind, label, ok, skipped, summary, family, detail, created_at)'
@@ -73,7 +82,7 @@ function createProof({ store, config = {}, log = console }) {
                     item && item.ok === false ? false : true, item && item.skipped === true ? true : false,
                     clip(item && item.summary, 1000), clip(item && item.family, 80), body, store.iso()],
             );
-            if (row) stored.push(row);
+            if (row) { stored.push(row); byId.set(row.id, pictures); }
         }
         // One line per item on the task's stream, after the lines that are already there.
         let seq = await nextSeq(taskId);
@@ -83,6 +92,7 @@ function createProof({ store, config = {}, log = console }) {
             body: {
                 t: 'proof', kind: row.kind, label: row.label, ok: row.ok === true,
                 skipped: row.skipped === true, summary: row.summary || null, family: row.family || null,
+                ...(byId.get(row.id) && byId.get(row.id).length ? { attachments: byId.get(row.id) } : {}),
             },
         }));
         return { rows: stored, lines };

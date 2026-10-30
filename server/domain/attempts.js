@@ -175,16 +175,17 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
     }
 
     /** The Run job of an attempt. The session is set for a conductor's attempt, which outlives each turn's job. */
-    async function bind(id, { job_id = null, state = null, started_at = null, machine = null, model = null, session = null } = {}) {
+    async function bind(id, { job_id = null, state = null, started_at = null, machine = null, model = null, session = null, run_mode = null } = {}) {
         return await db.one(
             `UPDATE codes_attempts SET job_id = COALESCE($2, job_id),
                 state = COALESCE($3, state),
                 machine = COALESCE($4, machine),
                 model = COALESCE($5, model),
                 started_at = COALESCE($6::timestamptz, started_at),
-                session = COALESCE($7, session)
+                session = COALESCE($7, session),
+                run_mode = COALESCE($8, run_mode)
              WHERE id = $1 RETURNING *`,
-            [id, job_id, state, machine, model, started_at, session],
+            [id, job_id, state, machine, model, started_at, session, run_mode],
         );
     }
 
