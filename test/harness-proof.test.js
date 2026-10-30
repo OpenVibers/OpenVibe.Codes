@@ -171,7 +171,7 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
         await check('the review goes to OpenVibe.AI as chat completions, with the token', async () => {
             const calls = [];
             const fetchImpl = async (url, options) => { calls.push({ url, options }); return OK(); };
-            const review = reviewAdapter({ env: { OPENVIBE_CODES_TASK_TOKEN: 'test-token' }, fetchImpl, models: ['deepseek-chat'] });
+            const review = reviewAdapter({ jobEnv: { OPENVIBE_AI_TOKEN: 'test-token' }, fetchImpl, models: ['deepseek-chat'] });
             const verdict = await review({ patch: '+x', summary: 'a change', family: 'anthropic', model: 'deepseek-chat' });
             assert.strictEqual(verdict.verdict, 'approved');
             assert.strictEqual(verdict.family, 'deepseek');
@@ -194,8 +194,21 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
         });
 
         await check('a personal provider key in the environment is not spent as a run token', async () => {
-            const review = reviewAdapter({ env: { OPENAI_API_KEY: 'a-personal-key' }, fetchImpl: OK, models: ['deepseek-chat'] });
+            const review = reviewAdapter({ env: { OPENAI_API_KEY: 'a-personal-key', OPENVIBE_AI_TOKEN: 'the-owner' }, fetchImpl: OK, models: ['deepseek-chat'] });
             await assert.rejects(() => review({ patch: '+x', family: 'anthropic' }), (e) => e.code === 'review.no_token');
+        });
+
+        await check('an OpenAI-compatible harness\'s run token and endpoint are the ones the job carries', async () => {
+            const calls = [];
+            const fetchImpl = async (url, options) => { calls.push({ url, options }); return OK(); };
+            const review = reviewAdapter({
+                jobEnv: { OPENVIBE_CODES_BASE_URL: 'https://ai.openvibe.services/v1', OPENVIBE_CODES_API_KEY: 'run-token' },
+                fetchImpl,
+            });
+            const verdict = await review({ patch: '+x', family: 'anthropic', model: 'deepseek-chat' });
+            assert.strictEqual(verdict.verdict, 'approved');
+            assert.strictEqual(calls[0].url, 'https://ai.openvibe.services/v1/chat/completions');
+            assert.strictEqual(calls[0].options.headers.authorization, 'Bearer run-token');
         });
 
         await check('a provider that speaks the messages dialect is tried when chat completions is not there', async () => {
@@ -205,7 +218,7 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
                 if (url.endsWith('/chat/completions')) return { status: 404, ok: false, json: async () => ({}) };
                 return { status: 200, ok: true, json: async () => ({ content: [{ type: 'text', text: 'changes requested: the parser still throws' }] }) };
             };
-            const review = reviewAdapter({ env: { OPENVIBE_AI_TOKEN: 'test-token' }, fetchImpl });
+            const review = reviewAdapter({ jobEnv: { OPENVIBE_AI_TOKEN: 'test-token' }, fetchImpl });
             const verdict = await review({ patch: '+x', family: 'anthropic', model: 'claude-sonnet-4' });
             assert.ok(calls[1].endsWith('/messages'), calls[1]);
             assert.strictEqual(verdict.verdict, 'changes_requested');
