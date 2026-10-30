@@ -77,7 +77,7 @@ function createEventsConsumer({ config, store, tasks, run, accountData, accountS
         let job = null;
         if (TERMINAL.has(state)) job = await run.read(jobId, tasks.who(row));
 
-        return await store.tx(async () => {
+        const applied = await store.tx(async () => {
             const inserted = await db.maybe(
                 `INSERT INTO codes_events_inbox (event_id, event_type, task_id, outcome, processed_at)
                  VALUES ($1, $2, $3, $4, $5::timestamptz) ON CONFLICT (event_id) DO NOTHING RETURNING event_id`,
@@ -90,6 +90,13 @@ function createEventsConsumer({ config, store, tasks, run, accountData, accountS
             await db.exec('UPDATE codes_events_inbox SET outcome = $2 WHERE event_id = $1', [event.event_id, state]);
             return { duplicate: false, outcome: state, task_id: row.id };
         });
+        // The attempt ended: the engine decides what happens next. It runs outside the transaction, because a
+        // follow-up starts a Run job. A failure here is logged, not fatal: the delivery is applied, and the decision
+        // is made again by the fallback (the read of Run after 10 quiet minutes).
+        if (!applied.duplicate) {
+            try { await tasks.afterEnd(applied.task_id); } catch (err) { log.warn(`[Codes] task ${applied.task_id} decision failed: ${err.message}`); }
+        }
+        return applied;
     }
 
     const router = express.Router();

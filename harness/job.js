@@ -162,7 +162,7 @@ const resultText = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map(
 function compact(e) {
     const cut = (s) => cutTo(s, MAX_TEXT);
     const parent = e.parent_tool_use_id ? { parent: String(e.parent_tool_use_id) } : {};
-    if (e.type === 'system' && e.subtype === 'init') return { t: 'agent', agent: e.agent, model: e.model || null };
+    if (e.type === 'system' && e.subtype === 'init') return { t: 'agent', agent: e.agent, model: e.model || null, session: e.session_id || null };
     if (e.type === 'system' && e.subtype === 'handoff') return { t: 'handoff', from: e.from, ...(e.to ? { to: e.to } : {}), reason: cut(e.reason) };
     if (e.type === 'system' && (e.subtype === 'error' || e.subtype === 'warning')) return { t: 'note', level: e.subtype, text: cut(e.text) };
     if (e.type === 'system' && e.subtype === 'tool_progress') return { t: 'tool_progress', id: String(e.tool_use_id || ''), chunk: clean(cutTo(e.text, MAX_OUTPUT)) };
@@ -299,6 +299,9 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         const run = harness.run({
             prompt: job.prompt, task: 'edit', agent: job.agent, model: job.model, cwd: work,
             permission: job.permission, handoff: !job.agent, maxAttempts: 3,
+            // A task carried on in the same conversation resumes its session (RESUME in the environment, or the job's
+            // own resume field).
+            resume: job.resume || null,
         });
         let last = null;
         for await (const e of run) {
