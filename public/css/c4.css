@@ -196,23 +196,27 @@
 }
 
 
-/* C9c: the fleet — one calm row per agent, a meter per limit window, when it frees. */
-.c4-fleet .c4-fleet-row{grid-template-columns:12px minmax(0,1fr) auto;padding:12px 0;align-items:start}
+/* C9c: the fleet. A desktop row reads across: the agent and its machine, its meters, its state. A phone row is the
+   agent and its state, then the meters under it. */
+.c4-fleet .c4-fleet-row{grid-template-columns:12px minmax(0,1fr) auto;padding:12px 0;align-items:center;column-gap:10px}
+.c4-fleet-row .c4-row-dot{grid-row:1/3;align-self:center}
 .c4-fleet-row .c4-row-label{grid-column:2;grid-row:1}
 .c4-fleet-row .c4-row-note{grid-column:2;grid-row:2}
-.c4-fleet-row > .c4-pill{grid-column:3;grid-row:1}
-.c4-fleet-windows{grid-column:1/-1;grid-row:3;display:grid;gap:5px;margin-top:4px}
-.c4-meter{display:grid;grid-template-columns:minmax(64px,110px) minmax(0,1fr) auto;align-items:center;gap:8px;font-size:12px;min-width:0}
+.c4-fleet-row > .c4-pill{grid-column:3;grid-row:1/3;align-self:center}
+.c4-fleet-windows{grid-column:2/-1;grid-row:3;display:grid;gap:6px;margin-top:6px;min-width:0}
+.c4-meter{display:grid;grid-template-columns:46px minmax(0,1fr);align-items:center;gap:3px 10px;font-size:12px;min-width:0}
 .c4-meter-name{color:var(--c4-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.c4-meter-track{display:block;height:7px;border-radius:99px;background:var(--c4-quiet-bg);overflow:hidden}
+.c4-meter-track{display:block;height:6px;border-radius:99px;background:var(--c4-quiet-bg);overflow:hidden}
 .c4-meter-fill{display:block;height:100%;border-radius:99px;background:var(--c4-dot-ok)}
 .c4-meter-fill.is-full{background:var(--c4-dot-bad)}
-.c4-meter-note{color:var(--c4-muted);white-space:nowrap}
-.c4-meter-quiet{grid-template-columns:auto 1fr}
-@media(max-width:760px){
- .c4-meter{grid-template-columns:66px minmax(0,1fr);gap:4px 8px}
- .c4-meter-note{grid-column:2;grid-row:2}
- .c4-meter-quiet{grid-template-columns:1fr}
+.c4-meter-note{grid-column:2;color:var(--c4-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.c4-meter-note b{color:var(--c4-ink);font-weight:650}
+@media(min-width:761px){
+ .c4-fleet .c4-fleet-row{grid-template-columns:12px minmax(180px,260px) minmax(0,1fr) 128px;column-gap:18px}
+ .c4-fleet-windows{grid-column:3;grid-row:1/3;margin:0}
+ .c4-meter{grid-template-columns:52px minmax(120px,1fr) minmax(0,auto)}
+ .c4-meter-note{grid-column:3}
+ .c4-fleet-row > .c4-pill{grid-column:4;justify-self:end}
 }
 /* The narrowest phones: one control per row, and a heading over its state, so no label is cut or broken
    (a 320 px screen has ~290 px of text; "Opus 5.5 (default)" and "Conductor" both fit whole). */

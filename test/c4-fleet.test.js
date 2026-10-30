@@ -37,8 +37,10 @@ const { boot, check, done } = require('./helpers/boot');
             assert.ok(r.text.includes('c4-meter'), 'a meter per window');
             assert.ok(r.text.includes('c4-meter-fill is-full'), 'a full window is drawn full');
             assert.ok(r.text.includes('week'), 'the window is named');
-            assert.ok(r.text.includes('frees Wed 00:00 UTC'), 'when it frees, in UTC');
-            assert.ok(r.text.includes('96% used') || r.text.includes('96 of 100'), 'how much is used');
+            assert.ok(/frees (now|in \d+ (min|h|d)) · Wed 00:00 UTC/.test(r.text), 'when it frees: how soon, and the time in UTC');
+            assert.ok(r.text.includes('<b>96 of 100</b>'), 'how much is used');
+            assert.ok(r.text.includes('ada-laptop · no limit reported'), 'an agent without a window says so beside its machine, not as an empty meter');
+            assert.ok(!r.text.includes('No limit window'), 'no empty meter row');
             assert.ok(r.text.includes('ada-laptop'), 'the machine that reported it');
         });
 

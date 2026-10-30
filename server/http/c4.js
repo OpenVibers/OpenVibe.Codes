@@ -33,12 +33,14 @@ const age = (value) => {
     const mins = Math.max(0, Math.floor((Date.now() - ms) / 60000));
     return mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.floor(mins / 60)}h ago` : `${Math.floor(mins / 1440)}d ago`;
 };
-/** When a limit window frees, in the one phrase the page uses: "frees Tue 14:00 UTC". */
+/** When a limit window frees, in the one phrase the page uses: "frees in 2 d · Tue 14:00 UTC". */
 const whenUtc = (value) => {
     const ms = Date.parse(String(value || ''));
     if (!Number.isFinite(ms)) return null;
     const text = new Date(ms).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }).replace(',', '');
-    return text ? `frees ${text} UTC` : null;
+    const mins = Math.round((ms - Date.now()) / 60000);
+    const soon = mins <= 0 ? 'now' : mins < 60 ? `in ${mins} min` : mins < 2880 ? `in ${Math.round(mins / 60)} h` : `in ${Math.round(mins / 1440)} d`;
+    return text ? `frees ${soon} · ${text} UTC` : null;
 };
 const FLEET_STATE = {
     ok: ['Has room', 'ok'], low: ['Nearly full', 'skip'], login: ['Sign in', 'bad'], limited: ['Full', 'bad'],
@@ -529,20 +531,18 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
             const pct = Math.max(0, Math.min(100, Number(w.pct) || 0));
             const full = Number(w.pct) >= 95;
             const free = whenUtc(w.resets_at);
-            const used = w.used != null && w.limit != null ? `${w.used} of ${w.limit}` : (w.pct != null ? `${Math.round(Number(w.pct))}% used` : '');
-            return `<div class="c4-meter"><span class="c4-meter-name">${esc(w.name || 'window')}</span><span class="c4-meter-track" role="img" aria-label="${esc(`${w.name || 'window'}: ${Math.round(pct)}% used${full ? ', full' : ''}`)}"><span class="c4-meter-fill${full ? ' is-full' : ''}" style="width:${pct}%"></span></span><span class="c4-meter-note">${esc(free || used || 'no reading')}</span></div>`;
+            const used = w.used != null && w.limit != null ? `${w.used} of ${w.limit}` : (w.pct != null ? `${Math.round(Number(w.pct))}%` : '');
+            return `<div class="c4-meter"><span class="c4-meter-name">${esc(w.name || 'window')}</span><span class="c4-meter-track" role="img" aria-label="${esc(`${w.name || 'window'}: ${Math.round(pct)}% used${full ? ', full' : ''}`)}"><span class="c4-meter-fill${full ? ' is-full' : ''}" style="width:${pct}%"></span></span><span class="c4-meter-note">${used ? `<b>${esc(used)}</b>` : ''}${used && free ? ' · ' : ''}${esc(free || (used ? '' : 'no reading'))}</span></div>`;
         };
         const list = rows.map((row) => {
             const [label, kind] = FLEET_STATE[row.state] || FLEET_STATE.unknown;
             const where = (row.machines || []).map((m) => m.name || m.machine).filter(Boolean).slice(0, 3).join(', ');
-            const windows = row.windows && row.windows.length
-                ? row.windows.map(meter).join('')
-                : '<div class="c4-meter c4-meter-quiet"><span class="c4-meter-name">No limit window</span><span class="c4-meter-note">the agent did not report one</span></div>';
+            const windows = row.windows && row.windows.length ? row.windows.map(meter).join('') : '';
             // A pay-per-token agent says what is left of the money, not of a plan window.
             const credit = row.balance_usd == null ? '' : ` · $${Number(row.balance_usd).toFixed(2)} left`;
-            return `<li class="c4-row c4-fleet-row"><span class="c4-row-dot${row.state === 'ok' ? ' c4-dot-ok' : row.state === 'login' || row.state === 'limited' || row.state === 'empty' ? ' c4-dot-bad' : ''}" aria-hidden="true"></span><span class="c4-row-label">${esc(row.name)}</span><span class="c4-row-note">${esc(where || 'on your machine')}${row.signed_in ? '' : ' · not signed in'}${esc(credit)}</span>${pill(label, kind)}<div class="c4-fleet-windows">${windows}</div></li>`;
+            return `<li class="c4-row c4-fleet-row"><span class="c4-row-dot${row.state === 'ok' ? ' c4-dot-ok' : row.state === 'login' || row.state === 'limited' || row.state === 'empty' ? ' c4-dot-bad' : ''}" aria-hidden="true"></span><span class="c4-row-label">${esc(row.name)}</span><span class="c4-row-note">${esc(where || 'on your machine')}${row.signed_in ? '' : ' · not signed in'}${esc(credit)}${windows ? '' : ' · no limit reported'}</span>${pill(label, kind)}${windows ? `<div class="c4-fleet-windows">${windows}</div>` : ''}</li>`;
         }).join('');
-        const at = latest && latest.at ? `Last reported ${age(latest.at)}.` : '';
+        const at = latest && latest.at ? `Reported ${age(latest.at) === '0m ago' ? 'just now' : age(latest.at)}` : '';
         return `<section class="c4-card" id="fleet"><div class="c4-card-head"><h2>Your fleet</h2><span class="c4-muted">${esc(at)}</span></div>
 <p class="c4-sub">What each agent on your machines has left. A machine reports it with its heartbeat; no key or account name leaves it.</p>
 ${problem ? note(`The fleet could not be refreshed: ${esc(problem.detail || 'Bot did not answer')}. ${latest && latest.at ? 'The last reading is below.' : ''}`, 'bad') : ''}
