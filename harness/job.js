@@ -26,6 +26,11 @@ const MAX_PATCH = 180_000;
 const MAX_TEXT = 2_000;
 const MAX_OUTPUT = 4_000;    // a step's output on a line (live)
 const MAX_LOG = 240_000;     // the session log kept in the result (its outputs cut shorter when it would not fit)
+// The pictures a run carries back: Run's JSON body is 768 KB, so each image is capped and the run as a whole is too.
+// What does not fit is left out — the picture stays on the person's machine and the session shows its name.
+const MAX_IMAGE_BYTES = 160 * 1024;
+const MAX_RESULT_BYTES = 320 * 1024;
+const IMAGE_MIME = /^image\/(png|jpeg|gif|webp)$/i;
 const BRANCH = /^[A-Za-z0-9._/-]{1,100}$/;
 
 /** git with no prompt and no credential helper; rejects with the command's stderr (tokens scrubbed). */
@@ -198,7 +203,47 @@ const resultText = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map(
  * A line from a helper agent carries `parent`, the id of the Task step that started it. 1.0 readers keep working: the
  * fields they read are where they were.
  */
-function compact(e) {
+/**
+ * The pictures a tool answered with: a Read of an image comes back as an image block, and the session shows it as a
+ * rich embed. The bytes travel as a data URL, so the page needs no other request to draw them.
+ */
+function imageAttachments(content, budget) {
+    const out = [];
+    for (const c of Array.isArray(content) ? content : []) {
+        if (!c || c.type !== 'image') continue;
+        const src = c.source && typeof c.source === 'object' ? c.source : {};
+        const mime = String(src.media_type || c.media_type || 'image/png');
+        const data = String(src.data || '');
+        if (!data || !IMAGE_MIME.test(mime)) continue;
+        const bytes = Math.ceil(data.length * 3 / 4);
+        if (bytes > MAX_IMAGE_BYTES) continue;
+        if (!budget || budget.left < bytes) continue;
+        if (budget) budget.left -= bytes;
+        out.push({ url: `data:${mime};base64,${data}`, name: String(c.name || c.file_name || ''), mime, kind: 'image', role: 'read' });
+    }
+    return out;
+}
+
+/**
+ * A proof screenshot with its bytes, when they fit: the page shows the picture, not a name for it. The picture itself
+ * stays in the clone; only these bytes travel.
+ */
+function shotWithBytes(shot, budget) {
+    if (!shot || typeof shot !== 'object') return shot;
+    const file = String(shot.path || '');
+    if (!file) return shot;
+    try {
+        const bytes = fs.readFileSync(file);
+        if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) return shot;
+        if (budget && budget.left < bytes.length) return shot;
+        if (budget) budget.left -= bytes.length;
+        return { ...shot, name: shot.name || path.basename(file), mime: shot.mime || 'image/jpeg', data: bytes.toString('base64') };
+    } catch {
+        return shot;   // the picture stays on the machine; the session shows its name
+    }
+}
+
+function compact(e, ctx) {
     const cut = (s) => cutTo(s, MAX_TEXT);
     const parent = e.parent_tool_use_id ? { parent: String(e.parent_tool_use_id) } : {};
     if (e.type === 'system' && e.subtype === 'init') return { t: 'agent', agent: e.agent, model: e.model || null, session: e.session_id || null };
@@ -220,7 +265,12 @@ function compact(e) {
     }
     if (e.type === 'user' && e.message && Array.isArray(e.message.content)) {
         return e.message.content.filter((c) => c && c.type === 'tool_result')
-            .map((c) => ({ t: 'tool_result', id: String(c.tool_use_id || ''), ok: !c.is_error, output: clean(cutTo(resultText(c.content), MAX_OUTPUT)), ...parent }));
+            .map((c) => {
+                const line = { t: 'tool_result', id: String(c.tool_use_id || ''), ok: !c.is_error, output: clean(cutTo(resultText(c.content), MAX_OUTPUT)), ...parent };
+                const pictures = imageAttachments(c.content, ctx && ctx.pictures);
+                if (pictures.length) line.attachments = pictures;
+                return line;
+            });
     }
     if (e.type === 'result') {
         return { t: 'done', ok: !e.is_error, text: cut(e.result), duration_ms: e.duration_ms || 0, cost_usd: e.total_cost_usd || 0, turns: e.num_turns || 0 };
@@ -237,6 +287,12 @@ function sessionLog(lines) {
     const size = (l) => JSON.stringify(l).length + 1;
     let list = lines.slice();
     let total = list.reduce((n, l) => n + size(l), 0);
+    if (total <= MAX_LOG) return list;
+    // The pictures go before the words: a session keeps what was said before it keeps what was shown.
+    list = list.map((l) => (l.attachments && l.attachments.length)
+        ? { ...l, attachments: l.attachments.map((x) => (x && typeof x.url === 'string' && x.url.startsWith('data:')) ? { ...x, url: undefined } : x) }
+        : l);
+    total = list.reduce((n, l) => size(l), 0);
     if (total <= MAX_LOG) return list;
     const ended = new Set(list.filter((l) => l.t === 'tool_result').map((l) => l.id));
     list = list.filter((l) => !(l.t === 'tool_progress' && ended.has(l.id)));
@@ -442,9 +498,11 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             ...(adapterOptions ? { adapterOptions } : {}),
         });
         let last = null;
+        // What the pictures may take of the result's room.
+        const pictures = { left: MAX_RESULT_BYTES };
         for await (const e of run) {
             last = e;
-            const c = compact(e);
+            const c = compact(e, { pictures });
             for (const line of Array.isArray(c) ? c : c ? [c] : []) say(line);
             if (e.type === 'system' && e.subtype === 'init' && e.agent && !result.agents.includes(e.agent)) result.agents.push(e.agent);
         }
@@ -472,7 +530,7 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                     author: { agent: job.agent, model: job.model },
                     emit: (item) => say({ t: 'proof', kind: item.kind, label: item.label, ok: item.ok, skipped: !!item.skipped, summary: item.summary, family: item.family || null }),
                 });
-                result.proof = { items: collected.items.map((i) => ({ kind: i.kind, label: i.label, ok: i.ok, skipped: !!i.skipped, summary: i.summary, family: i.family || null, detail: i.shots ? { shots: i.shots } : (i.kind === 'diff' ? { files: i.files, stats: i.stats } : null) })), outcome: collected.outcome };
+                result.proof = { items: collected.items.map((i) => ({ kind: i.kind, label: i.label, ok: i.ok, skipped: !!i.skipped, summary: i.summary, family: i.family || null, detail: i.shots ? { shots: i.shots.map((s) => shotWithBytes(s, pictures)) } : (i.kind === 'diff' ? { files: i.files, stats: i.stats } : null) })), outcome: collected.outcome };
             } catch (e) {
                 say({ t: 'note', level: 'warning', text: `The proof could not be collected: ${scrub(e.message)}` });
                 result.proof = { items: [], outcome: null };

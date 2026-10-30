@@ -94,12 +94,61 @@ function lineOf(raw) {
     return { kind, body };
 }
 
-function createSessionLines({ store, config = {}, log = console }) {
+function createSessionLines({ store, config = {}, log = console, media = null }) {
     const db = store.db;
     const retentionDays = Math.max(1, Number(config.sessions && config.sessions.retentionDays) || 90);
+    const pictures = media && media.configured ? media : null;
+
+    /** The bytes of a data URL, or null when it is not one. */
+    function bytesOf(url) {
+        const m = /^data:([^;,]+)?;base64,(.*)$/i.exec(String(url || ''));
+        if (!m) return null;
+        try { return Buffer.from(m[2], 'base64'); } catch { return null; }
+    }
+
+    /**
+     * The pictures on a line: the bytes go to Media as private objects of the person, and the line keeps the object
+     * id — never the bytes, and never a public URL. Without Media the pictures are left out and the line keeps its
+     * words.
+     */
+    async function storeAttachments(body, subject) {
+        if (!body || !Array.isArray(body.attachments) || !body.attachments.length) return body;
+        const list = [];
+        for (const a of body.attachments) {
+            if (!a || typeof a !== 'object') continue;
+            const url = String(a.url || '');
+            const bytes = bytesOf(url);
+            if (!bytes || !pictures) continue;                       // not our bytes: nothing to upload
+            try {
+                const put = await pictures.put({ bytes, mime: a.mime, name: a.name, kind: 'screenshot', subject });
+                list.push({ name: String(a.name || ''), mime: String(a.mime || ''), kind: String(a.kind || 'image'), role: String(a.role || 'output'), media: put.id });
+            } catch (e) {
+                log.warn(`[Codes] a picture did not reach Media: ${String(e && e.message).slice(0, 160)}`);
+            }
+        }
+        if (!list.length) { const copy = { ...body }; delete copy.attachments; return copy; }
+        return { ...body, attachments: list };
+    }
+
+    /** The lines a reader gets: every picture a short-lived signed URL, and only for the person the task belongs to. */
+    async function signLines(list, subject) {
+        if (!Array.isArray(list) || !list.length) return list;
+        if (!pictures) return list;
+        const out = [];
+        for (const l of list) {
+            if (!l || !Array.isArray(l.attachments) || !l.attachments.length) { out.push(l); continue; }
+            out.push({ ...l, attachments: await pictures.signAttachments(l.attachments, subject) });
+        }
+        return out;
+    }
+    /** One line with its pictures signed. */
+    async function signLine(line, subject) {
+        const [out] = await signLines([line], subject);
+        return out;
+    }
 
     /** Insert lines in order; an existing (task_id, seq) wins, so a replay never duplicates. → rows inserted. */
-    async function append(taskId, lines, attemptN = null) {
+    async function append(taskId, lines, attemptN = null, subject = null) {
         if (!taskId || !Array.isArray(lines) || !lines.length) return 0;
         const clean = [];
         for (const line of lines) {
@@ -109,7 +158,7 @@ function createSessionLines({ store, config = {}, log = console }) {
             const kind = String(line.kind || 'text').slice(0, 64) || 'text';
             // The transcript normaliser: a run token (Codes C3) that an agent printed is redacted here, before the
             // line is kept, so it never reaches the transcript, the page or the log.
-            clean.push({ seq, at, kind, body: clipBody(redact.scrubValue(line.body)) });
+            clean.push({ seq, at, kind, body: clipBody(redact.scrubValue(await storeAttachments(line.body, subject))) });
         }
         let inserted = 0;
         for (let i = 0; i < clean.length; i += 200) {
@@ -138,7 +187,7 @@ function createSessionLines({ store, config = {}, log = console }) {
      * into the job's JSON lines; state and end frames become their own lines. The stream's seq is the base, so the
      * same event replayed after a reconnect maps to the same rows.
      */
-    function recorder(taskId, { attemptN = null } = {}) {
+    function recorder(taskId, { attemptN = null, subject = null } = {}) {
         let frameBuffer = '';
         let outputBuffer = '';
         let fallbackSeq = 0;
@@ -199,7 +248,7 @@ function createSessionLines({ store, config = {}, log = console }) {
                 frameBuffer = `${frameBuffer}${String(text == null ? '' : text)}`.replace(/\r\n/g, '\n');
                 const out = [];
                 drainFrames(out);
-                if (out.length) await append(taskId, out, attemptN);
+                if (out.length) await append(taskId, out, attemptN, subject);
             },
             async flush() {
                 const out = [];
@@ -211,7 +260,7 @@ function createSessionLines({ store, config = {}, log = console }) {
                     out.push({ seq: (lastBase || 0) + PARTIAL_LINE_INDEX, at: store.iso(), kind: line.kind, body: line.body });
                     outputBuffer = '';
                 }
-                if (out.length) await append(taskId, out, attemptN);
+                if (out.length) await append(taskId, out, attemptN, subject);
             },
             ended: () => ended,
         };
@@ -245,7 +294,7 @@ function createSessionLines({ store, config = {}, log = console }) {
         const at = atIso(row.finished_at) || (row.updated_at ? iso(row.updated_at) : store.iso());
         return await append(row.id, missing.map((body, i) => ({
             seq: start + i, at, kind: typeof body.t === 'string' ? body.t : 'text', body,
-        })), attemptN);
+        })), attemptN, row.subject);
     }
 
     async function complete(taskId) {
@@ -266,8 +315,8 @@ function createSessionLines({ store, config = {}, log = console }) {
         if (!row || !row.id) return [];
         const rows = await allRows(row.id);
         const session = rows.filter((r) => r.kind !== 'state' && r.kind !== 'end').map((r) => r.body);
-        if (session.length) return session;
-        return sessionLogOf(row) || [];
+        if (session.length) return await signLines(session, row.subject);
+        return await signLines(sessionLogOf(row) || [], row.subject);
     }
 
     /** One replay page (at most 500 lines after `after`), from the table or the old result.log. */
@@ -287,6 +336,8 @@ function createSessionLines({ store, config = {}, log = console }) {
                 .filter((line) => line.seq > from);
         }
         const page = lines.slice(0, max);
+        const signed = await signLines(page.map((l) => l.body), row.subject);
+        page.forEach((l, i) => { l.body = signed[i]; });
         return {
             task_id: row.id,
             source,
