@@ -35,6 +35,7 @@ const { createRunClient } = require('./domain/run-client');
 const { createRunTasks } = require('./domain/run-tasks');
 const { createConnections } = require('./domain/connections');
 const { createRunTokens } = require('./domain/run-tokens');
+const { createAttempts } = require('./domain/attempts');
 const { createSessionLines } = require('./domain/session-lines');
 const { createOutbox, createPublisher } = require('./events/outbox');
 const { createEventsConsumer } = require('./events-consumer');
@@ -73,8 +74,10 @@ async function createApp(opts = {}) {
     // short-lived run token that names them.
     const connections = createConnections({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     const runTokens = createRunTokens({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections });
-    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens };
+    // The task's attempts (stage C2): every Run job is one attempt, and the engine decides what happens next.
+    const attempts = createAttempts({ store, config, log, harnesses });
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts });
+    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens, attempts };
     ctx.forgejo = createForgejoClient({ config, log });
 
     const app = express();
