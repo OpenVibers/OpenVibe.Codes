@@ -79,11 +79,22 @@ function testWords(files) {
 }
 
 /**
+ * The file a `node <file>` test script runs, or null.
+ *
+ * 'npm test' would run it with one more process in the way, and a machine's npm may be a guard that cannot tell a
+ * narrowed run from a whole one. Running the script itself is the same runner, with the words the plan chose.
+ */
+function nodeTestScript(script) {
+    const m = /^node\s+([^\s-][^\s]*)$/.exec(String(script || '').trim());
+    return m ? m[1] : null;
+}
+
+/**
  * The repo's own test command, and how narrow it is.
  *
- * The runner is the repo's: 'npm test' when package.json has it, then pytest, go and cargo. The suite is narrowed to
- * the tests the change reaches; the whole suite runs only when the change touches what every test shares and the
- * owner's guard allows it (CODES_PROOF_FULL_SUITE=1).
+ * The runner is the repo's: 'npm test' when package.json has it (or the file it runs, when that is `node <file>`),
+ * then pytest, go and cargo. The suite is narrowed to the tests the change reaches; the whole suite runs only when
+ * the change touches what every test shares and the owner's guard allows it (CODES_PROOF_FULL_SUITE=1).
  *
  * @param {object} what
  * @param {object} what.pkg the repo's package.json (or null)
@@ -102,13 +113,15 @@ function testPlan({ pkg = null, files = [], env = {} } = {}) {
     const words = testWords(changed);
 
     if (test) {
-        const base = { command: 'npm', args: ['test'] };
+        const direct = nodeTestScript(test);
+        const base = direct ? { command: 'node', args: [direct] } : { command: 'npm', args: ['test'] };
+        const narrowed = direct ? [direct, ...words] : ['test', '--', ...words];
         if (shared && allowFull) return { ...base, mode: 'full', reason: 'the change touches what every test shares, and the full suite is allowed' };
         if (!shared) {
             if (!words.length) return { ...base, mode: 'targeted', reason: 'no test name matches the changed files, so the suite runs as it is' };
-            return { ...base, args: ['test', '--', ...words], mode: 'targeted', reason: 'only the tests the change reaches (' + words.join(', ') + ')' };
+            return { command: base.command, args: narrowed, mode: 'targeted', reason: 'only the tests the change reaches (' + words.join(', ') + ')' };
         }
-        return { ...base, args: ['test', '--', ...words], mode: 'targeted', reason: 'the change touches what every test shares, but the full suite is not allowed (CODES_PROOF_FULL_SUITE=1)' };
+        return { command: base.command, args: narrowed, mode: 'targeted', reason: 'the change touches what every test shares, but the full suite is not allowed (CODES_PROOF_FULL_SUITE=1)' };
     }
     if (pkg && (pkg.go || (pkg.dependencies && pkg.dependencies.go))) return { command: 'go', args: ['test', './...'], mode: 'full', reason: "the repo's own Go suite" };
     if (pkg && (pkg.pytest || (pkg.dependencies && pkg.dependencies.pytest))) return { command: 'pytest', args: [], mode: 'full', reason: "the repo's own Python suite" };
@@ -216,12 +229,17 @@ async function collectProof({ cwd, files = [], adapters = {}, author = null, emi
             const shot = await adapters.screenshot({ cwd, width, files: pages, routes: routesOf(pages), pkg });
             shots.push({ width, ...(shot || {}) });
         }
-        const bad = shots.filter((s) => s && s.ok === false);
+        const made = shots.filter((s) => s && !s.skipped);
+        const bad = made.filter((s) => s.ok === false);
+        // A machine with nothing to shoot with (no browser, a site that did not start) says so: it is a skip, and the
+        // reason is the adapter's own words, not a clean bill of health.
+        const why = shots.find((s) => s && s.skipped);
         await say({
-            kind: 'screenshots', label: 'screenshots', ok: !bad.length, skipped: false,
+            kind: 'screenshots', label: 'screenshots', ok: !bad.length, skipped: !made.length,
             summary: bad.length
                 ? bad.map((s) => s.width + 'px: ' + (s.summary || 'the page did not render')).join('; ')
-                : shots.length + ' screenshots of ' + pages.length + ' page' + (pages.length === 1 ? '' : 's'),
+                : (made.length ? made.length + ' screenshots of ' + pages.length + ' page' + (pages.length === 1 ? '' : 's')
+                    : (why && why.summary) || 'no page was there to shoot'),
             shots,
         });
     }

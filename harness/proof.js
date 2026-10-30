@@ -14,9 +14,9 @@
  *     review({ patch, … })     the second opinion (OpenVibe.AI)
  *     models                   the models a reviewer may be chosen from
  *
- * The review is behind an interface (engine/review.js). The task token that names the person comes with stage C3
- * (the connections and the run token); until that lands the adapter has no token and says so instead of pretending
- * a second opinion happened.
+ * The review is behind an interface (engine/review.js). The token that names the person is the run token the attempt
+ * already carries (stage C3): it comes in the job's own input, is never read from the machine's other keys, and when
+ * there is none the adapter says so instead of pretending a second opinion happened.
  */
 
 const fs = require('fs');

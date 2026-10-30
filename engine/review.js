@@ -8,7 +8,7 @@
  * accepted, and the collector says so instead of pretending a second look happened.
  *
  * The call goes to OpenVibe.AI, the one place that holds the person's keys (stage C3): POST /v1/chat/completions with
- * the task's token, or /v1/messages for a provider that speaks that dialect. The token is passed in, never read
+ * the attempt's run token, or /v1/messages for a provider that speaks that dialect. The token is passed in, never read
  * from here: this module never sees a secret and never logs one.
  *
  *   familyOf(model)                 the family a model belongs to ('anthropic', 'openai', 'deepseek', …)

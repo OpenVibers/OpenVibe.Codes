@@ -18,7 +18,8 @@ const { check, done } = require('./helpers/boot');
         const calls = [];
         const run = async (argv, options) => {
             calls.push(argv);
-            if (argv[0] === 'node') return { code: 0, output: JSON.stringify(pkg) };
+            if (argv[0] === 'node' && argv[1] === '-e') return { code: 0, output: JSON.stringify(pkg) };
+            if (argv[0] === 'node' && argv[1] === 'test/run.js') return { code: testExit, output: testExit === 0 ? '12/12 test files passed' : 'FAIL test/foo.test.js\nAssertionError' };
             if (argv[0] === 'npm') return { code: testExit, output: testExit === 0 ? '12/12 test files passed' : 'FAIL test/foo.test.js\nAssertionError' };
             return { code: 0, output: '' };
         };
@@ -50,8 +51,14 @@ const { check, done } = require('./helpers/boot');
             const proof = await collectProof({ cwd: '/repo', adapters: m.adapters });
             const test = proof.items.find((i) => i.kind === 'tests');
             assert.strictEqual(test.ok, true);
-            assert.ok(/npm test -- proof/.test(test.command), test.command);
+            assert.strictEqual(test.command, 'node test/run.js proof');
             assert.strictEqual(test.mode, 'targeted');
+        });
+
+        await check('a test script with its own flags is left to npm, and the words follow --', async () => {
+            const plan = testPlan({ pkg: { scripts: { test: 'node --test test/' } }, files: ['engine/proof.js'], env: {} });
+            assert.strictEqual(plan.command, 'npm');
+            assert.deepStrictEqual(plan.args, ['test', '--', 'proof']);
         });
 
         await check('the whole suite runs only when the change touches what every test shares and the guard allows it', async () => {
@@ -60,7 +67,7 @@ const { check, done } = require('./helpers/boot');
             assert.ok(/full suite is not allowed/.test(shared.reason), shared.reason);
             const allowed = testPlan({ pkg: { scripts: { test: 'node test/run.js' } }, files: ['package.json'], env: { CODES_PROOF_FULL_SUITE: '1' } });
             assert.strictEqual(allowed.mode, 'full');
-            assert.deepStrictEqual(allowed.args, ['test']);
+            assert.deepStrictEqual(allowed.args, ['test/run.js']);
         });
 
         await check('a repo with no test command of its own says so instead of failing', async () => {
@@ -85,6 +92,16 @@ const { check, done } = require('./helpers/boot');
             const shots = proof.items.find((i) => i.kind === 'screenshots');
             assert.strictEqual(shots.skipped, true);
             assert.ok(/touches no page/.test(shots.summary), shots.summary);
+        });
+
+        await check('a machine with nothing to shoot with says the screenshots were skipped, and why', async () => {
+            const m = machine({ files: ['public/index.html'] });
+            m.adapters.screenshot = async ({ width }) => ({ ok: true, skipped: true, width, summary: 'the site did not start, so the pages were not shot' });
+            const proof = await collectProof({ cwd: '/repo', adapters: m.adapters });
+            const shots = proof.items.find((i) => i.kind === 'screenshots');
+            assert.strictEqual(shots.skipped, true);
+            assert.ok(/did not start/.test(shots.summary), shots.summary);
+            assert.ok(/screenshots was skipped/.test(proof.outcome.note), proof.outcome.note);
         });
 
         await check('a page that scrolls sideways is a failure of the proof, not a picture of one', async () => {
