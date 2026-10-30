@@ -14,7 +14,7 @@ const DIR = path.join(__dirname, '..', 'engine');
         for (const name of ['router', 'chain', 'budget', 'transcript', 'effort', 'scope', 'runerror', 'proof', 'review']) {
             assert.ok(engine[name], `${name} is exported`);
         }
-        for (const name of ['classify', 'pick', 'outcome', 'nextStep', 'evaluate', 'limitsFor', 'parse', 'parseText', 'fitEffort', 'pickModel']) {
+        for (const name of ['classify', 'pick', 'outcome', 'nextStep', 'evaluate', 'limitsFor', 'caps', 'parse', 'parseText', 'fitEffort', 'pickModel']) {
             assert.equal(typeof engine[name], 'function', `${name} is a function`);
         }
     });

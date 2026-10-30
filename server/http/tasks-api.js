@@ -300,7 +300,8 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         if (agent && !harnesses.list().some((a) => a.id === agent)) return problem(req, res, 422, 'codes.agent_unknown', 'agent is one of GET /api/v1/harnesses');
         const out = await taskStore.continueTask(row, { note, agent });
         if (out.error) return problem(req, res, 409, 'codes.task_conflict', out.error);
-        log.info(`[Codes] task ${row.id} carried on (${agent ? `with ${agent}` : 'by the owner'})`);
+        // One continuation at a time: an attempt that is already live answers this press, and no second one starts.
+        if (!out.live) log.info(`[Codes] task ${row.id} carried on (${agent ? `with ${agent}` : 'by the owner'})`);
         return res.json(await timeline(out.row));
     });
 

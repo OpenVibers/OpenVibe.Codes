@@ -37,6 +37,8 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
                                               OpenVibe Node's job worker runs it on your own machine)
   openvibe-codes task start|list|show|continue|stop   coding tasks on openvibe.codes, as you, on one of
                                               your machines (openvibe-codes task --help)
+  openvibe-codes mcp                          the Codes MCP tools for a Claude Code session: tasks, the fleet,
+                                              shipping status, and the conductor's approvals (stdio JSON-RPC)
 
 Environment: DEEPSEEK_API_KEY · OPENVIBE_CODES_BASE_URL, OPENVIBE_CODES_MODEL, OPENVIBE_CODES_API_KEY
 (your own OpenAI-compatible server) · OPENVIBE_CODES_HOME (where runs are kept) · OPENVIBE_TOKEN (your
@@ -97,6 +99,8 @@ async function main() {
     const [cmd, ...rest] = process.argv.slice(2);
     // Tasks on openvibe.codes: the person's own token, the server's API. Nothing here runs an agent.
     if (cmd === 'task') return task(rest);
+    // The Codes MCP server (Codes C9b): a conductor's Claude Code session starts it with --mcp-config.
+    if (cmd === 'mcp') return require('./mcp').mcp();
     const o = parse(rest);
     if (!cmd || cmd === 'help' || o.help || cmd === '--help' || cmd === '-h') { out(USAGE); return 0; }
     if (cmd === '--version' || cmd === '-v' || cmd === 'version') { out(VERSION); return 0; }

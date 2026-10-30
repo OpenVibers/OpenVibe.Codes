@@ -24,6 +24,7 @@ const { minimaxCode } = require('../engine/adapters/minimax-code');
 const transcript = require('../engine/transcript');
 const { runAttempt } = require('../engine/jobrunner');
 const { assemble } = require('../engine/prompt');
+const { caps } = require('../engine/budget');
 
 /** The DRY_RUN form of an adapter: the command, its arguments and its environment. */
 function dry(adapter, ctx = {}) {
@@ -155,6 +156,55 @@ function dry(adapter, ctx = {}) {
         assert.ok(dry(minimaxCode, { permission: 'full' }).argv.includes('full'));
     });
 
+    await check('the harness caps follow Settings → Limits: the set limits, and No limit means none', () => {
+        const set = caps({ steps: 350, minutes: 45 });
+        const none = caps({ steps: null, minutes: null });
+        const arg = (adapter, ctx, flag) => {
+            const argv = dry(adapter, ctx).argv;
+            return argv[argv.indexOf(flag) + 1];
+        };
+        // The three harnesses that had a hard-coded cap now take the owner's (steps + 25).
+        assert.equal(arg(claudeCode, set, '--max-turns'), '375');
+        assert.equal(arg(commandCode, set, '--max-turns'), '375');
+        assert.equal(arg(minimaxCode, { cwd: '/tmp/work', ...set }, '--max-steps'), '375');
+        assert.equal(arg(minimaxCode, { cwd: '/tmp/work', ...set }, '--timeout'), '50m');
+        // No limit means no cap: 100000 turns and no wall clock (the portal's MAXTURNS 100000, JOBTIMEOUT 0).
+        assert.equal(arg(claudeCode, none, '--max-turns'), '100000');
+        assert.equal(arg(commandCode, none, '--max-turns'), '100000');
+        assert.equal(arg(minimaxCode, { cwd: '/tmp/work', ...none }, '--max-steps'), '100000');
+        assert.equal(arg(minimaxCode, { cwd: '/tmp/work', ...none }, '--timeout'), '100000m');
+        // An adapter with no cap of its own gets none either: an absent cap is not the old 150/200.
+        assert.equal(arg(claudeCode, { maxTurns: undefined }, '--max-turns'), '100000');
+        assert.equal(arg(commandCode, { maxTurns: undefined }, '--max-turns'), '100000');
+        assert.equal(arg(minimaxCode, { cwd: '/tmp/work', maxSteps: undefined }, '--max-steps'), '100000');
+    });
+
+    await check('Claude-family harnesses may call the Know MCP tools, when the machine registered the server', () => {
+        const allowed = (adapter, know) => {
+            const argv = dry(adapter, { know }).argv;
+            return argv[argv.indexOf('--allowedTools') + 1].split(' ');
+        };
+        for (const adapter of [claudeCode, claudeOther]) {
+            assert.ok(!allowed(adapter, false).includes('mcp__ov_know'), `${adapter.id}: no Know server, no tools`);
+            assert.ok(allowed(adapter, true).includes('mcp__ov_know'), `${adapter.id}: the Know tools are allowed`);
+            assert.ok(allowed(adapter, true).includes('Bash'), 'the allow list keeps the tools a job needs');
+        }
+        // The machine's own registration is what decides it by default: ~/.claude.json → mcpServers.ov_know.
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'know-registered-'));
+        const registered = path.join(dir, 'claude.json');
+        fs.writeFileSync(registered, JSON.stringify({ mcpServers: { ov_know: { command: 'node', args: ['know/mcp.js'] } } }));
+        const absent = path.join(dir, 'none.json');
+        fs.writeFileSync(absent, JSON.stringify({ mcpServers: {} }));
+        const list = (file) => {
+            const argv = dry(claudeCode, { claudeConfig: file }).argv;
+            return argv[argv.indexOf('--allowedTools') + 1].split(' ');
+        };
+        assert.ok(list(registered).includes('mcp__ov_know'), 'the registered server makes its tools callable');
+        assert.ok(!list(absent).includes('mcp__ov_know'), 'an unregistered machine gets no allow it cannot use');
+        assert.ok(!list(path.join(dir, 'missing.json')).includes('mcp__ov_know'), 'a config that is not there changes nothing');
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
     await check('the effort is fitted to the harness, never handed over as it came', () => {
         // The 2026-10-29 incident: Codex's "medium" killed Command Code before its first step.
         assert.equal(effortFor('command-code', 'medium'), 'high');
@@ -244,17 +294,20 @@ function dry(adapter, ctx = {}) {
         // A job that works in one repository gets that repository's digest; a folder that holds many gets none.
         require('node:child_process').execFileSync('git', ['init', '-q'], { cwd: dir });
         fs.writeFileSync(path.join(dir, 'README.md'), '# Demo\n\nA demo repository.\n');
-        const lessonsFile = path.join(dir, 'lessons.jsonl');
-        fs.writeFileSync(lessonsFile, JSON.stringify({ text: 'the tests need the database', repo: 'demo', tags: ['tests'] }) + '\n');
-        const built = assemble({ brief: 'fix the test', dir, env: { OPENVIBE_CODES_LESSONS: lessonsFile } });
+        // On a Node the lessons come from the Know store's module (know/lessons.js), its path from the config.
+        const knowFile = path.join(dir, 'know.js');
+        fs.writeFileSync(knowFile, "module.exports = { recall: () => '## What earlier jobs learned here (dated)\\n- 2026-10-30 · demo — the tests need the database' };\n");
+        const built = assemble({ brief: 'fix the test', dir, env: { CODES_KNOW_LESSONS: knowFile } });
         const names = built.parts.map((p) => p.name);
         assert.deepStrictEqual(names, ['git-rule', 'house-rules', 'lessons', 'repo-digest', 'brief']);
         assert.ok(built.text.indexOf('Git rules') < built.text.indexOf('House rules'));
         assert.ok(built.text.indexOf('House rules') < built.text.indexOf('learned'));
         assert.ok(built.text.indexOf('learned') < built.text.indexOf('demo repository'));
         assert.ok(built.text.trimEnd().endsWith('fix the test'), 'the brief is last');
-        // A store that cannot be read is skipped, not an error.
-        const none = assemble({ brief: 'x', dir, env: { OPENVIBE_CODES_LESSONS: path.join(dir, 'nope.jsonl') } });
+        // The Node's config path wins over the environment, and a store that cannot be read is skipped, not an error.
+        const fromConfig = assemble({ brief: 'x', dir, know: knowFile, env: { CODES_KNOW_LESSONS: path.join(dir, 'nope.js') } });
+        assert.ok(fromConfig.parts.some((p) => p.name === 'lessons'), 'the config path is read');
+        const none = assemble({ brief: 'x', dir, env: { CODES_KNOW_LESSONS: path.join(dir, 'nope.js') } });
         assert.ok(!none.parts.some((p) => p.name === 'lessons'));
         fs.rmSync(dir, { recursive: true, force: true });
     });

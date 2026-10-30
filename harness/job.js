@@ -95,7 +95,36 @@ function parseArgs(raw, env = process.env) {
     let a;
     try { a = JSON.parse(String(raw || '').trim() || '{}'); } catch { throw new Error('the job input is not JSON'); }
     if (!a || typeof a !== 'object' || Array.isArray(a)) throw new Error('the job input must be an object');
-    const kind = a.kind === 'bench' ? 'bench' : 'code';
+    const kind = a.kind === 'bench' ? 'bench' : a.kind === 'conductor' ? 'conductor' : 'code';
+    const prompt = typeof a.prompt === 'string' ? a.prompt.trim() : '';
+    if (!prompt || prompt.length > MAX_PROMPT) throw new Error(`prompt must be 1-${MAX_PROMPT} characters`);
+    // A conductor's turn (Codes C9b): one Claude Code session in the owner's own folder, with the Codes MCP tools. No
+    // repository is cloned and nothing is pushed; the folder is the one the person chose, and it must exist.
+    if (kind === 'conductor') {
+        const folder = String(a.folder || '').trim();
+        if (!folder.startsWith('/') || folder.length > 4096 || /[\0-\x1f\x7f]/.test(folder)) throw new Error('folder must be an absolute path');
+        const safety = ['ask', 'project', 'full'].includes(a.safety) ? a.safety : 'ask';
+        const files = Array.isArray(a.attachments) ? a.attachments.slice(0, 4).filter((f) => f && typeof f === 'object'
+            && typeof f.url === 'string' && /^https?:\/\//.test(f.url) && f.url.length <= 2000).map((f) => ({
+            name: String(f.name || 'image').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'image',
+            mime: typeof f.mime === 'string' ? f.mime.slice(0, 100) : 'application/octet-stream',
+            url: f.url,
+        })) : [];
+        const codesUrl = typeof a.codes_url === 'string' && /^https?:\/\//.test(a.codes_url) && a.codes_url.length <= 300 ? a.codes_url.replace(/\/+$/, '') : null;
+        const resumeIn = a.resume == null || a.resume === '' ? env.RESUME : a.resume;
+        const resume = typeof resumeIn === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(resumeIn) ? resumeIn : null;
+        const wanted = jobEnv(a);
+        return {
+            kind, repo: null, ref: null, prompt, permission: 'edit', push: null,
+            folder, safety, mcp: a.mcp === true, codesUrl,
+            taskId: typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? a.task_id : null,
+            model: typeof a.model === 'string' && a.model.length <= 100 ? a.model : null,
+            agent: 'claude-code',
+            ...(files.length ? { attachments: files } : {}),
+            ...(resume ? { resume } : {}),
+            ...(Object.keys(wanted).length ? { env: wanted } : {}),
+        };
+    }
     let repo = null;
     if (kind === 'code') {
         try { repo = new URL(String(a.repo || '')); } catch { throw new Error('repo must be a repository URL'); }
@@ -103,8 +132,6 @@ function parseArgs(raw, env = process.env) {
         if (!fileOk && repo.protocol !== 'https:') throw new Error('repo must be an https URL');
         if (repo.username || repo.password) throw new Error('repo must not carry credentials');
     }
-    const prompt = typeof a.prompt === 'string' ? a.prompt.trim() : '';
-    if (!prompt || prompt.length > MAX_PROMPT) throw new Error(`prompt must be 1-${MAX_PROMPT} characters`);
     const ref = a.ref == null || a.ref === '' ? null : String(a.ref);
     if (ref && !BRANCH.test(ref)) throw new Error('ref must be a branch or tag name');
     // review is a read-only task (research, an audit, a review): the harness's own `read` level.
@@ -244,6 +271,73 @@ function githubRepo(url) {
 }
 
 /**
+ * The person's Codes token, for the two things a conductor turn needs from the server: the images the owner attached
+ * and the MCP tools. OPENVIBE_TOKEN when the worker set it, else the file `openvibe-codes task` writes
+ * (~/.config/openvibe/token, mode 600). Never printed, never in a line.
+ */
+function codesToken(env = process.env) {
+    const fromEnv = String(env.OPENVIBE_TOKEN || '').trim();
+    if (fromEnv) return fromEnv;
+    const file = String(env.OPENVIBE_TOKEN_FILE || '') || path.join(os.homedir(), '.config', 'openvibe', 'token');
+    try {
+        const st = fs.statSync(file);
+        if (st.mode & 0o077) return null;             // another account may read it: not ours to use
+        return fs.readFileSync(file, 'utf8').trim() || null;
+    } catch { return null; }
+}
+
+/**
+ * The MCP config a conductor's Claude Code session starts with: one stdio server, `openvibe-codes mcp`, in this
+ * package. The token and the server's address travel in its environment; the task id names the conductor whose
+ * approvals the server asks about.
+ */
+function conductorMcpConfig(file, job, env) {
+    const token = codesToken(env);
+    const bin = path.join(__dirname, '..', 'bin', 'openvibe-codes.js');
+    const config = {
+        mcpServers: {
+            codes: {
+                command: process.execPath,
+                args: [bin, 'mcp'],
+                env: {
+                    ...(job.codesUrl ? { OPENVIBE_CODES_URL: job.codesUrl } : {}),
+                    ...(job.taskId ? { OPENVIBE_CONDUCTOR_TASK: job.taskId } : {}),
+                    ...(token ? { OPENVIBE_TOKEN: token } : {}),
+                },
+            },
+        },
+    };
+    fs.writeFileSync(file, JSON.stringify(config, null, 2), { mode: 0o600 });
+    return file;
+}
+
+/** The owner's attached images, written as files the turn can read: [{ path, name }] (the ones that arrived). */
+async function writeAttachments(job, { dir, env, fetchImpl, say }) {
+    const out = [];
+    if (!Array.isArray(job.attachments) || !job.attachments.length) return out;
+    const token = codesToken(env);
+    const at = path.join(dir, 'attachments');
+    fs.mkdirSync(at, { recursive: true });
+    for (const file of job.attachments) {
+        try {
+            const response = await fetchImpl(file.url, {
+                headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), Accept: file.mime },
+                signal: AbortSignal.timeout(30_000),
+            });
+            if (!response.ok) throw new Error(`the server answered ${response.status}`);
+            const bytes = Buffer.from(await response.arrayBuffer());
+            if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new Error('the image is empty or too large');
+            const target = path.join(at, file.name);
+            fs.writeFileSync(target, bytes);
+            out.push({ path: target, name: file.name });
+        } catch (e) {
+            say({ t: 'note', level: 'warning', text: `An attached image could not be read (${file.name}): ${scrub(e.message)}` });
+        }
+    }
+    return out;
+}
+
+/**
  * Commit on a new branch and push it with GITHUB_TOKEN; a pull request when asked. Only ever a branch that does not
  * exist yet: never the base, never a protected name, never someone's existing branch (GitHub is asked first, and a push
  * is never forced, so a branch made meanwhile is not overwritten either).
@@ -300,26 +394,52 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         return doc;
     }
     const dir = fs.mkdtempSync(path.join(tmp, 'codes-'));
-    const work = path.join(dir, 'repo');
+    let work = path.join(dir, 'repo');
     const result = { protocol: JOB_PROTOCOL, ok: false, kind: job.kind, repo: job.repo ? scrub(job.repo) : null, ref: job.ref, agents: [], summary: '' };
     let base = null;
     try {
+        let adapterOptions = null;
         if (job.kind === 'code') {
             say({ t: 'step', text: `Cloning ${scrub(job.repo)}${job.ref ? ` (${job.ref})` : ''}` });
             await git(['clone', '--depth', '50', ...(job.ref ? ['--branch', job.ref] : []), '--', job.repo, work], { timeout: 300_000 });
             base = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: work })).trim();
             result.base = base;
             say({ t: 'step', text: `Working on ${base}` });
+        } else if (job.kind === 'conductor') {
+            // The owner's own folder: never a clone, never touched by git. Claude Code opens it, so it loads that
+            // project's memory and AGENTS.md.
+            work = job.folder;
+            let st = null;
+            try { st = fs.statSync(work); } catch { st = null; }
+            if (!st || !st.isDirectory()) throw new Error(`the working folder does not exist on this machine: ${work}`);
+            fs.chmodSync(dir, 0o700);
+            result.folder = work;
+            say({ t: 'step', text: `Opening ${work}` });
+            const images = await writeAttachments(job, { dir, env, fetchImpl, say });
+            let prompt = job.prompt;
+            if (images.length) {
+                prompt += `\n\n---\n## Images the owner attached\n\n${images.map((i) => `- \`${i.path}\``).join('\n')}\n\nThey are files on this machine; read them.`;
+                say({ t: 'step', text: `${images.length} image${images.length === 1 ? '' : 's'} attached` });
+            }
+            job = { ...job, prompt };
+            adapterOptions = {
+                // "ask" is Claude Code's own default mode, where every risky call goes to the permission prompt tool
+                // (the MCP tool that asks the owner through Codes' approvals inbox).
+                permissionMode: { ask: 'default', project: 'acceptEdits', full: 'bypassPermissions' }[job.safety] || 'default',
+                ...(job.mcp ? { mcpConfig: conductorMcpConfig(path.join(dir, 'mcp.json'), job, env), allowedTools: ['mcp__codes'] } : {}),
+                ...(job.mcp && job.safety === 'ask' ? { permissionPromptTool: 'mcp__codes__approve' } : {}),
+            };
         } else {
             fs.mkdirSync(work, { recursive: true });
             say({ t: 'step', text: 'Preparing an empty benchmark workspace' });
         }
         const run = harness.run({
             prompt: job.prompt, task: 'edit', agent: job.agent, model: job.model, cwd: work,
-            permission: job.permission, handoff: !job.agent, maxAttempts: 3,
+            permission: job.permission, handoff: !job.agent, maxAttempts: job.kind === 'conductor' ? 1 : 3,
             // A task carried on in the same conversation resumes its session (RESUME in the environment, or the job's
             // own resume field).
             resume: job.resume || null,
+            ...(adapterOptions ? { adapterOptions } : {}),
         });
         let last = null;
         for await (const e of run) {
@@ -335,11 +455,14 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         result.cost_usd = last && last.total_cost_usd ? last.total_cost_usd : 0;
         const usage = last && last.usage && typeof last.usage === 'object' ? last.usage : {};
         result.tokens = Number(last && (last.total_tokens || last.tokens)) || (Number(usage.input_tokens) || 0) + (Number(usage.output_tokens) || 0);
-        Object.assign(result, job.kind === 'bench' ? { files: [], patch: '', patch_truncated: false } : await changes(work));
-        say({ t: 'step', text: result.files.length ? `${result.files.length} file${result.files.length === 1 ? '' : 's'} changed` : 'No files changed' });
+        // The session the next message resumes: a conductor's turn ends, its conversation does not.
+        if (job.kind === 'conductor' && last && last.session_id) result.session = String(last.session_id).slice(0, 200);
+        // A conductor works in the owner's own folder: its changes are theirs, not a patch for a pull request.
+        Object.assign(result, job.kind === 'code' ? await changes(work) : { files: [], patch: '', patch_truncated: false });
+        say({ t: 'step', text: result.files.length ? `${result.files.length} file${result.files.length === 1 ? '' : 's'} changed` : (job.kind === 'conductor' ? 'Turn done' : 'No files changed') });
         // The proof of the change: the tests it reaches, the pages it touched, the diff, and a second model's opinion.
         // It is collected here, in the clone the agent worked in, so the evidence is about this machine's work.
-        if (proof) {
+        if (proof && job.kind === 'code') {
             say({ t: 'step', text: 'Collecting the proof' });
             try {
                 const collected = await collectProof({
@@ -389,4 +512,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL };
+module.exports = { runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments };

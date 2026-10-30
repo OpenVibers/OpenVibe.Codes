@@ -8,6 +8,7 @@
  *   about it (codes_events_inbox);
  * - the run tokens minted for their attempts (codes_run_tokens, C3: ids and expiry, never the token);
  * - their workspace choices (codes_user_settings, C4b);
+ * - their conductor's turns (codes_conductor_messages, C9b) and the approvals it asked them (codes_approvals);
  * - the events Codes sent about them (codes_outbox);
  * - telemetry samples that name them: the SDK covers telemetry_samples itself (telemetry.json, then subject NULL).
  *
@@ -43,6 +44,15 @@ const TASK_KEYED = [
     { table: 'codes_session_lines', file: 'session-lines.json', columns: 'l.task_id, l.seq, l.at, l.kind, l.body', order: 'l.seq ASC', kind: 'session_lines', max: SESSION_LINES_MAX },
     { table: 'codes_attempts', file: 'attempts.json', columns: 'l.id, l.task_id, l.n, l.agent, l.model, l.machine, l.state, l.reason, l.why, l.kind, l.cost_usd, l.tokens, l.steps, l.started_at, l.finished_at, l.created_at', order: 'l.n ASC', kind: 'attempts', max: TASK_ROWS_MAX },
     { table: 'codes_task_proof', file: 'proof.json', columns: 'l.task_id, l.attempt_n, l.n, l.kind, l.label, l.ok, l.skipped, l.summary, l.family, l.detail, l.created_at', order: 'l.n ASC', kind: 'proof', max: TASK_ROWS_MAX },
+    // The conductor's turns (C9b): what the person said, and what the turn answered. An attached image is exported by
+    // its name, type and size; its bytes stay in the database until the person's tasks are erased.
+    {
+        table: 'codes_conductor_messages', file: 'conductor-messages.json',
+        columns: "l.id, l.task_id, l.n, l.prompt, l.state, l.job_id, l.error, l.created_at, l.started_at, l.finished_at, COALESCE((SELECT jsonb_agg(jsonb_build_object('name', a->>'name', 'mime', a->>'mime', 'size', a->'size')) FROM jsonb_array_elements(l.attachments) a), '[]'::jsonb) AS attachments",
+        order: 'l.n ASC', kind: 'conductor_messages', max: TASK_ROWS_MAX,
+    },
+    // The approvals the person decided, and the ones still waiting when their account is erased.
+    { table: 'codes_approvals', file: 'approvals.json', columns: 'l.id, l.task_id, l.tool, l.summary, l.decision, l.message, l.created_at, l.decided_at', order: 'l.created_at ASC', kind: 'approvals', max: TASK_ROWS_MAX },
     { table: 'codes_events_inbox', file: null, kind: 'events_received' },
 ];
 

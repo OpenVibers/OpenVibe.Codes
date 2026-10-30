@@ -157,11 +157,37 @@ const TASK3 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAX';
             assert.ok(page.text.includes('<option value="codex" selected'), 'the default agent is kept');
             assert.ok(page.text.includes('value="project" checked'), 'so is the safety level');
             assert.ok(!page.text.includes('name="notify_done" value="1" checked'), 'an unticked box stays unticked');
+            assert.ok(page.text.includes('name="steps"') && page.text.includes('name="minutes"'), 'the limits are on the page');
             const other = await t.get('/settings', { as: bo });
             assert.ok(other.text.includes('<option value="codex">'), 'and it is only this person&rsquo;s');
             assert.ok(!other.text.includes('<option value="codex" selected'));
             const bad = await t.get('/settings', { as: ada, method: 'POST', form: { safety: 'anything' } });
             assert.ok(String(bad.headers.get('location')).includes('error='), 'a level Codes does not know is refused');
+        });
+
+        await check('Settings → Limits: steps and minutes per task, with No limit meaning none', async () => {
+            const saved = await t.get('/settings', { as: ada, method: 'POST', form: {
+                default_agent: 'codex', steps: '350', minutes: '90', notify_done: '1', notify_needs: '1', safety: 'ask',
+            } });
+            assert.strictEqual(saved.status, 303);
+            let settings = await t.ctx.userSettings.get(ada.subject);
+            assert.strictEqual(settings.steps, 350);
+            assert.strictEqual(settings.minutes, 90);
+            const page = await t.get('/settings', { as: ada });
+            assert.ok(page.text.includes('<option value="350" selected'), 'the step limit is shown');
+            assert.ok(page.text.includes('<option value="90" selected'), 'and the time limit');
+            // No limit is an empty value, stored as null, never a zero budget.
+            await t.get('/settings', { as: ada, method: 'POST', form: { steps: '', minutes: 'off', notify_done: '1', notify_needs: '1' } });
+            settings = await t.ctx.userSettings.get(ada.subject);
+            assert.strictEqual(settings.steps, null);
+            assert.strictEqual(settings.minutes, null);
+            const none = await t.get('/settings', { as: ada });
+            assert.ok(none.text.includes('<option value="" selected'), 'No limit is selected');
+            // A negative or silly value is refused, and the stored one stays.
+            await t.get('/settings', { as: ada, method: 'POST', form: { steps: '500' } });
+            const refused = await t.get('/settings', { as: ada, method: 'POST', form: { steps: '-3' } });
+            assert.ok(String(refused.headers.get('location')).includes('error='), 'a negative limit is refused');
+            assert.strictEqual((await t.ctx.userSettings.get(ada.subject)).steps, 500, 'the saved value is untouched');
         });
 
         await check('Usage counts runs, minutes and tokens per day, and shows no prices', async () => {

@@ -43,7 +43,7 @@ const TIER_EFFORT = { basic: 'low', research: 'medium', standard: 'high', hard: 
 
 /** The attempt's own states, and the reasons it may have ended. */
 const STATES = ['queued', 'running', 'done', 'failed', 'stopped', 'budget-stopped', 'interrupted'];
-const REASONS = ['limit', 'auth', 'capacity', 'refused', 'error', 'budget', 'stopped', 'hung', 'context'];
+const REASONS = ['limit', 'auth', 'capacity', 'refused', 'error', 'budget', 'stopped', 'hung', 'context', 'turns'];
 const KINDS = ['first', 'continue', 'switch', 'wrap-up', 'restart', 'manual'];
 
 /** The engine's own words for a reason: the timeline reads like a person wrote it. */
@@ -63,6 +63,7 @@ const ERROR_TEXT = {
     stopped: 'stopped on purpose',
     context: 'the context window is too big',
     hung: 'it went quiet for too long',
+    turns: 'the harness reached max_turns',
 };
 
 /** The engine's status for our state (the two vocabularies are the same, except 'queued' and 'running'). */
@@ -171,17 +172,18 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
         throw new Error('the attempt could not be written');
     }
 
-    /** The Run job of an attempt. */
-    async function bind(id, { job_id = null, state = null, started_at = null, machine = null, model = null, run_mode = null } = {}) {
+    /** The Run job of an attempt. The session is set for a conductor's attempt, which outlives each turn's job. */
+    async function bind(id, { job_id = null, state = null, started_at = null, machine = null, model = null, session = null, run_mode = null } = {}) {
         return await db.one(
             `UPDATE codes_attempts SET job_id = COALESCE($2, job_id),
                 state = COALESCE($3, state),
                 machine = COALESCE($4, machine),
                 model = COALESCE($5, model),
                 started_at = COALESCE($6::timestamptz, started_at),
-                run_mode = COALESCE($7, run_mode)
+                session = COALESCE($7, session),
+                run_mode = COALESCE($8, run_mode)
              WHERE id = $1 RETURNING *`,
-            [id, job_id, state, machine, model, started_at, run_mode],
+            [id, job_id, state, machine, model, started_at, session, run_mode],
         );
     }
 

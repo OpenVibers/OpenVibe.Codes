@@ -145,7 +145,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -154,6 +154,12 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     // The proof of a finished task (stage C8): the tests, the pages, the diff and the second model's opinion.
     const taskProof = proof || require('./proof').createProof({ store, config, log });
     const attemptStore = attempts || require('./attempts').createAttempts({ store, config, log });
+    /**
+     * The conductor's turns (server/domain/conductor.js). Wired by the app after both exist, because the conductor
+     * starts Run jobs and this module is what applies their events: a constructor argument would be a cycle.
+     */
+    let conductorTurns = conductor;
+    const setConductor = (turns) => { conductorTurns = turns; };
     /** An attempt's state when it ended: a limit reached is a budget-stop, never a plain failure. */
     const ENDED = new Set(['done', 'failed', 'stopped', 'budget-stopped', 'interrupted']);
 
@@ -391,25 +397,35 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             if (attempt) {
                 if (TERMINAL.has(state)) {
                     const usage = usageOf(updated.result);
-                    let why = reasonOf(state, updated.error);
-                    const localHit = budgetHit(attempt, usage, why);
-                    // OpenVibe.AI refused the run for its budget (402 ai.run_budget_reached): the attempt ends at its
-                    // budget, not as a crash. Which budget ran out is in the refusal itself.
-                    const refused = !localHit && budgetRefused(updated.result, updated.error);
-                    const hit = localHit || (refused ? budgetKind(updated.result, updated.error) : null);
-                    if (refused) why = 'budget';
-                    if (refused) budgetAttempt = { id: attempt.id };
-                    await attemptStore.end(attempt.id, {
-                        state: hit ? 'budget-stopped' : (ATTEMPT_STATE[state] || 'failed'),
-                        reason: hit ? 'budget' : why,
-                        cost_usd: usage.cost_usd, tokens: usage.tokens, steps: usage.steps, session: usage.session,
-                        model: usage.model, machine: machineOf(next.job),
-                        budget_hit: hit,
-                        finished_at: updated.finished_at || store.iso(),
-                    });
+                    // A conductor's attempt outlives every turn: the same session is resumed by the next message, so
+                    // its end is not the attempt's end — it waits for the person.
+                    if (current.kind === 'conductor') {
+                        await attemptStore.bind(attempt.id, {
+                            state: 'waiting', session: usage.session, model: usage.model, machine: machineOf(next.job),
+                            started_at: updated.started_at || null,
+                        });
+                    } else {
+                        let why = reasonOf(state, updated.error);
+                        const localHit = budgetHit(attempt, usage, why);
+                        // OpenVibe.AI refused the run for its budget (402 ai.run_budget_reached): the attempt ends at its
+                        // budget, not as a crash. Which budget ran out is in the refusal itself.
+                        const refused = !localHit && budgetRefused(updated.result, updated.error);
+                        const hit = localHit || (refused ? budgetKind(updated.result, updated.error) : null);
+                        if (refused) why = 'budget';
+                        if (refused) budgetAttempt = { id: attempt.id };
+                        await attemptStore.end(attempt.id, {
+                            state: hit ? 'budget-stopped' : (ATTEMPT_STATE[state] || 'failed'),
+                            reason: hit ? 'budget' : why,
+                            cost_usd: usage.cost_usd, tokens: usage.tokens, steps: usage.steps, session: usage.session,
+                            model: usage.model, machine: machineOf(next.job),
+                            budget_hit: hit,
+                            finished_at: updated.finished_at || store.iso(),
+                        });
+                    }
                 } else {
                     await attemptStore.bind(attempt.id, {
-                        state: ATTEMPT_STATE[state] || 'queued', started_at: updated.started_at || null, machine: machineOf(next.job),
+                        state: current.kind === 'conductor' ? 'running' : (ATTEMPT_STATE[state] || 'queued'),
+                        started_at: updated.started_at || null, machine: machineOf(next.job),
                     });
                 }
             }
@@ -555,6 +571,8 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         if (!row) return null;
         if (!TERMINAL.has(row.state)) return row;
         if (row.outcome === 'stopped') return row;      // a person stopped it: nothing carries it on
+        // The conductor's turns are its own: a turn that ended lands its message and the next one starts.
+        if (row.kind === 'conductor') return conductorTurns ? conductorTurns.onTurnEnd(row.id, row.job_id) : row;
         const actorRef = asObject(row.actor_ref);
         if (actorRef && actorRef.bench) {
             const done = row.state === 'succeeded';
@@ -659,12 +677,18 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     /**
      * The next attempt now: the owner carries the task on (with a note), or switches to another agent. The task's row
      * is locked while the attempt is written, so two presses start one attempt and not two.
+     *
+     * One continuation at a time (the portal's liveContinuation, 10-30): while an attempt is still live — the automatic
+     * continue after a crash, a wrap-up, another manual press — that attempt is returned, and no second one is started
+     * beside it. Two sessions on one worktree would fight over the same files.
      */
     async function continueTask(row, { note = null, agent = null } = {}) {
         if (!row || !row.id) return { error: 'no such task' };
         const attempts = await attemptStore.list(row.id);
         const ending = attempts[attempts.length - 1];
         if (!ending) return { error: 'the task has no attempt to carry on' };
+        const live = attempts.slice().reverse().find((a) => !ENDED.has(a.state));
+        if (live) return { attempt: live, live: true, row };
         const text = note ? String(note).trim().slice(0, 4000) : '';
         const plan = agent
             ? {
@@ -776,7 +800,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
 
     return {
         start, refresh, applyJob, applyEvent, recordState, afterEnd, continueTask, stopTask, proof: taskProof,
-        latestProject, present, who, attempts: attemptStore,
+        latestProject, present, who, attempts: attemptStore, setConductor,
     };
 }
 

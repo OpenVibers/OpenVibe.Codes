@@ -1,6 +1,6 @@
 {
   "name": "openvibe-codes",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "description": "OpenVibe.Codes: the open coding-agent harness. Run a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or your own model, with routing by capability and cost and hand-offs between agents; plus the site with the agent catalog, a public routing API and the way to improve OpenVibe itself.",
   "main": "harness/index.js",

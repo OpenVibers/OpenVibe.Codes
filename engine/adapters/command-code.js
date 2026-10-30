@@ -15,7 +15,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { effortFor, claudeFeed, TOOL_NAMES, emitter } = require('./base');
+const { effortFor, turnCap, claudeFeed, TOOL_NAMES, emitter } = require('./base');
 
 /** The tools a job may not use (the portal's deny list). */
 const DENY = ['Shell(rm:*)', 'Shell(git push:*)', 'Shell(git commit:*)', 'Shell(git reset:*)', 'Shell(git checkout:*)',
@@ -44,7 +44,7 @@ function build(ctx = {}) {
     argv.push('--effort', effort || 'high');
     argv.push('--config', 'compact-mode=fast');
     argv.push('--output-format', 'json');
-    argv.push('--max-turns', String(ctx.maxTurns || 150));
+    argv.push('--max-turns', turnCap(ctx.maxTurns));
     argv.push('--skip-onboarding', '--no-auto-update', '-t');
     return { cmd: ctx.bin || 'cmd', argv, env: {}, stdin: null };
 }
