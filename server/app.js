@@ -32,6 +32,7 @@ const { createTasksApi } = require('./http/tasks-api');
 const { createActionsApi } = require('./http/actions-api');
 const { createRunClient } = require('./domain/run-client');
 const { createRunTasks } = require('./domain/run-tasks');
+const { createAttempts } = require('./domain/attempts');
 const { createSessionLines } = require('./domain/session-lines');
 const { createOutbox, createPublisher } = require('./events/outbox');
 const { createEventsConsumer } = require('./events-consumer');
@@ -66,8 +67,10 @@ async function createApp(opts = {}) {
     const sessions = createSessionLines({ store, config, log });
     const outbox = createOutbox({ store, log });
     const run = opts.run || createRunClient({ config, fetchImpl: fetchImpl || globalThis.fetch });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox });
-    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks };
+    // The task's attempts (stage C2): every Run job is one attempt, and the engine decides what happens next.
+    const attempts = createAttempts({ store, config, log, harnesses });
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, attempts });
+    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, attempts };
     ctx.forgejo = createForgejoClient({ config, log });
 
     const app = express();
