@@ -36,10 +36,25 @@ async function startNetworkStub() {
     const db = t.ctx.store.db;
     const ada = ids.newId('user');
     const bo = ids.newId('user');
-    const task = (subject, prompt) => db.exec(`INSERT INTO run_tasks (id, subject, project_id, job_id, repo, prompt, state, result, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, 'https://github.com/a/b', $5, 'succeeded', '{"ok":true}'::jsonb, 1, 2)`, [ids.newId('task').replace(/^[a-z]+_/, 'tsk_'), subject, ids.newId('project'), `job_${ids.ulid()}`, prompt]);
-    await task(ada, 'Ada’s task');
-    await task(bo, 'Bo’s task');
+    const task = async (subject, prompt) => {
+        const id = ids.newId('task').replace(/^[a-z]+_/, 'tsk_');
+        await db.exec(`INSERT INTO run_tasks (id, subject, project_id, job_id, repo, prompt, state, result, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, 'https://github.com/a/b', $5, 'succeeded', '{"ok":true}'::jsonb, 1, 2)`, [id, subject, ids.newId('project'), `job_${ids.ulid()}`, prompt]);
+        return id;
+    };
+    const adaTask = await task(ada, 'Ada’s task');
+    const boTask = await task(bo, 'Bo’s task');
+    // Everything later stages keep about a person or their tasks (C2 attempts, C3 run tokens, C8 proof, C4b settings,
+    // the outbox, telemetry): each must leave with the person, and only theirs.
+    for (const [subject, taskId] of [[ada, adaTask], [bo, boTask]]) {
+        await db.exec("INSERT INTO codes_attempts (id, task_id, n, state, agent) VALUES ($1, $2, 1, 'done', 'codex')", [`att_${ids.ulid()}`, taskId]);
+        await db.exec("INSERT INTO codes_task_proof (id, task_id, attempt_n, n, kind, label, ok) VALUES ($1, $2, 1, 1, 'tests', 'tests', true)", [`prf_${ids.ulid()}`, taskId]);
+        await db.exec("INSERT INTO codes_run_tokens (id, task_id, subject, provider, jti, expires_at) VALUES ($1, $2, $3, 'openai', $4, now())", [`rtk_${ids.ulid()}`, taskId, subject, `jti_${ids.ulid()}`]);
+        await db.exec("INSERT INTO codes_user_settings (subject, default_agent) VALUES ($1, 'codex')", [subject]);
+        await db.exec("INSERT INTO codes_outbox (event_id, topic, subject, payload) VALUES ($1, 'codes.task.updated', $2, '{}'::jsonb)", [`evt_${ids.ulid()}`, subject]);
+        await db.exec("INSERT INTO telemetry_samples (at, service, operation, subject) VALUES (now(), 'codes', 'task.start', $1)", [subject]);
+        await db.exec("INSERT INTO codes_events_inbox (event_id, event_type, task_id) VALUES ($1, 'run.job.finished', $2)", [`evt_${ids.ulid()}`, taskId]);
+    }
     const deliver = async (event, { secret = SECRET } = {}) => {
         const body = JSON.stringify({ event, seq: 1 });
         const res = await fetch(`${t.base}/internal/events`, { method: 'POST', body, headers: { 'Content-Type': 'application/json', ...(secret ? signDeliveryHeaders(body, secret) : {}) } });
@@ -64,6 +79,13 @@ async function startNetworkStub() {
             assert.strictEqual(file.content.length, 1);
             assert.strictEqual(file.content[0].prompt, 'Ada’s task');
             assert.deepStrictEqual(file.content[0].result, { ok: true });
+            for (const name of ['attempts.json', 'proof.json', 'settings.json', 'run-tokens.json']) {
+                const f = part.body.files.find((x) => x.name === name);
+                assert.ok(f, `${name} is in the export`);
+                assert.strictEqual(f.content.length, 1, `${name} holds Ada’s row only`);
+            }
+            const tok = part.body.files.find((x) => x.name === 'run-tokens.json').content[0];
+            assert.ok(!('jti' in tok), 'a run token’s jti stays out of the export');
         });
 
         await check('a deletion erases them, keeps everyone else’s, and confirms once', async () => {
@@ -76,6 +98,15 @@ async function startNetworkStub() {
             const confirmations = stub.calls.filter((c) => c.url === `/internal/account-deletions/${deletionId}/confirmations`);
             assert.strictEqual(confirmations.length, 1);
             assert.strictEqual(confirmations[0].body.erased.run_tasks, 1);
+            for (const [table, key, who] of [
+                ['codes_attempts', 'task_id', [boTask]], ['codes_task_proof', 'task_id', [boTask]], ['codes_events_inbox', 'task_id', [boTask]],
+                ['codes_run_tokens', 'subject', [bo]], ['codes_user_settings', 'subject', [bo]], ['codes_outbox', 'subject', [bo]],
+            ]) {
+                const left = (await db.many(`SELECT ${key} FROM ${table}`)).map((r) => r[key]);
+                assert.deepStrictEqual(left, who, `${table}: only Bo’s row is left`);
+            }
+            const samples = await db.many('SELECT subject FROM telemetry_samples ORDER BY subject NULLS FIRST');
+            assert.deepStrictEqual(samples.map((r) => r.subject), [null, bo], 'Ada’s telemetry sample stays, without her');
         });
     } finally {
         await t.close();
