@@ -57,6 +57,7 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
         grants: new Map(), quotas: new Map(), usage: new Map(), audit: [], codes: new Map(), refresh: new Map(),
         catalog: null, down: false, requests: [], tokenRequests: [], exportTokens: [], exportTtl: 300,
         vault: new Map(),   // OpenVibe.AI's stand-in: a person's own keys, by subject and provider
+        nodes: new Map(),   // Network's node principals (a person's machines), by principal id
     };
     let issuer = null;
     let nextUserId = 1;
@@ -341,6 +342,23 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
                 ? { id: 'msg_1', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'ok' }], model: 'openvibe', usage: { input_tokens: 1, output_tokens: 1 } }
                 : { id: 'chatcmpl_1', object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }], model: 'openvibe', usage: { prompt_tokens: 1, completion_tokens: 1 } });
         }
+        // ── Network's node principals (Codes C4b): a person's own machines ──
+        if (url.pathname === '/api/v1/me/nodes' || url.pathname.startsWith('/api/v1/me/nodes/')) {
+            const u = userFrom(req);
+            if (!u) return problem(json, 401, 'auth.required', 'sign in to see your machines');
+            if (req.method === 'GET' && url.pathname === '/api/v1/me/nodes') {
+                const mine = [...st.nodes.values()].filter((n) => n.owner === u.subject).map((n) => ({ ...n.view }));
+                return json(200, { nodes: mine });
+            }
+            const m = /^\/api\/v1\/me\/nodes\/([^/]+)\/revoke$/.exec(url.pathname);
+            if (req.method === 'POST' && m) {
+                const node = st.nodes.get(decodeURIComponent(m[1]));
+                if (!node || node.owner !== u.subject) return problem(json, 404, 'registry.unknown_node', 'no such machine of yours');
+                node.view = { ...node.view, status: 'revoked', revoked_at: new Date().toISOString() };
+                return json(200, node.view);
+            }
+            return problem(json, 404, 'route.not_found', 'no such route');
+        }
         if (url.pathname.startsWith('/api/v1/projects')) {
             const u = userFrom(req);
             if (u === 'expired') return problem(json, 401, 'auth.expired', 'access token expired; refresh it');
@@ -363,6 +381,7 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
         setUsage(projectId, body) { st.usage.set(projectId, body); },
         setQuota(projectId, capability, limit, window, unit) { st.quotas.set(`${projectId} ${capability}`, { project_id: projectId, capability, limit, window, unit, updated_at: new Date().toISOString() }); },
         setCatalog(list) { st.catalog = list; },
+        addNode(subject, view) { st.nodes.set(view.principal, { owner: subject, view }); return view; },
         setDown(v) { st.down = v; },
         mintApp: (appId, audience, cap, extra = {}) => { const a = st.apps.get(appId); const now = Math.floor(Date.now() / 1000); return serviceAuth.signServiceToken({ iss: issuer, sub: `app:${a.id}`, actor_type: 'app', aud: [audience], cap, ns: [a.project_id], project_id: a.project_id, env: a.environment, iat: now, exp: now + 300, jti: `tok_${crypto.randomBytes(8).toString('hex')}`, ...extra }, privatePem); },
         /** A Network client-credentials token: a first-party service (svc:<id>) or an app (app:<id>), for audience, holding cap. */

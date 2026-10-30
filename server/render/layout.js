@@ -55,7 +55,9 @@ function renderPage(o) {
     const viewer = o.viewer || { kind: 'anonymous' };
     const signedIn = viewer.kind === 'user';
     const pathNow = o.path || '/';
-    const c4Workspace = pathNow === '/' || /^\/(tasks|agents|machines|usage|settings)(\/|$)/.test(pathNow);
+    // The workspace pages share the compact Frame: no second app bar under the Frame's own (a query must not change it).
+    const pathOnly = pathNow.split('?')[0];
+    const c4Workspace = pathOnly === '/' || /^\/(tasks|agents|machines|usage|settings)(\/|$)/.test(pathOnly);
     const loginNext = encodeURIComponent(pathNow);
     const canonical = `${o.config.baseUrl}${pathNow.split('?')[0]}`;
     const nav = {

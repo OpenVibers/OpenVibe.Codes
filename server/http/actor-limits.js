@@ -35,6 +35,9 @@ const BUDGETS = {
     'codes.harness.route': { minute: 30, hour: 600 },
     // A service starting (or cancelling) a coding task for a person counts against that person (tasks-api.js).
     'codes.task.start': { minute: 6, hour: 60 },
+    // The Home picker's repository search asks GitHub, which allows an address few searches a minute. The person's
+    // own repositories come first and cost nothing; this bounds what they may spend on the rest.
+    'codes.repo.search': { minute: 6, hour: 60 },
 };
 
 /**

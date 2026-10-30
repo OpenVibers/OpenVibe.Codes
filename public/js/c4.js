@@ -8,7 +8,8 @@
             links.forEach((link) => link.setAttribute('aria-selected', String(link.dataset.c4Tab === id)));
             panels.forEach((panel) => { panel.hidden = panel.id !== id; });
         };
-        activate('live');
+        const chosen = links.find((link) => link.getAttribute('aria-selected') === 'true');
+        activate(chosen ? chosen.dataset.c4Tab : 'live');
         links.forEach((link) => link.addEventListener('click', (event) => {
             event.preventDefault();
             activate(link.dataset.c4Tab);
@@ -92,7 +93,8 @@
                 if (reason) reason.textContent = outcome.note || task.error || 'The task stopped before it was complete.';
             }
             const chip = detail.querySelector('.c4-task-heading > .c4-status');
-            if (chip) chip.textContent = task.state || 'Unknown';
+            // The words the page uses, not Run's own state id.
+            if (chip) chip.textContent = ({ running: 'Running', queued: 'Queued', placed: 'On its way', done: 'Done', succeeded: 'Done', failed: "Didn't finish", cancelled: 'Stopped by you', expired: 'Expired' })[task.state] || task.state || 'Unknown';
             if (label) label.textContent = ['succeeded', 'failed', 'cancelled', 'expired'].includes(task.state) ? 'This task has finished.' : 'Connecting to the live task…';
         };
         if (detail) fetch(detail.dataset.taskApi, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
@@ -140,6 +142,45 @@
         stream.addEventListener('end', () => { stream.close(); window.clearInterval(timer); if (title) title.textContent = 'Task finished'; });
         stream.addEventListener('error', () => {
             if (stream.readyState === EventSource.CLOSED) { stream.close(); window.clearInterval(timer); }
+        });
+    });
+    // The repository picker: the person's own repositories first, then GitHub's public answer for what they type.
+    // Server-rendered options already hold the saved ones, so the field works with this script blocked.
+    document.querySelectorAll('[data-c4-repo-search]').forEach((input) => {
+        const list = document.getElementById(input.getAttribute('list'));
+        const status = input.closest('form')?.querySelector('[data-c4-repo-status]');
+        const url = input.dataset.c4RepoUrl;
+        if (!list || !url) return;
+        let timer = 0;
+        let seq = 0;
+        const say = (text, bad) => { if (status) { status.textContent = text; status.classList.toggle('is-bad', !!bad); } };
+        const search = async () => {
+            const q = input.value.trim();
+            if (q.length < 2 || /^https?:\/\//i.test(q)) { say(''); return; }
+            const mine = ++seq;
+            say('Searching your repositories…');
+            try {
+                const res = await fetch(`${url}?q=${encodeURIComponent(q)}`, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                if (!res.ok) throw new Error(`search answered ${res.status}`);
+                const doc = await res.json();
+                if (mine !== seq) return;
+                list.textContent = '';
+                for (const repo of doc.repos || []) {
+                    const option = document.createElement('option');
+                    option.value = repo.url;
+                    option.label = repo.full_name + (repo.recent ? ' · used here' : '');
+                    list.append(option);
+                }
+                const found = (doc.repos || []).length;
+                if (doc.problem) say(doc.problem.detail || 'GitHub could not be searched', true);
+                else say(found ? `${found} repositor${found === 1 ? 'y' : 'ies'}; pick one or paste a URL.` : 'No repository matched. Paste its URL.');
+            } catch (e) {
+                if (mine === seq) say('Search is not available; paste the repository URL.', true);
+            }
+        };
+        input.addEventListener('input', () => {
+            window.clearTimeout(timer);
+            timer = window.setTimeout(search, 350);
         });
     });
 })();

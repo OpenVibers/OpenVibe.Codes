@@ -23,7 +23,7 @@ const { boot, check, done } = require('./helpers/boot');
             const settings = await t.get('/settings', { as: ada });
             assert.strictEqual(settings.status, 200);
             assert.ok(settings.text.includes('Safety'));
-            assert.strictEqual((settings.text.match(/Arrives with connections\./g) || []).length, 1);
+            assert.ok(settings.text.includes('Save settings'));
             assert.ok(!settings.text.includes('Sign in to see your work'));
             const hidden = await t.get('/tasks/tsk_01ARZ3NDEKTSV4RRFFQ69G5FAV', { as: ada });
             assert.strictEqual(hidden.status, 404);
