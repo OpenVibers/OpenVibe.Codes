@@ -174,15 +174,22 @@ function createMemoryRoutes(ctx, kit) {
                 + '<code class="c4-code-inline">openvibe-node memory upload</code>: it shows what it found and asks before sending anything. '
                 + '<a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/memory.md#the-upload">The Node docs</a></div></section>';
         }
-        const list = rows.map((row) => {
+        const sourceRow = (row) => {
             const fresh = row.seen && Date.now() - row.seen < SEVEN_DAYS;
             const seen = row.seen ? agoOf(new Date(row.seen).toISOString()) : 'never';
             return '<li class="c4-row c4-row-flat c4-source"><span class="c4-row-dot c4-dot-' + (fresh ? 'ok' : 'skip') + '" aria-hidden="true"></span>'
                 + '<span class="c4-row-label">' + esc(sourceName(row.id)) + '</span>'
                 + '<span class="c4-row-note">' + row.count + (row.count === 1 ? ' note' : ' notes') + ' · seen ' + esc(seen) + '</span>'
-                + '<a class="c4-opill c4-opill-quiet" href="/memory/remove?source=' + encodeURIComponent(row.id) + '">Remove…</a></li>';
-        }).join('');
-        return head + '<ul class="c4-rows">' + list + '</ul></section>';
+                + '<a class="c4-quiet-link" href="/memory/remove?source=' + encodeURIComponent(row.id) + '">Remove…</a></li>';
+        };
+        // A phone shows the three most recent sources and the rest open behind a plain details; a desktop shows them all.
+        const first = rows.slice(0, 3);
+        const rest = rows.slice(3);
+        const fold = rest.length
+            ? '<li class="c4-more-row"><details class="c4-more"><summary>Show all ' + rows.length + ' sources</summary>'
+                + '<div class="c4-more-body"><ul class="c4-rows">' + rest.map(sourceRow).join('') + '</ul></div></details></li>'
+            : '';
+        return head + '<ul class="c4-rows">' + first.map(sourceRow).join('') + fold + '</ul></section>';
     }
 
     /** The notes tab: a search, the scopes, and one row per note. */
@@ -196,13 +203,13 @@ function createMemoryRoutes(ctx, kit) {
                 return '<a class="c4-chip" href="' + href + '"' + (here ? ' aria-current="page"' : '') + '>' + esc(label) + '</a>';
             }).join('');
         const search = '<form class="c4-search" method="get" action="/memory"><input type="hidden" name="tab" value="notes">'
-            + '<label for="memory-search">Search your notes</label>'
+            + '<label class="c4-sr-only" for="memory-search">Search your notes</label>'
             + '<input id="memory-search" name="q" value="' + esc(q) + '" placeholder="Search your notes" maxlength="200">'
             + '<button class="c4-button c4-button-light">Search</button></form>';
         const body = notes.length
             ? '<ul class="c4-rows">' + notes.map((item) => noteRow(item, merged.has(item.id))).join('') + '</ul>'
             : '<div class="c4-emptyline">' + (q || scope ? 'No note matches. <a href="/memory?tab=notes">Show all</a>' : 'No notes yet.') + '</div>';
-        return '<section class="c4-card"><div class="c4-card-head"><h2>Notes</h2><span class="c4-muted">' + notes.length + '</span></div>'
+        return '<section class="c4-card">'
             + search + '<div class="c4-chips" aria-label="Scopes">' + chips + '</div>' + body
             + '<p class="c4-hint">A note is one thing your tools remembered. Everything here is yours: edit it, archive it or delete it.</p></section>';
     }
@@ -225,7 +232,7 @@ function createMemoryRoutes(ctx, kit) {
             + '<button class="c4-button" type="submit">Save</button></form>'
             + '<form method="post" action="/memory/items/' + id + '/archive"><input type="hidden" name="tab" value="notes"><button class="c4-opill c4-opill-quiet" type="submit">Archive</button></form>'
             + (isMerged ? '<form method="post" action="/memory/items/' + id + '/split"><input type="hidden" name="tab" value="notes"><button class="c4-opill c4-opill-quiet" type="submit">Split</button></form>' : '')
-            + '<form method="post" action="/memory/items/' + id + '/delete"><input type="hidden" name="tab" value="notes"><button class="c4-opill c4-opill-quiet" type="submit">Delete</button></form>'
+            + '<form class="c4-note-danger" method="post" action="/memory/items/' + id + '/delete"><input type="hidden" name="tab" value="notes"><button class="c4-opill c4-opill-danger" type="submit">Delete</button></form>'
             + '</div></details></li>';
     }
 
@@ -269,7 +276,7 @@ function createMemoryRoutes(ctx, kit) {
                 + '<form method="post" action="/memory/items/' + id + '/decline"><input type="hidden" name="tab" value="suggested"><button class="c4-opill c4-opill-quiet" type="submit">Decline</button></form>'
                 + '</div></li>';
         }).join('');
-        return '<section class="c4-card"><div class="c4-card-head"><h2>Suggested</h2><span class="c4-muted">' + items.length + '</span></div>'
+        return '<section class="c4-card">'
             + '<p class="c4-sub">Notes your agents worked out on their own. Accept one to keep it; decline one and it goes.</p>'
             + '<ul class="c4-rows">' + rows + '</ul></section>';
     }
@@ -322,7 +329,7 @@ function createMemoryRoutes(ctx, kit) {
                 + '<span class="c4-row-label">' + esc(actor) + ' read ' + count + (count === 1 ? ' note' : ' notes') + '</span>'
                 + '<span class="c4-row-note">for ' + esc(purpose) + ' · <time datetime="' + esc(when) + '">' + esc(agoOf(when)) + '</time></span></li>';
         }).join('');
-        return '<section class="c4-card"><div class="c4-card-head"><h2>Who read it</h2><span class="c4-muted">' + reads.length + '</span></div>'
+        return '<section class="c4-card">'
             + '<p class="c4-sub">The agents that read your notes. The list says how many notes each one took, never what they said.</p>'
             + '<ul class="c4-rows">' + rows + '</ul></section>';
     }
@@ -347,7 +354,7 @@ function createMemoryRoutes(ctx, kit) {
             + 'and the next upload brings them back.</p>'
             + '<form method="post" action="/memory/remove"><input type="hidden" name="source" value="' + esc(source) + '">'
             + '<input type="hidden" name="tab" value="notes">'
-            + '<button class="c4-button" type="submit">Delete ' + count + (count === 1 ? ' note' : ' notes') + '</button> '
+            + '<button class="c4-button c4-button-danger" type="submit">Delete ' + count + (count === 1 ? ' note' : ' notes') + '</button> '
             + '<a class="c4-opill c4-opill-quiet" href="/memory?tab=notes">Keep them</a></form></section>';
         return page(req, res, 'Memory', wrap(content));
     }
@@ -496,7 +503,8 @@ function sourceRows(items) {
             rows.set(id, row);
         }
     }
-    return [...rows.values()].sort((a, b) => b.count - a.count || b.seen - a.seen);
+    // The most recent source first: a phone shows the three most recent ones.
+    return [...rows.values()].sort((a, b) => b.seen - a.seen || b.count - a.count);
 }
 
 module.exports = { createMemoryRoutes, SOURCE_NAMES, KINDS, sourceName, scopeName, dayOf, agoOf };

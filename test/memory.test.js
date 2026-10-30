@@ -17,7 +17,7 @@ async function startStore() {
         items.push({
             id: id(i + 1), text: 'Note number ' + (i + 1) + ' about how the person works',
             kind: i % 3 === 0 ? 'preference' : 'fact', scope: i % 5 === 0 ? 'project:demo' : 'user',
-            source: ['claude-code', 'cursor', 'agents'][i % 3], sources: ['claude-code', 'cursor', 'agents'][i % 3],
+            source: ['claude-code', 'cursor', 'agents', 'gemini'][i % 4], sources: ['claude-code', 'cursor', 'agents', 'gemini'][i % 4],
             status: 'active', confidence: 0.9, seen_at: WHEN, created_at: WHEN, updated_at: WHEN,
             merged_into: null, conflict_with: null,
         });
@@ -48,7 +48,7 @@ async function startStore() {
     for (let s = 0; s < 3; s++) {
         items.push({
             id: id(120 + s), text: 'A suggested note ' + (s + 1), kind: 'fact', scope: 'user',
-            source: 'actor', sources: ['actor'], status: 'suggested', confidence: 0.6,
+            source: ['actor', 'vibe', 'know'][s], sources: [['actor', 'vibe', 'know'][s]], status: 'suggested', confidence: 0.6,
             seen_at: WHEN, created_at: WHEN, updated_at: WHEN, merged_into: null, conflict_with: null,
         });
     }
@@ -134,13 +134,48 @@ await check('every tab renders its own view, and the bar counts the others', asy
     } finally { await h.close(); await store.close(); }
 });
 
+await check('the sources are quiet, the panels repeat no heading, and the menu opens in place', async () => {
+    const store = await startStore();
+    const h = await boot({ env: { CODES_AI_INTERNAL_URL: store.url } });
+    try {
+        const user = h.network.addUser('maria');
+        const notes = await h.get('/memory?tab=notes', { as: user });
+        // The Remove on a source row is a quiet link, not a bordered pill.
+        assert.ok(notes.text.includes('class="c4-quiet-link" href="/memory/remove?source=claude-code"'), 'a quiet Remove link');
+        assert.ok(!notes.text.includes('c4-opill c4-opill-quiet" href="/memory/remove'), 'and no bordered pill');
+        // A phone shows three sources and the rest behind a details the person opens; a desktop shows them all.
+        assert.ok(notes.text.includes('Show all 7 sources'), 'the fold');
+        assert.ok(notes.text.includes('<details class="c4-more">'), 'a plain details, no JavaScript');
+        // The tab already says "Notes (40)": the panel repeats no heading.
+        assert.ok(!notes.text.includes('<h2>Notes</h2>'), 'no repeated heading in the notes panel');
+        const suggested = await h.get('/memory?tab=suggested', { as: user });
+        assert.ok(!suggested.text.includes('<h2>Suggested</h2>'), 'no repeated heading in the suggested panel');
+        const reads = await h.get('/memory?tab=reads', { as: user });
+        assert.ok(!reads.text.includes('<h2>Who read it</h2>'), 'no repeated heading in the reads panel');
+        // The search field keeps a label, but only for a screen reader.
+        assert.ok(notes.text.includes('class="c4-sr-only" for="memory-search"'), 'a visually hidden label');
+        // The menu is part of the note's own row: the panel follows the text inside the same note.
+        const note = notes.text.slice(notes.text.indexOf('class="c4-note"'), notes.text.indexOf('class="c4-note"') + 2000);
+        assert.ok(note.indexOf('c4-note-text') < note.indexOf('class="c4-menu"'), 'the text comes first');
+        assert.ok(note.indexOf('class="c4-menu"') < note.indexOf('c4-menu-body'), 'then the menu');
+        // Delete is the danger style, and it is last.
+        assert.ok(note.includes('c4-opill-danger'), 'the danger button');
+        assert.ok(note.indexOf('c4-opill-danger') > note.indexOf('c4-opill-quiet'), 'and it is last');
+        // The remove page's delete is the danger style too, and "Keep them" is quiet.
+        const remove = await h.get('/memory/remove?source=claude-code', { as: user });
+        assert.ok(remove.text.includes('c4-button c4-button-danger'), 'the danger button');
+        assert.ok(remove.text.includes('c4-opill c4-opill-quiet" href="/memory?tab=notes"'), 'the quiet way back');
+    } finally { await h.close(); await store.close(); }
+});
+
 await check('the page never carries the person token, and no note text reaches the logs', async () => {
     const store = await startStore();
     const h = await boot({ env: { CODES_AI_INTERNAL_URL: store.url } });
     try {
         const user = h.network.addUser('maria');
-        const token = h.network.userToken(user);
-        const res = await h.get('/memory?tab=notes', { as: user });
+        const cookie = h.signIn(user);
+        const token = cookie.split('=')[1];
+        const res = await h.get('/memory?tab=notes', { cookie });
         assert.ok(!res.text.includes(token), 'no token in the page');
         assert.ok(!res.text.includes('Bearer '), 'no bearer in the page');
         assert.ok(!h.logs().includes('Note number 1 about'), 'no note text in the logs');
@@ -153,10 +188,11 @@ await check('every form calls the right store route with the person own token, a
     const h = await boot({ env: { CODES_AI_INTERNAL_URL: store.url } });
     try {
         const user = h.network.addUser('maria');
-        const token = h.network.userToken(user);
+        const cookie = h.signIn(user);
+        const token = cookie.split('=')[1];
         const note = id(1);
 
-        const edit = await h.get('/memory/items/' + note + '/edit', { as: user, method: 'POST', form: { text: 'A new text', kind: 'decision', tab: 'notes' } });
+        const edit = await h.get('/memory/items/' + note + '/edit', { cookie, method: 'POST', form: { text: 'A new text', kind: 'decision', tab: 'notes' } });
         assert.equal(edit.status, 303);
         assert.ok(edit.headers.get('location').includes('/memory?tab=notes'), 'back to the tab');
         const patched = store.last('PATCH', note);
@@ -166,28 +202,28 @@ await check('every form calls the right store route with the person own token, a
         assert.equal(patched.body.text, 'A new text');
         assert.equal(patched.body.kind, 'decision');
 
-        const archive = await h.get('/memory/items/' + note + '/archive', { as: user, method: 'POST', form: { tab: 'notes' } });
+        const archive = await h.get('/memory/items/' + note + '/archive', { cookie, method: 'POST', form: { tab: 'notes' } });
         assert.equal(archive.status, 303);
         assert.equal(store.last('PATCH', note).body.status, 'archived');
 
-        const split = await h.get('/memory/items/' + note + '/split', { as: user, method: 'POST', form: { tab: 'notes' } });
+        const split = await h.get('/memory/items/' + note + '/split', { cookie, method: 'POST', form: { tab: 'notes' } });
         assert.equal(split.status, 303);
         assert.ok(store.last('POST', '/split'), 'the store was asked to split');
 
-        const del = await h.get('/memory/items/' + note + '/delete', { as: user, method: 'POST', form: { tab: 'notes' } });
+        const del = await h.get('/memory/items/' + note + '/delete', { cookie, method: 'POST', form: { tab: 'notes' } });
         assert.equal(del.status, 303);
         assert.equal(store.last('DELETE', note).method, 'DELETE');
 
-        const accept = await h.get('/memory/items/' + id(120) + '/accept', { as: user, method: 'POST', form: { tab: 'suggested' } });
+        const accept = await h.get('/memory/items/' + id(120) + '/accept', { cookie, method: 'POST', form: { tab: 'suggested' } });
         assert.equal(accept.status, 303);
         assert.ok(accept.headers.get('location').includes('tab=suggested'), 'back to the suggestions');
         assert.equal(store.last('PATCH', id(120)).body.status, 'active');
 
-        const decline = await h.get('/memory/items/' + id(121) + '/decline', { as: user, method: 'POST', form: { tab: 'suggested' } });
+        const decline = await h.get('/memory/items/' + id(121) + '/decline', { cookie, method: 'POST', form: { tab: 'suggested' } });
         assert.equal(decline.status, 303);
         assert.equal(store.last('PATCH', id(121)).body.status, 'archived');
 
-        const settle = await h.get('/memory/conflicts/' + id(100) + '/settle', { as: user, method: 'POST', form: { keep: id(101), tab: 'disagree' } });
+        const settle = await h.get('/memory/conflicts/' + id(100) + '/settle', { cookie, method: 'POST', form: { keep: id(101), tab: 'disagree' } });
         assert.equal(settle.status, 303);
         const settled = store.last('POST', '/settle');
         assert.equal(settled.path, '/api/v1/memory/items/' + id(100) + '/settle');
@@ -195,7 +231,7 @@ await check('every form calls the right store route with the person own token, a
         assert.equal(settled.auth, 'Bearer ' + token);
 
         // The flash says what happened, and the page it goes back to is the tab it came from.
-        const back = await h.get('/memory?tab=suggested&ok=' + encodeURIComponent('The note is kept.'), { as: user });
+        const back = await h.get('/memory?tab=suggested&ok=' + encodeURIComponent('The note is kept.'), { cookie });
         assert.ok(back.text.includes('The note is kept.'), 'the flash');
     } finally { await h.close(); await store.close(); }
 });
@@ -205,19 +241,21 @@ await check('the remove page says what goes, and the one form takes it away', as
     const h = await boot({ env: { CODES_AI_INTERNAL_URL: store.url } });
     try {
         const user = h.network.addUser('maria');
-        const page = await h.get('/memory/remove?source=claude-code', { as: user });
+        const cookie = h.signIn(user);
+        const token = cookie.split('=')[1];
+        const page = await h.get('/memory/remove?source=claude-code', { cookie });
         assert.equal(page.status, 200);
         assert.ok(page.text.includes('notes from Claude Code'), 'what goes');
         assert.ok(page.text.includes('Your files on your computer are not touched'), 'what does not');
         assert.equal((page.text.match(/<form[^>]*method="post"/g) || []).length, 1, 'exactly one form');
         assert.ok(page.text.includes('action="/memory/remove"'), 'the form');
 
-        const done = await h.get('/memory/remove', { as: user, method: 'POST', form: { source: 'claude-code', tab: 'notes' } });
+        const done = await h.get('/memory/remove', { cookie, method: 'POST', form: { source: 'claude-code', tab: 'notes' } });
         assert.equal(done.status, 303);
         const call = store.last('DELETE', '/api/v1/memory/items');
         assert.ok(call, 'the store was asked to delete');
         assert.ok(call.query.includes('source=claude-code'), 'by source');
-        assert.equal(call.auth, 'Bearer ' + h.network.userToken(user));
+        assert.equal(call.auth, 'Bearer ' + token);
     } finally { await h.close(); await store.close(); }
 });
 
