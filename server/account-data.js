@@ -9,12 +9,15 @@
  * - the run tokens minted for their attempts (codes_run_tokens, C3: ids and expiry, never the token);
  * - their workspace choices (codes_user_settings, C4b);
  * - the events Codes sent about them (codes_outbox);
- * - telemetry samples that name them.
+ * - telemetry samples that name them: the SDK covers telemetry_samples itself (telemetry.json, then subject NULL).
  *
  * Export carries the tasks whole, and the task-keyed rows as session-lines.json, attempts.json and proof.json.
  * Deletion erases everything task-keyed and then the tasks, in one transaction. Telemetry samples stay as numbers with
  * the person's id removed. The Run jobs themselves are OpenVibe.Run's records (usage billed to the project) and are
  * Run's to answer for.
+ *
+ * test/account-data.test.js asserts uncovered() is empty, so a new table with a person column fails CI until it is
+ * added to TABLES or TASK_KEYED, or exempted there with a reason.
  */
 const { createAccountData, TOPICS } = require('openvibe-sdk/account-data');
 
@@ -33,12 +36,6 @@ const TABLES = [
     // The token itself is never stored; its jti is an internal handle and stays out of the export.
     { table: 'codes_run_tokens', subject: 'subject', file: 'run-tokens.json', order: 'created_at', columns: ['id', 'task_id', 'attempt_id', 'provider', 'expires_at', 'created_at'] },
     { table: 'codes_outbox', subject: 'subject', file: 'events-sent.json', order: 'created_at', columns: ['event_id', 'topic', 'created_at', 'published_at'] },
-    {
-        table: 'telemetry_samples', subject: 'subject', file: 'telemetry.json', order: 'at',
-        columns: ['at', 'operation', 'resource', 'status', 'latency_ms'],
-        // The sample stays (latency and error rates are the service's), without the person in it.
-        erase: { anonymize: {} },
-    },
 ];
 
 // The rows that hang under a person's tasks: exported under the task, erased before it.
