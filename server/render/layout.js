@@ -55,13 +55,15 @@ function renderPage(o) {
     const viewer = o.viewer || { kind: 'anonymous' };
     const signedIn = viewer.kind === 'user';
     const pathNow = o.path || '/';
+    const c4Workspace = pathNow === '/' || /^\/(tasks|agents|machines|usage|settings)(\/|$)/.test(pathNow);
     const loginNext = encodeURIComponent(pathNow);
     const canonical = `${o.config.baseUrl}${pathNow.split('?')[0]}`;
     const nav = {
         service: 'codes',
+        brandName: SITE_NAME,
         apiBase: NETWORK_URL,
         links: NAV.map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: pathNow === l.href || pathNow.startsWith(`${l.href}/`) })),
-        appBar: [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Start', href: '/start', icon: 'fa-play' }, { label: 'Run', href: '/run', icon: 'fa-microchip' }, { label: 'Agents', href: '/harnesses', icon: 'fa-robot' }],   // phones: the bottom tab bar (Shared 4.20)
+        appBar: c4Workspace ? false : [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Start', href: '/start', icon: 'fa-play' }, { label: 'Run', href: '/run', icon: 'fa-microchip' }, { label: 'Agents', href: '/harnesses', icon: 'fa-robot' }],   // phones: the bottom tab bar (Shared 4.20)
         history: { type: 'page', title: o.title || SITE_NAME },
         silentLogin: `${o.config.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
@@ -73,7 +75,7 @@ function renderPage(o) {
     // bar below is only for visitors without JavaScript).
     // Your projects and apps live on the developer platform (OpenVibe.Services).
     if (signedIn) nav.menu = { before: [{ label: 'Your projects', href: 'https://openvibe.services/projects', icon: 'fa-folder' }] };
-    const footer = { service: 'codes', variant: 'auto', path: o.path, mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' };   // full on the front page only (Shared 4.19)
+    const footer = { service: 'codes', variant: signedIn && c4Workspace ? 'compact' : 'auto', path: o.path, mount: '#ov-footer', brandName: SITE_NAME, ...(signedIn && c4Workspace ? { shipped: false } : { updates: '/updates' }) };   // workspace pages use a compact frame
     const account = signedIn
         ? html`Signed in as <strong>${viewer.displayName || viewer.username || 'you'}</strong> · <a href="/auth/logout?next=${loginNext}">Sign out</a>`
         : html`<a href="/auth/login?next=${loginNext}">Sign in with OpenVibe</a>`;
@@ -113,7 +115,7 @@ ${render(scripts)}
 <main id="main" class="page">
 ${render(crumbs)}
 ${render(o.body)}
-${o.path === '/' ? frame.shipped({ service: 'codes', title: `Recently shipped on ${SITE_NAME}` }) : ''}
+${o.path === '/' && !signedIn ? frame.shipped({ service: 'codes', title: `Recently shipped on ${SITE_NAME}` }) : ''}
 </main>
 <script>
 window.__OV_PAGE = ${JSON.stringify({ navbar: nav, footer }).replace(/</g, '\\u003c')};
