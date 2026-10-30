@@ -4,7 +4,9 @@
  *
  * A proof screenshot can show anything on the person's screen, so it never becomes a public file. The bytes go to
  * Media as a private object owned by the person, and the session shows a short-lived signed URL that only that
- * person (through Codes) can use. Without a key there are no attachments, and the session simply shows the text.
+ * person (through Codes) can use. Media takes no app keys (C-71): Codes reaches its own tenant with its Network service
+ * token (audience openvibe.media; media.object.upload and media.object.read, granted on the codes tenant only), the
+ * person named in X-OV-Subject. Without a client secret there are no attachments, and the session simply shows the text.
  *
  *   createMedia({ config, fetchImpl })
  *     configured()                 is Media set up?
@@ -13,22 +15,28 @@
  *     uploadAttachments(list, subject)            → the list with the bytes swapped for object ids
  *     signAttachments(list, subject)              → the list with the object ids swapped for URLs
  */
+const { createServiceTokenClient } = require('openvibe-sdk/auth');
+
 const DEFAULT_TTL = 900;      // a signed URL lives fifteen minutes
 const MAX_BYTES = 12 * 1024 * 1024;
+const SCOPE = 'media.object.upload media.object.read';
 
-function createMedia({ config, fetchImpl = globalThis.fetch, log = null } = {}) {
+function createMedia({ config, fetchImpl = globalThis.fetch, log = null, tokens = null } = {}) {
     const media = (config && config.media) || {};
+    const oauth = (config && config.oauth) || {};
     const url = String(media.url || '').replace(/\/+$/, '');
-    const key = String(media.key || '').trim();
     const app = String(media.app || 'codes').trim() || 'codes';
     const ttl = Math.min(3600, Math.max(60, Number(media.ttl) || DEFAULT_TTL));
     const base = () => `${url}/api/v2/${encodeURIComponent(app)}/objects`;
-    const configured = () => !!(url && key);
+    const auth = tokens || (oauth.clientSecret && config.networkInternalUrl
+        ? createServiceTokenClient({ tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: oauth.clientId, clientSecret: oauth.clientSecret, audience: 'openvibe.media', scope: SCOPE, fetch: fetchImpl })
+        : null);
+    const configured = () => !!(url && auth);
 
     const warn = (msg) => { if (log && typeof log.warn === 'function') log.warn(msg); };
 
     async function call(method, apiUrl, subject, body, raw) {
-        const headers = { authorization: `Bearer ${key}`, accept: 'application/json' };
+        const headers = { ...(await auth.authHeaders()), accept: 'application/json' };
         if (subject) headers['x-ov-subject'] = String(subject);
         if (body != null) headers['content-type'] = 'application/json';
         const ctrl = new AbortController();
@@ -39,6 +47,7 @@ function createMedia({ config, fetchImpl = globalThis.fetch, log = null } = {}) 
         } finally {
             clearTimeout(timer);
         }
+        if (res.status === 401 && auth.invalidate) auth.invalidate();
         const text = await res.text();
         let json = null;
         try { json = text ? JSON.parse(text) : null; } catch { json = null; }

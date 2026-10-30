@@ -118,10 +118,10 @@ function load(env = process.env) {
         fleet: { ttlMs: Math.max(0, int(env.CODES_FLEET_TTL_MS, 60_000)) },
         // OpenVibe.Media: the private objects a task's pictures live in. A proof screenshot can show anything on the
         // person's screen, so it is never public: the bytes go to Media as a private object of the person, and the
-        // session shows a short-lived signed URL that only that person can use. Without a key there are no pictures.
+        // session shows a short-lived signed URL that only that person can use. Media takes no app keys (C-71): Codes
+        // uses its Network service token (server/media.js), so without a client secret there are no pictures.
         media: {
             url: trim(env.CODES_MEDIA_URL || 'https://openvibe.media'),
-            key: String(env.CODES_MEDIA_KEY || '').trim(),
             app: trim(env.CODES_MEDIA_APP || 'codes'),
             ttl: int(env.CODES_MEDIA_URL_TTL, 600),
         },
