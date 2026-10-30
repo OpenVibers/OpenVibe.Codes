@@ -21,8 +21,8 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
   openvibe-codes route [--task edit] [--need harness:resume,…]   which agent a task would go to, and why
   openvibe-codes run [options] "what to do"   run a task ("-" reads it from stdin)
       --task edit|review|long|resume   what kind of task (default edit)
-      --agent <id>                     skip routing: claude-code, codex, opencode, command-code, aider,
-                                       deepseek, openai-compatible
+      --agent <id>                     skip routing: claude-code, claude-other, codex, opencode, command-code,
+                                       aider, minimax-code, deepseek, openai-compatible
       --model <name>                   the first agent's model
       --permission read|edit|full      read: look and answer; edit: change files (default);
                                        full: anything, unattended
@@ -105,7 +105,7 @@ async function main() {
     if (cmd === 'agents') {
         const list = harness.agents();
         if (o.json) { out(JSON.stringify(list, null, 2)); return 0; }
-        for (const a of list) out(`${a.available ? '✔' : '·'} ${a.id.padEnd(18)} ${a.name.padEnd(16)} ${a.available ? dim(a.where || '') : dim(a.reason)}`);
+        for (const a of list) out(`${a.available ? '✔' : '·'} ${a.id.padEnd(18)} ${a.name.padEnd(16)} ${a.available ? dim([a.where, a.version].filter(Boolean).join(' · ')) : dim(a.reason)}`);
         return 0;
     }
     if (cmd === 'logins') {

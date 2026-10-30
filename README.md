@@ -54,6 +54,8 @@ More: [docs/cli.md](docs/cli.md).
 | Agent | Adapter | Needs |
 |---|---|---|
 | Claude Code | `claude -p --output-format stream-json` | `claude` on PATH |
+| Claude Code (another provider) | the same `claude -p --output-format stream-json`, on your own Anthropic-compatible endpoint | `claude` on PATH, `ANTHROPIC_BASE_URL` (the endpoint of your connection) and `ANTHROPIC_AUTH_TOKEN` (its run token); the model id in `ANTHROPIC_MODEL` |
+| MiniMax Code | `mcode exec --input - --output-format stream-json` | `mcode` on PATH (your own MiniMax sign-in on this machine) |
 | Codex | `codex exec --json` | `codex` on PATH |
 | OpenCode | `opencode run --format json` | `opencode` on PATH |
 | Command Code | `cmd --print --output-format json` | `cmd` on PATH |
