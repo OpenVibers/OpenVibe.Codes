@@ -32,5 +32,5 @@ CREATE TABLE IF NOT EXISTS codes_notices (
 
 -- A conductor's chosen machine, pinned on Run by its OpenVibe.Bot device id (`dev_…`, the id codes_machine_fleet stores
 -- as `machine`): every turn of the session runs there, where its folder and its memory are (Run's job `node`, contracts
--- 0.249.0). NULL: not a conductor, or a conductor created without a machine — Run places the job where it fits, as before.
+-- 0.250.0). NULL: not a conductor, or a conductor created without a machine — Run places the job where it fits, as before.
 ALTER TABLE run_tasks ADD COLUMN IF NOT EXISTS pin text COLLATE "C";

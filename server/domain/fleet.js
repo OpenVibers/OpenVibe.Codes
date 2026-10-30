@@ -19,12 +19,13 @@
  * page keeps the last reading and says when it was taken.
  */
 
-const { roomFor, windowFull, FULL_PCT } = require('../../engine/router');
+const { roomFor, windowFull, FULL_PCT, MIN_BALANCE_USD } = require('../../engine/router');
+const { readBalances } = require('../../engine/balance');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const AGENT = /^[a-z0-9-]{1,40}$/;
 const MACHINE = /^[A-Za-z0-9_-]{1,128}$/;
-const STATE = { ok: 0, low: 1, unknown: 2, absent: 3, login: 4, limited: 5 };
+const STATE = { ok: 0, low: 1, unknown: 2, absent: 3, login: 4, limited: 5, empty: 6 };
 const LOW_PCT = 80;
 
 const iso = (value) => {
@@ -65,20 +66,38 @@ function mergeWindows(lists) {
 }
 
 /** The one-line state the page shows. An agent with room on one machine is usable, even when another machine's window is
- *  full: the meter shows the fullest reading, and the row's machines say which one can take a job. */
+ *  full: the meter shows the fullest reading, and the row's machines say which one can take a job. A pay-per-token
+ *  agent whose balance is nearly gone is out of credit, whatever its windows say. */
 function stateOf(row) {
     if (!row) return 'unknown';
     if (!row.installed) return 'absent';
     if (!row.signed_in) return 'login';
+    const usd = row.balance_usd == null || row.balance_usd === '' ? NaN : Number(row.balance_usd);
+    if (Number.isFinite(usd) && usd < MIN_BALANCE_USD) return 'empty';
     const windows = Array.isArray(row.windows) ? row.windows : [];
     if (row.room !== true && windows.length && windows.every((w) => w.pct != null && w.pct >= FULL_PCT)) return 'limited';
     if (windows.some((w) => w.pct != null && w.pct >= LOW_PCT)) return 'low';
     return 'ok';
 }
 
-function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = console, now = () => Date.now() } = {}) {
+function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = console, now = () => Date.now(), balance = null } = {}) {
     const db = store.db;
     const base = String((config.bot && config.bot.internalUrl) || '').replace(/\/+$/, '');
+    // The balances of the pay-per-token accounts (Codes C9c): a plan window says how much of a plan is used, a
+    // balance says what is left of the money. Read the way the portal reads it (engine/balance.js), cached for five
+    // minutes: the answer moves in cents, and a task's routing may ask for it as often as it likes.
+    const BALANCE_TTL_MS = 5 * 60_000;
+    let balanceCache = { at: 0, value: null };
+    const readBalancesNow = balance || (() => readBalances({ fetchImpl }));
+    async function balances() {
+        if (balanceCache.value && now() - balanceCache.at < BALANCE_TTL_MS) return balanceCache.value;
+        let value = {};
+        try { value = await readBalancesNow(); } catch (e) {
+            log.warn(`[Codes] the balances could not be read: ${String((e && e.message) || e).slice(0, 160)}`);
+        }
+        balanceCache = { at: now(), value: value || {} };
+        return balanceCache.value;
+    }
 
     /** One read of Bot's machines for this person. → { status, doc } */
     async function read(token) {
@@ -165,9 +184,12 @@ function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = c
     /**
      * Per harness id, the best state across the person's machines — what the router reads. An agent is usable when at
      * least one machine has it installed and signed in with room; its windows are the fullest reading across machines.
+     * A pay-per-token agent also carries its balance, when one was read: an agent whose money is nearly gone may not
+     * take a job (the router's rule), so the reading belongs with the rest of its state.
      */
     async function byHarness(subject) {
         const { machines } = await latest(subject);
+        const money = await balances();
         const out = {};
         for (const machine of machines) {
             for (const a of machine.agents) {
@@ -186,6 +208,9 @@ function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = c
         for (const [agent, row] of Object.entries(out)) {
             row.windows = mergeWindows(row._lists);
             row.machine = row._best || (row.machines[0] && row.machines[0].machine) || null;
+            const account = money[agent];
+            row.balance_usd = account ? account.usd : null;
+            row.balance_at = account ? account.at : null;
             row.room = row._room || roomFor({ [agent]: row }, agent, now());
             delete row._lists; delete row._best;
         }
@@ -199,7 +224,10 @@ function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = c
         for (const [harness, row] of Object.entries(by)) {
             const runner = harnessOf ? harnessOf(harness) : harness;
             if (!runner) continue;
-            out[runner] = { signed_in: row.signed_in, installed: row.installed, windows: row.windows, machine: row.machine, room: row.room };
+            out[runner] = {
+                signed_in: row.signed_in, installed: row.installed, windows: row.windows,
+                machine: row.machine, room: row.room, balance_usd: row.balance_usd ?? null,
+            };
         }
         return out;
     }
@@ -214,6 +242,7 @@ function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = c
             return {
                 agent, name: (offer && offer.name) || agent, state, installed: row.installed, signed_in: row.signed_in,
                 windows: row.windows, machines: row.machines, machine: row.machine, used,
+                balance_usd: row.balance_usd ?? null, balance_at: row.balance_at ?? null,
             };
         });
         return rows.sort((a, b) => (STATE[a.state] ?? 9) - (STATE[b.state] ?? 9) || a.used - b.used || a.name.localeCompare(b.name));
@@ -232,7 +261,7 @@ function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = c
         return hit ? { device: String(hit.id), node_id: str(hit.node_id, 128), name: str(hit.name, 120), online: hit.online !== false } : null;
     }
 
-    return { refresh, latest, byHarness, forRouter, agents, deviceFor, stateOf, windowOf, mergeWindows, enabled: !!base };
+    return { refresh, latest, byHarness, forRouter, agents, deviceFor, balances, stateOf, windowOf, mergeWindows, enabled: !!base };
 }
 
-module.exports = { createFleet, stateOf, windowOf, mergeWindows, FULL_PCT, LOW_PCT, STATE };
+module.exports = { createFleet, stateOf, windowOf, mergeWindows, FULL_PCT, LOW_PCT, MIN_BALANCE_USD, STATE };

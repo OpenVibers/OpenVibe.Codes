@@ -80,6 +80,8 @@ async function fakeGitHub() {
     const db = t.ctx.store.db;
     const ada = t.network.addUser('ada');
     t.network.addNode(ada.subject, { principal: NODE, node_id: 'node_ada', name: 'ada-laptop', status: 'active', last_seen_at: new Date().toISOString() });
+    // The machine, as OpenVibe.Bot answers it: the conductor is pinned to its device id, so Run never moves it.
+    t.bot.addMachine({ id: 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N2', node_id: NODE, name: 'ada-laptop', online: true });
     const created = await t.get('/api/v1/conductor', { as: ada, json: { folder: '/home/ada/openvibe', machine: NODE } });
     assert.strictEqual(created.status, 201, created.text);
     const conductorId = created.json().task.id;
@@ -177,9 +179,11 @@ async function fakeGitHub() {
                 assert.strictEqual(typeof a.installed, 'boolean');
                 assert.ok(Array.isArray(a.windows));
             }
-            // Codes answers with every machine's stored report; Bot is not running here, and the answer says so.
+            // Codes answers with every machine's stored report: this machine is in Bot's list, but its Node has not
+            // reported a fleet yet, so there is nothing stored and nothing is invented.
             assert.ok(Array.isArray(out.machines), 'the stored fleet of every machine');
-            assert.ok(out.problem && /bot|answer|refused|fetch/i.test(JSON.stringify(out.problem)), JSON.stringify(out.problem));
+            assert.strictEqual(out.problem, undefined, 'Bot answered, so there is no problem beside the fleet');
+            assert.ok(out.agents.length >= 5, 'and the CLIs of this machine are read directly');
         });
 
         await check('codes_ship_status: a pull request\'s CI, merge and deploy state, from GitHub', async () => {

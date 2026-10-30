@@ -42,7 +42,7 @@ const whenUtc = (value) => {
 };
 const FLEET_STATE = {
     ok: ['Has room', 'ok'], low: ['Nearly full', 'skip'], login: ['Sign in', 'bad'], limited: ['Full', 'bad'],
-    absent: ['Not installed', 'skip'], unknown: ['Not reported', 'skip'],
+    empty: ['Out of credit', 'bad'], absent: ['Not installed', 'skip'], unknown: ['Not reported', 'skip'],
 };
 const repoDetails = (repo) => {
     try {
@@ -512,7 +512,7 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
      * machines' heartbeats through Bot (`fleet.refresh` writes it, `fleet.agents` reads it), so the page keeps the last
      * reading when Bot or a machine does not answer.
      */
-    const fleetCard = async (req) => {
+    const fleetCard = async (req, res = null) => {
         let problem = null;
         let refreshed = null;
         if (fleet) {
@@ -538,7 +538,9 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
             const windows = row.windows && row.windows.length
                 ? row.windows.map(meter).join('')
                 : '<div class="c4-meter c4-meter-quiet"><span class="c4-meter-name">No limit window</span><span class="c4-meter-note">the agent did not report one</span></div>';
-            return `<li class="c4-row c4-fleet-row"><span class="c4-row-dot${row.state === 'ok' ? ' c4-dot-ok' : row.state === 'login' || row.state === 'limited' ? ' c4-dot-bad' : ''}" aria-hidden="true"></span><span class="c4-row-label">${esc(row.name)}</span><span class="c4-row-note">${esc(where || 'on your machine')}${row.signed_in ? '' : ' · not signed in'}</span>${pill(label, kind)}<div class="c4-fleet-windows">${windows}</div></li>`;
+            // A pay-per-token agent says what is left of the money, not of a plan window.
+            const credit = row.balance_usd == null ? '' : ` · $${Number(row.balance_usd).toFixed(2)} left`;
+            return `<li class="c4-row c4-fleet-row"><span class="c4-row-dot${row.state === 'ok' ? ' c4-dot-ok' : row.state === 'login' || row.state === 'limited' || row.state === 'empty' ? ' c4-dot-bad' : ''}" aria-hidden="true"></span><span class="c4-row-label">${esc(row.name)}</span><span class="c4-row-note">${esc(where || 'on your machine')}${row.signed_in ? '' : ' · not signed in'}${esc(credit)}</span>${pill(label, kind)}<div class="c4-fleet-windows">${windows}</div></li>`;
         }).join('');
         const at = latest && latest.at ? `Last reported ${age(latest.at)}.` : '';
         return `<section class="c4-card" id="fleet"><div class="c4-card-head"><h2>Your fleet</h2><span class="c4-muted">${esc(at)}</span></div>
@@ -575,7 +577,7 @@ ${rows || plans ? `<ul class="c4-rows">${rows}${plans}</ul>` : `<div class="c4-e
     };
 
     r.get('/agents', async (req, res) => {
-        const content = `${header('Agents', 'The agents your tasks can run, what they have left, and the keys behind them.')}${viewer(req) ? `${flash(req)}${await fleetCard(req)}${await connectionsCard(req)}` : signIn(req)}`;
+        const content = `${header('Agents', 'The agents your tasks can run, what they have left, and the keys behind them.')}${viewer(req) ? `${flash(req)}${await fleetCard(req, res)}${await connectionsCard(req)}` : signIn(req)}`;
         page(req, res, 'Agents', wrap(content));
     });
     r.post('/agents/connections', form, async (req, res) => {

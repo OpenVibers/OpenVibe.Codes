@@ -172,7 +172,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     // The fleet the person's machines reported (Codes C9c), cached for a minute like the connections: one task's
     // routing and its follow-ups read the same reading, and a page view does not ask Bot for every task.
     const fleetCache = new Map();
-    const FLEET_TTL_MS = 60_000;
+    const FLEET_TTL_MS = Number.isFinite(Number(config.fleet && config.fleet.ttlMs)) ? Math.max(0, Number(config.fleet.ttlMs)) : 60_000;
     let providerMap = null;
     let harnessInfoCache = null;
     async function fleetFor(subject) {
@@ -481,10 +481,13 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         let agent = args.agent || null;
         let model = args.model || null;
         let why = agent ? `the first try, with ${attemptStore.nameOf(agent)}` : 'the first try, with the agent that fits the task';
+        // Nothing may take it: the task says why, and needs a person. It never starts on an agent without room.
+        let refusal = null;
         if (!agent) {
             const f = await fleetFor(subject);
             const picked = attemptStore.nextAgent(args.prompt, { ...attemptStore.routing(f), fleet: f }, null);
             if (picked) { agent = picked.agent; model = picked.model || null; why = picked.why || why; }
+            else refusal = attemptStore.whyNoAgent(f);
         }
         const runArgs = { ...args, agent, model };
         const actorRefValue = actorRef && typeof actorRef === 'object' && !Array.isArray(actorRef) ? JSON.stringify(actorRef) : null;
@@ -505,6 +508,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         });
         let job;
         try {
+            if (refusal) throw Object.assign(new Error(refusal), { code: 'codes.no_agent' });
             // The job's harness runs with a short-lived run token that names the person (Codes C3): the environment
             // travels with the job's input and the machine's worker hands it to the harness.
             const funding = await attemptEnv({ subject, taskId: id, attemptId: first.attempt.id, agent: agent || null, budget });
@@ -512,7 +516,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             job = await run.submit({ subject, project, args: funding.env ? { ...runArgs, env: funding.env } : runArgs, key: id });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
-            await attemptStore.end(first.attempt.id, { state: 'failed', reason: 'error', finished_at: store.iso() });
+            await attemptStore.end(first.attempt.id, { state: 'failed', reason: refusal ? 'refused' : 'error', finished_at: store.iso() });
             const failed = await store.tx(async () => {
                 const row = await db.one(`UPDATE run_tasks SET state = 'failed', error = $2, outcome = 'unfinished', outcome_note = $3, finished_at = $4::timestamptz, updated_at = $5
                     WHERE id = $1 RETURNING *`, [id, why, `the task could not start: ${why}`, store.iso(), store.now()]);

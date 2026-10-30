@@ -11,6 +11,15 @@ const { boot, check, done } = require('./helpers/boot');
     const t = await boot();
     const ada = t.network.addUser('ada');
     const RESET = '2026-11-04T00:00:00Z';
+    // The machine, as OpenVibe.Bot answers it: the page reads Bot and keeps the latest reading per machine.
+    t.bot.addMachine({
+        id: 'dev_ada_laptop', node_id: 'nod_ada', name: 'ada-laptop', online: true, fleet_at: new Date().toISOString(),
+        fleet: [
+            { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', used: 96, limit: 100, pct: 96, resets_at: RESET }] },
+            { agent: 'minimax-code', installed: true, signed_in: true, windows: [] },
+            { agent: 'opencode', installed: true, signed_in: false, windows: [] },
+        ],
+    });
     await t.ctx.store.db.exec(
         `INSERT INTO codes_machine_fleet (subject, machine, node_id, name, agent, installed, signed_in, windows, online, reported_at, updated_at)
          VALUES ($1,'dev_ada_laptop','nod_ada','ada-laptop','codex',true,true,$2::jsonb,true,now(),now()),
@@ -43,6 +52,7 @@ const { boot, check, done } = require('./helpers/boot');
 
         await check('with nothing reported the page says so and links to pairing a machine', async () => {
             const bo = t.network.addUser('bo');
+            t.bot.state.machines.length = 0;   // no machine of bo's is connected
             const r = await t.get('/agents', { as: bo });
             assert.strictEqual(r.status, 200);
             assert.ok(r.text.includes('No machine has reported its agents yet'));

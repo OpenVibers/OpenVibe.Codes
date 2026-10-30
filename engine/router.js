@@ -66,11 +66,36 @@ function windowFull(w, now = Date.now()) {
 }
 
 /**
+ * The lowest balance a pay-per-token agent may take a job on: $1. DeepSeek reads its balance the way the portal reads
+ * it (engine/balance.js), and a balance under a dollar would not pay for the job: the agent would stop mid-way and the
+ * task would need a person.
+ */
+const MIN_BALANCE_USD = 1;
+
+/**
+ * Whether a runner's balance is too low to take a job. A balance nobody read is unknown, not empty: the agent stays
+ * in the ladder (the ladder worked for years without one).
+ *
+ * @param {object} [fleet] the fleet per runner: { [runner]: { signed_in, windows, balance_usd } }
+ * @param {string} runner the runner's id
+ * @param {number} [min] the lowest balance that may take a job
+ * @returns {boolean} is the balance spent?
+ */
+function balanceLow(fleet, runner, min = MIN_BALANCE_USD) {
+    const f = fleet && fleet[runner];
+    if (!f) return false;
+    if (f.balance_usd == null || f.balance_usd === '') return false;   // unknown, not empty
+    const usd = Number(f.balance_usd);
+    if (!Number.isFinite(usd)) return false;
+    return usd < min;
+}
+
+/**
  * Whether a runner has room, from the fleet the person's machines reported. An agent the fleet does not name is
  * unknown, not full: the ladder keeps working before any machine has reported (and for the API-key agents, which have no
  * plan window at all).
  *
- * @param {object} [fleet] the fleet per runner: { [runner]: { signed_in, windows } }
+ * @param {object} [fleet] the fleet per runner: { [runner]: { signed_in, windows, balance_usd } }
  * @param {string} runner the runner's id
  * @param {number} [now] the clock
  * @returns {boolean} may this runner take a job now
@@ -79,6 +104,7 @@ function roomFor(fleet, runner, now = Date.now()) {
     const f = fleet && fleet[runner];
     if (!f) return true;
     if (f.signed_in === false) return false;
+    if (balanceLow(fleet, runner)) return false;
     const windows = Array.isArray(f.windows) ? f.windows : [];
     return !windows.some((w) => windowFull(w, now));
 }
@@ -234,4 +260,4 @@ function pick(prompt, { cfg, health, counts, models, runs, JOBS, name, ladder, c
     return null;
 }
 
-module.exports = { LADDER, TIERS, FULL_PCT, classify, classifyText, pick, track, briefFor, forcedTier, fitEffort, stepUp, EFFORTS, connected, windowFull, roomFor };
+module.exports = { LADDER, TIERS, FULL_PCT, MIN_BALANCE_USD, classify, classifyText, pick, track, briefFor, forcedTier, fitEffort, stepUp, EFFORTS, connected, windowFull, balanceLow, roomFor };

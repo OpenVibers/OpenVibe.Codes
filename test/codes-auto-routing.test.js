@@ -24,20 +24,38 @@ const RESET_MONTH = '2026-11-02T00:00:00Z';
     };
     const pushed = [];
     const notify = { async push(body) { pushed.push(body); return { sent: true }; } };
-    const t = await boot({ run, notify });
+    // DeepSeek's balance is read the way the portal reads it (engine/balance.js): $0.02 today, too little for a job.
+    const t = await boot({
+        run, notify,
+        balance: async () => ({ deepseek: { usd: 0.02, at: new Date().toISOString() } }),
+        // The fleet is read fresh every time here, so a changed reading is the one the router sees.
+        env: { CODES_FLEET_TTL_MS: '0' },
+    });
     const db = t.ctx.store.db;
     const ada = t.network.addUser('ada');
     t.network.addNode(ada.subject, { principal: NODE, node_id: 'node_ada', name: 'ada-laptop', status: 'active', last_seen_at: new Date().toISOString() });
 
     /** The fleet Ada's machines reported with their last heartbeats. */
     const window = (name, pct, resetsAt) => JSON.stringify([{ name, pct, resets_at: resetsAt }]);
+    // The machine, as OpenVibe.Bot answers it: the device id Run pins a job to, the Network id the machine is known
+    // by, and the fleet its Node last reported with its heartbeat.
+    t.bot.addMachine({
+        id: 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1', node_id: NODE, name: 'ada-laptop', online: true, fleet_at: new Date().toISOString(),
+        fleet: [
+            { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', pct: 100, resets_at: RESET_WEEK }] },
+            { agent: 'opencode', installed: true, signed_in: true, windows: [{ name: 'month', pct: 100, resets_at: RESET_MONTH }] },
+            { agent: 'command-code', installed: true, signed_in: true, windows: [{ name: 'week', pct: 96, resets_at: RESET_WEEK }] },
+            { agent: 'minimax-code', installed: true, signed_in: true, windows: [] },
+            { agent: 'deepseek', installed: true, signed_in: true, windows: [] },
+        ],
+    });
     await db.exec(
         `INSERT INTO codes_machine_fleet (subject, machine, node_id, name, agent, installed, signed_in, windows, online, reported_at, updated_at)
-         VALUES ($1,'dev_ada_laptop','nod_ada','ada-laptop','codex',true,true,$2::jsonb,true,now(),now()),
-                ($1,'dev_ada_laptop','nod_ada','ada-laptop','opencode',true,true,$3::jsonb,true,now(),now()),
-                ($1,'dev_ada_laptop','nod_ada','ada-laptop','command-code',true,true,$4::jsonb,true,now(),now()),
-                ($1,'dev_ada_laptop','nod_ada','ada-laptop','minimax-code',true,true,'[]'::jsonb,true,now(),now()),
-                ($1,'dev_ada_laptop','nod_ada','ada-laptop','deepseek',true,true,'[]'::jsonb,true,now(),now())`,
+         VALUES ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','nod_ada','ada-laptop','codex',true,true,$2::jsonb,true,now(),now()),
+                ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','nod_ada','ada-laptop','opencode',true,true,$3::jsonb,true,now(),now()),
+                ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','nod_ada','ada-laptop','command-code',true,true,$4::jsonb,true,now(),now()),
+                ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','nod_ada','ada-laptop','minimax-code',true,true,'[]'::jsonb,true,now(),now()),
+                ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','nod_ada','ada-laptop','deepseek',true,true,'[]'::jsonb,true,now(),now())`,
         [ada.subject, window('week', 100, RESET_WEEK), window('month', 100, RESET_MONTH), window('week', 96, RESET_WEEK)],
     );
 
@@ -102,7 +120,37 @@ const RESET_MONTH = '2026-11-02T00:00:00Z';
             assert.strictEqual(pushed.filter((p) => p.url.endsWith(`/tasks/${task.id}`)).length, 0);
         });
 
+        await check('a task that no agent may take is refused, and needs a person', async () => {
+            // Every flat plan is spent and DeepSeek has $0.02: nothing may take it, and the task says why.
+            t.bot.state.machines[0].fleet = [
+                { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', pct: 100, resets_at: RESET_WEEK }] },
+                { agent: 'opencode', installed: true, signed_in: true, windows: [{ name: 'month', pct: 100, resets_at: RESET_MONTH }] },
+                { agent: 'command-code', installed: true, signed_in: true, windows: [{ name: 'week', pct: 96, resets_at: RESET_WEEK }] },
+                { agent: 'minimax-code', installed: true, signed_in: true, windows: [{ name: 'week', pct: 100, resets_at: RESET_WEEK }] },
+                { agent: 'deepseek', installed: true, signed_in: true, windows: [] },
+            ];
+            await t.get('/api/v1/fleet', { as: ada });   // the reading Bot now answers is the one Codes keeps
+            const before = submits.length;
+            const r = await t.get('/api/v1/me/tasks', { as: ada, json: { repo: 'https://github.com/octocat/Hello-World', prompt: 'Find the root cause of the race condition in the payment webhook.', idempotency_key: `c9c_${Math.random().toString(36).slice(2, 10)}` } });
+            assert.strictEqual(r.status, 201, r.text);
+            assert.strictEqual(submits.length, before, 'no job was started');
+            const row = await db.one('SELECT state, error, outcome FROM run_tasks WHERE id = $1', [r.json().task.id]);
+            assert.strictEqual(row.state, 'failed');
+            assert.match(row.error, /no agent has room/, row.error);
+            assert.match(row.error, /DeepSeek has \$0\.02 left/, row.error);
+            const told = pushed.filter((p) => p.title === 'Your task needs you' && p.url.endsWith(`/tasks/${r.json().task.id}`));
+            assert.strictEqual(told.length, 1, 'the person is told, once');
+        });
+
         await check('/api/v1/fleet answers the stored fleet for the person', async () => {
+            // Ada's machine reports again: MiniMax has room, DeepSeek's balance is what it is.
+            t.bot.state.machines[0].fleet = [
+                { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', pct: 100, resets_at: RESET_WEEK }] },
+                { agent: 'opencode', installed: true, signed_in: true, windows: [{ name: 'month', pct: 100, resets_at: RESET_MONTH }] },
+                { agent: 'command-code', installed: true, signed_in: true, windows: [{ name: 'week', pct: 96, resets_at: RESET_WEEK }] },
+                { agent: 'minimax-code', installed: true, signed_in: true, windows: [] },
+                { agent: 'deepseek', installed: true, signed_in: true, windows: [] },
+            ];
             const r = await t.get('/api/v1/fleet', { as: ada });
             assert.strictEqual(r.status, 200, r.text);
             const body = r.json();
@@ -110,8 +158,11 @@ const RESET_MONTH = '2026-11-02T00:00:00Z';
             assert.ok(Array.isArray(body.agents));
             const mm = body.agents.find((a) => a.agent === 'minimax-code');
             assert.strictEqual(mm.state, 'ok');
-            assert.ok(mm.machines.some((m) => m.machine === 'dev_ada_laptop'));
-            assert.ok(body.problem, 'Bot is not running here, and the answer says so beside the stored fleet');
+            const ds = body.agents.find((a) => a.agent === 'deepseek');
+            assert.strictEqual(ds.balance_usd, 0.02, 'the balance the portal reads, in the agent\'s own row');
+            assert.strictEqual(ds.state, 'empty', 'and an agent out of credit says so');
+            assert.ok(mm.machines.some((m) => m.machine === 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1'));
+            assert.strictEqual(body.problem, undefined, 'Bot answered, so there is no problem beside the fleet');
         });
     } catch (e) {
         console.error(e);

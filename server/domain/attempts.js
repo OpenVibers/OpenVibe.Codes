@@ -245,6 +245,31 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
     }
 
     /**
+     * Why no agent could take the task, in one line. The router's silence is not something a person can act on, so
+     * the task says what each agent is short of: a window that is spent, a balance that is gone, a sign-in that is
+     * missing. Only what was read is said; an agent with room is not mentioned.
+     *
+     * @param {object} [fleet] the fleet per runner: { [runner]: { signed_in, windows, balance_usd } }
+     * @returns {string} the reason, in plain words
+     */
+    function whyNoAgent(fleet) {
+        const rows = Object.entries(fleet || {});
+        if (!rows.length) return 'no agent on your machines could take it right now';
+        const parts = [];
+        for (const [runner, row] of rows) {
+            const harness = HARNESS_OF[runner];
+            const name = (harness && catalog.get(harness) && catalog.get(harness).name) || harness || runner;
+            if (row.signed_in === false) { parts.push(`${name} is not signed in`); continue; }
+            const usd = row.balance_usd == null || row.balance_usd === '' ? NaN : Number(row.balance_usd);
+            if (Number.isFinite(usd) && usd < router.MIN_BALANCE_USD) { parts.push(`${name} has $${usd.toFixed(2)} left`); continue; }
+            const spent = (row.windows || []).filter((w) => router.windowFull(w)).map((w) => w.name).filter(Boolean);
+            if (spent.length) { parts.push(`${name}'s ${spent.join(' and ')} ${spent.length > 1 ? 'are' : 'is'} spent`); continue; }
+            parts.push(`${name} is busy`);
+        }
+        return `no agent has room right now: ${parts.join('; ')}`;
+    }
+
+    /**
      * The next agent for a task, from the engine's router (engine/router.js): the tier of the brief decides the
      * ladder, and the first harness of it that may take the task takes it. The agent that just stopped is skipped.
      */
@@ -451,7 +476,7 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
 
     return {
         STATES, REASONS, KINDS, REASON_TEXT, RUNNER_OF, HARNESS_OF,
-        list, get, byJob, create, bind, end, spend, decide, present, routing, nextAgent, nameOf, wordsOf, budgetNote,
+        list, get, byJob, create, bind, end, spend, decide, present, routing, nextAgent, whyNoAgent, nameOf, wordsOf, budgetNote,
     };
 }
 

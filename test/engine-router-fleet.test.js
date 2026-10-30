@@ -68,9 +68,38 @@ const BASIC = 'Rename the variable in the one file and reformat it.';
             assert.equal(router.pick(BASIC, context(ccRoom)).runner, 'cc');
         });
 
+        await check('a flat-price plan with room is preferred over a pay-per-token agent', () => {
+            // Both have room: the plan comes first, because the pay-per-token one costs money for every token.
+            const both = { ...TODAY, mm: { signed_in: true, windows: [] }, dsh: { signed_in: true, windows: [] } };
+            assert.equal(router.pick(BASIC, context(both)).runner, 'mm', 'the plan, not the meter');
+            assert.equal(router.pick(HARD, context(both)).runner, 'mm');
+            // And when the plan is spent, the pay-per-token one is what is left.
+            const spent = { ...both, mm: { signed_in: true, windows: [{ name: 'week', pct: 100, resets_at: RESET_WEEK }] } };
+            assert.equal(router.pick(BASIC, context(spent)).runner, 'dsh', 'DeepSeek is last, but it is the one with room');
+        });
+
         await check('an agent the person is not signed in to is skipped for one that is', () => {
             const out = { ...TODAY, cx: { signed_in: false, windows: [] }, mm: { signed_in: false, windows: [] } };
             assert.equal(router.pick(HARD, context(out)).runner, 'dsh', 'Codex and MiniMax are signed out, so DeepSeek');
+        });
+
+        await check('an agent whose balance is nearly gone may not take a job', () => {
+            // DeepSeek reads its balance the way the portal reads it (engine/balance.js): $0.02 today.
+            assert.equal(router.MIN_BALANCE_USD, 1, 'a balance under a dollar would not pay for the job');
+            const broke = { ...TODAY, dsh: { ...TODAY.dsh, balance_usd: 0.02 } };
+            assert.equal(router.balanceLow(broke, 'dsh'), true, '$0.02 is too little');
+            assert.equal(router.roomFor(broke, 'dsh', NOW), false, 'so DeepSeek has no room');
+            assert.equal(router.pick(HARD, context(broke)).runner, 'mm', 'and the hard task goes to MiniMax');
+            const signedOut = { ...broke, cx: { signed_in: false, windows: [] }, mm: { signed_in: false, windows: [] } };
+            assert.equal(router.pick(HARD, context(signedOut)), null, 'nothing may take it: no agent is left, not a guess');
+
+            // A balance nobody read is unknown, not empty: the ladder keeps working.
+            assert.equal(router.balanceLow(TODAY, 'dsh'), false);
+            assert.equal(router.roomFor(TODAY, 'dsh', NOW), true);
+            assert.equal(router.pick(HARD, context(TODAY)).runner, 'mm');
+            // And a balance with money in it is no reason to skip anything.
+            const paid = { ...TODAY, dsh: { ...TODAY.dsh, balance_usd: 12.5 } };
+            assert.equal(router.roomFor(paid, 'dsh', NOW), true);
         });
     } catch (e) {
         console.error(e);

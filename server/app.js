@@ -88,7 +88,7 @@ async function createApp(opts = {}) {
     // The task's attempts (stage C2): every Run job is one attempt, and the engine decides what happens next.
     const attempts = createAttempts({ store, config, log, harnesses });
     // The fleet (C9c): each machine's agents and limit windows, reported with its heartbeat and read from Bot.
-    const fleet = createFleet({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log, now: store.now });
+    const fleet = createFleet({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log, now: store.now, balance: opts.balance || null });
     // A person's choices (their notification switches) and the notices a task sends once (C9c).
     const userSettings = createUserSettings({ store });
     const notify = opts.notify || createNotify({ config, fetchImpl: fetchImpl || globalThis.fetch, log });

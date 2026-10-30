@@ -51,7 +51,7 @@ function createRunClient({ config, fetchImpl = globalThis.fetch, now = () => Dat
     /**
      * A coding job for `subject` in `project`, only on that person's own machine. A conductor's turn asks for more: its
      * wall time (a session that works through a plan), its TTL and its own memory, all bounded here; and when its
-     * machine is known (`node`, the OpenVibe.Bot device id `dev_…`), the job is pinned to it (contracts 0.249.0): Run
+     * machine is known (`node`, the OpenVibe.Bot device id `dev_…`), the job is pinned to it (contracts 0.250.0): Run
      * runs it nowhere else, and refuses it `409 run.job.node_offline` when the machine is away.
      */
     async function submit({ subject, project, args, key, limits = null, ttlMs = null, node = null }) {
