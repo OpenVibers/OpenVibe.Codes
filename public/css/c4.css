@@ -194,6 +194,30 @@
 @media(max-width:760px){
  body.ov-workspace{padding-bottom:var(--ovnav-appbar-h,calc(58px + env(safe-area-inset-bottom,0px)))}
 }
+
+
+/* C9c: the fleet. A desktop row reads across: the agent and its machine, its meters, its state. A phone row is the
+   agent and its state, then the meters under it. */
+.c4-fleet .c4-fleet-row{grid-template-columns:12px minmax(0,1fr) auto;padding:12px 0;align-items:center;column-gap:10px}
+.c4-fleet-row .c4-row-dot{grid-row:1/3;align-self:center}
+.c4-fleet-row .c4-row-label{grid-column:2;grid-row:1}
+.c4-fleet-row .c4-row-note{grid-column:2;grid-row:2}
+.c4-fleet-row > .c4-pill{grid-column:3;grid-row:1/3;align-self:center}
+.c4-fleet-windows{grid-column:2/-1;grid-row:3;display:grid;gap:6px;margin-top:6px;min-width:0}
+.c4-meter{display:grid;grid-template-columns:46px minmax(0,1fr);align-items:center;gap:3px 10px;font-size:12px;min-width:0}
+.c4-meter-name{color:var(--c4-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c4-meter-track{display:block;height:6px;border-radius:99px;background:var(--c4-quiet-bg);overflow:hidden}
+.c4-meter-fill{display:block;height:100%;border-radius:99px;background:var(--c4-dot-ok)}
+.c4-meter-fill.is-full{background:var(--c4-dot-bad)}
+.c4-meter-note{grid-column:2;color:var(--c4-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.c4-meter-note b{color:var(--c4-ink);font-weight:650}
+@media(min-width:761px){
+ .c4-fleet .c4-fleet-row{grid-template-columns:12px minmax(180px,260px) minmax(0,1fr) 128px;column-gap:18px}
+ .c4-fleet-windows{grid-column:3;grid-row:1/3;margin:0}
+ .c4-meter{grid-template-columns:52px minmax(120px,1fr) minmax(0,auto)}
+ .c4-meter-note{grid-column:3}
+ .c4-fleet-row > .c4-pill{grid-column:4;justify-self:end}
+}
 /* The narrowest phones: one control per row, and a heading over its state, so no label is cut or broken
    (a 320 px screen has ~290 px of text; "Opus 5.5 (default)" and "Conductor" both fit whole). */
 @media(max-width:380px){

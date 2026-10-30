@@ -111,6 +111,11 @@ function load(env = process.env) {
             retentionDays: Math.max(1, int(env.CODES_SESSION_RETENTION_DAYS, 90)),
             retentionIntervalMs: Math.max(60_000, int(env.CODES_SESSION_RETENTION_INTERVAL_MS, 86_400_000)),
         },
+        // OpenVibe.Bot (Codes C9c): a person's machines, the fleet each one reports with its heartbeat, and the device
+        // id Run places a job on. Codes reads it with the person's own token, on the loopback.
+        bot: { internalUrl: trim(env.CODES_BOT_INTERNAL_URL || 'http://127.0.0.1:4630') },
+        // How long a machine's fleet reading is kept before Bot is asked again (the fleet's own cache).
+        fleet: { ttlMs: Math.max(0, int(env.CODES_FLEET_TTL_MS, 60_000)) },
         // OpenVibe.Media: the private objects a task's pictures live in. A proof screenshot can show anything on the
         // person's screen, so it is never public: the bytes go to Media as a private object of the person, and the
         // session shows a short-lived signed URL that only that person can use. Media takes no app keys (C-71): Codes
@@ -147,7 +152,7 @@ function load(env = process.env) {
         // Anthropic one: the conductor is the only Anthropic session).
         conductor: {
             wallMs: Math.max(60_000, int(env.CODES_CONDUCTOR_TURN_MS, 4 * 60 * 60_000)),
-            subagentAgent: String(env.CODES_CONDUCTOR_SUBAGENT_AGENT || 'codex').trim() || 'codex',
+            subagentAgent: String(env.CODES_CONDUCTOR_SUBAGENT_AGENT || 'auto').trim() || 'auto',
         },
         // The event stream of a task (GET /api/v1/tasks/:id/events): the heartbeat that keeps a connection alive.
         sse: { heartbeatMs: Math.max(1000, int(env.CODES_SSE_HEARTBEAT_MS, 15_000)) },

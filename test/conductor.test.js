@@ -13,6 +13,7 @@ const { boot, check, done } = require('./helpers/boot');
 
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
+const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
 
 (async () => {
     const calls = [];
@@ -36,6 +37,10 @@ const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
     const ada = t.network.addUser('ada');
     const bo = t.network.addUser('bo');
     t.network.addNode(ada.subject, { principal: NODE, node_id: 'node_ada', name: 'ada-laptop', status: 'active', last_seen_at: new Date().toISOString() });
+    // The same machine on OpenVibe.Bot (Codes C9c): the device id is what Run places a job on, the node id what
+    // Network knows it by. A conductor's turns are pinned to it.
+    const mineBot = () => t.bot.addMachine({ id: DEVICE, node_id: NODE, name: 'ada-laptop', online: true });
+    mineBot();
 
     const submits = () => calls.filter((c) => c[0] === 'submit');
     const get = (path, as = ada) => t.get(path, { as });
@@ -91,6 +96,8 @@ const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
             assert.strictEqual(submit.args.mcp, true);
             assert.strictEqual(submit.args.resume, undefined, 'the first turn starts the session');
             assert.ok(submit.limits && submit.limits.wall_ms >= 60_000, 'a turn gets a wall time');
+            assert.strictEqual(submit.node, DEVICE, 'the turn is pinned to the chosen machine, by its OpenVibe.Bot device id');
+            assert.strictEqual(row.pin, DEVICE, 'the pin is kept on the conductor');
         });
 
         await check('a message waits while a turn runs, then is the next turn of the same session', async () => {
@@ -111,6 +118,7 @@ const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
             const submit = submits().at(-1)[1];
             assert.strictEqual(submit.args.resume, 'sess_abc', 'the next turn resumes the conversation');
             assert.strictEqual(submit.args.prompt, 'now do the second piece');
+            assert.strictEqual(submit.node, DEVICE, 'every turn of the session is pinned to the same machine');
         });
 
         await check('a turn that ends with nothing queued leaves the conductor idle, not finished', async () => {
@@ -123,6 +131,32 @@ const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
             assert.strictEqual(view.idle, true);
             assert.strictEqual(view.messages.at(-1).state, 'done');
             assert.strictEqual(view.messages.at(-1).result.summary, 'Everything is in order.');
+        });
+
+        await check('a conductor is started only where its folder is: no such machine on Bot, away, or Bot itself away', async () => {
+            const other = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N2';
+            t.network.addNode(ada.subject, { principal: other, node_id: 'node_ada_desktop', name: 'ada-desktop', status: 'active', last_seen_at: new Date().toISOString() });
+            const before = submits().length;
+            const unknown = await post('/api/v1/conductor', { folder: '/home/ada/openvibe', machine: other });
+            assert.strictEqual(unknown.status, 422, unknown.text);
+            assert.strictEqual(unknown.json().code, 'conductor.machine_invalid', 'a machine Codes cannot find on Bot is never a guess');
+            t.bot.addMachine({ id: 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N2', node_id: other, name: 'ada-desktop', online: false });
+            const away = await post('/api/v1/conductor', { folder: '/home/ada/openvibe', machine: other });
+            assert.strictEqual(away.status, 409, away.text);
+            assert.strictEqual(away.json().code, 'conductor.machine_offline');
+            t.bot.setDown(true);
+            const down = await post('/api/v1/conductor', { folder: '/home/ada/openvibe', machine: NODE });
+            assert.strictEqual(down.status, 503, down.text);
+            assert.strictEqual(down.json().code, 'conductor.machine_unpinned');
+            assert.strictEqual(submits().length, before, 'no job was started for a conductor that could not be pinned');
+
+            // The pin is kept on the conductor: a later turn starts on the same machine without asking Bot again.
+            const res = await post(`/api/v1/conductor/${taskId}/messages`, { text: 'now the next piece' });
+            t.bot.setDown(false);
+            assert.strictEqual(res.status, 201, res.text);
+            assert.strictEqual(submits().at(-1)[1].node, DEVICE, 'the stored pin starts the turn, even with Bot away');
+            const ended = await endTurn(taskId, { session: 'sess_abc' });
+            assert.strictEqual(ended.state, 'succeeded', 'idle again');
         });
 
         await check('a failing turn is unfinished, and a message still carries on', async () => {
@@ -146,8 +180,11 @@ const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
             assert.strictEqual(started.status, 201, started.text);
             const submit = submits().at(-1)[1];
             assert.strictEqual(submits().length, before + 1);
-            assert.strictEqual(submit.args.agent, 'codex', 'an unnamed agent is a non-Anthropic one');
+            // An unnamed agent is auto (Codes C9c): the router names one from the fleet, and never an Anthropic one.
+            assert.strictEqual(submit.args.agent, 'opencode', 'an unnamed agent is the one the router picked, from a non-Anthropic ladder');
+            assert.ok(!/claude/.test(String(submit.args.agent)), 'never an Anthropic agent');
             assert.ok(!submit.args.push, 'a sub-task does not push');
+            assert.strictEqual(submit.node, undefined, 'a sub-task is placed by Run wherever it fits, not pinned');
             const sub = started.json().task;
             assert.notStrictEqual(sub.id, taskId, 'a sub-task is its own task');
             const subRow = await rowOf(sub.id);

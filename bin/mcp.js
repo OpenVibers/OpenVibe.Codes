@@ -26,6 +26,7 @@
 const os = require('os');
 const { auth, call } = require('./task');
 const { probe: probeLogins } = require('../engine/logins');
+const { createShip } = require('../server/domain/ship');
 
 const APPROVAL_TIMEOUT_MS = Math.max(10_000, Number(process.env.APPROVAL_TIMEOUT_MS) || 15 * 60_000);
 const POLL_MS = 2500;
@@ -96,12 +97,12 @@ const TOOLS = [
     },
     {
         name: 'codes_fleet',
-        description: 'The coding CLIs on this machine: installed, signed in, and their limit windows (read from the CLIs\' own files, read-only).',
+        description: 'The coding agents on the owner\'s machines: installed, signed in, and every limit window with when it frees. Each Node reports its fleet with its heartbeat; this machine is read directly from the CLIs\' own files. Read-only.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: true },
     },
     {
         name: 'codes_ship_status',
-        description: 'A GitHub pull request\'s state: CI, merge state, title and branch. Read-only.',
+        description: 'A GitHub pull request\'s state: CI, merge, and whether the service it builds is deployed (the service\'s own /release.json, as `ovhost status` reads it). Read-only.',
         inputSchema: { type: 'object', properties: { repo: { type: 'string' }, pr: { type: 'number', description: 'The pull request number' } }, required: ['repo', 'pr'], additionalProperties: true },
     },
     {
@@ -202,15 +203,49 @@ async function stopTask(args) {
     return text({ id: t.id, state: t.state, outcome: t.outcome ? t.outcome.state : null });
 }
 
-async function fleet() {
+/** This machine's own reading: the CLIs' files, the same answer the Node sends with its heartbeat. */
+function here() {
     const rows = probeLogins({ home: os.homedir() });
-    return text({
+    return {
         machine: os.hostname(),
         agents: rows.map((r) => ({
             agent: r.id, installed: !!r.installed, signed_in: !!r.signed_in,
             version: r.version || null,
             windows: (r.windows || []).map((w) => ({ name: w.name, used: w.used == null ? null : w.used, limit: w.limit == null ? null : w.limit, resets_at: w.resets_at || null })),
         })),
+    };
+}
+
+/**
+ * The fleet: every machine's latest report from Codes (which Bot answers from the Nodes' heartbeats), and this
+ * machine read directly. Without a token, or when Codes cannot answer, this machine's reading is still the answer,
+ * and the reason is said rather than hidden.
+ */
+async function fleet() {
+    let local = null;
+    let localProblem = null;
+    try { local = here(); } catch (e) { localProblem = String(e && e.message).slice(0, 200); }
+    let stored = null;
+    let problem = localProblem ? { detail: `this machine could not be read: ${localProblem}` } : null;
+    try {
+        const c = auth();
+        const answer = await call(c, 'GET', '/api/v1/fleet');
+        stored = {
+            machines: (answer.machines || []).map((m) => ({
+                machine: m.id, node_id: m.node_id || null, name: m.name || null, online: !!m.online, reported_at: m.reported_at || null,
+                agents: (m.agents || []).map((a) => ({ agent: a.agent, installed: !!a.installed, signed_in: !!a.signed_in, windows: a.windows || [] })),
+            })),
+            agents: answer.agents || [],
+            at: answer.at || null,
+        };
+        if (answer.problem && !problem) problem = answer.problem;
+    } catch (e) {
+        problem = problem || { detail: String(e && e.message).slice(0, 300) };
+    }
+    return text({
+        ...(local || { machine: os.hostname(), agents: [] }),
+        ...(stored ? { machines: stored.machines, all_agents: stored.agents, at: stored.at } : {}),
+        ...(problem ? { problem } : {}),
     });
 }
 
@@ -236,11 +271,18 @@ async function shipStatus(args) {
         const st = await get(`/repos/${gh.owner}/${gh.name}/commits/${sha}/status`);
         if (st.ok && st.doc) ci = ({ success: 'Passed', failure: 'Failed', error: 'Errored', pending: 'Running' })[st.doc.state] || null;
     }
+    // The deploy is the service's own /release.json — the same signal `ovhost status` reads.
+    const ship = createShip({ config: { github: { token } }, fetchImpl: fetch });
+    const deploy = await ship.deployOf({ repo: `${gh.owner}/${gh.name}`, mergeCommitSha: d.merge_commit_sha || null, merged: !!d.merged });
     return text({
         repo: `${gh.owner}/${gh.name}`, pr, title: d.title || null,
         state: d.merged ? 'merged' : d.state === 'closed' ? 'closed' : 'open',
+        merged: !!d.merged, merge_commit_sha: d.merge_commit_sha || null,
         draft: !!d.draft, mergeable: d.mergeable == null ? null : !!d.mergeable, mergeable_state: d.mergeable_state || null,
-        ci, branch: d.head && d.head.ref ? d.head.ref : null, base: d.base && d.base.ref ? d.base.ref : null,
+        ci, deploy: {
+            state: deploy.state, service: deploy.service, release: deploy.release, booted_at: deploy.booted_at, detail: deploy.detail || null,
+        },
+        branch: d.head && d.head.ref ? d.head.ref : null, base: d.base && d.base.ref ? d.base.ref : null,
     });
 }
 

@@ -121,14 +121,17 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
 
     /**
      * Create the conductor: the task row, its one attempt and the hand-over turn. The first turn starts at once
-     * (startNext), so a person who pressed "Start your conductor" sees it begin to work.
+     * (startNext), so a person who pressed "Start your conductor" sees it begin to work. A chosen machine is also
+     * `pin`, its OpenVibe.Bot device id (`dev_…`, Codes C9c): every turn is pinned to it on Run, so the session runs
+     * where its folder and its memory are.
      */
-    async function create({ subject, project, folder, machine = null, model = 'opus', safety = 'ask', note = null, key = null } = {}) {
+    async function create({ subject, project, folder, machine = null, pin = null, model = 'opus', safety = 'ask', note = null, key = null } = {}) {
         const work = validFolder(folder);
         if (!work) throw Object.assign(new Error('the working folder must be an absolute path'), { status: 422, code: 'conductor.folder_invalid' });
         if (!MODEL.test(String(model || ''))) throw Object.assign(new Error('the model is not a model name'), { status: 422, code: 'conductor.model_invalid' });
         if (!SAFETY.includes(safety)) throw Object.assign(new Error('safety is ask, project or full'), { status: 422, code: 'conductor.safety_invalid' });
         if (machine && !NODE.test(String(machine))) throw Object.assign(new Error('the machine is not one of the person\'s machines'), { status: 422, code: 'conductor.machine_invalid' });
+        if (pin != null && !/^dev_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(pin))) throw Object.assign(new Error('the pin is not a machine id'), { status: 422, code: 'conductor.machine_invalid' });
         if (!subject) throw Object.assign(new Error('a conductor belongs to a person'), { status: 422, code: 'conductor.subject_required' });
 
         const first = fragment() + (note && String(note).trim() ? `\n\n---\n\n## What the owner asked now\n\n${String(note).trim().slice(0, MAX_NOTE)}\n` : '');
@@ -138,9 +141,9 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
         let row;
         await store.tx(async () => {
             row = await db.one(
-                `INSERT INTO run_tasks (id, subject, project_id, repo, prompt, agent, model, kind, folder, machine, safety, state, idempotency_key, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, 'claude-code', $6, 'conductor', $7, $8, $9, 'queued', $10, $11, $11) RETURNING *`,
-                [id, subject, project, repo, first.slice(0, 16000), String(model).slice(0, 100), work, machine || null, safety, key || null, at],
+                `INSERT INTO run_tasks (id, subject, project_id, repo, prompt, agent, model, kind, folder, machine, pin, safety, state, idempotency_key, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, 'claude-code', $6, 'conductor', $7, $8, $9, $10, 'queued', $11, $12, $12) RETURNING *`,
+                [id, subject, project, repo, first.slice(0, 16000), String(model).slice(0, 100), work, machine || null, pin || null, safety, key || null, at],
             );
         });
         await attempts.create({
@@ -232,6 +235,9 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
             job = await run.submit({
                 subject: task.subject, project: task.project_id, args: turnArgs(task, turn, attempt), key: turn.id,
                 limits: { wall_ms: wallMs, cpu_ms: wallMs, mem_bytes: 4 * 1024 ** 3 }, ttlMs: Math.min(86_400_000, wallMs + 10 * 60_000),
+                // Pinned to the machine the person chose (Codes C9c): the turn resumes a session whose folder and
+                // memory are there, so Run must not place it anywhere else.
+                node: task.pin || null,
             });
         } catch (e) {
             const why = String((e && (e.detail || e.message)) || 'the turn could not start').slice(0, 500);

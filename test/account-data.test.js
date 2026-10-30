@@ -55,6 +55,9 @@ async function startNetworkStub() {
         await db.exec("INSERT INTO codes_outbox (event_id, topic, subject, payload) VALUES ($1, 'codes.task.updated', $2, '{}'::jsonb)", [`evt_${ids.ulid()}`, subject]);
         await db.exec("INSERT INTO telemetry_samples (at, service, operation, subject) VALUES (now(), 'codes', 'task.start', $1)", [subject]);
         await db.exec("INSERT INTO codes_events_inbox (event_id, event_type, task_id) VALUES ($1, 'run.job.finished', $2)", [`evt_${ids.ulid()}`, taskId]);
+        await db.exec("INSERT INTO codes_notices (task_id, kind) VALUES ($1, 'done')", [taskId]);
+        await db.exec(`INSERT INTO codes_machine_fleet (subject, machine, name, agent, installed, signed_in, windows, online, reported_at)
+            VALUES ($1, 'dev_laptop', 'laptop', 'codex', true, true, '[]'::jsonb, true, now())`, [subject]);
     }
     const deliver = async (event, { secret = SECRET } = {}) => {
         const body = JSON.stringify({ event, seq: 1 });
@@ -103,6 +106,10 @@ async function startNetworkStub() {
             assert.ok(telemetry, 'telemetry.json is in the export (the SDK covers the table)');
             assert.strictEqual(telemetry.content.length, 1, 'Ada’s sample only');
             assert.deepStrictEqual(Object.keys(telemetry.content[0]).sort(), ['at', 'latency_ms', 'operation', 'resource', 'service', 'status']);
+            const fleet = part.body.files.find((x) => x.name === 'fleet.json');
+            assert.ok(fleet, 'fleet.json is in the export');
+            assert.strictEqual(fleet.content.length, 1, 'Ada’s fleet only');
+            assert.strictEqual(fleet.content[0].agent, 'codex');
         });
 
         await check('a deletion erases them, keeps everyone else’s, and confirms once', async () => {
@@ -117,6 +124,7 @@ async function startNetworkStub() {
             assert.strictEqual(confirmations[0].body.erased.run_tasks, 1);
             for (const [table, key, who] of [
                 ['codes_attempts', 'task_id', [boTask]], ['codes_task_proof', 'task_id', [boTask]], ['codes_events_inbox', 'task_id', [boTask]],
+                ['codes_notices', 'task_id', [boTask]], ['codes_machine_fleet', 'subject', [bo]],
                 ['codes_run_tokens', 'subject', [bo]], ['codes_user_settings', 'subject', [bo]], ['codes_outbox', 'subject', [bo]],
             ]) {
                 const left = (await db.many(`SELECT ${key} FROM ${table}`)).map((r) => r[key]);

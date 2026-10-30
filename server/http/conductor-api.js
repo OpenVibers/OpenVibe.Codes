@@ -21,8 +21,9 @@
  * `openvibe-codes task` reads from ~/.config/openvibe/token. Always the person's own rows; another person's task is 404.
  *
  * The rule: the conductor may start sub-tasks on any agent except an Anthropic one. codes.task_start refuses
- * claude-code / claude-other, an Anthropic model, or no agent at all (which the router could send to Claude Code): the
- * conductor is the only Anthropic session in the system.
+ * claude-code, claude-other and an Anthropic model: the conductor is the only Anthropic session in the system. A
+ * sub-task with no agent named is `auto` (Codes C9c): the router reads the fleet and picks the agent with room, never
+ * a fixed one and never an Anthropic one.
  */
 
 const express = require('express');
@@ -39,7 +40,7 @@ const ANTHROPIC_MODEL = /(^|[^a-z])(claude|opus|sonnet|haiku|anthropic)([^a-z]|$
 const WAIT_MS = 20_000;
 const WAIT_POLL_MS = 750;
 
-function createConductorApi({ config, store, keys, harnesses, tasks, conductor, approvals, machines = null, actorLimits, log = console }) {
+function createConductorApi({ config, store, keys, harnesses, tasks, conductor, approvals, machines = null, fleet = null, actorLimits, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
@@ -110,6 +111,26 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
         } catch { return null; }
     }
 
+    /**
+     * The machine a conductor runs on, pinned (Codes C9c): its OpenVibe.Bot device id (`dev_…`), which is what Run
+     * places a job on. Network knows the machine by its principal (`nod_…`); Bot's list names both. A machine Codes
+     * cannot find there, or a Bot that does not answer, is a problem — a conductor must never fall back to running
+     * wherever Run likes, because its folder and its memory are on the chosen machine.
+     */
+    async function pinFor(req, machine) {
+        if (!fleet) return { problem: { status: 503, code: 'conductor.machine_unpinned', detail: 'Codes cannot pin a conductor to a machine here' } };
+        let hit;
+        try {
+            hit = await fleet.deviceFor(req.person.token, machine);
+        } catch (e) {
+            log.warn(`[Codes] conductor: ${machine} could not be pinned: ${String(e && e.message).slice(0, 200)}`);
+            return { problem: { status: 503, code: 'conductor.machine_unpinned', detail: 'OpenVibe.Bot did not answer, so Codes cannot pin the conductor to that machine; a conductor runs where its folder is, never wherever' } };
+        }
+        if (!hit) return { problem: { status: 422, code: 'conductor.machine_invalid', detail: 'that machine is not on openvibe.bot/machines: add it there, so a conductor can run where its folder is' } };
+        if (!hit.online) return { problem: { status: 409, code: 'conductor.machine_offline', detail: `${hit.name || 'that machine'} is offline: a conductor starts on the machine its folder is on` } };
+        return { device: hit.device };
+    }
+
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
     r.post('/conductor', person, actorLimits.budget('codes.task.start'), small, async (req, res) => {
@@ -119,11 +140,13 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
         const machine = typeof b.machine === 'string' && b.machine ? b.machine : null;
         const bad = await machineProblem(req, machine);
         if (bad) return problem(req, res, 422, 'conductor.machine_invalid', bad);
+        const pin = machine ? await pinFor(req, machine) : { device: null };
+        if (pin.problem) return problem(req, res, pin.problem.status, pin.problem.code, pin.problem.detail);
         const project = await projectFor(req);
         if (!project) return problem(req, res, 409, 'codes.no_project', 'start one task at ' + config.baseUrl + '/run first: a conductor runs in your project, on your machine');
         try {
             const made = await conductor.create({
-                subject: req.person.subject, project, folder, machine,
+                subject: req.person.subject, project, folder, machine, pin: pin.device,
                 model: typeof b.model === 'string' && b.model ? b.model : 'opus',
                 safety: typeof b.safety === 'string' && b.safety ? b.safety : 'ask',
                 note: typeof b.note === 'string' ? b.note : null,
@@ -169,8 +192,7 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
 
     /**
      * A sub-task on another harness. The rule: never an Anthropic one — that is the conductor's session alone. An
-     * unnamed agent is filled in with a non-Anthropic default, because the router would otherwise be free to pick
-     * Claude Code.
+     * unnamed agent is `auto`: the router picks among the agents the fleet says have room, never a fixed one.
      */
     r.post('/conductor/:id/tasks', person, actorLimits.budget('codes.task.start'), small, async (req, res) => {
         if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site JSON posts are refused');
@@ -179,23 +201,23 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
         const b = req.body && typeof req.body === 'object' ? req.body : {};
         const prompt = typeof b.prompt === 'string' ? b.prompt.trim() : '';
         if (!prompt) return problem(req, res, 422, 'codes.task_invalid', 'a sub-task needs a prompt');
-        const defaultAgent = (config.conductor && config.conductor.subagentAgent) || 'codex';
-        const wanted = typeof b.agent === 'string' && b.agent ? b.agent : defaultAgent;
+        const named = typeof b.agent === 'string' && b.agent.trim() ? b.agent.trim() : null;
+        const wanted = named && named !== 'auto' ? named : null;
         const model = typeof b.model === 'string' && b.model ? b.model : null;
-        if (ANTHROPIC_AGENTS.has(wanted) || ANTHROPIC_MODEL.test(wanted) || (model && ANTHROPIC_MODEL.test(model))) {
+        if ((wanted && (ANTHROPIC_AGENTS.has(wanted) || ANTHROPIC_MODEL.test(wanted))) || (model && ANTHROPIC_MODEL.test(model))) {
             return problem(req, res, 422, 'conductor.anthropic_subtask', 'the conductor may start sub-tasks on any agent except an Anthropic one: it is the only Anthropic session here');
         }
         const agent = wanted;
-        if (!harnesses.list().some((h) => h.id === agent)) return problem(req, res, 422, 'codes.agent_unknown', `agent is one of GET /api/v1/harnesses, and not an Anthropic one`);
+        if (agent && !harnesses.list().some((h) => h.id === agent)) return problem(req, res, 422, 'codes.agent_unknown', `agent is one of GET /api/v1/harnesses, and not an Anthropic one`);
         if (typeof b.repo !== 'string' || !/^https:\/\//.test(b.repo)) return problem(req, res, 422, 'codes.task_invalid', 'a sub-task needs the repository it works in (https://…)');
         let args;
         try {
-            args = parseArgs(JSON.stringify({ repo: b.repo, ref: b.ref || null, prompt, agent, ...(model ? { model } : {}), permission: 'edit' }));
+            args = parseArgs(JSON.stringify({ repo: b.repo, ref: b.ref || null, prompt, ...(agent ? { agent } : {}), ...(model ? { model } : {}), permission: 'edit' }));
         } catch (e) {
             return problem(req, res, 422, 'codes.task_invalid', e.message);
         }
         const task = await tasks.start({ subject: req.person.subject, project: row.project_id, args, via: 'conductor', key: null, actorRef: { conductor: { task_id: row.id } } });
-        log.info(`[Codes] conductor ${row.id} started sub-task ${task.id} on ${agent}`);
+        log.info(`[Codes] conductor ${row.id} started sub-task ${task.id} on ${agent || 'auto'}`);
         return res.status(201).json({ task: { ...tasks.present(task), outcome: { state: task.outcome || null, note: task.outcome_note || null } } });
     });
 

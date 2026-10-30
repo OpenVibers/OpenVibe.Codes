@@ -76,6 +76,8 @@ function mcpChild(env) {
     const db = t.ctx.store.db;
     const ada = t.network.addUser('ada');
     t.network.addNode(ada.subject, { principal: NODE, node_id: 'node_ada', name: 'ada-laptop', status: 'active', last_seen_at: new Date().toISOString() });
+    // The machine, as OpenVibe.Bot answers it: the conductor is pinned to its device id, so Run never moves it.
+    t.bot.addMachine({ id: 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N2', node_id: NODE, name: 'ada-laptop', online: true });
 
     const created = await t.get('/api/v1/conductor', { as: ada, json: { folder: '/home/ada/openvibe', machine: NODE, safety: 'ask' } });
     assert.strictEqual(created.status, 201, created.text);

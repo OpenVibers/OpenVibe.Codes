@@ -39,7 +39,7 @@ const { expandMatrix } = require('../domain/bench');
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 
-function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, log = console }) {
+function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, fleet = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
@@ -134,6 +134,34 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
             outcome: { state: row.outcome || null, note: row.outcome_note || null },
         };
     };
+
+    /**
+     * The fleet (Codes C9c): each of the person's machines' agents and limit windows, read from OpenVibe.Bot with the
+     * person's own token and kept here. A signed-in visitor or their own access token; never a service acting for
+     * someone (a machine's windows are the person's own account).
+     */
+    r.get('/fleet', actorLimits.reads('codes.read'), async (req, res) => {
+        let subject = null;
+        let token = null;
+        if (signedIn(req)) { subject = req.viewer.subject; token = req.viewer.token || null; }
+        else {
+            const header = String(req.headers.authorization || '');
+            if (header.startsWith('Bearer ') && !principalToken(header.slice(7).trim())) {
+                token = header.slice(7).trim();
+                subject = await personOf(token);
+            }
+        }
+        if (!subject) return problem(req, res, 401, 'token.required', 'sign in, or send your own Network access token, to read your fleet');
+        if (!fleet) return res.json({ ok: false, machines: [], agents: [], problem: { status: 503, detail: 'the fleet is not configured here' } });
+        let out;
+        try { out = await fleet.refresh(subject, token); } catch (e) {
+            if (e.status === 401) return problem(req, res, 401, 'token.invalid', 'the session expired: sign in again');
+            out = { ok: false, problem: { status: e.status || 503, detail: String(e.message || 'the fleet could not be read').slice(0, 300) } };
+        }
+        const agents = await fleet.agents(subject, harnesses);
+        const latest = await fleet.latest(subject);
+        return res.json({ ok: out.ok !== false, machines: latest.machines, agents, at: latest.at, ...(out.problem ? { problem: out.problem } : {}) });
+    });
 
     r.post('/tasks', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
         const b = req.body;

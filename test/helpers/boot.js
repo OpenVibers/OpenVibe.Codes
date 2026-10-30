@@ -13,7 +13,7 @@ process.env.CODES_RATE_LIMIT_PER_MIN = process.env.CODES_RATE_LIMIT_PER_MIN || '
  *   t.logs(), t.dbDump()
  */
 const http = require('http');
-const { startNetwork } = require('./mocks');
+const { startNetwork, startBot } = require('./mocks');
 
 const captured = [];
 for (const m of ['log', 'info', 'warn', 'error']) {
@@ -23,10 +23,14 @@ for (const m of ['log', 'info', 'warn', 'error']) {
 
 async function boot(opts = {}) {
     const network = await startNetwork(opts.network || {});
+    // OpenVibe.Bot's machines (Codes C9c): a conductor's chosen machine is pinned on Run by the device id Bot names, and
+    // the fleet is read from the same answer. A test adds machines with t.bot.addMachine({ id: 'dev_…', node_id, … }).
+    const bot = await startBot();
     const env = {
         NODE_ENV: 'test', PORT: '0', BASE_URL: 'https://openvibe.codes', TRUST_PROXY: '1',
         OV_NETWORK_URL: network.url, OV_NETWORK_INTERNAL_URL: network.url,
         OV_OAUTH_CLIENT_ID: 'codes', OV_OAUTH_CLIENT_SECRET: 'codes-secret', COOKIE_SECURE: 'false',
+        CODES_BOT_INTERNAL_URL: bot.url,
         ...(typeof opts.env === 'function' ? opts.env(network) : (opts.env || {})),
     };
     const configLib = require('../../server/config');
@@ -37,7 +41,7 @@ async function boot(opts = {}) {
     const { createStore } = require('../../server/db');
     // One database per boot (PGlite, or CODES_TEST_STORE=pg: the containers), dropped when the boot closes.
     const testdb = await require('./db').testDb();
-    const built = await createApp({ config, store: createStore(testdb.db), log, limitsNow: opts.limitsNow, actorLimits: opts.actorLimits === true, ...(opts.run ? { run: opts.run } : {}), ...(opts.benchAttemptEnded ? { benchAttemptEnded: opts.benchAttemptEnded } : {}), ...(opts.accountSend ? { accountSend: opts.accountSend } : {}), ...(opts.connections ? { connections: opts.connections } : {}), ...(opts.notify ? { notify: opts.notify } : {}) });
+    const built = await createApp({ config, store: createStore(testdb.db), log, limitsNow: opts.limitsNow, actorLimits: opts.actorLimits === true, ...(opts.run ? { run: opts.run } : {}), ...(opts.benchAttemptEnded ? { benchAttemptEnded: opts.benchAttemptEnded } : {}), ...(opts.accountSend ? { accountSend: opts.accountSend } : {}), ...(opts.connections ? { connections: opts.connections } : {}), ...(opts.notify ? { notify: opts.notify } : {}), ...(opts.balance ? { balance: opts.balance } : {}) });
     await built.ctx.keys.ensure();
     const server = await new Promise((resolve) => { const s = http.createServer(built.app); s.listen(0, '127.0.0.1', () => resolve(s)); });
     const base = `http://127.0.0.1:${server.address().port}`;
@@ -70,11 +74,12 @@ async function boot(opts = {}) {
     const t = {
         base, network, config, ctx: built.ctx, get, signIn, dbDump,
         logs: () => captured.join('\n'),
+        bot,
         async close() {
             await new Promise((r) => server.close(r));
             built.ctx.keys.client.stop();
             await testdb.close();
-            await network.close();
+            await Promise.all([network.close(), bot.close()]);
         },
     };
     return t;
