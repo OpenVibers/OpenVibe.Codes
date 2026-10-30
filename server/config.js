@@ -66,7 +66,11 @@ function load(env = process.env) {
         // OpenVibe.AI (Codes C3): where a person's own provider key is sealed (it never leaves AI) and where the
         // harnesses run. Codes talks to it with its own Network token (audience openvibe.ai).
         ai: {
+            // The public address: what a harness on the person's own machine is given.
             url: trim(env.CODES_AI_URL || 'https://ai.openvibe.services'),
+            // Codes' own address for AI: the vault (a person's keys) is a host-local API, so Codes reaches it over
+            // the loopback. The public address answers 403 there (nginx: /api/ is host-local only).
+            internalUrl: trim(env.CODES_AI_INTERNAL_URL || 'http://127.0.0.1:4700'),
             audience: 'openvibe.ai',
             // The scopes Codes asks Network for: it stores a person's key with the first and runs a test request
             // (and the harnesses' requests) with the second.

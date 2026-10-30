@@ -49,7 +49,9 @@ function present(row) {
 }
 
 function createConnections({ config, fetchImpl = globalThis.fetch, log = console } = {}) {
-    const base = String((config.ai && config.ai.url) || 'https://ai.openvibe.services').replace(/\/+$/, '');
+    // Codes' own address for AI: the vault (a person's keys) is a host-local API, so Codes reaches it over the
+    // loopback. The public address answers 403 there (nginx: /api/ is host-local only).
+    const base = String((config.ai && (config.ai.internalUrl || config.ai.url)) || 'https://ai.openvibe.services').replace(/\/+$/, '');
     const scope = (config.ai && config.ai.scope) || 'ai.credential.manage ai.run.create';
     // Codes' own Network token for OpenVibe.AI: the consent grant (ai.credential.manage) lets it store a person's
     // key; ai.run.create lets it make the test request. Five minutes, cached by the SDK client.
