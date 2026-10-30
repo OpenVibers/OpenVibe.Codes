@@ -14,6 +14,37 @@ engine.outcome(attempts);                                            // { state,
 
 ## The modules
 
+### `adapters/` — every harness Codes can run, with the portal's argv and environment
+
+Six harnesses, each one the portal's runner script, ported: `claude-code` and `claude-other` (Claude Code, and Claude
+Code on another provider with the cm-style environment), `codex`, `command-code`, `opencode` and `minimax-code`. An
+adapter says how its CLI is started (the argv and the environment — the portal's, not a guess), how what it prints is
+read into the one transcript shape (the portal's feed converters), and what its reasoning levels are.
+
+```js
+const { adapterFor } = require('./engine/adapters');
+
+adapterFor('codex').build({ prompt, cwd, model: 'gpt-5-codex', effort: 'medium', permission: 'edit' });
+// → { cmd: 'codex', argv: ['exec', '--json', '--skip-git-repo-check', '-C', cwd, '-s', 'workspace-write', …], env: {}, stdin: prompt }
+```
+
+The effort is fitted to the harness, never handed over as it came: the 2026-10-29 incident killed a job that copied
+Codex's "medium" to Command Code, which accepts off, low, high and max.
+
+### `jobrunner.js` — one attempt of one harness, the way the portal runs one
+
+The prompt is assembled (`prompt.js`), the harness is started (`adapters/`), what it prints goes through the transcript
+normaliser (`transcript.js`) into job lines (`joblines.js`), and a budget stop buys one wrap-up turn on the same session
+(`budget.js`).
+
+### `prompt.js` — the prompt every job gets
+
+The git rule, the house rules, the lessons (when a store is reachable), the repo digest (`repomap.js`), then the brief.
+
+### `logins.js` — what this machine has
+
+Each CLI: installed, signed in, and the limit windows it can read. Nothing else: no key, no token, no account name.
+
 ### `router.js` — what kind of task is this, and which runner may take it
 
 A brief is classified into one of five tiers (`basic`, `research`, `standard`, `hard`, `design`); a line `tier: hard`

@@ -81,18 +81,6 @@ function load(env = process.env) {
         // OpenVibe.Run (plan T16): a coding task on the person's own machine is a Run job Codes starts for them.
         run: { url: trim(env.CODES_RUN_URL || 'http://127.0.0.1:4920') },
 
-        // A task's own budget (engine/budget.js): steps (tool calls), minutes (wall clock) and dollars. A limit that is
-        // not set is no limit — 0 means "no limit", never a zero budget. Steps and minutes buy one wrap-up turn.
-        budget: {
-            steps: int(env.CODES_TASK_STEPS, 0),
-            minutes: int(env.CODES_TASK_MINUTES, 0),
-            usd: Number(env.CODES_TASK_USD || 0) || 0,
-        },
-        // The task's timeline (stage C2): how many automatic continues one task may have before it needs a person.
-        task: { maxContinues: Math.max(0, int(env.CODES_TASK_MAX_CONTINUES, 2)) },
-        // The event stream of a task (GET /api/v1/tasks/:id/events): the heartbeat that keeps a connection alive.
-        sse: { heartbeatMs: Math.max(1000, int(env.CODES_SSE_HEARTBEAT_MS, 15_000)) },
-
     };
 }
 

@@ -7,29 +7,19 @@
  * machine, in the project of their latest /run task.
  *
  *   POST /tasks              codes.task.start    codes.task-start-request@1 → codes.task-start-result@1 (201, or 200 again)
- *   GET  /tasks/:id          codes.task.read     → codes.task@2 (the task as codes.task@1, with its attempts and
- *                                                   its outcome added to it)
+ *   GET  /tasks/:id          codes.task.read     → codes.task@1
  *   POST /tasks/:id/cancel   codes.task.cancel   → codes.task@1
- *   GET  /tasks/:id/events   codes.task.read     → the task's event stream (server-sent events)
- *   POST /tasks/:id/continue codes.task.start    → the next attempt now (a switch when an agent is named)
- *   POST /tasks/:id/stop     codes.task.cancel   → the running attempt stops; nothing carries it on
  *
  * A Network service token for audience openvibe.codes (CODES_AUDIENCE), from a svc: principal holding the route's
- * capability. A service sees only the tasks it started, for that person; anything else is 404. The owner may read
- * and act on their own tasks without a token. The person's task page (the codes.task@1 url) shows every task they
- * own, whoever started it. Calls count against the person's own per-actor budget (actor-limits.js), not the service's.
- *
- * Stage C2: a task's timeline is its attempts. GET /tasks/:id answers codes.task@2: the task itself with the same
- * fields it always had, and, added to them, its attempts and its outcome in plain words ("done", "unfinished" with
- * what is left, or "stopped"). GET /tasks/:id/events replays the session's lines in order — resumable with
- * Last-Event-ID, a heartbeat every 15 s — with the attempt each line belongs to.
+ * capability. A service sees only the tasks it started, for that person; anything else is 404. The person's task
+ * page (the codes.task@1 url) shows every task they own, whoever started it. Calls count against the person's own
+ * per-actor budget (actor-limits.js), not the service's.
  */
 const express = require('express');
 const { serviceAuth, capabilities, http, validate } = require('openvibe-contracts');
 const { asyncRouter } = require('./router');
 const { parseArgs } = require('../../harness/job');
 const { createRunTasks, TERMINAL } = require('../domain/run-tasks');
-const { createTaskEvents } = require('./task-events');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -38,7 +28,6 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
-    const taskEvents = createTaskEvents({ store, config, log, attempts: taskStore.attempts });
     const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
     const json = express.json({ limit: '32kb' });
 
@@ -64,31 +53,9 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
     /** The task this service started for this person, or null. */
     const mine = async (req) => {
         if (!TASK.test(String(req.params.id))) return null;
-        if (req.principal.owner) return db.maybe('SELECT * FROM run_tasks WHERE id = $1 AND subject = $2', [req.params.id, req.principal.subject]);
         return db.maybe('SELECT * FROM run_tasks WHERE id = $1 AND subject = $2 AND via = $3', [req.params.id, req.principal.subject, req.principal.via]);
     };
     const byKey = (p, key) => db.maybe('SELECT * FROM run_tasks WHERE subject = $1 AND via = $2 AND idempotency_key = $3', [p.subject, p.via, key]);
-
-    /** The owner (signed in), or a service token with the capability acting for the person in X-OV-Subject. */
-    const signedIn = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
-    const guardAny = (cap) => async (req, res, next) => {
-        if (String(req.headers.authorization || '').startsWith('Bearer ')) return guard(cap)(req, res, next);
-        if (signedIn(req)) {
-            req.principal = { sub: `user:${req.viewer.subject}`, subject: req.viewer.subject, via: null, owner: true };
-            return next();
-        }
-        return problem(req, res, 401, 'token.required', `${cap} needs a Network service token for ${config.serviceAudience}, or a signed-in owner`);
-    };
-
-    /** The task, its attempts and its outcome in plain words. The task's own fields stay at the top level. */
-    const timeline = async (row) => {
-        const attempts = await taskStore.attempts.list(row.id);
-        return {
-            ...taskStore.present(row),
-            attempts: attempts.map((a) => taskStore.attempts.present(a)),
-            outcome: { state: row.outcome || null, note: row.outcome_note || null },
-        };
-    };
 
     r.post('/tasks', guard('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
         const b = req.body;
@@ -135,41 +102,10 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         return res.status(201).json({ task: taskStore.present(row), created: true });
     });
 
-    r.get('/tasks/:id', guardAny('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
+    r.get('/tasks/:id', guard('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
         const row = await mine(req);
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
-        return res.json(await timeline(await taskStore.refresh(row)));
-    });
-
-    /** The task's event stream: the session's lines in order, resumable with Last-Event-ID, plus the attempts. */
-    r.get('/tasks/:id/events', guardAny('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
-        const row = await mine(req);
-        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
-        return await taskEvents.stream(req, res, row);
-    });
-
-    /** The next attempt now: the owner carries the task on, or hands it to another agent. */
-    r.post('/tasks/:id/continue', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
-        const row = await mine(req);
-        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
-        const b = req.body || {};
-        const note = typeof b.note === 'string' ? b.note.slice(0, 4000) : null;
-        const agent = typeof b.agent === 'string' && b.agent ? b.agent : null;
-        if (agent && !harnesses.list().some((a) => a.id === agent)) return problem(req, res, 422, 'codes.agent_unknown', 'agent is one of GET /api/v1/harnesses');
-        const out = await taskStore.continueTask(row, { note, agent });
-        if (out.error) return problem(req, res, 409, 'codes.task_conflict', out.error);
-        log.info(`[Codes] task ${row.id} carried on (${agent ? `with ${agent}` : 'by the owner'})`);
-        return res.json(await timeline(out.row));
-    });
-
-    /** The running attempt stops: the outcome is "stopped" and nothing carries it on. */
-    r.post('/tasks/:id/stop', guardAny('codes.task.cancel'), actorLimits.budget('codes.task.start'), async (req, res) => {
-        const row = await mine(req);
-        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
-        const out = await taskStore.stopTask(row);
-        if (out.error) return problem(req, res, 409, 'codes.task_conflict', out.error);
-        log.info(`[Codes] task ${row.id} stopped by ${req.principal.via || req.principal.subject}`);
-        return res.json(await timeline(out.row));
+        return res.json(taskStore.present(await taskStore.refresh(row)));
     });
 
     r.post('/tasks/:id/cancel', guard('codes.task.cancel'), actorLimits.budget('codes.task.start'), async (req, res) => {

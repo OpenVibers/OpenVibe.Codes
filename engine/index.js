@@ -10,6 +10,13 @@
  *   engine.effort      the reasoning level a harness accepts, and the models a provider refuses
  *   engine.scope       one systemd scope per job, so nothing is left behind
  *   engine.runerror    what a failed run really said
+ *   engine.adapters    every harness Codes can run, with the portal's argv and environment
+ *   engine.jobrunner   one attempt of one harness, the way the portal runs one
+ *   engine.prompt      the prompt every job gets (the rules, the lessons, the digest, the brief)
+ *   engine.repomap     the repo digest a job gets instead of a directory tree
+ *   engine.joblines    the lines a task's page shows while it runs
+ *   engine.logins      what this machine has: each CLI, signed in or not, and its limit windows
+ *   engine.redact      the secrets that never reach an event stream
  *
  * The modules do not depend on each other in a cycle, and none of them reads the portal's log folder.
  */
@@ -21,6 +28,13 @@ const transcript = require('./transcript');
 const effort = require('./effort');
 const scope = require('./scope');
 const runerror = require('./runerror');
+const adapters = require('./adapters');
+const jobrunner = require('./jobrunner');
+const prompt = require('./prompt');
+const repomap = require('./repomap');
+const joblines = require('./joblines');
+const logins = require('./logins');
+const redact = require('./redact');
 
 module.exports = {
     router,
@@ -30,6 +44,13 @@ module.exports = {
     effort,
     scope,
     runerror,
+    adapters,
+    jobrunner,
+    prompt,
+    repomap,
+    joblines,
+    logins,
+    redact,
     // The names a caller usually wants, in one place.
     classify: router.classify,
     pick: router.pick,
@@ -41,4 +62,11 @@ module.exports = {
     parseText: transcript.parseText,
     fitEffort: effort.fitEffort,
     pickModel: effort.pickModel,
+    // C5: the job runner and the harnesses it can run.
+    runAttempt: jobrunner.runAttempt,
+    adapterFor: adapters.adapterFor,
+    assemblePrompt: prompt.assemble,
+    jobLines: joblines.lines,
+    probeLogins: logins.probe,
+    scrub: redact.scrub,
 };
