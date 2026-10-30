@@ -123,6 +123,13 @@ function load(env = process.env) {
         },
         // The task's timeline (stage C2): how many automatic continues one task may have before it needs a person.
         task: { maxContinues: Math.max(0, int(env.CODES_TASK_MAX_CONTINUES, 2)) },
+        // The conductor (Codes C9b): one long Claude Code session on the person's own machine. A turn's wall time (the
+        // session may work through a plan), and the harness a sub-task gets when the conductor names none (never an
+        // Anthropic one: the conductor is the only Anthropic session).
+        conductor: {
+            wallMs: Math.max(60_000, int(env.CODES_CONDUCTOR_TURN_MS, 4 * 60 * 60_000)),
+            subagentAgent: String(env.CODES_CONDUCTOR_SUBAGENT_AGENT || 'codex').trim() || 'codex',
+        },
         // The event stream of a task (GET /api/v1/tasks/:id/events): the heartbeat that keeps a connection alive.
         sse: { heartbeatMs: Math.max(1000, int(env.CODES_SSE_HEARTBEAT_MS, 15_000)) },
 

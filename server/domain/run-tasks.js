@@ -140,7 +140,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -149,6 +149,12 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     // The proof of a finished task (stage C8): the tests, the pages, the diff and the second model's opinion.
     const taskProof = proof || require('./proof').createProof({ store, config, log });
     const attemptStore = attempts || require('./attempts').createAttempts({ store, config, log });
+    /**
+     * The conductor's turns (server/domain/conductor.js). Wired by the app after both exist, because the conductor
+     * starts Run jobs and this module is what applies their events: a constructor argument would be a cycle.
+     */
+    let conductorTurns = conductor;
+    const setConductor = (turns) => { conductorTurns = turns; };
     /** An attempt's state when it ended: a limit reached is a budget-stop, never a plain failure. */
     const ENDED = new Set(['done', 'failed', 'stopped', 'budget-stopped', 'interrupted']);
 
@@ -247,18 +253,28 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             if (attempt) {
                 if (TERMINAL.has(state)) {
                     const usage = usageOf(updated.result);
-                    const why = reasonOf(state, updated.error);
-                    const hit = budgetHit(attempt, usage, why);
-                    await attemptStore.end(attempt.id, {
-                        state: hit ? 'budget-stopped' : (ATTEMPT_STATE[state] || 'failed'),
-                        reason: hit ? 'budget' : why,
-                        cost_usd: usage.cost_usd, tokens: usage.tokens, steps: usage.steps, session: usage.session,
-                        model: usage.model, machine: machineOf(next.job),
-                        finished_at: updated.finished_at || store.iso(),
-                    });
+                    // A conductor's attempt outlives every turn: the same session is resumed by the next message, so
+                    // its end is not the attempt's end — it waits for the person.
+                    if (current.kind === 'conductor') {
+                        await attemptStore.bind(attempt.id, {
+                            state: 'waiting', session: usage.session, model: usage.model, machine: machineOf(next.job),
+                            started_at: updated.started_at || null,
+                        });
+                    } else {
+                        const why = reasonOf(state, updated.error);
+                        const hit = budgetHit(attempt, usage, why);
+                        await attemptStore.end(attempt.id, {
+                            state: hit ? 'budget-stopped' : (ATTEMPT_STATE[state] || 'failed'),
+                            reason: hit ? 'budget' : why,
+                            cost_usd: usage.cost_usd, tokens: usage.tokens, steps: usage.steps, session: usage.session,
+                            model: usage.model, machine: machineOf(next.job),
+                            finished_at: updated.finished_at || store.iso(),
+                        });
+                    }
                 } else {
                     await attemptStore.bind(attempt.id, {
-                        state: ATTEMPT_STATE[state] || 'queued', started_at: updated.started_at || null, machine: machineOf(next.job),
+                        state: current.kind === 'conductor' ? 'running' : (ATTEMPT_STATE[state] || 'queued'),
+                        started_at: updated.started_at || null, machine: machineOf(next.job),
                     });
                 }
             }
@@ -396,6 +412,8 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         if (!row) return null;
         if (!TERMINAL.has(row.state)) return row;
         if (row.outcome === 'stopped') return row;      // a person stopped it: nothing carries it on
+        // The conductor's turns are its own: a turn that ended lands its message and the next one starts.
+        if (row.kind === 'conductor') return conductorTurns ? conductorTurns.onTurnEnd(row.id, row.job_id) : row;
         const actorRef = asObject(row.actor_ref);
         if (actorRef && actorRef.bench) {
             const done = row.state === 'succeeded';
@@ -583,7 +601,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
 
     return {
         start, refresh, applyJob, applyEvent, recordState, afterEnd, continueTask, stopTask, proof: taskProof,
-        latestProject, present, who, attempts: attemptStore,
+        latestProject, present, who, attempts: attemptStore, setConductor,
     };
 }
 

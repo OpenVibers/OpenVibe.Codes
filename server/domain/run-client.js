@@ -48,16 +48,21 @@ function createRunClient({ config, fetchImpl = globalThis.fetch, now = () => Dat
         if (!res.ok) throw new RunError(res.status, (doc && doc.code) || 'run.error', (doc && (doc.detail || doc.title)) || `Run answered ${res.status}`);
         return doc;
     }
-    /** A coding job for `subject` in `project`, only on that person's own machine. */
-    async function submit({ subject, project, args, key }) {
+    /**
+     * A coding job for `subject` in `project`, only on that person's own machine. A conductor's turn asks for more: its
+     * wall time (a session that works through a plan), its TTL and its own memory, all bounded here.
+     */
+    async function submit({ subject, project, args, key, limits = null, ttlMs = null }) {
+        const wall = Math.max(1000, Math.min(90 * 60_000, Number(limits && limits.wall_ms) || Number(args && args.limits && args.limits.ms) || 30 * 60_000));
         const body = {
             class: 'code', artifact: { name: 'openvibe-codes', version: JOB_PROTOCOL }, args,
             limits: {
-                wall_ms: Math.max(1000, Math.min(30 * 60_000, Number(args.limits && args.limits.ms) || 30 * 60_000)),
-                cpu_ms: Math.max(1000, Math.min(30 * 60_000, Number(args.limits && args.limits.ms) || 30 * 60_000)),
-                mem_bytes: 4 * 1024 ** 3,
+                wall_ms: wall,
+                cpu_ms: Math.max(1000, Math.min(90 * 60_000, Number(limits && limits.cpu_ms) || wall)),
+                mem_bytes: Math.max(1024 ** 2, Math.min(16 * 1024 ** 3, Number(limits && limits.mem_bytes) || 4 * 1024 ** 3)),
             },
-            ttl_ms: 45 * 60_000, egress: 'public',
+            ttl_ms: Math.max(60_000, Math.min(86_400_000, Number(ttlMs) || 45 * 60_000)),
+            egress: 'public',
             requirements: { kind: 'run.code', mobility: 'job', latency_class: 'background', objective: 'balanced', trust: ['user-owned'] },
         };
         const out = await call('POST', '/api/v1/jobs', { subject, project, body, key });
