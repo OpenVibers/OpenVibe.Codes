@@ -138,6 +138,25 @@ function track(runs) {
 }
 
 /**
+ * Whether the person may run this runner (Codes C3): a runner whose connection is missing is never picked, so a
+ * task never goes to an agent the person cannot pay for or sign in to.
+ *
+ * `connections` is { [runner]: { provider, connected } } — what the person has: an API key for the provider, or a
+ * plan on one of their machines (the same thing the router skips while it is at its limit). A runner that is not in
+ * the map needs no connection, and a map that is absent at all leaves the ladder as it was (the portal's router).
+ *
+ * @param {string} runner the runner's id
+ * @param {object} [connections] the person's connections, per runner
+ * @returns {boolean} may this runner take the job
+ */
+function connected(runner, connections) {
+    if (!connections) return true;
+    const c = connections[runner];
+    if (!c) return true;
+    return c.connected !== false;
+}
+
+/**
  * The runner, model and reasoning for a job, or null when nothing on the ladder can take it now.
  *
  * @param {string} prompt the brief or the launch prompt
@@ -150,13 +169,14 @@ function track(runs) {
  * @param {string} [ctx.JOBS] the jobs folder
  * @param {string} [ctx.name] the job's own name
  * @param {object} [ctx.ladder] the ladder to use (the portal's by default)
+ * @param {object} [ctx.connections] the person's connections, per runner (Codes C3)
  * @returns {{runner: string, model: string|null, effort: string|null, tier: string, brief: string|null, why: string}|null}
  */
-function pick(prompt, { cfg, health, counts, models, runs, JOBS, name, ladder } = {}) {
+function pick(prompt, { cfg, health, counts, models, runs, JOBS, name, ladder, connections } = {}) {
     const c = classify(prompt, { JOBS, name });
     const rec = track(runs);
     const reliable = (r) => { const t = rec[r]; return !t || t.done + t.failed < 4 || t.done / (t.done + t.failed) >= 0.4; };
-    const usable = (r) => cfg.subagents[r] && cfg.subagents[r].enabled && (counts[r] || 0) < cfg.subagents[r].max && health[r] && health[r].state === 'ok' && reliable(r);
+    const usable = (r) => cfg.subagents[r] && cfg.subagents[r].enabled && (counts[r] || 0) < cfg.subagents[r].max && health[r] && health[r].state === 'ok' && reliable(r) && connected(r, connections);
     for (const [runner, model, wanted] of (ladder || LADDER)[c.tier]) {
         if (!usable(runner)) continue;
         // A model the runner no longer lists is skipped for that runner's default (lists refresh from each provider).
@@ -168,4 +188,4 @@ function pick(prompt, { cfg, health, counts, models, runs, JOBS, name, ladder } 
     return null;
 }
 
-module.exports = { LADDER, TIERS, classify, classifyText, pick, track, briefFor, forcedTier, fitEffort, stepUp, EFFORTS };
+module.exports = { LADDER, TIERS, classify, classifyText, pick, track, briefFor, forcedTier, fitEffort, stepUp, EFFORTS, connected };

@@ -56,6 +56,7 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
         users: new Map(), byUsername: new Map(), projects: new Map(), members: new Map(), apps: new Map(), creds: new Map(),
         grants: new Map(), quotas: new Map(), usage: new Map(), audit: [], codes: new Map(), refresh: new Map(),
         catalog: null, down: false, requests: [], tokenRequests: [], exportTokens: [], exportTtl: 300,
+        vault: new Map(),   // OpenVibe.AI's stand-in: a person's own keys, by subject and provider
     };
     let issuer = null;
     let nextUserId = 1;
@@ -281,8 +282,14 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
                     return json(200, { access_token: userToken(user), refresh_token: rt, token_type: 'Bearer' });
                 }
                 if (body.grant_type === 'client_credentials') {
+                    // A run token (Codes C3): it may name the person it acts for and live longer than five minutes.
                     const now = Math.floor(Date.now() / 1000);
-                    return json(200, { access_token: serviceAuth.signServiceToken({ iss: issuer, sub: 'svc:codes', actor_type: 'service', aud: [body.audience || 'openvibe.events'], cap: String(body.scope || '').split(/\s+/).filter(Boolean), iat: now, exp: now + 300, jti: crypto.randomUUID() }, privatePem), token_type: 'Bearer', expires_in: 300 });
+                    const ttl = Math.min(7200, Math.max(60, Number(body.ttl) || 300));
+                    const claims = { iss: issuer, sub: 'svc:codes', actor_type: 'service', aud: [body.audience || 'openvibe.events'], cap: String(body.scope || '').split(/\s+/).filter(Boolean), iat: now, exp: now + ttl, jti: crypto.randomUUID() };
+                    if (body.on_behalf_of) claims.on_behalf_of = String(body.on_behalf_of);
+                    st.tokenRequests[st.tokenRequests.length - 1].on_behalf_of = body.on_behalf_of || null;
+                    st.tokenRequests[st.tokenRequests.length - 1].ttl = body.ttl || null;
+                    return json(200, { access_token: serviceAuth.signServiceToken(claims, privatePem), token_type: 'Bearer', expires_in: ttl });
                 }
             }
             const a = st.apps.get(body.client_id);
@@ -297,6 +304,42 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
             if (missing.length) return json(400, { error: 'invalid_scope', error_description: `not granted: ${missing.join(' ')}` });
             if (!wanted.length) return json(400, { error: 'invalid_scope', error_description: `no grants for audience ${body.audience}` });
             return json(200, { access_token: mintApp(a, body.audience, wanted), token_type: 'Bearer', expires_in: 300, scope: wanted.join(' ') });
+        }
+        // ── OpenVibe.AI's stand-in (Codes C3): the vault of a person's own keys and the two model endpoints ──
+        if (url.pathname.startsWith('/api/v1/credentials/')) {
+            const parts = url.pathname.split('/').filter(Boolean);   // api, v1, credentials, subject, provider
+            const subject = parts[3]; const provider = parts[4];
+            if (!subject || !provider) return problem(json, 404, 'route.not_found', 'no such route');
+            const key = `${subject}:${provider}`;
+            const view = (row) => row && ({ subject: row.subject, owner: 'codes', provider: row.provider, base_url: row.base_url || null, key_hint: `\u2026${String(row.key || '').slice(-4)}`, models: {}, budget_usd_per_day: row.budget_usd_per_day == null ? null : row.budget_usd_per_day, spent_usd_today: row.spent_usd_today || 0, created_at: row.created_at, updated_at: row.updated_at, last_used_at: row.last_used_at || null });
+            if (req.method === 'PUT') {
+                let body = {};
+                try { body = JSON.parse(raw.toString('utf8') || '{}'); } catch { return problem(json, 400, 'input.invalid', 'body is not JSON'); }
+                const prev = st.vault.get(key);
+                const row = { subject, provider, key: body.key != null ? String(body.key) : (prev ? prev.key : ''), base_url: body.base_url != null ? body.base_url : (prev ? prev.base_url : null), budget_usd_per_day: body.budget_usd_per_day != null ? body.budget_usd_per_day : (prev ? prev.budget_usd_per_day : null), spent_usd_today: prev ? prev.spent_usd_today : 0, created_at: prev ? prev.created_at : new Date().toISOString(), updated_at: new Date().toISOString(), last_used_at: prev ? prev.last_used_at : null };
+                st.vault.set(key, row);
+                return json(200, view(row));
+            }
+            if (req.method === 'GET') {
+                const row = st.vault.get(key);
+                if (!row) return problem(json, 404, 'credential.not_found', 'no credential stored for that subject');
+                return json(200, view(row));
+            }
+            if (req.method === 'DELETE') {
+                if (!st.vault.has(key)) return problem(json, 404, 'credential.not_found', 'no credential stored for that subject');
+                st.vault.delete(key);
+                return json(204, {});
+            }
+            return problem(json, 404, 'route.not_found', 'no such route');
+        }
+        if (url.pathname === '/v1/messages' || url.pathname === '/v1/chat/completions') {
+            const credential = String(req.headers['x-openvibe-credential'] || '');
+            st.modelRequests = st.modelRequests || [];
+            st.modelRequests.push({ path: url.pathname, credential, authorization: String(req.headers.authorization || '') });
+            if (st.modelFails) return json(503, { type: 'error', error: { type: 'overloaded_error', message: st.modelFails } });
+            return json(200, url.pathname === '/v1/messages'
+                ? { id: 'msg_1', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'ok' }], model: 'openvibe', usage: { input_tokens: 1, output_tokens: 1 } }
+                : { id: 'chatcmpl_1', object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }], model: 'openvibe', usage: { prompt_tokens: 1, completion_tokens: 1 } });
         }
         if (url.pathname.startsWith('/api/v1/projects')) {
             const u = userFrom(req);

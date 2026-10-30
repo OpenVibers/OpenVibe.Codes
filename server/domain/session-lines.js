@@ -16,6 +16,7 @@
  *     retention                            { runOnce, start, stop } (CODES_SESSION_RETENTION_DAYS, default 90)
  */
 const { TERMINAL, sessionLogOf } = require('./run-tasks');
+const redact = require('./redact');
 
 const MAX_BODY_BYTES = 64 * 1024;
 const CLIP_MARKER = '… [clipped]';
@@ -106,7 +107,9 @@ function createSessionLines({ store, config = {}, log = console }) {
             if (!Number.isSafeInteger(seq) || seq < 1) continue;
             const at = atIso(line.at) || store.iso();
             const kind = String(line.kind || 'text').slice(0, 64) || 'text';
-            clean.push({ seq, at, kind, body: clipBody(line.body) });
+            // The transcript normaliser: a run token (Codes C3) that an agent printed is redacted here, before the
+            // line is kept, so it never reaches the transcript, the page or the log.
+            clean.push({ seq, at, kind, body: clipBody(redact.scrubValue(line.body)) });
         }
         let inserted = 0;
         for (let i = 0; i < clean.length; i += 200) {

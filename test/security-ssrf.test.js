@@ -47,6 +47,8 @@ const INTERNAL = [`http://127.0.0.1:3000${PROBE}`, `http://2130706433${PROBE}`, 
             'server/http/home.js': 'OpenVibe Git\'s public repository search (CODES_GIT_INTERNAL_URL, configured loopback Forgejo) for the home page; no token',
             'server/http/me-api.js': 'Network projects API (configured) with the viewer\'s token, for the user task API; no URL from a person',
             'server/http/pages.js': 'Network projects API (configured) for Improve OpenVibe project creation; Forgejo repo read (CODES_GIT_INTERNAL_URL) for repo details; no URL from a person',
+            'server/domain/connections.js': 'OpenVibe.AI (CODES_AI_URL, configured) for a person\'s own keys: the credential routes and the two model endpoints, with the provider and the subject as path segments; no URL from a person',
+            'server/domain/run-tokens.js': 'OpenVibe.Network\'s token endpoint (OV_NETWORK_INTERNAL_URL, configured) for a run token; no URL from a person',
             'server/events-consumer.js': 'OpenVibe.Events subscriptions (EVENTS_URL, configured) at boot; no URL from a person',
             'server/events/outbox.js': 'OpenVibe.Events publish (EVENTS_URL, configured) of fixed codes.task.* payloads; no URL from a person',
         };

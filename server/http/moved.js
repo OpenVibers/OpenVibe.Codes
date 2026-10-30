@@ -18,8 +18,8 @@ const SERVICES_ORIGIN = 'https://openvibe.services';
 const MOVED_PREFIXES = ['/docs', '/projects', '/releases', '/apps', '/oauth', '/tools', '/manifests', '/staff'];
 const MOVED_EXACT = ['/policy/rfc', '/policy/compatibility', '/policy/licensing', '/policy/transparency'];
 // The console's API: everything under /api/v1 but the agent catalog, the coding tasks (codes.task.*), the user task
-// API and the Action Center read (codes.actions.read).
-const API_STAYS = /^\/api\/v1\/(harnesses|tasks|actions|me\/tasks)(\/|$)/;
+// API, the Action Center read (codes.actions.read) and a person's own connections (Codes C3).
+const API_STAYS = /^\/api\/v1\/(harnesses|tasks|actions|me\/tasks|connections)(\/|$)/;
 
 const under = (p, prefix) => p === prefix || p.startsWith(`${prefix}/`);
 

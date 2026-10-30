@@ -29,9 +29,12 @@ const { createHarnesses } = require('./domain/harnesses');
 const { createPageRoutes } = require('./http/pages');
 const { createRunRoutes } = require('./http/run');
 const { createTasksApi } = require('./http/tasks-api');
+const { createConnectionsApi } = require('./http/connections-api');
 const { createActionsApi } = require('./http/actions-api');
 const { createRunClient } = require('./domain/run-client');
 const { createRunTasks } = require('./domain/run-tasks');
+const { createConnections } = require('./domain/connections');
+const { createRunTokens } = require('./domain/run-tokens');
 const { createSessionLines } = require('./domain/session-lines');
 const { createOutbox, createPublisher } = require('./events/outbox');
 const { createEventsConsumer } = require('./events-consumer');
@@ -66,8 +69,12 @@ async function createApp(opts = {}) {
     const sessions = createSessionLines({ store, config, log });
     const outbox = createOutbox({ store, log });
     const run = opts.run || createRunClient({ config, fetchImpl: fetchImpl || globalThis.fetch });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox });
-    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks };
+    // A person's own connections (Codes C3): their provider keys live in OpenVibe.AI, and their harnesses run with a
+    // short-lived run token that names them.
+    const connections = createConnections({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    const runTokens = createRunTokens({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections });
+    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens };
     ctx.forgejo = createForgejoClient({ config, log });
 
     const app = express();
@@ -170,6 +177,8 @@ async function createApp(opts = {}) {
     app.use('/api/v1', createApi(ctx));
     app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, actorLimits: ctx.actorLimits, log }));
+    // A person's connections: their own provider keys (stored in OpenVibe.AI, never here) and their machines' plans.
+    app.use('/api/v1', createConnectionsApi({ config, store, connections, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createActionsApi({ config, store, keys, run, tasks, actorLimits: ctx.actorLimits, log }));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
 

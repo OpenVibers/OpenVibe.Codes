@@ -27,7 +27,7 @@ async function boot(opts = {}) {
         NODE_ENV: 'test', PORT: '0', BASE_URL: 'https://openvibe.codes', TRUST_PROXY: '1',
         OV_NETWORK_URL: network.url, OV_NETWORK_INTERNAL_URL: network.url,
         OV_OAUTH_CLIENT_ID: 'codes', OV_OAUTH_CLIENT_SECRET: 'codes-secret', COOKIE_SECURE: 'false',
-        ...(opts.env || {}),
+        ...(typeof opts.env === 'function' ? opts.env(network) : (opts.env || {})),
     };
     const configLib = require('../../server/config');
     const { createApp } = require('../../server/app');

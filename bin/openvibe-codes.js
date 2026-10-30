@@ -8,7 +8,7 @@
  */
 const path = require('path');
 const { createHarness } = require('../harness');
-const { runJob, resultWriter } = require('../harness/job');
+const { runJob, resultWriter, jobEnv } = require('../harness/job');
 const { version: VERSION } = require('../package.json');
 const { probe: probeLogins } = require('../engine/logins');
 
@@ -152,7 +152,13 @@ async function main() {
     if (cmd === 'job') {
         // The job ends 0 whenever it handed over a result, ok or not (the document says which): OpenVibe Run keeps a
         // result only from a job that exited 0, and the person needs the summary and the patch either way.
-        await runJob({ input: await readStdin(), harness, emit: out, writeResult: resultWriter(out) });
+        const input = await readStdin();
+        // The job's own environment (Codes C3): the run token the harness carries and where the model APIs are. The
+        // harness is built with it, so the agent's process gets the token and never the job's other input.
+        let wanted = {};
+        try { wanted = jobEnv(JSON.parse(input)); } catch { wanted = {}; }
+        const jobHarness = createHarness({ env: { ...process.env, ...wanted } });
+        await runJob({ input, harness: jobHarness, emit: out, writeResult: resultWriter(out) });
         return 0;
     }
     if (cmd === 'runs') {

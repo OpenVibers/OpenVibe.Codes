@@ -63,6 +63,32 @@ function scrub(s) {
     return String(s).replace(/(https?:\/\/)[^@/\s]+@/g, '$1***@').replace(/gh[pousr]_[A-Za-z0-9]{20,}/g, '***');
 }
 
+/**
+ * The environment a job may set for the harness (Codes C3): the model APIs' own names, nothing else. A run token
+ * travels this way (the job's input carries it, the harness's process gets it), so only these names are read from
+ * the job's input: everything else in it is ignored.
+ */
+const ENV_NAMES = new Set([
+    'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_CUSTOM_HEADERS',
+    'OPENAI_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_CUSTOM_HEADERS',
+    'DEEPSEEK_BASE_URL', 'DEEPSEEK_API_KEY',
+    'OPENVIBE_AI_URL', 'OPENVIBE_AI_TOKEN', 'OPENVIBE_CODES_BASE_URL', 'OPENVIBE_CODES_API_KEY',
+    'OPENVIBE_CODES_MODEL', 'OPENVIBE_CODES_HEADERS',
+]);
+
+/** The environment a job's input asks for: the allowlisted names only, each a short string. */
+function jobEnv(input) {
+    const out = {};
+    const a = input && typeof input === 'object' && !Array.isArray(input) ? input.env : null;
+    if (!a || typeof a !== 'object' || Array.isArray(a)) return out;
+    for (const [k, v] of Object.entries(a)) {
+        if (!ENV_NAMES.has(k)) continue;
+        if (typeof v !== 'string' || !v || v.length > 4000) continue;
+        out[k] = v;
+    }
+    return out;
+}
+
 /** The job's input checked: a public https repository (file:// only when OPENVIBE_CODES_ALLOW_FILE_REPO=1, for tests). */
 function parseArgs(raw, env = process.env) {
     let a;
@@ -84,8 +110,15 @@ function parseArgs(raw, env = process.env) {
     } : null;
     if (push && push.branch && (!BRANCH.test(push.branch) || push.branch.startsWith('-'))) throw new Error('push.branch must be a branch name');
     if (push && push.branch && PROTECTED.test(push.branch)) throw new Error(`push.branch must be a new branch of the task's own, never ${push.branch}`);
+    // The session a resume continues: the job's own input, or RESUME in the environment (a task carried on in the
+    // same conversation). It is a harness's session id, never a path and never a credential.
+    const resumeIn = a.resume == null || a.resume === '' ? env.RESUME : a.resume;
+    const resume = typeof resumeIn === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(resumeIn) ? resumeIn : null;
+    const wanted = jobEnv(a);
     return {
         repo: repo.toString(), ref, prompt, permission, push,
+        ...(resume ? { resume } : {}),
+        ...(Object.keys(wanted).length ? { env: wanted } : {}),
         agent: typeof a.agent === 'string' && /^[a-z0-9-]{1,40}$/.test(a.agent) ? a.agent : null,
         model: typeof a.model === 'string' && a.model.length <= 100 ? a.model : null,
     };
@@ -313,4 +346,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, JOB_PROTOCOL };
+module.exports = { runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL };

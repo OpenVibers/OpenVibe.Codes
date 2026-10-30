@@ -4,7 +4,7 @@
  * Coding tasks on a person's own machine (run_tasks, plan T16): what the /run pages (server/http/run.js) and the
  * service API (server/http/tasks-api.js, codes.task.*) share.
  *
- *   createRunTasks({ store, run, config, log, sessions, outbox })
+ *   createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections })
  *     start({ subject, project, args, via, key }) → the row: queued (Run took the job) or failed (Run's reason)
  *     refresh(row, { force })                     → the row, read from Run only as a fallback after 10 quiet minutes
  *     applyEvent(row, event)                      → a run.job.* delivery: state, timings, result, event, in one tx
@@ -85,12 +85,70 @@ function errorOf(job) {
     return `${job.error.code || 'run.error'}${job.error.detail ? `: ${job.error.detail}` : ''}`.slice(0, 1000);
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
     const sessionLines = sessions || require('./session-lines').createSessionLines({ store, config, log });
     const taskOutbox = outbox || require('../events/outbox').createOutbox({ store, log });
+
+    // ── The person's connections (Codes C3) ──
+    // What they may run: the providers they keep a key for and the plans on their machines. It is read from
+    // OpenVibe.AI (the keys) and from the machines' reports (the plans, empty until the machines report them).
+    // The answer is cached for a minute, so a task that ends does not ask again for every attempt.
+    const connectionCache = new Map();
+    const CONNECTION_TTL_MS = 60_000;
+    let providerMap = null;
+    async function personConnections(subject) {
+        if (!connections || !subject) return null;
+        const hit = connectionCache.get(subject);
+        if (hit && hit.until > store.now()) return hit.value;
+        let value = null;
+        try {
+            const out = await connections.list(subject);
+            value = { providers: (out.keys || []).map((k) => k.provider), plans: out.plans || [] };
+        } catch (e) {
+            log.warn(`[Codes] the connections of ${subject} could not be read: ${String(e && e.message).slice(0, 200)}`);
+            value = null;
+        }
+        connectionCache.set(subject, { value, until: store.now() + CONNECTION_TTL_MS });
+        return value;
+    }
+
+    /**
+     * The environment the job's harness gets (Codes C3): a run token that names the person and says where to
+     * send its requests. A failure to mint one is not fatal: the job runs as it did before, without the token.
+     */
+    async function harnessEnv({ subject, taskId, attemptId = null, agent = null }) {
+        if (!runTokens) return null;
+        try {
+            const provider = providerFor(agent);
+            const own = provider ? await hasOwnKey(subject, provider) : false;
+            const minted = await runTokens.mint({ subject, task: taskId, attempt: attemptId, harness: agent, provider, ownKey: own });
+            return minted.env;
+        } catch (e) {
+            log.warn(`[Codes] no run token for task ${taskId}: ${String(e && e.message).slice(0, 200)}`);
+            return null;
+        }
+    }
+
+    /** The provider a harness runs on: the catalog's own word for it (anthropic, openai, deepseek, …). */
+    function providerFor(agent) {
+        if (!agent) return null;
+        if (!providerMap) {
+            providerMap = {};
+            for (const offer of require('./harnesses').createHarnesses().list()) providerMap[offer.id] = offer.provider;
+        }
+        return providerMap[agent] || null;
+    }
+
+    /** Whether the person keeps their own key for this provider. */
+    async function hasOwnKey(subject, provider) {
+        const conns = await personConnections(subject);
+        if (!conns) return false;
+        return conns.providers.includes(provider);
+    }
+
 
     /**
      * One state change: update the row, write its codes.task.* outbox row in the same transaction, and on a terminal
@@ -141,7 +199,10 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         });
         let job;
         try {
-            job = await run.submit({ subject, project, args, key: id });
+            // The job's harness runs with a short-lived run token that names the person (Codes C3): the environment
+            // travels with the job's input and the machine's worker hands it to the harness.
+            const env = await harnessEnv({ subject, taskId: id, agent: args.agent || null });
+            job = await run.submit({ subject, project, args: env ? { ...args, env } : args, key: id });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             return await store.tx(async () => {
