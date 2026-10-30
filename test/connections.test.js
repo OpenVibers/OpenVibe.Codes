@@ -14,7 +14,9 @@ const router = require('../engine/router');
 
 (async () => {
     const KEY = 'sk-ant-0123456789abcdefXYZ';
-    const t = await boot({ env: (network) => ({ CODES_AI_URL: network.url }) });
+    // The public address is an address that cannot answer (the vault is a host-local API): if Codes reached for it
+    // instead of its own loopback address, every call here would fail.
+    const t = await boot({ env: (network) => ({ CODES_AI_URL: 'https://ai.openvibe.services.invalid', CODES_AI_INTERNAL_URL: network.url }) });
     const db = t.ctx.store.db;
     const ada = t.network.addUser('ada');
     const bo = t.network.addUser('bo');
