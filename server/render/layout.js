@@ -38,6 +38,7 @@ const NAV = [
 const WORKSPACE_NAV = [
     { label: 'Home', href: '/', icon: 'fa-house' },
     { label: 'Tasks', href: '/tasks', icon: 'fa-list' },
+    { label: 'Conductor', href: '/conductor', icon: 'fa-chart-simple' },
     { label: 'Agents', href: '/agents', icon: 'fa-robot' },
     { label: 'Machines', href: '/machines', icon: 'fa-display' },
     { label: 'Usage', href: '/usage', icon: 'fa-chart-line' },
@@ -70,7 +71,7 @@ function renderPage(o) {
     const pathNow = o.path || '/';
     // The workspace pages share the compact Frame: no second app bar under the Frame's own (a query must not change it).
     const pathOnly = pathNow.split('?')[0];
-    const c4Workspace = pathOnly === '/' || /^\/(tasks|agents|machines|usage|settings)(\/|$)/.test(pathOnly);
+    const c4Workspace = pathOnly === '/' || /^\/(tasks|conductor|approvals|agents|machines|usage|settings)(\/|$)/.test(pathOnly);
     const loginNext = encodeURIComponent(pathNow);
     const canonical = `${o.config.baseUrl}${pathNow.split('?')[0]}`;
     // One navigation per page. On the workspace pages a signed-in person's navbar carries the workspace sections, with
