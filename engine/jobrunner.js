@@ -26,8 +26,8 @@ const transcript = require('./transcript');
 const joblines = require('./joblines');
 const budget = require('./budget');
 
-/** How long one attempt may run (the portal's 2700 s). */
-const DEFAULT_TIMEOUT_MS = 45 * 60 * 1000;
+/** The wall clock when the task sets none: no limit, like every other unset limit. */
+const DEFAULT_TIMEOUT_MS = 0;
 
 /**
  * Run one attempt.
@@ -40,7 +40,10 @@ const DEFAULT_TIMEOUT_MS = 45 * 60 * 1000;
  * @param {string} [opts.effort] the wanted reasoning level (fitted to the harness)
  * @param {string} [opts.permission] 'read' | 'edit' | 'full'
  * @param {string} [opts.resume] the session to continue
- * @param {object} [opts.budget] the limits ({ steps, minutes, usd })
+ * @param {object} [opts.budget] the limits ({ steps, minutes, usd }); null means no limit
+ * @param {boolean} [opts.know] this machine has the shared Know MCP server (Claude Code gets mcp__ov_know)
+ * @param {string} [opts.claudeConfig] the Claude Code config to read for that check
+ * @param {string} [opts.knowLessons] the Know store's module (know/lessons.js) for the prompt's lessons
  * @param {string} [opts.log] the file the feed is written to
  * @param {function} [opts.onLine] every job line
  * @param {AbortSignal} [opts.signal] stops the attempt
@@ -58,7 +61,7 @@ async function runAttempt(opts = {}) {
     // The prompt: the rules, the house rules, the lessons, the repo digest, then the brief.
     const prompt = opts.systemPrompt === false
         ? { text: String(opts.prompt || ''), parts: [{ name: 'brief', text: String(opts.prompt || '') }] }
-        : assemble({ brief: opts.prompt, dir: cwd, env: opts.env || process.env });
+        : assemble({ brief: opts.prompt, dir: cwd, env: opts.env || process.env, know: opts.knowLessons });
     const rulesFile = opts.rulesFile !== null ? path.join(dir, 'rules.md') : null;
     if (rulesFile) fs.writeFileSync(rulesFile, prompt.parts.filter((p) => p.name !== 'brief').map((p) => p.text).join('\n\n'));
 
@@ -67,13 +70,22 @@ async function runAttempt(opts = {}) {
         try { adapter.writeSettings(cwd, { permission: opts.permission || 'edit' }); } catch { /* the job may not write there */ }
     }
 
+    // The task's limits (Settings → Limits) set the harness's own caps too: its turn cap sits 25 above the step limit
+    // and its wall clock 5 minutes past the time limit, or there is neither (engine/budget.js caps()). Passing them to
+    // the builder and the process keeps Command Code, Claude Code and MiniMax Code from their old hard-coded 150/200.
+    const limits = budget.limitsFor({ budget: opts.budget || {} }, opts.agent, opts.budgetOverride);
+    const caps = budget.caps(limits);
     const built = adapter.build({
         prompt: prompt.text,
         model: opts.model,
         effort: opts.effort,
         resume: opts.resume,
         permission: opts.permission,
-        maxTurns: opts.maxTurns,
+        maxTurns: opts.maxTurns != null ? opts.maxTurns : caps.maxTurns,
+        maxSteps: opts.maxSteps != null ? opts.maxSteps : (opts.maxTurns != null ? opts.maxTurns : caps.maxTurns),
+        timeout: caps.timeout,
+        know: opts.know,
+        claudeConfig: opts.claudeConfig,
         cwd,
         rules: rulesFile,
         provider: opts.provider,
@@ -82,7 +94,6 @@ async function runAttempt(opts = {}) {
     });
 
     const started = Date.now();
-    const limits = budget.limitsFor({ budget: opts.budget || {} }, opts.agent, opts.budgetOverride);
     const state = { from: 0, sessionId: opts.resume || null, usage: null, cost: null, steps: 0, done: false };
 
     const feed = adapter.feed({
@@ -115,7 +126,7 @@ async function runAttempt(opts = {}) {
         // The adapter's own environment (the provider's, the effort), then the job's (the PATH with the CLI on it).
         env: { ...(opts.env || {}), ...built.env },
         stdin: built.stdin,
-        timeoutMs: opts.timeoutMs || DEFAULT_TIMEOUT_MS,
+        timeoutMs: opts.timeoutMs != null ? opts.timeoutMs : caps.timeoutMs,
         signal: opts.signal,
         onLine: (raw) => { feed.line(raw); pump(); },
         onEnd: () => { feed.end(); },

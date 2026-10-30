@@ -55,6 +55,7 @@ const REASON_TEXT = {
     incomplete: 'it stopped before the work was done',
     context: 'the context grew too big',
     hung: 'it went quiet for too long',
+    turns: 'stopped at its turn cap, mid-work',
 };
 
 // A job that stopped for a reason the engine can fix by itself: the context is too big, the clock ran out, the agent
@@ -77,6 +78,9 @@ function reason(text) {
     if (/authenticat|log ?in again|run .?cmd login|\b401\b|api key (has )?expired|invalid api key|unauthori[sz]ed|not signed in/i.test(s)) return 'auth';
     if (/at capacity|overloaded|\b529\b|\b503\b|temporarily unavailable|server is busy/i.test(s)) return 'capacity';
     if (/mcode exec failed:.*Internal server error.*\(50[024]\)/i.test(s) || /(?:HTTP(?: status)?|status(?: code)?)\s*[:=]?\s*50[024]\b/i.test(s)) return 'capacity';
+    // A harness's own turn cap ("✔ max_turns in 2483s", error_max_turns): the work isn't done and isn't broken. It is
+    // continued in its own session, on the same harness, never restarted on another (10-30, cc:codes-c4b-screens).
+    if (/\bmax[_ ]turns\b|error_max_turns|turn limit|maximum (?:number of )?turns/i.test(s)) return 'turns';
     return 'error';
 }
 
@@ -411,6 +415,20 @@ function chainEnd(runs) {
     return settleChain(runs, byKey, carriedMap(runs, byKey), latest).end;
 }
 
+/** Whether the owner settled an attempt (Fine / Mark handled): its continuation is settled too and is never switched. */
+function ownerSettled(run) {
+    if (!run) return false;
+    if (run.resolvedNote) return true;
+    return !!(run.resolved && (run.resolved.how === 'note' || run.resolved.how === 'stopped'));
+}
+
+/** The attempt this one continues, when the owner already settled it. */
+function settledParent(runs, end) {
+    if (!end || !end.parent) return null;
+    const parent = runs.find((r) => r.key === end.parent);
+    return ownerSettled(parent) ? parent : null;
+}
+
 /** The next step, given the chain's end. */
 function step(runs, end, opts = {}) {
     if (!end) return { action: 'none', why: 'there are no attempts' };
@@ -422,6 +440,17 @@ function step(runs, end, opts = {}) {
         const hit = (end.budget && end.budget.hit) || 'steps';
         const wrap = budget.wrapUp(hit, { done: !!end.wrapUp });
         return { action: wrap.action, hit, prompt: wrap.prompt, why: wrap.why };
+    }
+    // A harness that stopped at its own turn cap is carried on in its own session, on the same harness, with its
+    // context. This comes before every switch: the work is not broken, and another runner would redo it from scratch.
+    if (why === 'turns') {
+        const session = facts(end).session;
+        if (session) return { action: 'continue', session, why: 'the harness stopped at its turn cap, mid-work: continue it in the same session' };
+        const settled = settledParent(runs, end);
+        if (settled) return { action: 'failed', why: `its earlier attempt was marked handled by the owner (${settled.key}): not switched to another runner` };
+        const choice = nextRunner(end, opts);
+        if (!choice) return { action: 'failed', why: 'the harness stopped at its turn cap, there is no session to continue, and no other runner can take it now' };
+        return { action: 'switch', runner: choice.runner, model: choice.model, why: choice.why };
     }
     // The same session continues the task when it stopped early (crash, timeout, incomplete, hung); a context that
     // grew too big starts fresh with a compacted brief instead. This comes before the runner switch: a context that
@@ -439,6 +468,10 @@ function step(runs, end, opts = {}) {
         const tries = end.attempt || 1;
         const max = why === 'error' ? 2 : 4;
         if (tries >= max) return { action: 'failed', why: `the task was already retried ${tries} times; the owner must decide` };
+        // A continuation of an attempt the owner marked Fine is never switched to another runner: it would redo work
+        // the owner already landed (10-30, blog-patchnotes-v2).
+        const settled = settledParent(runs, end);
+        if (settled) return { action: 'failed', why: `its earlier attempt was marked handled by the owner (${settled.key}): not switched to another runner` };
         const choice = nextRunner(end, opts);
         if (!choice) return { action: 'failed', why: `no other runner can take it now (${why})` };
         const out = { action: 'switch', runner: choice.runner, model: choice.model, why: choice.why };

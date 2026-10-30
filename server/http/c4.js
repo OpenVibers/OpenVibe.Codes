@@ -460,11 +460,23 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
         const agentOptions = (harnesses?.list?.() || []).map((a) => `<option value="${esc(a.id)}"${settings && settings.default_agent === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
         // The same order the Home picker shows: the machines their work ran on last come first.
         const machineOptions = orderMachines((mine.machines || []).filter((m) => m.state !== 'revoked'), used).map((m) => machineOption(m, settings)).join('');
+        // Settings → Limits (C9a): steps and minutes per task, for every agent at once; No limit means none.
+        const limitSelect = (name, value, presets, unit) => {
+            const choices = [[null, 'No limit'], ...presets];
+            if (value != null && !choices.some(([v]) => v === Number(value))) choices.push([Number(value), Number(value).toLocaleString('en-US')]);
+            return `<select name="${name}">${choices.map(([v, label]) => `<option value="${v == null ? '' : v}"${(v == null ? value == null : Number(value) === v) ? ' selected' : ''}>${esc(label)}${v == null ? '' : ` ${unit}`}</option>`).join('')}</select>`;
+        };
         const content = `${header('Settings', 'Your choices, remembered for your account.')}${viewer(req) ? `${flash(req)}<section class="c4-card"><form class="c4-form" method="post" action="/settings">
 <div class="c4-form-grid">
 <label>Default agent <select name="default_agent"><option value="">Auto</option>${agentOptions}</select></label>
 <label>Default machine <select name="default_machine"><option value="">Auto</option>${machineOptions}</select></label>
 </div>
+<h3 class="c4-subhead">Limits</h3>
+<div class="c4-form-grid">
+<label>Steps per task ${limitSelect('steps', settings.steps, [[200, '200'], [350, '350'], [500, '500'], [1000, '1,000']], 'steps')}</label>
+<label>Time per task ${limitSelect('minutes', settings.minutes, [[45, '45'], [90, '90'], [180, '180'], [360, '360']], 'min')}</label>
+</div>
+<p class="c4-hint">For every agent. The harness's own turn cap and timer follow these; No limit means none. A task that reaches a limit lands its work in one last turn and carries on with a fresh budget.</p>
 <h3 class="c4-subhead">Notifications</h3>
 <div class="c4-checks">
   <label class="c4-check"><input type="checkbox" name="notify_done" value="1"${settings.notify_done ? ' checked' : ''}><span><b>A task finishes</b><small>Tell me when it ends, with its outcome.</small></span></label>
@@ -487,6 +499,8 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
                 notify_done: b.notify_done === '1',
                 notify_needs: b.notify_needs === '1',
                 ...(b.safety ? { safety: b.safety } : {}),
+                steps: b.steps === undefined ? undefined : b.steps,
+                minutes: b.minutes === undefined ? undefined : b.minutes,
             });
             return res.redirect(303, '/settings?ok=Settings%20saved');
         } catch (e) {

@@ -128,6 +128,24 @@ const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
             assert.notStrictEqual(last.key, id, 'the follow-up has its own idempotency key');
         });
 
+        await check('one continuation at a time: a manual continue while the automatic one runs returns the live one', async () => {
+            const id = await startTask();
+            const result = {
+                ok: false, summary: 'I will continue with the rest of it', files: [],
+                log: [{ t: 'agent', agent: 'claude-code', session: 'sess-live' }, { t: 'done', ok: false, text: 'I will continue with the rest of it' }],
+            };
+            await endAttempt(id, { state: 'failed', result, error: 'the machine went away' });
+            const attempts = await attemptsOf(id);
+            assert.strictEqual(attempts.length, 2, 'the crash was carried on automatically');
+            assert.strictEqual(attempts[1].state, 'queued', 'and its job is live');
+            const submits = calls.filter((c) => c[0] === 'submit').length;
+            const pressed = await call('POST', `/tasks/${id}/continue`, { body: { note: 'And check the tests.' } });
+            assert.strictEqual(pressed.status, 200, JSON.stringify(pressed.json));
+            assert.strictEqual(pressed.json.attempts.length, 2, 'no second continuation was started');
+            assert.strictEqual(pressed.json.attempts[1].session, 'sess-live', 'the live continuation is the one returned');
+            assert.strictEqual(calls.filter((c) => c[0] === 'submit').length, submits, 'no job was started beside it');
+        });
+
         await check('a limit: another agent takes over, with a hand-over note of what the last one did', async () => {
             const id = await startTask();
             const result = { ok: false, summary: 'I fixed the parser', files: [{ path: 'src/parse.js', added: 3, removed: 1 }], log: [{ t: 'done', ok: false, text: 'usage limit reached' }] };
@@ -215,9 +233,12 @@ const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
             assert.strictEqual(continued.json.attempts.length, 2);
             assert.strictEqual(continued.json.attempts[1].kind, 'manual');
             assert.ok(/carried on by the owner/.test(continued.json.attempts[1].why), continued.json.attempts[1].why);
-            // While the task runs again, nobody carries it on a second time.
+            // While the task runs again, nobody carries it on a second time: the live attempt answers the press.
+            const runsBefore = calls.filter((c) => c[0] === 'submit').length;
             const again = await call('POST', `/tasks/${id}/continue`, { body: { agent: 'codex' } });
-            assert.strictEqual(again.status, 409, 'the task is running again');
+            assert.strictEqual(again.status, 200, JSON.stringify(again.json));
+            assert.strictEqual(again.json.attempts.length, 2, 'the live attempt is returned, not a second one');
+            assert.strictEqual(calls.filter((c) => c[0] === 'submit').length, runsBefore, 'no job was started');
         });
 
         await check('the auth of every new route: no token, no capability, another person', async () => {

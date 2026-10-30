@@ -4,7 +4,7 @@
 
 const assert = require('node:assert/strict');
 const { check, done } = require('./helpers/boot');
-const { limitsFor, evaluate, state, wrapUp, wrapUpPrompt, STATES } = require('../engine/budget');
+const { limitsFor, caps, evaluate, state, wrapUp, wrapUpPrompt, STATES } = require('../engine/budget');
 
 (async () => {
     await check('the limits are the config\'s, then the runner\'s, then the task\'s', () => {
@@ -18,6 +18,18 @@ const { limitsFor, evaluate, state, wrapUp, wrapUpPrompt, STATES } = require('..
     await check('a limit that is not set is no limit, never a zero budget', () => {
         assert.deepEqual(limitsFor({ budget: { steps: 0, minutes: -1, usd: 'many' } }, 'mm'), { steps: null, minutes: null, usd: null });
         assert.equal(evaluate({ steps: 100000 }, limitsFor({}, 'mm')).hit, null);
+    });
+
+    await check('the harness caps follow the limits: 25 turns and 5 minutes above, or none', () => {
+        assert.deepEqual(caps({ steps: 350, minutes: 45 }), { maxTurns: 375, timeoutMs: 50 * 60_000, timeout: '50m' });
+        assert.deepEqual(caps({ steps: 200, minutes: 90 }), { maxTurns: 225, timeoutMs: 95 * 60_000, timeout: '95m' });
+        // No limit means none: the harness's own cap is effectively off, and the wall clock is no timer at all.
+        const none = caps({ steps: null, minutes: null });
+        assert.equal(none.maxTurns, 100000);
+        assert.equal(none.timeoutMs, 0);
+        assert.equal(none.timeout, '100000m');
+        assert.deepEqual(caps({}), none);
+        assert.deepEqual(caps({ steps: 0, minutes: 0 }), none);
     });
 
     await check('the first limit reached wins', () => {

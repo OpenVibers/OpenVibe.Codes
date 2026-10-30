@@ -121,6 +121,39 @@ const carried = (parent, name, at) => ({
         assert.match(step.why, /crash/);
     });
 
+    await check('a harness turn cap is continued in its own session, on the same harness, never switched', () => {
+        const cfg = { subagents: { cc: { enabled: true, max: 2 }, mm: { enabled: true, max: 2 } }, fallback: { order: ['cc', 'mm'] } };
+        const ctx = { cfg, health: { cc: { state: 'ok' }, mm: { state: 'ok' } }, counts: {}, models: {}, runners: ['cc', 'mm'] };
+        for (const error of ['max_turns in 2483s', 'error_max_turns', 'turn limit_exceeded', 'maximum number of turns reached']) {
+            const attempts = [{ ...job('cc', 'a', 'failed', now, { error }), facts: { session: 'sess-9' } }];
+            const step = chain.nextStep(attempts, ctx);
+            assert.equal(step.action, 'continue', error);
+            assert.equal(step.session, 'sess-9', error);
+            assert.match(step.why, /turn cap/, error);
+        }
+        // Without a session there is nothing to continue: then, and only then, another runner may take it.
+        const noSession = chain.nextStep([job('cc', 'a', 'failed', now, { error: 'max_turns' })], ctx);
+        assert.equal(noSession.action, 'switch');
+        assert.equal(noSession.runner, 'mm');
+    });
+
+    await check('a continuation of an attempt the owner marked handled is never switched', () => {
+        const cfg = { subagents: { cc: { enabled: true, max: 2 }, mm: { enabled: true, max: 2 } }, fallback: { order: ['cc', 'mm'] } };
+        const ctx = { cfg, health: { cc: { state: 'ok' }, mm: { state: 'ok' } }, counts: {}, models: {}, runners: ['cc', 'mm'] };
+        const parent = job('cc', 'a', 'failed', now - 5000, { resolvedNote: 'Fine: the work landed in PR 12' });
+        for (const error of ['usage limit reached', 'max_turns']) {
+            const child = job('mm', 'a-r2', 'failed', now, { parent: 'cc:a', error });
+            const step = chain.nextStep([parent, child], ctx);
+            assert.notEqual(step.action, 'switch', error);
+            assert.equal(step.action, 'failed', error);
+            assert.match(step.why, /marked handled by the owner/, error);
+        }
+        // On a fresh parent that was not settled, the switch still happens.
+        const open = job('cc', 'b', 'failed', now - 5000);
+        const failed = job('mm', 'b-r2', 'failed', now, { parent: 'cc:b', error: 'usage limit reached' });
+        assert.equal(chain.nextStep([open, failed], ctx).action, 'switch');
+    });
+
     await check('a context that grew too big starts fresh instead of continuing', () => {
         const attempts = [{ ...job('cc', 'a', 'failed', now), facts: { apiError: 'prompt is too long: 250000 tokens' } }];
         const step = chain.nextStep(attempts);

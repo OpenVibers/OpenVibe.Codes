@@ -31,6 +31,11 @@ adapterFor('codex').build({ prompt, cwd, model: 'gpt-5-codex', effort: 'medium',
 The effort is fitted to the harness, never handed over as it came: the 2026-10-29 incident killed a job that copied
 Codex's "medium" to Command Code, which accepts off, low, high and max.
 
+The harness's own turn cap and wall clock follow the task's limits (`budget.caps()`): 25 turns above the step limit and
+5 minutes past the time limit, or 100000 / no timer when the owner set none. `claude-code` and `command-code` carry it
+as `--max-turns`, `minimax-code` as `--max-steps` and `--timeout`; every adapter is stopped by the same wall clock in
+`runCli()`. Claude Code also gets `mcp__ov_know` when the machine has the shared Know MCP server registered.
+
 ### `jobrunner.js` — one attempt of one harness, the way the portal runs one
 
 The prompt is assembled (`prompt.js`), the harness is started (`adapters/`), what it prints goes through the transcript
@@ -39,7 +44,9 @@ normaliser (`transcript.js`) into job lines (`joblines.js`), and a budget stop b
 
 ### `prompt.js` — the prompt every job gets
 
-The git rule, the house rules, the lessons (when a store is reachable), the repo digest (`repomap.js`), then the brief.
+The git rule, the house rules, the lessons, the repo digest (`repomap.js`), then the brief. The lessons come from the
+shared Know store's own `recall()` (the portal's `know/lessons.js`; on a Node its path is configuration —
+`CODES_KNOW_LESSONS` — never a hard-coded home). A store that cannot be read gives no lessons, not an error.
 
 ### `logins.js` — what this machine has
 
@@ -74,7 +81,11 @@ The ladder is the portal's, so the portal's jobs keep their routing. Codes suppl
 
 Pure: it takes the attempts and returns the outcome and the next step. It never reads a log folder, a marker file or a
 process table — the caller passes the data in. The failure reasons are the portal's: `limit`, `auth`, `capacity`,
-`refused`, `error`, `budget`, `stopped`, `crash`, `timeout`, `incomplete`, `context`, `hung`.
+`refused`, `error`, `budget`, `stopped`, `crash`, `timeout`, `incomplete`, `context`, `hung`, `turns`.
+
+A harness that stops at its own turn cap (`max_turns`, `error_max_turns`, `turn limit_exceeded`) is `turns`: the next
+step is `continue` in the same session on the same harness, never `switch`. Only when there is no session to resume may
+another runner take it. A continuation of an attempt the owner settled (Fine / Mark handled) is never switched.
 
 An attempt is `{ key, runner, name, runnerName, status, updated, error, next, prev, parent, resolvedNote, stopped, budget, wrapUp, facts }`.
 
@@ -101,11 +112,16 @@ Three limits: steps (tool calls), minutes (wall clock) and dollars. A limit that
 price is never a zero budget. The first limit reached wins. Steps and minutes buy **one** wrap-up turn, so the work
 already done lands; dollars stay a hard stop.
 
-Public: `limitsFor(cfg, runner, override)`, `evaluate(used, limits)`, `state(status)`, `wrapUp(hit, opts)`,
-`wrapUpPrompt(hit)`, `STATES`.
+Public: `limitsFor(cfg, runner, override)`, `caps(limits)`, `evaluate(used, limits)`, `state(status)`,
+`wrapUp(hit, opts)`, `wrapUpPrompt(hit)`, `STATES`.
 
 ```js
-const { evaluate, wrapUp } = require('./engine/budget');
+const { evaluate, caps, wrapUp } = require('./engine/budget');
+
+caps({ steps: 350, minutes: 45 });
+// { maxTurns: 375, timeoutMs: 3000000, timeout: '50m' }
+caps({ steps: null, minutes: null });
+// { maxTurns: 100000, timeoutMs: 0, timeout: '100000m' } — no limit means none
 
 evaluate({ steps: 120, minutes: 30, usd: 1.2 }, { steps: 100, minutes: 60, usd: 5 });
 // { hit: 'steps', limits: { steps: 100, minutes: 60, usd: 5 }, used: { steps: 120, minutes: 30, usd: 1.2 } }

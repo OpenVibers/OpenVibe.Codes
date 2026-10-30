@@ -548,12 +548,18 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     /**
      * The next attempt now: the owner carries the task on (with a note), or switches to another agent. The task's row
      * is locked while the attempt is written, so two presses start one attempt and not two.
+     *
+     * One continuation at a time (the portal's liveContinuation, 10-30): while an attempt is still live — the automatic
+     * continue after a crash, a wrap-up, another manual press — that attempt is returned, and no second one is started
+     * beside it. Two sessions on one worktree would fight over the same files.
      */
     async function continueTask(row, { note = null, agent = null } = {}) {
         if (!row || !row.id) return { error: 'no such task' };
         const attempts = await attemptStore.list(row.id);
         const ending = attempts[attempts.length - 1];
         if (!ending) return { error: 'the task has no attempt to carry on' };
+        const live = attempts.slice().reverse().find((a) => !ENDED.has(a.state));
+        if (live) return { attempt: live, live: true, row };
         const text = note ? String(note).trim().slice(0, 4000) : '';
         const plan = agent
             ? {
