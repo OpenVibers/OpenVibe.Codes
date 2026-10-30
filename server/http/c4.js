@@ -117,7 +117,7 @@ function createC4Routes(ctx) {
      * The person's machines in the order they read: the ones their work ran on last come first, the ones never used
      * come after them. Their saved default is marked, not moved: the order the brief asks for is the order of use.
      */
-    const orderMachines = (list, settings, used) => {
+    const orderMachines = (list, used) => {
         const rank = new Map(used.map((m, i) => [m, i]));
         const rankOf = (m) => (rank.has(m.id) ? rank.get(m.id) : rank.has(m.node_id) ? rank.get(m.node_id) : 1e6);
         return [...(list || [])].sort((a, b) => rankOf(a) - rankOf(b));
@@ -236,7 +236,7 @@ ${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="
         const repos = signedIn ? await recentRepos(req) : [];
         const mine = signedIn ? await machinesOf(req, res) : { ok: false, machines: [] };
         const used = signedIn ? await lastUsedMachines(req) : [];
-        const machineList = orderMachines(mine.machines, settings, used);
+        const machineList = orderMachines(mine.machines, used);
         const agentOptions = (harnesses?.list?.() || []).map((a) => `<option value="${esc(a.id)}"${settings && settings.default_agent === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
         const machineOptions = machineList.map((m) => machineOption(m, settings)).join('');
         const saved = repos.map((repo) => `<a class="c4-chip" href="/?repo=${encodeURIComponent(repo.url)}#c4-prompt" data-c4-saved-repo="${esc(repo.url)}">${icon('<path d="M4 4h16v16l-8-4-8 4z"/>')}${esc(repo.full_name)}</a>`).join('');
@@ -452,7 +452,7 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
         const used = viewer(req) ? await lastUsedMachines(req) : [];
         const agentOptions = (harnesses?.list?.() || []).map((a) => `<option value="${esc(a.id)}"${settings && settings.default_agent === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
         // The same order the Home picker shows: the machines their work ran on last come first.
-        const machineOptions = orderMachines((mine.machines || []).filter((m) => m.state !== 'revoked'), settings, used).map((m) => machineOption(m, settings)).join('');
+        const machineOptions = orderMachines((mine.machines || []).filter((m) => m.state !== 'revoked'), used).map((m) => machineOption(m, settings)).join('');
         const content = `${header('Settings', 'Your choices, remembered for your account.')}${viewer(req) ? `${flash(req)}<section class="c4-card"><form class="c4-form" method="post" action="/settings">
 <div class="c4-form-grid">
 <label>Default agent <select name="default_agent"><option value="">Auto</option>${agentOptions}</select></label>
