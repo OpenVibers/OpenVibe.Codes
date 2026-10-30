@@ -11,7 +11,7 @@ const DIR = path.join(__dirname, '..', 'engine');
 
 (async () => {
     await check('the engine exports every module and the names a caller wants', () => {
-        for (const name of ['router', 'chain', 'budget', 'transcript', 'effort', 'scope', 'runerror']) {
+        for (const name of ['router', 'chain', 'budget', 'transcript', 'effort', 'scope', 'runerror', 'proof', 'review']) {
             assert.ok(engine[name], `${name} is exported`);
         }
         for (const name of ['classify', 'pick', 'outcome', 'nextStep', 'evaluate', 'limitsFor', 'parse', 'parseText', 'fitEffort', 'pickModel']) {

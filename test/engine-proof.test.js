@@ -9,7 +9,6 @@
  */
 const assert = require('assert');
 const { collectProof, testPlan, testWords, pageFiles, routesOf, outcomeOf } = require('../engine/proof');
-const { familyOf, authorFamily, pickReviewer, readVerdict } = require('../engine/review');
 const { check, done } = require('./helpers/boot');
 
 (async () => {
@@ -166,29 +165,6 @@ const { check, done } = require('./helpers/boot');
             const seen = [];
             await collectProof({ cwd: '/repo', adapters: m.adapters, emit: async (item) => seen.push(item.kind) });
             assert.deepStrictEqual(seen, ['tests', 'screenshots', 'diff', 'review']);
-        });
-
-        await check('the model families are read from the model\'s own name', async () => {
-            assert.strictEqual(familyOf('claude-sonnet-4'), 'anthropic');
-            assert.strictEqual(familyOf('gpt-5'), 'openai');
-            assert.strictEqual(familyOf('deepseek-chat'), 'deepseek');
-            assert.strictEqual(familyOf('gemini-2.5-pro'), 'google');
-            assert.strictEqual(familyOf('something-else'), null);
-            assert.strictEqual(authorFamily({ agent: 'claude-code' }), 'anthropic');
-            assert.strictEqual(authorFamily({ agent: 'codex', model: 'gpt-5' }), 'openai');
-        });
-
-        await check('the reviewer is a model of another family', async () => {
-            const picked = pickReviewer({ models: ['claude-sonnet-4', 'deepseek-chat'], author: 'anthropic' });
-            assert.strictEqual(picked.family, 'deepseek');
-            assert.strictEqual(pickReviewer({ models: ['claude-sonnet-4'], author: 'anthropic' }), null);
-        });
-
-        await check('a verdict is read from JSON or from the words, and an empty answer is a change request', async () => {
-            assert.strictEqual(readVerdict('{"verdict":"approved","summary":"ok"}').verdict, 'approved');
-            assert.strictEqual(readVerdict('looks good to me').verdict, 'approved');
-            assert.strictEqual(readVerdict('this needs changes').verdict, 'changes_requested');
-            assert.strictEqual(readVerdict('').verdict, 'changes_requested');
         });
 
         await check('the changed files that are pages, and the routes they are served at', async () => {

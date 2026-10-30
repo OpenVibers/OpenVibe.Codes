@@ -17,6 +17,8 @@
  *   engine.joblines    the lines a task's page shows while it runs
  *   engine.logins      what this machine has: each CLI, signed in or not, and its limit windows
  *   engine.redact      the secrets that never reach an event stream
+ *   engine.proof       the proof of a finished attempt: its tests, its pages, its diff, and a second opinion
+ *   engine.review      the second opinion itself: a model of another family, through OpenVibe.AI
  *
  * The modules do not depend on each other in a cycle, and none of them reads the portal's log folder.
  */
@@ -35,6 +37,8 @@ const repomap = require('./repomap');
 const joblines = require('./joblines');
 const logins = require('./logins');
 const redact = require('./redact');
+const proof = require('./proof');
+const review = require('./review');
 
 module.exports = {
     router,
@@ -51,6 +55,8 @@ module.exports = {
     joblines,
     logins,
     redact,
+    proof,
+    review,
     // The names a caller usually wants, in one place.
     classify: router.classify,
     pick: router.pick,
