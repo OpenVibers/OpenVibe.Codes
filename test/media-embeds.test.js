@@ -2,7 +2,8 @@
 /**
  * The pictures of a task (Codes C10): the images a harness read and the screenshots the proof shot travel in the job
  * result, and Codes puts them in Media as private objects of the person — never a public URL. The session shows a
- * short-lived signed URL, and only the task's owner gets one: another person gets a 404.
+ * short-lived signed URL, and only the task's owner gets one: another person gets a 404. Media takes no app keys
+ * (C-71), so every call carries Codes' Network service token for openvibe.media, upload and read only.
  */
 const assert = require('assert');
 const http = require('http');
@@ -48,7 +49,7 @@ const b64 = (bytes) => Buffer.alloc(bytes, 7).toString('base64');
     await new Promise((ok) => mediaServer.listen(0, '127.0.0.1', ok));
     const mediaUrl = `http://127.0.0.1:${mediaServer.address().port}`;
 
-    const t = await boot({ env: { CODES_MEDIA_URL: mediaUrl, CODES_MEDIA_KEY: 'codes-test-key' } });
+    const t = await boot({ env: { CODES_MEDIA_URL: mediaUrl } });
     const db = t.ctx.store.db;
     const ada = t.network.addUser('ada');
     const bo = t.network.addUser('bo');
@@ -58,7 +59,7 @@ const b64 = (bytes) => Buffer.alloc(bytes, 7).toString('base64');
         VALUES ($1, $2, $3, 'job_01J8Z3Q4R5S6T7V8W9X0Y1Z2J55', 'https://github.com/a/b', 'look at the picture', 'running', 1, 2)`,
     [taskId, ada.subject, project]);
 
-    const media = createMedia({ config: { media: { url: mediaUrl, key: 'codes-test-key', app: 'codes', ttl: 600 } }, log: console });
+    const media = createMedia({ config: t.ctx.config, log: console });
     const lines = createSessionLines({ store: t.ctx.store, config: t.ctx.config, log: console, media });
     const proof = createProof({ store: t.ctx.store, config: t.ctx.config, log: console });
 
@@ -75,6 +76,10 @@ const b64 = (bytes) => Buffer.alloc(bytes, 7).toString('base64');
         assert.strictEqual(body.visibility, 'private', 'a screenshot is never public');
         assert.strictEqual(body.mime_type, 'image/png', 'Media is told what it is');
         assert.ok(init.headers['x-ov-subject'] === ada.subject, 'the object belongs to the person the task belongs to');
+        assert.ok(/^Bearer ey/.test(String(init.headers.authorization)), 'Codes signs in to Media with a Network token, never an app key');
+        const asked = t.network.tokenRequests.filter((r) => r.audience === 'openvibe.media');
+        assert.ok(asked.length >= 1, 'the token is for Media');
+        assert.deepStrictEqual(asked.map((r) => [r.grant_type, r.client_id, r.scope, r.on_behalf_of]).pop(), ['client_credentials', 'codes', 'media.object.upload media.object.read', null], 'Codes\' own service token, upload and read only, acting for nobody');
         assert.ok(calls.some((c) => c.method === 'PUT' && c.url.startsWith('/upload/')), 'the bytes were sent');
         assert.ok(calls.some((c) => c.method === 'POST' && c.url.endsWith('/complete')), 'and the object was completed');
 
@@ -96,8 +101,21 @@ const b64 = (bytes) => Buffer.alloc(bytes, 7).toString('base64');
     await check('another person cannot read the task at all', async () => {
         const res = await t.get(`/run/tasks/${taskId}/session.json`, { as: bo });
         assert.strictEqual(res.status, 404, 'a task of yours is 404 for another person');
-        const row = await db.maybe('SELECT id, subject FROM run_tasks WHERE id = $1', [taskId]);
-        process.stderr.write(`[test] the row: ${JSON.stringify(row)}; ada: ${ada.subject}\n`);
+    });
+
+    await check('without a client secret Codes keeps no pictures, and never falls back to a key', async () => {
+        const off = createMedia({ config: { media: { url: mediaUrl, app: 'codes' }, oauth: { clientId: 'codes', clientSecret: '' }, networkInternalUrl: t.network.url } });
+        assert.strictEqual(off.configured(), false, 'no secret, no Media');
+        const offLines = createSessionLines({ store: t.ctx.store, config: t.ctx.config, log: console, media: off });
+        calls.length = 0;
+        await offLines.append(taskId, [{
+            seq: 2, at: new Date().toISOString(), kind: 'tool_result',
+            body: { t: 'tool_result', id: 'tool-2', ok: true, output: 'still here', attachments: [{ url: `data:image/png;base64,${PNG}`, name: 'b.png', mime: 'image/png', kind: 'image', role: 'read' }] },
+        }], null, ada.subject);
+        assert.strictEqual(calls.length, 0, 'Media is never called');
+        const row = await db.maybe("SELECT body FROM codes_session_lines WHERE task_id = $1 AND body->>'id' = 'tool-2'", [taskId]);
+        assert.ok(row && row.body.output === 'still here', 'the line keeps its words');
+        assert.ok(!row.body.attachments && !JSON.stringify(row.body).includes('base64'), 'and drops the picture, bytes and all');
     });
 
     await check('a proof item with a screenshot puts the picture on its line and keeps no bytes in the record', async () => {
