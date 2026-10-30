@@ -33,6 +33,8 @@ const { asyncRouter } = require('./router');
 const { parseArgs } = require('../../harness/job');
 const { createRunTasks, TERMINAL } = require('../domain/run-tasks');
 const { createTaskEvents } = require('./task-events');
+const { createServiceTokenClient } = require('openvibe-sdk/auth');
+const { expandMatrix } = require('../domain/bench');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -44,6 +46,10 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
     const taskEvents = createTaskEvents({ store, config, log, attempts: taskStore.attempts });
     const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
     const json = express.json({ limit: '32kb' });
+    const benchTokens = config.oauth.clientSecret ? createServiceTokenClient({
+        tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId,
+        clientSecret: config.oauth.clientSecret, audience: 'openvibe.bench', scope: 'bench.run.publish',
+    }) : null;
 
     /** The route's guard: the service token, its capability and the person it acts for → req.principal. */
     const guard = (cap) => async (req, res, next) => {
@@ -172,6 +178,84 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         }
         log.info(`[Codes] task ${row.id} started by ${p.via} for ${p.subject}: ${row.state}`);
         return res.status(201).json({ task: taskStore.present(row), created: true });
+    });
+
+    // Bench is the only caller: it supplies a service token for Codes plus the signed-in user's short-lived
+    // Network token in a private server-to-server header. The latter is used only to provision the user's own project.
+    r.post('/benchmarks/:id/run', guardAny('codes.task.start'), json, async (req, res) => {
+        const p = req.principal;
+        if (p.owner) return problem(req, res, 403, 'codes.bench_service_required', 'Bench starts verified benchmark tasks.');
+        const userToken = String(req.get('x-ov-user-token') || '').trim();
+        const user = await keys.verifyUser(userToken, { issuer: config.networkIssuer, audience: config.oauth.sessionAudience });
+        if (!user.ok || user.claims.subject_id !== p.subject) return problem(req, res, 403, 'codes.bench_subject_mismatch', 'The signed-in person must match X-OV-Subject.');
+        if (!benchTokens) return problem(req, res, 503, 'codes.bench_unconfigured', 'Codes has no Network client credentials for Bench.');
+        const b = req.body || {};
+        const models = Array.isArray(b.models) ? b.models.map(String) : [];
+        const requestedHarnesses = Array.isArray(b.harnesses) ? b.harnesses.map(String) : [];
+        const repeat = Number(b.repeat);
+        if (!models.length || !requestedHarnesses.length || !Number.isInteger(repeat) || repeat < 1 || repeat > 10
+            || models.some((m) => !m || m.length > 120) || new Set(requestedHarnesses).size !== requestedHarnesses.length) {
+            return problem(req, res, 422, 'codes.bench_invalid', 'models and harnesses are required; repeat must be 1–10.');
+        }
+        const available = new Set(harnesses.list().map((h) => h.id));
+        if (requestedHarnesses.some((h) => !available.has(h))) return problem(req, res, 422, 'codes.bench_harness_unknown', 'A harness is not in GET /api/v1/harnesses.');
+        let definition;
+        try {
+            const response = await fetch(`${config.bench.url}/api/v1/benchmarks/${encodeURIComponent(String(req.params.id))}`, {
+                headers: { ...(await benchTokens.authHeaders()), Accept: 'application/json' }, signal: AbortSignal.timeout(15000),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) return problem(req, res, response.status, body.code || 'codes.bench_definition_failed', body.detail || 'Bench did not return the benchmark definition.');
+            definition = body.definition;
+        } catch (e) { return problem(req, res, 503, 'codes.bench_unavailable', `Bench did not answer: ${e.message}`); }
+        let matrix;
+        try { matrix = expandMatrix(definition, models, requestedHarnesses, repeat); }
+        catch (e) { return problem(req, res, 422, e.code || 'codes.bench_empty', e.message); }
+        if (!matrix.length) return problem(req, res, 422, 'codes.bench_empty', 'The benchmark has no tasks.');
+        const total = matrix.length;
+        if (total > config.bench.maxMatrixSize) return problem(req, res, 422, 'codes.bench_matrix_too_large', `This matrix has ${total} tasks; the limit is ${config.bench.maxMatrixSize}.`);
+        const running = Number(await db.value("SELECT COUNT(*)::int AS n FROM (SELECT actor_ref->'bench'->>'session' AS session FROM run_tasks WHERE subject = $1 AND actor_ref ? 'bench' GROUP BY actor_ref->'bench'->>'session' HAVING bool_or(state NOT IN ('succeeded','failed','cancelled','expired'))) active", [p.subject]));
+        if (running >= 3) return problem(req, res, 429, 'codes.bench_concurrency_limit', 'A person may have at most three benchmark runs active.');
+        const today = store.now() - (store.now() % 86400000);
+        const daily = Number(await db.value("SELECT COUNT(*)::int AS n FROM run_tasks WHERE subject = $1 AND actor_ref ? 'bench' AND created_at >= $2", [p.subject, today]));
+        if (daily + total > config.bench.dailyTasks) return problem(req, res, 429, 'codes.bench_daily_limit', `The daily benchmark task cap is ${config.bench.dailyTasks}.`);
+
+        let project;
+        try {
+            const headers = { Authorization: `Bearer ${userToken}`, Accept: 'application/json' };
+            const projectsResponse = await fetch(`${config.networkInternalUrl}/api/v1/projects`, { headers, signal: AbortSignal.timeout(8000) });
+            if (!projectsResponse.ok) throw new Error(`Network answered ${projectsResponse.status}`);
+            const projects = (await projectsResponse.json()).projects || [];
+            project = projects.find((x) => x.name === 'bench' && !x.archived_at)?.id;
+            if (!project) {
+                const created = await fetch(`${config.networkInternalUrl}/api/v1/projects`, {
+                    method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'bench' }), signal: AbortSignal.timeout(8000),
+                });
+                if (!created.ok) throw new Error(`Network answered ${created.status}`);
+                project = (await created.json()).id;
+            }
+        } catch (e) { return problem(req, res, 502, 'codes.bench_project_failed', `Could not get or create the person's bench project: ${e.message}`); }
+
+        const session = `${req.params.id}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+        const started = [];
+        const runIds = new Map();
+        try {
+            for (const cell of matrix) {
+                const { task, model, harness, repetition } = cell;
+                const key = `${model}\u0000${harness}\u0000${repetition}`;
+                if (!runIds.has(key)) runIds.set(key, store.newId('brn'));
+                const runId = runIds.get(key);
+                const harnessOffer = harnesses.list().find((h) => h.id === harness);
+                const inputs = Array.isArray(task.files) ? JSON.stringify(task.files).slice(0, 3000) : '';
+                const prompt = `Benchmark ${b.benchmark || req.params.id}, task ${task.id}.\n\n${String(task.prompt).slice(0, 10000)}${inputs ? `\n\nInput files:\n${inputs}` : ''}\n\nReturn only the requested artifact content. Respect the per-task limits: ${Number(definition.limits && definition.limits.ms) || 0} ms, ${Number(definition.limits && definition.limits.tokens) || 0} tokens, $${Number(definition.limits && definition.limits.usd) || 0}.`;
+                const limits = definition.limits || {};
+                const args = parseArgs(JSON.stringify({ kind: 'bench', prompt, agent: harness, model, limits }));
+                const taskRow = await taskStore.start({ subject: p.subject, project, args, via: p.via,
+                    actorRef: { bench: { run_id: runId, task_count: matrix.filter((x) => x.model === model && x.harness === harness && x.repetition === repetition).length, benchmark: `${req.params.id}@${Number(definition.version) || 1}`, session, model, provider: (harnessOffer && harnessOffer.provider) || String(model).split('/')[0] || 'unknown', harness, harness_version: (harnessOffer && harnessOffer.version) || 'unknown', repetition, task_id: String(task.id), kind: definition.kind, expected: task.expected, judges: definition.judges || [], scoring: definition.scoring || {}, limits: definition.limits || {} } } });
+                started.push(taskStore.present(taskRow));
+            }
+        } catch (e) { return problem(req, res, 502, 'codes.bench_start_failed', `Codes started ${started.length} of ${total} tasks: ${e.message}`); }
+        return res.status(202).json({ session, tasks: started, task: started[0] || null, total: started.length });
     });
 
     /**

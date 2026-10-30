@@ -36,6 +36,7 @@ const { createRunTasks } = require('./domain/run-tasks');
 const { createConnections } = require('./domain/connections');
 const { createRunTokens } = require('./domain/run-tokens');
 const { createAttempts } = require('./domain/attempts');
+const { createBenchPublisher } = require('./domain/bench-publisher');
 const { createSessionLines } = require('./domain/session-lines');
 const { createOutbox, createPublisher } = require('./events/outbox');
 const { createEventsConsumer } = require('./events-consumer');
@@ -76,8 +77,9 @@ async function createApp(opts = {}) {
     const runTokens = createRunTokens({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The task's attempts (stage C2): every Run job is one attempt, and the engine decides what happens next.
     const attempts = createAttempts({ store, config, log, harnesses });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts });
-    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens, attempts };
+    const benchPublisher = createBenchPublisher({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, benchAttemptEnded: benchPublisher.onTaskTerminal });
+    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens, attempts, benchPublisher };
     ctx.forgejo = createForgejoClient({ config, log });
 
     const app = express();
