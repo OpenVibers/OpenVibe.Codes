@@ -7,9 +7,10 @@
  */
 const assert = require('assert');
 const http = require('http');
-const { createNetworkSender } = require('openvibe-sdk/account-data');
+const { createNetworkSender, uncovered } = require('openvibe-sdk/account-data');
 const { signDeliveryHeaders } = require('openvibe-sdk/events');
 const { ids } = require('openvibe-contracts');
+const { TABLES, TASK_KEYED } = require('../server/account-data');
 const { boot, check, done } = require('./helpers/boot');
 
 const SECRET = `whsec_${'fixture'.repeat(6)}`;
@@ -63,6 +64,18 @@ async function startNetworkStub() {
     const ev = (id, type, payload) => ({ event_id: id, event_type: type, source: 'network', version: 1, timestamp: new Date().toISOString(), payload });
 
     try {
+        await check('every table that names a person is covered, task-keyed or exempted with a reason', async () => {
+            const missing = await uncovered(db, {
+                tables: TABLES,
+                taskKeyed: TASK_KEYED.map((k) => k.table),
+                exempt: {
+                    account_data_events: 'the ledger of requests itself: which export and deletion Codes applied',
+                    event_outbox: 'no person column (the SDK outbox keeps envelopes); dropped with the console in 0002 anyway',
+                },
+            });
+            assert.deepStrictEqual(missing, [], `a table with a person column is neither covered nor exempted: ${missing.join(', ')}`);
+        });
+
         await check('an unsigned delivery is refused', async () => {
             const r = await deliver(ev(`evt_${ids.ulid()}`, 'network.account.deleted', { deletion_id: `del_${ids.ulid()}`, subject: ada, aliases: [] }), { secret: null });
             assert.strictEqual(r.status, 401);
@@ -86,6 +99,10 @@ async function startNetworkStub() {
             }
             const tok = part.body.files.find((x) => x.name === 'run-tokens.json').content[0];
             assert.ok(!('jti' in tok), 'a run token’s jti stays out of the export');
+            const telemetry = part.body.files.find((x) => x.name === 'telemetry.json');
+            assert.ok(telemetry, 'telemetry.json is in the export (the SDK covers the table)');
+            assert.strictEqual(telemetry.content.length, 1, 'Ada’s sample only');
+            assert.deepStrictEqual(Object.keys(telemetry.content[0]).sort(), ['at', 'latency_ms', 'operation', 'resource', 'service', 'status']);
         });
 
         await check('a deletion erases them, keeps everyone else’s, and confirms once', async () => {
