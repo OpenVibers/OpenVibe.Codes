@@ -35,7 +35,7 @@ Everything is server-rendered and usable without JavaScript.
 ## Use the harness
 
 ```bash
-npm install -g https://codeload.github.com/OpenVibers/OpenVibe.Codes/tar.gz/refs/tags/v0.4.0   # Node.js 22+
+npm install -g https://codeload.github.com/OpenVibers/OpenVibe.Codes/tar.gz/refs/tags/v0.5.0   # Node.js 22+
 openvibe-codes agents                                   # what this machine can run, and why not the rest
 openvibe-codes run "rename getUser to findUser"         # routed, handed off on failure, kept
 openvibe-codes run --agent codex --permission read "where is the session cookie set?"
