@@ -5,8 +5,7 @@
  *   GET  /run                    the form, the person's projects and their recent tasks (a sign-in prompt for a guest)
  *   POST /run                    start one: a run_tasks row and an OpenVibe Run job for the person (server/domain/run-client.js)
  *   POST /run/project            create a project for the runs when the person has none they may run jobs in
- *   GET  /run/tasks/:id          one task: its attempts (the timeline), live while it runs, then the agents' summary,
- *                                the changed files and the patch
+ *   GET  /run/tasks/:id          one task: live while it runs, then the agents' summary, the changed files and the patch
  *   GET  /run/tasks/:id/events   its live lines, proxied from Run's job stream (server-sent events)
  *   POST /run/tasks/:id/cancel   stop it
  *
@@ -26,9 +25,6 @@ const { createSessionLines } = require('../domain/session-lines');
 const DELEGABLE = new Set(['owner', 'admin']);
 const MACHINES_URL = 'https://openvibe.bot/machines';
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
-
-/** The task's outcome in the words a person reads. */
-const OUTCOME_TEXT = { done: 'Done', unfinished: "Didn't finish", stopped: 'Stopped by you' };
 
 /** A repository URL as a heading: the host small, then owner/name, which may break after a slash but never mid-word. */
 function repoName(url) {
@@ -186,24 +182,6 @@ ${typeof d.duration_ms === 'number' ? html`<p class="muted">${Math.round(d.durat
 </section>`;
     }
 
-    /** The task's timeline: every attempt and why it happened. The data-* hooks are for the design of stage C4. */
-    async function timelineHtml(row) {
-        const attempts = await taskStore.attempts.list(row.id);
-        if (!attempts.length) return '';
-        const outcome = row.outcome
-            ? html`<p class="run-outcome" data-outcome="${row.outcome}"><b>${OUTCOME_TEXT[row.outcome] || row.outcome}</b>${row.outcome_note ? html` ${row.outcome_note}` : ''}</p>`
-            : '';
-        return html`<section class="run-timeline" data-timeline data-attempts="${attempts.length}">
-<h2>The attempts</h2>
-<ol class="run-attempts">${attempts.map((a) => html`<li class="run-attempt" data-attempt="${a.n}" data-attempt-id="${a.id}" data-state="${a.state}" data-reason="${a.reason || ''}" data-kind="${a.kind || 'first'}" data-agent="${a.agent || ''}">
-<p class="run-attempt-head"><b>Attempt ${a.n}</b>${a.agent ? html` · ${a.agent}` : ''} <span class="run-pill run-pill-${a.state}">${a.state}</span></p>
-<p class="run-attempt-why" data-why>${a.why || ''}</p>
-${a.reason ? html`<p class="run-attempt-end" data-end-why>${taskStore.attempts.wordsOf(a.reason)}</p>` : ''}
-</li>`)}</ol>
-${outcome}
-</section>`;
-    }
-
     r.get('/run/tasks/:id', async (req, res) => {
         if (!signedIn(req)) return res.redirect(302, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
         let row = await own(req, req.params.id);
@@ -219,7 +197,6 @@ ${outcome}
 <h1 class="run-repo">${repoName(row.repo)}${row.ref ? html` <small>${row.ref}</small>` : ''}</h1>
 <p><span class="run-pill run-pill-${row.state}" data-state>${STATE_LABEL[row.state] || row.state}</span>${row.agent ? html` <span class="run-pill">${row.agent}</span>` : ''}</p>
 <pre tabindex="0" class="run-prompt">${row.prompt}</pre>
-${await timelineHtml(row)}
 ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events" data-title="${title}" aria-live="polite"><h2>Live</h2><ol class="run-log" data-log></ol></section>
 <form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : html`${session}${resultHtml(row, { session: !!(lines && lines.length) })}`}`;
         return page(req, res, { title: 'Task', body, sharedScripts: ['agent-session.js'] });
@@ -265,9 +242,7 @@ ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events
         if (!resp.ok || !resp.body) return res.status(resp.status === 404 ? 404 : 503).end();
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
         // The bytes go to the browser unchanged, and the same frames become codes_session_lines as they stream.
-        const attempts = await taskStore.attempts.list(row.id);
-        const attemptN = attempts.length ? Number(attempts[attempts.length - 1].n) : null;
-        const recorder = sessionStore.recorder(row.id, { attemptN });
+        const recorder = sessionStore.recorder(row.id);
         const decoder = new TextDecoder();
         try {
             for await (const chunk of resp.body) {
@@ -311,8 +286,13 @@ ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events
         if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
         const row = await own(req, req.params.id);
         if (!row) return res.status(404).type('text/plain').send('No such task of yours.\n');
-        // The running attempt stops: the outcome is "stopped" and nothing carries it on.
-        try { await taskStore.stopTask(row); } catch (e) { log.warn(`[Codes] cancel ${row.id}: ${e.message}`); }
+        if (row.job_id && !TERMINAL.has(row.state)) {
+            try { await run.cancel(row.job_id, who(row)); } catch (e) { log.warn(`[Codes] cancel ${row.id}: ${e.message}`); }
+            try {
+                const fresh = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [row.id]);
+                if (fresh) await taskStore.refresh(fresh, { force: true });
+            } catch (e) { log.warn(`[Codes] cancel ${row.id}: ${e.message}`); }
+        }
         return res.redirect(303, `/run/tasks/${row.id}`);
     });
 

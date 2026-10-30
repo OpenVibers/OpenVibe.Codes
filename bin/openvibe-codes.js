@@ -10,10 +10,12 @@ const path = require('path');
 const { createHarness } = require('../harness');
 const { runJob, resultWriter } = require('../harness/job');
 const { version: VERSION } = require('../package.json');
+const { probe: probeLogins } = require('../engine/logins');
 
 const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your terminal
 
   openvibe-codes agents                       which agents this machine can run, and why not the others
+  openvibe-codes logins                      the coding CLIs here: installed, signed in, and their limit windows
   openvibe-codes route [--task edit] [--need harness:resume,…]   which agent a task would go to, and why
   openvibe-codes run [options] "what to do"   run a task ("-" reads it from stdin)
       --task edit|review|long|resume   what kind of task (default edit)
@@ -97,6 +99,17 @@ async function main() {
         const list = harness.agents();
         if (o.json) { out(JSON.stringify(list, null, 2)); return 0; }
         for (const a of list) out(`${a.available ? '✔' : '·'} ${a.id.padEnd(18)} ${a.name.padEnd(16)} ${a.available ? dim(a.where || '') : dim(a.reason)}`);
+        return 0;
+    }
+    if (cmd === 'logins') {
+        // What this machine has: each CLI, whether it is signed in, and the limit windows it can read. Nothing else:
+        // no key, no token, no account name.
+        const rows = probeLogins({ home: process.env.HOME });
+        if (o.json) { out(JSON.stringify(rows, null, 2)); return 0; }
+        for (const r of rows) {
+            const windows = r.windows.length ? r.windows.map((w) => `${w.name}${w.used != null ? ` ${w.used}/${w.limit}` : ''}${w.resets_at ? ` (resets ${w.resets_at})` : ''}`).join(', ') : '';
+            out(`${r.installed ? '✔' : '·'} ${r.id.padEnd(16)} ${r.signed_in ? 'signed in' : 'not signed in'}${windows ? dim(' · ' + windows) : ''}`);
+        }
         return 0;
     }
     if (cmd === 'route') {
