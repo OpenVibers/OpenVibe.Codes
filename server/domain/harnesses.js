@@ -27,14 +27,14 @@ function createHarnesses({ catalogPath = DEFAULT_CATALOG } = {}) {
     for (const [index, row] of rows.entries()) {
         if (!row || typeof row !== 'object' || Array.isArray(row)) throw invalid(`row ${index} is not an offer`);
         const { agents, ...offer } = row;
-        const harnessCheck = contracts.validate('platform.harness-offer@1', offer);
+        // A row is one contract instance: the offer and the agents (models) it runs. platform.harness-offer@1
+        // carries the agents (contracts 0.246.0), so the whole row is checked against it in one go.
+        const harnessCheck = contracts.validate('platform.harness-offer@1', row);
         if (!harnessCheck.valid) throw invalid(`row ${index} harness offer: ${JSON.stringify(harnessCheck.errors)}`);
         if (ids.has(offer.id)) throw invalid(`duplicate id ${offer.id}`);
         ids.add(offer.id);
         if (!Array.isArray(agents)) throw invalid(`row ${index} needs agents[]`);
-        for (const [agentIndex, agent] of agents.entries()) {
-            const agentCheck = contracts.validate('platform.agent-offer@1', agent);
-            if (!agentCheck.valid) throw invalid(`row ${index} agent ${agentIndex}: ${JSON.stringify(agentCheck.errors)}`);
+        for (const agent of agents) {
             if (ids.has(agent.id)) throw invalid(`duplicate id ${agent.id}`);
             if (agent.harness !== offer.id) throw invalid(`agent ${agent.id} refers to another harness`);
             ids.add(agent.id);

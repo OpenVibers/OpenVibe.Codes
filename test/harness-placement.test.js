@@ -65,7 +65,7 @@ function priced(row, freshUsd) {
     await check('every seed offer validates as platform.resource-offer@1 of kind harness', async () => {
         const harnesses = createHarnesses({ catalogPath });
         const offers = harnesses.list().flatMap((harness) => harnesses.agents(harness.id).map((agent) => [harness, toOffer(harness, agent, { now })]));
-        assert.strictEqual(offers.length, 8);
+        assert.strictEqual(offers.length, 10);
         for (const [harness, offer] of offers) {
             const result = contracts.validate('platform.resource-offer@1', JSON.parse(JSON.stringify(offer)));
             assert.ok(result.valid, `${offer.offer_id}: ${JSON.stringify(result.errors)}`);
@@ -130,7 +130,7 @@ function priced(row, freshUsd) {
         const [harnessId] = r.selected.split(':');
         assert.ok(toOffer(harnesses.get(harnessId), harnesses.agents(harnessId)[0]).capabilities.includes('task:review'));
         assert.ok(r.reasons.length);
-        assert.deepStrictEqual(r.candidates.map((c) => c.id), ['claude-code:claude-code-sonnet', 'codex:codex-default', 'command-code:command-code-default', 'opencode:opencode-default', 'aider:aider-default', 'deepseek:deepseek-chat', 'openvibe-ai:openvibe-ai-router', 'openai-compatible:openai-compatible-local']);
+        assert.deepStrictEqual(r.candidates.map((c) => c.id), ['claude-code:claude-code-sonnet', 'claude-other:claude-other-default', 'codex:codex-default', 'command-code:command-code-default', 'opencode:opencode-default', 'minimax-code:minimax-code-default', 'aider:aider-default', 'deepseek:deepseek-chat', 'openvibe-ai:openvibe-ai-router', 'openai-compatible:openai-compatible-local']);
     });
 
     await check('an offer whose health is down is excluded with a reason', async () => {
@@ -153,7 +153,8 @@ function priced(row, freshUsd) {
     });
 
     await check('with equal latency the cheaper eligible offer wins', async () => {
-        const [claude, codex] = rows;
+        const claude = rows.find((row) => row.id === 'claude-code');
+        const codex = rows.find((row) => row.id === 'codex');
         const harnesses = stub([priced(claude, 0.015), priced(codex, 0.003)]);
         const opts = { 'claude-code:claude-code-sonnet': { latencyMs: 500 }, 'codex:codex-default': { latencyMs: 500 } };
         const r = route({ task: 'edit', harnesses, opts, now });
@@ -164,7 +165,8 @@ function priced(row, freshUsd) {
     });
 
     await check('a task:browse requirement excludes harnesses without it', async () => {
-        const [claude, codex] = rows;
+        const claude = rows.find((row) => row.id === 'claude-code');
+        const codex = rows.find((row) => row.id === 'codex');
         const harnesses = stub([{ ...claude, task_capabilities: ['edit', 'review', 'browse'] }, codex]);
         const r = route({ task: 'edit', extra: { capabilities: ['task:browse'] }, harnesses, now });
         assert.strictEqual(r.selected, 'claude-code:claude-code-sonnet');

@@ -40,6 +40,19 @@ const rows = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'server', 'da
         assert.ok(body.candidates.some((c) => c.id === body.selected && c.included === true));
     });
 
+    await check('the router can select each of the harnesses the engine adapters added', async () => {
+        // minimax-code and claude-other: the two adapters Codes' engine gained (C5) that the catalogue lacked.
+        for (const id of ['minimax-code:minimax-code-default', 'claude-other:claude-other-default']) {
+            const r = await post({ task: 'edit', requirements: { objective: 'correctness', authority: id } });
+            assert.strictEqual(r.status, 200, r.text.slice(0, 300));
+            const body = r.json();
+            const candidate = body.candidates.find((c) => c.id === id);
+            assert.ok(candidate, `${id} is a candidate`);
+            assert.strictEqual(candidate.included, true, `${id} can take the task`);
+            assert.strictEqual(body.selected, id, `the router selects ${id}`);
+        }
+    });
+
     await check('a bad body is 422 harness.invalid', async () => {
         for (const json of [{}, { task: '' }, { task: 7 }, { task: 'review', requirements: 'x' }, { task: 'review', requirements: [] }, { task: 'review', requirements: { capabilities: 5 } }]) {
             const r = await post(json);

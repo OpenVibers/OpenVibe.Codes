@@ -23,7 +23,7 @@
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 /** The harnesses that speak Anthropic's Messages API (the rest speak OpenAI's Chat Completions). */
-const ANTHROPIC_HARNESSES = ['claude-code'];
+const ANTHROPIC_HARNESSES = ['claude-code', 'claude-other'];
 
 /** The claims of a JWT, decoded but not verified (the receiver verifies; this is for the jti and the expiry). */
 function claims(token) {
