@@ -17,6 +17,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
+const { collectProof } = require('../engine/proof');
 
 const JOB_PROTOCOL = '1.0.0';   // the job's contract with the Node (stdin, stdout lines, fd 3): unchanged by 1.1's lines
 const LINES = '1.1';            // 1.1: lines carry step ids, inputs, results, progress, helpers; the result keeps `log`
@@ -276,7 +277,7 @@ async function pushBranch(dir, job, { env, fetchImpl, base }) {
  * Run one job. `harness` is createHarness(); `emit(line)` prints a line; `writeResult(doc)` hands the result over.
  * → the result document.
  */
-async function runJob({ input, harness, emit, writeResult, env = process.env, tmp = os.tmpdir(), fetchImpl = globalThis.fetch }) {
+async function runJob({ input, harness, emit, writeResult, env = process.env, tmp = os.tmpdir(), fetchImpl = globalThis.fetch, proof = null }) {
     const started = Date.now();
     const log = [];
     const say = (doc) => { if (doc && doc.t && doc.t !== 'result_doc') log.push(doc); emit(JSON.stringify(doc)); };
@@ -317,6 +318,24 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         result.cost_usd = last && last.total_cost_usd ? last.total_cost_usd : 0;
         Object.assign(result, await changes(work));
         say({ t: 'step', text: result.files.length ? `${result.files.length} file${result.files.length === 1 ? '' : 's'} changed` : 'No files changed' });
+        // The proof of the change: the tests it reaches, the pages it touched, the diff, and a second model's opinion.
+        // It is collected here, in the clone the agent worked in, so the evidence is about this machine's work.
+        if (proof) {
+            say({ t: 'step', text: 'Collecting the proof' });
+            try {
+                const collected = await collectProof({
+                    cwd: work,
+                    files: result.files.map((f) => f.path),
+                    adapters: proof,
+                    author: { agent: job.agent, model: job.model },
+                    emit: (item) => say({ t: 'proof', kind: item.kind, label: item.label, ok: item.ok, skipped: !!item.skipped, summary: item.summary, family: item.family || null }),
+                });
+                result.proof = { items: collected.items.map((i) => ({ kind: i.kind, label: i.label, ok: i.ok, skipped: !!i.skipped, summary: i.summary, family: i.family || null, detail: i.shots ? { shots: i.shots } : (i.kind === 'diff' ? { files: i.files, stats: i.stats } : null) })), outcome: collected.outcome };
+            } catch (e) {
+                say({ t: 'note', level: 'warning', text: `The proof could not be collected: ${scrub(e.message)}` });
+                result.proof = { items: [], outcome: null };
+            }
+        }
         if (job.push && result.ok && result.files.length) {
             say({ t: 'step', text: 'Pushing a new branch' });
             try {

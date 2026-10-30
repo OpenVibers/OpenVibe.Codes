@@ -190,8 +190,13 @@ ${typeof d.duration_ms === 'number' ? html`<p class="muted">${Math.round(d.durat
     async function timelineHtml(row) {
         const attempts = await taskStore.attempts.list(row.id);
         if (!attempts.length) return '';
+        // The outcome in plain words: the label, and the note beside it — unless the note already says it
+        // ("Done with proof: …" says "Done" already, so it is not said twice).
+        const note = row.outcome_note || '';
+        const label = row.outcome ? (OUTCOME_TEXT[row.outcome] || row.outcome) : '';
+        const says = !!label && note.toLowerCase().startsWith(label.toLowerCase());
         const outcome = row.outcome
-            ? html`<p class="run-outcome" data-outcome="${row.outcome}"><b>${OUTCOME_TEXT[row.outcome] || row.outcome}</b>${row.outcome_note ? html` ${row.outcome_note}` : ''}</p>`
+            ? html`<p class="run-outcome" data-outcome="${row.outcome}"><b>${says ? note : [label, note].filter(Boolean).join(' ')}</b></p>`
             : '';
         return html`<section class="run-timeline" data-timeline data-attempts="${attempts.length}">
 <h2>The attempts</h2>
@@ -201,6 +206,23 @@ ${typeof d.duration_ms === 'number' ? html`<p class="muted">${Math.round(d.durat
 ${a.reason ? html`<p class="run-attempt-end" data-end-why>${taskStore.attempts.wordsOf(a.reason)}</p>` : ''}
 </li>`)}</ol>
 ${outcome}
+</section>`;
+    }
+
+    /**
+     * The task's proof (stage C8): the tests, the pages, the diff and the second model's opinion, each with what it
+     * found. The outcome in plain words sits above it, so a person reads what was proved before the detail.
+     */
+    async function proofHtml(row) {
+        const items = await taskStore.proof.list(row.id);
+        if (!items.length) return '';
+        const shown = taskStore.proof.present(items);
+        return html`<section class="run-proof" data-proof data-items="${shown.length}">
+<h2>The proof</h2>
+<ul class="run-proof-items">${shown.map((i) => html`<li class="run-proof-item" data-proof-kind="${i.kind}" data-ok="${i.ok}" data-skipped="${i.skipped}">
+<p class="run-proof-head"><b>${i.label}</b>${i.skipped ? html` <span class="run-pill">skipped</span>` : (i.ok ? html` <span class="run-pill run-pill-succeeded">passed</span>` : html` <span class="run-pill run-pill-failed">failed</span>`)}${i.family ? html` · ${i.family}` : ''}</p>
+${i.summary ? html`<p class="run-proof-summary" data-proof-summary>${i.summary}</p>` : ''}
+</li>`)}</ul>
 </section>`;
     }
 
@@ -220,6 +242,7 @@ ${outcome}
 <p><span class="run-pill run-pill-${row.state}" data-state>${STATE_LABEL[row.state] || row.state}</span>${row.agent ? html` <span class="run-pill">${row.agent}</span>` : ''}</p>
 <pre tabindex="0" class="run-prompt">${row.prompt}</pre>
 ${await timelineHtml(row)}
+${await proofHtml(row)}
 ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events" data-title="${title}" aria-live="polite"><h2>Live</h2><ol class="run-log" data-log></ol></section>
 <form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : html`${session}${resultHtml(row, { session: !!(lines && lines.length) })}`}`;
         return page(req, res, { title: 'Task', body, sharedScripts: ['agent-session.js'] });

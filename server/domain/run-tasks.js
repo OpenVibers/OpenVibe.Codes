@@ -140,12 +140,14 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
     const sessionLines = sessions || require('./session-lines').createSessionLines({ store, config, log });
     const taskOutbox = outbox || require('../events/outbox').createOutbox({ store, log });
+    // The proof of a finished task (stage C8): the tests, the pages, the diff and the second model's opinion.
+    const taskProof = proof || require('./proof').createProof({ store, config, log });
     const attemptStore = attempts || require('./attempts').createAttempts({ store, config, log });
     /** An attempt's state when it ended: a limit reached is a budget-stop, never a plain failure. */
     const ENDED = new Set(['done', 'failed', 'stopped', 'budget-stopped', 'interrupted']);
@@ -389,14 +391,38 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const attempts = await attemptStore.list(row.id);
         const ending = attempts[attempts.length - 1];
         if (!ending || !ENDED.has(ending.state)) return row;
+        // The proof this attempt's machine collected: the items are kept, and each one is an event on the stream.
+        const collected = await recordProof(row, ending);
         const plan = await attemptStore.decide({ task: row, attempts, ending, result: row.result });
         if (plan.outcome) {
+            // The outcome in plain words: what the engine decided, and what the proof says about it.
+            const outcome = taskProof.outcomeOf(collected, { state: plan.outcome, note: plan.note });
             return await db.one('UPDATE run_tasks SET outcome = $2, outcome_note = $3, updated_at = $4 WHERE id = $1 RETURNING *',
-                [row.id, plan.outcome, plan.note, store.now()]);
+                [row.id, outcome.state, outcome.note, store.now()]);
         }
         if (!plan.kind) return row;
         const done = await startFollowUp(row, plan, ending);
         return done.row || row;
+    }
+
+    /**
+     * The proof this attempt's machine collected: the items are kept, and each one is an event on the task's stream.
+     *
+     * The machine collects it in the clone it worked in (harness/job.js), so the tests that ran and the pages that were
+     * shot are about that machine's work. A task from before this change has no proof, and says nothing about one.
+     *
+     * @param {object} row the task
+     * @param {object} ending the attempt that ended
+     * @returns {Promise<object[]>} the items as they are stored
+     */
+    async function recordProof(row, ending) {
+        const result = asObject(row.result) || {};
+        const items = Array.isArray(result.proof && result.proof.items) ? result.proof.items : [];
+        if (!items.length) return [];
+        const attemptN = ending ? Number(ending.n) : null;
+        const recorded = await taskProof.record(row.id, attemptN, items);
+        if (recorded.lines.length) await sessionLines.append(row.id, recorded.lines, attemptN);
+        return recorded.rows;
     }
 
     /**
@@ -542,7 +568,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     }
 
     return {
-        start, refresh, applyJob, applyEvent, recordState, afterEnd, continueTask, stopTask,
+        start, refresh, applyJob, applyEvent, recordState, afterEnd, continueTask, stopTask, proof: taskProof,
         latestProject, present, who, attempts: attemptStore,
     };
 }

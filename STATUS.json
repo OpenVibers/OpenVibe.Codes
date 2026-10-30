@@ -31,7 +31,8 @@
     "Improve OpenVibe (/improve): a guided run from repository choice to a task on your machine, plus the contributor path",
     "The community documents (code of conduct, contributing, contributor ladder, moderation) rendered from this repository",
     "Permanent redirects for every former console address (301 for reads, 308 for writes) to openvibe.services",
-    "robots.txt, sitemap.xml, llms.txt and llms-full.txt; per-actor and per-address limits; truthful readiness"
+    "robots.txt, sitemap.xml, llms.txt and llms-full.txt; per-actor and per-address limits; truthful readiness",
+    "Proof of a finished task (engine/proof.js, engine/review.js): the repo's own tests, the pages the diff touches (phone and desktop, headless Chrome), the diff, and a second model's review of another family; kept in codes_task_proof, one event per item, and the task's outcome in plain words"
   ],
   "notYet": [
     "A hosted runner (tasks on OpenVibe.Run workers for people who do not run agents themselves) with budgets and metering",
@@ -51,7 +52,8 @@
     "community documents",
     "redirects for the moved developer console",
     "run a coding task on your own machine from any browser (/run; openvibe-codes job through OpenVibe Run and the person's own OpenVibe Node)",
-    "user JSON API for signed-in people to list, start, read and cancel their own tasks"
+    "user JSON API for signed-in people to list, start, read and cancel their own tasks",
+    "proof of a finished task: its tests, screenshots, diff and a second-model review, and the outcome in plain words"
   ],
   "updated": "2026-10-30"
 }
