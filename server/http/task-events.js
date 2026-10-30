@@ -96,11 +96,38 @@ function createTaskEvents({ store, config = {}, log = console, attempts = null }
         };
         await sendLines();
 
+        // The proof of the task (stage C8): one event per item — the tests, the pages, the diff, the review.
+        const sentProof = new Set();
+        const sendProof = async () => {
+            const items = await db.many('SELECT * FROM codes_task_proof WHERE task_id = $1 ORDER BY n ASC', [row.id]);
+            let wrote = 0;
+            for (const item of items) {
+                if (sentProof.has(item.id)) continue;
+                sentProof.add(item.id);
+                wrote++;
+                write(frame('proof', {
+                    id: item.id,
+                    n: Number(item.n),
+                    kind: item.kind,
+                    label: item.label,
+                    ok: item.ok === true,
+                    skipped: item.skipped === true,
+                    summary: item.summary || null,
+                    family: item.family || null,
+                    attempt_n: item.attempt_n == null ? null : Number(item.attempt_n),
+                    at: item.created_at ? new Date(item.created_at).toISOString() : null,
+                }));
+            }
+            return wrote;
+        };
+        await sendProof();
+
         const tick = async () => {
             if (closed || busy) return;
             busy = true;
             try {
                 const sentLines = await sendLines();
+                await sendProof();
                 const fresh = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [row.id]);
                 const rows = await attemptStore.list(row.id);
                 let updates = '';

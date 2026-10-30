@@ -10,6 +10,7 @@ const path = require('path');
 const { createHarness } = require('../harness');
 const { runJob, resultWriter, jobEnv } = require('../harness/job');
 const { task } = require('./task');
+const { createProofAdapters } = require('../harness/proof');
 const { version: VERSION } = require('../package.json');
 const { probe: probeLogins } = require('../engine/logins');
 
@@ -164,7 +165,16 @@ async function main() {
         let wanted = {};
         try { wanted = jobEnv(JSON.parse(input)); } catch { wanted = {}; }
         const jobHarness = createHarness({ env: { ...process.env, ...wanted } });
-        await runJob({ input, harness: jobHarness, emit: out, writeResult: resultWriter(out) });
+        // The proof adapters: the repo's own tests, its pages in a browser, its diff, and the second model. The review
+        // spends the same run token the attempt already carries, so it names the same person.
+        const proof = createProofAdapters({
+            cwd: process.cwd(),
+            env: { ...process.env, ...wanted },
+            jobEnv: wanted,
+            // The models this machine can offer a reviewer: the catalog's own.
+            models: (jobHarness.agents() || []).flatMap((a) => (a.agents || []).map((x) => x.model)).filter(Boolean),
+        });
+        await runJob({ input, harness: jobHarness, emit: out, writeResult: resultWriter(out), proof });
         return 0;
     }
     if (cmd === 'runs') {
