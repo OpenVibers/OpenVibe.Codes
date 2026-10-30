@@ -35,26 +35,16 @@ const { boot, check, done } = require('./helpers/boot');
 
     const t = await boot();
     try {
-        await check('the home: quick start, OpenVibe Git, a FAQ and its JSON-LD', async () => {
+        await check('the home presents the Codes workspace and its composer', async () => {
             let r = await t.get('/');
             assert.strictEqual(r.status, 200);
-            assert.match(r.text, /id="quick-start"/);
-            assert.match(r.text, /npm install -g https:\/\/codeload\.github\.com\/OpenVibers\/OpenVibe\.Codes\/tar\.gz\/refs\/tags\/v\d+\.\d+\.\d+/);
-            assert.match(r.text, /https:\/\/openvibe\.codes\/api\/v1\/harnesses\/route/);
-            assert.match(r.text, /id="git"/, 'OpenVibe Git is on the home');
-            assert.ok(!/class="codes-repos"/.test(r.text), 'no repository list while the forge has not answered');
-            assert.ok(r.text.includes('git clone https://git.openvibe.codes/OpenVibers/OpenVibe.Codes.git'));
-            assert.ok(r.text.includes('# an example run'), 'the hero transcript says it is an example');
+            assert.match(r.text, /Every coding agent\. One place\./);
+            assert.match(r.text, /What should an agent do\?/);
+            assert.match(r.text, /Needs you/);
+            assert.match(r.text, /Recent tasks/);
             const blocks = [...r.text.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => JSON.parse(m[1]));
-            const faq = blocks.find((b) => b['@type'] === 'FAQPage');
-            assert.ok(faq && faq.mainEntity.length === home.faqPairs().length && faq.mainEntity.length >= 5, 'a FAQPage node with every question');
-            faq.mainEntity.forEach((q) => assert.ok(r.text.includes(`<h3>${q.name.replace(/'/g, '&#39;')}</h3>`), `the page shows "${q.name}"`));
+            assert.ok(blocks.some((b) => b['@type'] === 'WebSite'), 'the home keeps its website metadata');
             assert.strictEqual((r.text.match(/<h1[\s>]/g) || []).length, 1, 'one h1');
-
-            t.ctx.git = { peek: () => ({ total: 52, publicUrl: 'https://git.openvibe.codes', repos: [{ name: 'OpenVibers/OpenVibe.Codes', url: 'https://git.openvibe.codes/OpenVibers/OpenVibe.Codes', updated: new Date().toISOString(), language: 'JavaScript' }] }) };
-            r = await t.get('/');
-            assert.match(r.text, /52 repositories on OpenVibe&#39;s own code forge|52 repositories on OpenVibe's own code forge/);
-            assert.ok(r.text.includes('href="https://git.openvibe.codes/OpenVibers/OpenVibe.Codes"') && r.text.includes('<small>Build and fix apps with AI</small>'), 'a repository with its service tagline');
         });
     } finally { await t.close(); }
     done();

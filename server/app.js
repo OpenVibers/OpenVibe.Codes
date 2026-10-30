@@ -201,6 +201,8 @@ async function createApp(opts = {}) {
         if (req.path !== '/.well-known/agent.json' && !twin) return next();
         return agentLayer(req, res, next);
     });
+    // C4 workspace pages sit before the legacy marketing pages and share the existing owner-scoped task store.
+    app.use(require('./http/c4').createC4Routes(ctx));
     app.use(pageRoutes);
     app.use(createRunRoutes({ config, store, sso, harnesses, run, tasks, sessions, keys, fetchImpl: fetchImpl || globalThis.fetch, log }));
     app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try <a href="/harnesses">the agents</a>, <a href="/improve">Improve OpenVibe</a>, or the developer platform at <a href="https://openvibe.services">openvibe.services</a>.</p>` }));

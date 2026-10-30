@@ -55,13 +55,14 @@ function renderPage(o) {
     const viewer = o.viewer || { kind: 'anonymous' };
     const signedIn = viewer.kind === 'user';
     const pathNow = o.path || '/';
+    const c4Workspace = pathNow === '/' || /^\/(tasks|agents|machines|usage|settings)(\/|$)/.test(pathNow);
     const loginNext = encodeURIComponent(pathNow);
     const canonical = `${o.config.baseUrl}${pathNow.split('?')[0]}`;
     const nav = {
         service: 'codes',
         apiBase: NETWORK_URL,
         links: NAV.map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: pathNow === l.href || pathNow.startsWith(`${l.href}/`) })),
-        appBar: [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Start', href: '/start', icon: 'fa-play' }, { label: 'Run', href: '/run', icon: 'fa-microchip' }, { label: 'Agents', href: '/harnesses', icon: 'fa-robot' }],   // phones: the bottom tab bar (Shared 4.20)
+        appBar: c4Workspace ? false : [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Start', href: '/start', icon: 'fa-play' }, { label: 'Run', href: '/run', icon: 'fa-microchip' }, { label: 'Agents', href: '/harnesses', icon: 'fa-robot' }],   // phones: the bottom tab bar (Shared 4.20)
         history: { type: 'page', title: o.title || SITE_NAME },
         silentLogin: `${o.config.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
