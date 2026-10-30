@@ -180,6 +180,7 @@ const { boot, check, done } = require('./helpers/boot');
             assert.strictEqual(other.status, 404, 'someone else’s task');
             // A continue starts the next attempt on a task that has ended; stop ends the running one for good.
             await db.exec("UPDATE run_tasks SET state = 'failed', outcome = 'unfinished' WHERE id = $1", [own.id]);
+            await db.exec("UPDATE codes_attempts SET state = 'failed' WHERE task_id = $1", [own.id]);
             const carried = await asAda('POST', `/tasks/${own.id}/continue`, { note: 'and the tests' });
             assert.strictEqual(carried.status, 200, JSON.stringify(carried.json));
             assert.ok(carried.json.attempts.length >= 2, 'the continue is the next attempt');

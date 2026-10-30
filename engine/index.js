@@ -64,6 +64,7 @@ module.exports = {
     nextStep: chain.nextStep,
     evaluate: budget.evaluate,
     limitsFor: budget.limitsFor,
+    caps: budget.caps,
     parse: transcript.parse,
     parseText: transcript.parseText,
     fitEffort: effort.fitEffort,

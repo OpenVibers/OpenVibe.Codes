@@ -31,6 +31,19 @@ const NAV = [
     { label: 'Community', href: '/policy', icon: 'fa-people-group', more: true },
 ];
 
+// The workspace's own sections (Codes C4c). The shared Frame owns the page's navigation (openvibe.design/patterns/
+// single-navbar), so on the workspace pages the Frame navbar's links ARE these sections and the page carries no
+// sidebar of its own. The product's own places (Get started, Run on your machine) move into More for a signed-in
+// person, so a workspace page has one navigation and not two.
+const WORKSPACE_NAV = [
+    { label: 'Home', href: '/', icon: 'fa-house' },
+    { label: 'Tasks', href: '/tasks', icon: 'fa-list' },
+    { label: 'Agents', href: '/agents', icon: 'fa-robot' },
+    { label: 'Machines', href: '/machines', icon: 'fa-display' },
+    { label: 'Usage', href: '/usage', icon: 'fa-chart-line' },
+    { label: 'Settings', href: '/settings', icon: 'fa-gear' },
+];
+
 const hashes = new Map();
 function assetVersion(rel) {
     if (hashes.has(rel)) return hashes.get(rel);
@@ -60,11 +73,23 @@ function renderPage(o) {
     const c4Workspace = pathOnly === '/' || /^\/(tasks|agents|machines|usage|settings)(\/|$)/.test(pathOnly);
     const loginNext = encodeURIComponent(pathNow);
     const canonical = `${o.config.baseUrl}${pathNow.split('?')[0]}`;
+    // One navigation per page. On the workspace pages a signed-in person's navbar carries the workspace sections, with
+    // the current one active, and the product's own places fold into More; a visitor who is not signed in keeps the
+    // product's links, because the sections hold the visitor's own work and a visitor has none yet.
+    const here = (href) => pathOnly === href || (href !== '/' && pathOnly.startsWith(`${href}/`));
+    const links = (signedIn && c4Workspace)
+        ? [
+            ...WORKSPACE_NAV.map((l) => ({ ...l, active: here(l.href) })),
+            // The catalogue of harnesses is the product's Agents page; the workspace's own Agents page is above, so the
+            // product's one is named for what it is.
+            ...NAV.map((l) => ({ ...l, more: true, label: l.href === '/harnesses' ? 'Agent catalogue' : l.label })),
+        ]
+        : NAV.map((l) => ({ ...l, active: pathNow === l.href || pathNow.startsWith(`${l.href}/`) }));
     const nav = {
         service: 'codes',
         brandName: SITE_NAME,
         apiBase: NETWORK_URL,
-        links: NAV.map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: pathNow === l.href || pathNow.startsWith(`${l.href}/`) })),
+        links,
         appBar: c4Workspace ? false : [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Start', href: '/start', icon: 'fa-play' }, { label: 'Run', href: '/run', icon: 'fa-microchip' }, { label: 'Agents', href: '/harnesses', icon: 'fa-robot' }],   // phones: the bottom tab bar (Shared 4.20)
         history: { type: 'page', title: o.title || SITE_NAME },
         silentLogin: `${o.config.baseUrl}/auth/login?silent=1&next={url}`,
@@ -88,6 +113,8 @@ function renderPage(o) {
     return shell.page({
         name: SITE_NAME,
         lang: 'en',
+        // The workspace pages carry their own phone tab bar, so the page's bottom inset is theirs (C4c).
+        bodyClass: c4Workspace ? 'ov-workspace' : '',
         title: o.title || `${SITE_NAME}: code with any agent`,
         titleSuffix: o.title ? ` · ${SITE_NAME}` : '',
         siteName: SITE_NAME,

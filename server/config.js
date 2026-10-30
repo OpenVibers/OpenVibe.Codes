@@ -120,7 +120,12 @@ function load(env = process.env) {
             steps: int(env.CODES_TASK_STEPS, 0),
             minutes: int(env.CODES_TASK_MINUTES, 0),
             usd: Number(env.CODES_TASK_USD || 0) || 0,
+            // The tokens one attempt may spend, when the task does not say (a run token's budget, Codes C3).
+            tokens: int(env.CODES_TASK_TOKENS, 0),
         },
+        // Know (the shared lessons store, Know K): on a Node this is the portal's know/lessons.js, never a hard-coded
+        // home. The path is configuration; a store that cannot be read gives no lessons, never an error.
+        know: { lessons: String(env.CODES_KNOW_LESSONS || env.OPENVIBE_CODES_LESSONS || '').trim() },
         // The task's timeline (stage C2): how many automatic continues one task may have before it needs a person.
         task: { maxContinues: Math.max(0, int(env.CODES_TASK_MAX_CONTINUES, 2)) },
         // The conductor (Codes C9b): one long Claude Code session on the person's own machine. A turn's wall time (the

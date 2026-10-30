@@ -19,7 +19,7 @@
  * claude-minimax sets, and what claude-deepseek does for DeepSeek).
  */
 
-const { effortFor, claudeFeed, TOOL_NAMES } = require('./base');
+const { effortFor, turnCap, knowRegistered, claudeFeed, TOOL_NAMES } = require('./base');
 
 /** The permission modes, by the Codes level (read, edit, full). */
 const MODES = { read: 'plan', edit: 'acceptEdits', full: 'bypassPermissions' };
@@ -43,21 +43,27 @@ function rulesFile(rules) { return rules && rules.trim() ? rules.trim() : null; 
  * @param {string} [ctx.effort] the wanted reasoning level
  * @param {string} [ctx.resume] the session to continue
  * @param {string} [ctx.permission] 'read' | 'edit' | 'full'
- * @param {number} [ctx.maxTurns] the turn limit
+ * @param {number} [ctx.maxTurns] the turn limit (steps + 25, or none)
  * @param {string} [ctx.rules] the rules file (appended to the system prompt)
  * @param {object} [ctx.provider] the provider's environment (base URL, token, model): the cm-style environment
+ * @param {boolean} [ctx.know] this machine has the shared Know MCP server (default: read the machine's Claude config)
+ * @param {string} [ctx.claudeConfig] the Claude Code config to read for that check (a Node's own path, or a test)
  * @returns {{cmd: string, argv: string[], env: object, stdin: string|null}} what to run
  */
 function build(ctx = {}) {
     const effort = effortFor('claude-code', ctx.effort);
     const argv = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-        '--max-turns', String(ctx.maxTurns || 200),
+        '--max-turns', turnCap(ctx.maxTurns),
         '--permission-mode', MODES[ctx.permission] || MODES.edit,
         '--exclude-dynamic-system-prompt-sections'];
     const rules = rulesFile(ctx.rules);
     if (rules) argv.push('--append-system-prompt-file', rules);
     argv.push('--disallowedTools', DENIED.join(' '));
-    argv.push('--allowedTools', ALLOWED.join(' '));
+    // mcp__ov_know: the shared Know server, when this machine registered it (know/register.js). Claude Code refuses an
+    // MCP tool that is not on --allowedTools in a headless run, so the allow list is what makes it callable.
+    const allowed = ALLOWED.slice();
+    if (ctx.know === true || (ctx.know !== false && knowRegistered({ file: ctx.claudeConfig }))) allowed.push('mcp__ov_know');
+    argv.push('--allowedTools', allowed.join(' '));
     if (ctx.resume) argv.push('--resume', String(ctx.resume));
     const env = {};
     const p = ctx.provider || {};
@@ -67,7 +73,7 @@ function build(ctx = {}) {
     if (ctx.model) env.ANTHROPIC_MODEL = ctx.model;
     if (effort) env.CLAUDE_CODE_EFFORT_LEVEL = effort;
     if (p.mcpConfig) argv.push('--mcp-config', p.mcpConfig);
-    if (p.extraAllowed && p.extraAllowed.length) argv.push('--allowedTools', ALLOWED.concat(p.extraAllowed).join(' '));
+    if (p.extraAllowed && p.extraAllowed.length) argv.push('--allowedTools', allowed.concat(p.extraAllowed).join(' '));
     return { cmd: ctx.bin || 'claude', argv, env, stdin: ctx.prompt || '' };
 }
 

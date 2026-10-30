@@ -1,12 +1,14 @@
 'use strict';
 
 /**
- * A person's workspace choices (Codes C4b): the default agent, the default machine, their notifications and the safety
- * level. One row per person in codes_user_settings (migration 0013); a person without a row reads the defaults, so the
- * Settings screen is complete before anything is saved.
+ * A person's workspace choices (Codes C4b): the default agent, the default machine, their notifications, the safety
+ * level and the limits on every task (Codes C9a: steps and minutes, null meaning no limit). One row per person in
+ * codes_user_settings (migrations 0013 and 0014); a person without a row reads the defaults, so the Settings screen is
+ * complete before anything is saved.
  *
  *   createUserSettings({ store })
- *     get(subject)                 → { default_agent, default_machine, notify_done, notify_needs, safety }
+ *     get(subject)                 → { default_agent, default_machine, notify_done, notify_needs, safety,
+ *                                     steps, minutes }
  *     save(subject, patch)         → the saved row, in the same shape
  *
  * Only a usr_ subject is accepted: a service token has no preferences of its own to keep.
@@ -15,8 +17,24 @@ const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const SAFETY = ['ask', 'project', 'full'];
 const AGENT = /^[a-z0-9-]{1,40}$/;
 const MACHINE = /^(?:nod_)?[0-9A-HJKMNP-TV-Z]{26}$/;
+/** The most a person may set (the portal's own cap): a number of steps or minutes, or none at all. */
+const LIMIT_MAX = 100000;
 
-const DEFAULTS = Object.freeze({ default_agent: null, default_machine: null, notify_done: true, notify_needs: true, safety: 'ask' });
+const DEFAULTS = Object.freeze({
+    default_agent: null, default_machine: null, notify_done: true, notify_needs: true, safety: 'ask',
+    steps: null, minutes: null,
+});
+
+/** A nullable limit from a form or an API: '' / 'off' / 0 / null mean no limit; a negative or silly number is refused. */
+function limit(v, field) {
+    if (v === undefined) return undefined;
+    if (v === null || v === '' || v === 0 || v === '0' || String(v).toLowerCase() === 'off') return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0 || n > LIMIT_MAX) {
+        throw Object.assign(new Error(`${field} is a positive number, or empty for No limit`), { status: 422, code: 'settings.limit_invalid' });
+    }
+    return Math.round(n);
+}
 
 function present(row) {
     if (!row) return { ...DEFAULTS };
@@ -26,6 +44,8 @@ function present(row) {
         notify_done: row.notify_done !== false,
         notify_needs: row.notify_needs !== false,
         safety: SAFETY.includes(row.safety) ? row.safety : 'ask',
+        steps: row.steps == null ? null : Number(row.steps),
+        minutes: row.minutes == null ? null : Number(row.minutes),
     };
 }
 
@@ -64,17 +84,24 @@ function createUserSettings({ store }) {
             if (!SAFETY.includes(v)) throw Object.assign(new Error(`the safety level is one of ${SAFETY.join(', ')}`), { status: 422, code: 'settings.safety_unknown' });
             next.safety = v;
         }
+        // Settings → Limits: steps and minutes per task, for every harness at once. No value means no limit.
+        const steps = limit(patch.steps, 'steps per task');
+        if (steps !== undefined) next.steps = steps;
+        const minutes = limit(patch.minutes, 'minutes per task');
+        if (minutes !== undefined) next.minutes = minutes;
         await db.exec(
-            `INSERT INTO codes_user_settings (subject, default_agent, default_machine, notify_done, notify_needs, safety, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, now())
+            `INSERT INTO codes_user_settings (subject, default_agent, default_machine, notify_done, notify_needs, safety,
+                 steps, minutes, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
              ON CONFLICT (subject) DO UPDATE SET default_agent = EXCLUDED.default_agent, default_machine = EXCLUDED.default_machine,
-                 notify_done = EXCLUDED.notify_done, notify_needs = EXCLUDED.notify_needs, safety = EXCLUDED.safety, updated_at = now()`,
-            [subject, next.default_agent, next.default_machine, next.notify_done, next.notify_needs, next.safety],
+                 notify_done = EXCLUDED.notify_done, notify_needs = EXCLUDED.notify_needs, safety = EXCLUDED.safety,
+                 steps = EXCLUDED.steps, minutes = EXCLUDED.minutes, updated_at = now()`,
+            [subject, next.default_agent, next.default_machine, next.notify_done, next.notify_needs, next.safety, next.steps, next.minutes],
         );
         return next;
     }
 
-    return { get, save, DEFAULTS, SAFETY };
+    return { get, save, DEFAULTS, SAFETY, LIMIT_MAX };
 }
 
-module.exports = { createUserSettings, present, DEFAULTS, SAFETY };
+module.exports = { createUserSettings, present, DEFAULTS, SAFETY, LIMIT_MAX };

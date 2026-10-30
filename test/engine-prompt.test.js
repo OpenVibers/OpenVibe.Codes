@@ -10,27 +10,44 @@ const { assemble, lessons, fragment } = require('../engine/prompt');
 
 (async () => {
     await check('the rules and the house rules are Codes\' own fragments', () => {
-        assert.ok(fragment('git-rule.md').includes('Git rules'));
+        const git = fragment('git-rule.md');
+        assert.ok(git.includes('Git rules'));
+        // 10-30: a job pushes its own branch when its brief asks for a PR. Never main, never force.
+        assert.match(git, /Push only your own job branch, and only when your brief asks for a PR/);
+        assert.match(git, /Never push to main, never force-push, never push someone else's branch/);
+        assert.doesNotMatch(git, /git config\. Never push\./, 'the old no-push-at-all rule is gone');
         assert.ok(fragment('house-rules.md').includes('House rules'));
         assert.equal(fragment('nope.md'), '');
     });
 
-    await check('the lessons are the ones that fit, at most five', () => {
-        const file = path.join(os.tmpdir(), `lessons-${process.pid}.jsonl`);
-        const rows = [];
-        for (let i = 0; i < 8; i++) rows.push(JSON.stringify({ text: `lesson ${i} about the database`, repo: 'demo', tags: ['database'] }));
-        rows.push(JSON.stringify({ text: 'unrelated note' }));
-        fs.writeFileSync(file, rows.join('\n') + '\n');
+    await check('the lessons come from the Know store, through its own recall()', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'know-'));
+        const file = path.join(dir, 'lessons.js');
+        fs.writeFileSync(file, `module.exports = { recall(brief, repo, k) {
+            require('fs').writeFileSync(${JSON.stringify(path.join(dir, 'seen.json'))}, JSON.stringify({ brief, repo, k }));
+            return '## What earlier jobs learned here (dated)\\n- 2026-10-30 · demo — the tests need the database\\n';
+        } };\n`);
         const got = lessons({ file, repo: 'demo', brief: 'fix the database test' });
-        assert.ok(got.includes('What earlier jobs learned here'));
-        assert.ok(!got.includes('unrelated note'), 'a lesson that does not fit is left out');
-        assert.ok((got.match(/^- /gm) || []).length <= 5);
-        fs.rmSync(file, { force: true });
+        assert.ok(got.startsWith('## What earlier jobs learned here'), 'the store formats its own block');
+        assert.ok(got.trimEnd().endsWith('the database'), 'and its lesson is kept');
+        assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(dir, 'seen.json'), 'utf8')),
+            { brief: 'fix the database test', repo: 'demo', k: 5 }, 'the store gets the brief, the repo and the cap');
+        // The environment is how a Node passes the config path when the caller does not.
+        assert.equal(lessons({ brief: 'x', env: { CODES_KNOW_LESSONS: file } }), got);
+        fs.rmSync(dir, { recursive: true, force: true });
     });
 
     await check('a store that cannot be reached gives no lessons, not an error', () => {
-        assert.equal(lessons({ file: '/nope/lessons.jsonl', brief: 'x' }), '');
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'know-bad-'));
+        const noRecall = path.join(dir, 'no-recall.js');
+        fs.writeFileSync(noRecall, 'module.exports = { search: () => "x" };\n');
+        const throws = path.join(dir, 'throws.js');
+        fs.writeFileSync(throws, 'module.exports = { recall: () => { throw new Error("no store"); } };\n');
+        assert.equal(lessons({ file: '/nope/lessons.js', brief: 'x' }), '');
+        assert.equal(lessons({ file: noRecall, brief: 'x' }), '');
+        assert.equal(lessons({ file: throws, brief: 'x' }), '');
         assert.equal(lessons({ brief: 'x' }), '');
+        fs.rmSync(dir, { recursive: true, force: true });
     });
 
     await check('the prompt is the rules, the house rules, the lessons, the digest, the brief', () => {

@@ -6,15 +6,17 @@
  * The argv comes from the portal's mm-run.sh:
  *
  *   mcode exec --input - --output-format stream-json --prompt-mode coding --permission MODE --cwd DIR
- *         --timeout 45m --max-steps N --append-system-prompt-file RULES -o LAST [--ptc] [--mode lightweight]
+ *         --timeout TIME --max-steps N --append-system-prompt-file RULES -o LAST [--ptc] [--mode lightweight]
  *         [--model MODEL] [--effort EFFORT] [--session SESSION]
  *
  * The rules ride in the appended system prompt (the stable, best-cached prefix) and the brief alone is the user turn.
  * --ptc is Programmatic Tool Calling (the model batches its tool calls in one round trip). The permission is smart for a
- * guarded job and full for the owner's "full" choice.
+ * guarded job and full for the owner's "full" choice. The wall clock and the step cap follow the task's limits
+ * (engine/budget.js caps): the time limit plus five minutes, and the step limit plus 25, or 100000m / 100000 when the
+ * owner set none (the portal's 86e5f95: this used to be a hard-coded 45m / 150 steps).
  */
 
-const { effortFor, emitter } = require('./base');
+const { effortFor, turnCap, emitter } = require('./base');
 
 /**
  * The argv and the environment for one MiniMax Code run.
@@ -37,8 +39,8 @@ function build(ctx = {}) {
     const effort = effortFor('minimax-code', ctx.effort);
     const perm = ctx.permission === 'full' ? 'full' : 'smart';
     const argv = ['exec', '--input', '-', '--output-format', 'stream-json', '--prompt-mode', 'coding',
-        '--permission', perm, '--cwd', ctx.cwd || process.cwd(), '--timeout', ctx.timeout || '45m',
-        '--max-steps', String(ctx.maxSteps || 150)];
+        '--permission', perm, '--cwd', ctx.cwd || process.cwd(), '--timeout', ctx.timeout || '100000m',
+        '--max-steps', turnCap(ctx.maxSteps || ctx.maxTurns)];
     if (ctx.rules && String(ctx.rules).trim()) argv.push('--append-system-prompt-file', String(ctx.rules).trim());
     if (ctx.out) argv.push('-o', ctx.out);
     if (ctx.ptc !== false) argv.push('--ptc');

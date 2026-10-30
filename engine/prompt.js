@@ -23,39 +23,29 @@ function fragment(name) {
 }
 
 /**
- * The lessons a job gets: what earlier jobs learned here, at most five lines.
+ * The lessons a job gets: what earlier jobs learned here, through the shared Know store's own `recall()`
+ * (the portal's know/lessons.js; on a Node its path comes from the configuration, never a hard-coded home).
  *
- * The store is optional and off by default: `OPENVIBE_CODES_LESSONS` names a JSONL file (one lesson per line, with a
- * `text` field and optional `repo` and `tags`). A store that cannot be read gives no lessons, not an error.
+ * The store is optional and off by default. A path that cannot be required, a module without recall(), or a recall
+ * that throws gives no lessons, never an error: a job must not fail because the memory is unreachable.
  *
  * @param {object} opts
- * @param {string} [opts.file] the store's path
+ * @param {string} [opts.file] the Know module's path (know/lessons.js)
  * @param {string} [opts.repo] the repo the job works in (its lessons come first)
  * @param {string} [opts.brief] the brief (its words pick the lessons that fit)
+ * @param {object} [opts.env] the environment (CODES_KNOW_LESSONS, or the older OPENVIBE_CODES_LESSONS)
  * @returns {string} the lessons, as markdown ('' when there are none)
  */
-function lessons({ file, repo, brief } = {}) {
-    const path_ = file || process.env.OPENVIBE_CODES_LESSONS;
+function lessons({ file, repo, brief, env = process.env } = {}) {
+    const path_ = String(file || (env && (env.CODES_KNOW_LESSONS || env.OPENVIBE_CODES_LESSONS)) || '').trim();
     if (!path_) return '';
-    let raw;
-    try { raw = fs.readFileSync(path_, 'utf8'); } catch { return ''; }
-    const rows = [];
-    for (const line of String(raw).split('\n')) {
-        if (!line.trim()) continue;
-        let row; try { row = JSON.parse(line); } catch { continue; }
-        const text = typeof row.text === 'string' ? row.text.trim() : '';
-        if (text) rows.push({ text, repo: row.repo || null, tags: Array.isArray(row.tags) ? row.tags : [] });
-    }
-    if (!rows.length) return '';
-    const words = new Set(String(brief || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3));
-    const scored = rows.map((r) => {
-        let score = r.repo && repo && r.repo === repo ? 10 : 0;
-        for (const t of r.tags) if (words.has(String(t).toLowerCase())) score += 2;
-        for (const w of words) if (r.text.toLowerCase().includes(w)) score += 1;
-        return { r, score };
-    }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 5);
-    if (!scored.length) return '';
-    return ['### What earlier jobs learned here', ...scored.map((x) => `- ${x.r.text}`)].join('\n');
+    let know;
+    try { know = require(path.resolve(path_)); } catch { return ''; }
+    if (!know || typeof know.recall !== 'function') return '';
+    try {
+        const block = know.recall(String(brief || ''), repo || '*', 5);
+        return typeof block === 'string' ? block.trim() : '';
+    } catch { return ''; }
 }
 
 /**
@@ -64,14 +54,15 @@ function lessons({ file, repo, brief } = {}) {
  * @param {object} opts
  * @param {string} opts.brief what the task is
  * @param {string} opts.dir the folder the job works in
- * @param {object} [opts.env] the environment (OPENVIBE_CODES_LESSONS)
+ * @param {object} [opts.env] the environment (CODES_KNOW_LESSONS, or the older OPENVIBE_CODES_LESSONS)
+ * @param {string} [opts.know] the Know module's path (the Node's config wins over the environment)
  * @returns {{text: string, parts: object[]}} the prompt and the parts it is made of
  */
-function assemble({ brief, dir, env = process.env } = {}) {
+function assemble({ brief, dir, env = process.env, know } = {}) {
     const gitRule = fragment('git-rule.md');
     const houseRules = fragment('house-rules.md');
     const repo = repomap(dir);
-    const learned = lessons({ file: env.OPENVIBE_CODES_LESSONS, repo: repo.repo, brief });
+    const learned = lessons({ file: know, repo: repo.repo, brief, env });
     const parts = [
         { name: 'git-rule', text: gitRule },
         { name: 'house-rules', text: houseRules },
