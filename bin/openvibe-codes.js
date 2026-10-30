@@ -9,6 +9,7 @@
 const path = require('path');
 const { createHarness } = require('../harness');
 const { runJob, resultWriter, jobEnv } = require('../harness/job');
+const { task } = require('./task');
 const { version: VERSION } = require('../package.json');
 const { probe: probeLogins } = require('../engine/logins');
 
@@ -33,9 +34,12 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
   openvibe-codes resume <run id> "follow-up"  continue a run's last session with its agent
   openvibe-codes job                          one task as an OpenVibe Run job (JSON input on stdin; the
                                               OpenVibe Node's job worker runs it on your own machine)
+  openvibe-codes task start|list|show|continue|stop   coding tasks on openvibe.codes, as you, on one of
+                                              your machines (openvibe-codes task --help)
 
 Environment: DEEPSEEK_API_KEY · OPENVIBE_CODES_BASE_URL, OPENVIBE_CODES_MODEL, OPENVIBE_CODES_API_KEY
-(your own OpenAI-compatible server) · OPENVIBE_CODES_HOME (where runs are kept).
+(your own OpenAI-compatible server) · OPENVIBE_CODES_HOME (where runs are kept) · OPENVIBE_TOKEN (your
+Network token, for 'task') and OPENVIBE_CODES_URL (the server task talks to).
 Guide: https://openvibe.codes/start`;
 
 function parse(argv) {
@@ -90,6 +94,8 @@ async function readStdin() {
 
 async function main() {
     const [cmd, ...rest] = process.argv.slice(2);
+    // Tasks on openvibe.codes: the person's own token, the server's API. Nothing here runs an agent.
+    if (cmd === 'task') return task(rest);
     const o = parse(rest);
     if (!cmd || cmd === 'help' || o.help || cmd === '--help' || cmd === '-h') { out(USAGE); return 0; }
     if (cmd === '--version' || cmd === '-v' || cmd === 'version') { out(VERSION); return 0; }

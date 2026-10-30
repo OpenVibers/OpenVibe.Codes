@@ -68,9 +68,9 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
         st.users.set(u.id, u); st.byUsername.set(username, u);
         return u;
     }
-    function userToken(u, { ttl = 3600, iat = null } = {}) {
+    function userToken(u, { ttl = 3600, iat = null, audience = null } = {}) {
         const now = iat != null ? iat : Math.floor(Date.now() / 1000);
-        return signJwt({ iss: issuer, sub: u.id, subject_id: u.subject, username: u.username, display_name: u.display_name, role: u.role, aud: ['openvibe.network'], iat: now, exp: now + ttl }, privatePem);
+        return signJwt({ iss: issuer, sub: u.id, subject_id: u.subject, username: u.username, display_name: u.display_name, role: u.role, aud: audience || ['openvibe.network'], iat: now, exp: now + ttl }, privatePem);
     }
     function userFrom(req) {
         const h = String(req.headers.authorization || '');
