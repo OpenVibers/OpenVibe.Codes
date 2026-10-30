@@ -1,0 +1,159 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://openvibe.codes/schemas/engine/transcript@1",
+    "title": "OpenVibe.Codes transcript",
+    "description": "One event shape for every harness's log: Claude Code stream-json, Codex, Command Code, OpenCode, dsh --json and MiniMax Code stream-json. The normaliser lives in engine/transcript.js.",
+    "type": "object",
+    "required": ["events"],
+    "properties": {
+        "events": {
+            "type": "array",
+            "description": "The conversation, in order.",
+            "items": { "$ref": "#/$defs/event" }
+        },
+        "session": {
+            "type": ["string", "null"],
+            "description": "The harness's session id, when it reported one (a continue needs it)."
+        },
+        "model": {
+            "type": ["string", "null"],
+            "description": "The model that worked on it, when the feed said."
+        },
+        "cwd": {
+            "type": ["string", "null"],
+            "description": "The folder it worked in."
+        },
+        "usage": {
+            "type": "object",
+            "description": "The tokens it used.",
+            "properties": {
+                "input": { "type": "number", "minimum": 0 },
+                "output": { "type": "number", "minimum": 0 },
+                "cached": { "type": "number", "minimum": 0 }
+            },
+            "additionalProperties": false
+        },
+        "cost": {
+            "type": ["number", "null"],
+            "description": "The dollars the feed reported, when it reported any."
+        },
+        "line": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The number of feed lines that were read."
+        }
+    },
+    "additionalProperties": true,
+    "$defs": {
+        "event": {
+            "type": "object",
+            "required": ["t"],
+            "description": "One event of the conversation.",
+            "properties": {
+                "t": {
+                    "type": "string",
+                    "enum": ["user", "text", "thinking", "tool", "error", "final", "meta"],
+                    "description": "The kind of event."
+                },
+                "text": {
+                    "type": "string",
+                    "description": "The words: what was said, thought, or went wrong."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "The tool's name (on a tool event)."
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["shell", "read", "edit", "search", "web", "plan", "tool"],
+                    "description": "What kind of tool it was (on a tool event)."
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "One line about what the tool was asked to do."
+                },
+                "input": {
+                    "type": "object",
+                    "description": "What the tool was given.",
+                    "properties": {
+                        "text": { "type": "string" },
+                        "more": { "type": "number", "minimum": 0 }
+                    },
+                    "required": ["text"],
+                    "additionalProperties": true
+                },
+                "output": {
+                    "type": ["object", "null"],
+                    "description": "What the tool answered, once it did.",
+                    "properties": {
+                        "text": { "type": "string" },
+                        "more": { "type": "number", "minimum": 0 }
+                    },
+                    "required": ["text"],
+                    "additionalProperties": true
+                },
+                "at": {
+                    "type": ["string", "null"],
+                    "format": "date-time",
+                    "description": "When it happened (ISO 8601), when the feed said."
+                },
+                "ts": {
+                    "type": ["number", "null"],
+                    "description": "When it happened, in milliseconds since the epoch."
+                },
+                "line": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "The feed line it came from."
+                },
+                "i": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Its index in the event list."
+                },
+                "id": {
+                    "type": "string",
+                    "description": "The tool call's id (on a tool event)."
+                },
+                "pending": {
+                    "type": "boolean",
+                    "description": "The tool has not answered yet."
+                },
+                "isError": {
+                    "type": "boolean",
+                    "description": "It failed."
+                },
+                "exit": {
+                    "type": "number",
+                    "description": "The exit code of the command (on a tool event)."
+                },
+                "v": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "How often this event changed."
+                },
+                "partial": {
+                    "type": "boolean",
+                    "description": "The words are still streaming in."
+                },
+                "answer": {
+                    "type": "boolean",
+                    "description": "This message is the answer of the turn."
+                },
+                "session": {
+                    "type": "string",
+                    "description": "The session id (on a meta event)."
+                },
+                "model": {
+                    "type": "string",
+                    "description": "The model (on a meta event)."
+                    },
+                "cwd": {
+                    "type": "string",
+                    "description": "The folder (on a meta event)."
+                }
+            },
+            "additionalProperties": true
+        }
+    }
+}
