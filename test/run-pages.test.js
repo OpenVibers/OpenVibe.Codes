@@ -73,7 +73,8 @@ const { boot, check, done } = require('./helpers/boot');
         assert.strictEqual(kind, 'submit');
         assert.deepStrictEqual([sent.subject, sent.project, sent.key], [ada.subject, project, taskId]);
         // The harness's environment (Codes C3) is not part of the task's own arguments: it carries the run token.
-        const { env, ...args } = sent.args;
+        const { env, resume, ...args } = sent.args;
+        assert.match(resume, /^[0-9a-f-]{36}$/i, 'the C2 continuation id');
         assert.deepStrictEqual(args, { repo: 'https://github.com/OpenVibers/OpenVibe.Codes', ref: 'main', prompt: 'Fix the typo in README', permission: 'edit', push: { branch: null, pull_request: true }, agent: 'claude-code', model: null });
         assert.deepStrictEqual(Object.keys(env || {}).sort(), ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL']);
         assert.ok(env.ANTHROPIC_AUTH_TOKEN && env.ANTHROPIC_BASE_URL, 'the harness gets a run token and OpenVibe.AI\'s address');
