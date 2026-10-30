@@ -110,6 +110,10 @@ function load(env = process.env) {
         // OpenVibe.Run (plan T16): a coding task on the person's own machine is a Run job Codes starts for them.
         run: { url: trim(env.CODES_RUN_URL || 'http://127.0.0.1:4920') },
 
+        // GitHub (Codes C4b): the repository search behind the Home picker, and the CI and merge state beside a task's
+        // pull request. Read-only, public answers; the token only raises GitHub's limits and is never shown or logged.
+        github: { token: String(env.CODES_GITHUB_TOKEN || '').trim() },
+
         // A task's own budget (engine/budget.js): steps (tool calls), minutes (wall clock) and dollars. A limit that is
         // not set is no limit — 0 means "no limit", never a zero budget. Steps and minutes buy one wrap-up turn.
         budget: {

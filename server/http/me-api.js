@@ -9,6 +9,7 @@
  *   POST /me/tasks              → { task: codes.task@1 } (201)
  *   GET  /me/tasks/:id          → codes.task@1
  *   POST /me/tasks/:id/cancel   → codes.task@1
+ *   GET  /me/repos?q=…          → { repos: [{ full_name, url, … }] }: the Home picker's search (Codes C4b)
  */
 const express = require('express');
 const { http, validate } = require('openvibe-contracts');
@@ -20,7 +21,7 @@ const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const DELEGABLE = new Set(['owner', 'admin']);
 
-function createMeApi({ config, store, sso, run, harnesses, actorLimits, tasks = null, log = console }) {
+function createMeApi({ config, store, sso, run, harnesses, actorLimits, tasks = null, github = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
@@ -99,6 +100,18 @@ function createMeApi({ config, store, sso, run, harnesses, actorLimits, tasks = 
         const row = await taskStore.start({ subject: req.viewer.subject, project, args });
         log.info(`[Codes] user ${req.viewer.subject} started task ${row.id} through the user API`);
         return res.status(201).json({ task: taskStore.present(row), created: true });
+    });
+
+    /**
+     * The Home composer's repository search (Codes C4b): the person's own repositories used here, first, then GitHub's
+     * public answer. Codes holds no GitHub account of a person, so the public search is what it can read; a GitHub that
+     * does not answer is a `problem` beside the repositories Codes already knows, never an empty list pretending so.
+     */
+    r.get('/me/repos', actorLimits.budget('codes.repo.search'), async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to search your repositories');
+        if (!github) return res.json({ q: String(req.query.q || ''), repos: [], problem: { status: 503, detail: 'the repository search is not available here' } });
+        const out = await github.search(req.viewer.subject, req.query.q, { limit: 8 });
+        return res.json({ q: out.q, repos: out.found, problem: out.problem });
     });
 
     r.get('/me/tasks/:id', actorLimits.reads('codes.read'), async (req, res) => {

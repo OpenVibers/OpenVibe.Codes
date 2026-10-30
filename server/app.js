@@ -46,6 +46,10 @@ const { createMovedRoutes } = require('./http/moved');
 const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
 const { createForgejoClient } = require('./domain/forgejo');
+const { createMachines } = require('./domain/machines');
+const { createUserSettings } = require('./domain/user-settings');
+const { createGitHub } = require('./domain/github');
+const { createUsage } = require('./domain/usage');
 const { assetVersion, send } = require('./render/layout');
 const { html } = require('./render/html');
 
@@ -81,6 +85,11 @@ async function createApp(opts = {}) {
     const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
     const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens, attempts, benchPublisher };
     ctx.forgejo = createForgejoClient({ config, log });
+    // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
+    ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    ctx.userSettings = createUserSettings({ store });
+    ctx.github = createGitHub({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
+    ctx.usage = createUsage({ store });
 
     const app = express();
     app.disable('x-powered-by');
@@ -181,7 +190,7 @@ async function createApp(opts = {}) {
     // pages below or, for a first-party service acting for the person, from /api/v1/tasks (codes.task.*).
     app.use('/api/v1', createApi(ctx));
     app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, actorLimits: ctx.actorLimits, log }));
-    app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, actorLimits: ctx.actorLimits, log }));
+    app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, github: ctx.github, actorLimits: ctx.actorLimits, log }));
     // A person's connections: their own provider keys (stored in OpenVibe.AI, never here) and their machines' plans.
     app.use('/api/v1', createConnectionsApi({ config, store, connections, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createActionsApi({ config, store, keys, run, tasks, actorLimits: ctx.actorLimits, log }));
