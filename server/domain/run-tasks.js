@@ -316,6 +316,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                 const failed = await db.one(`UPDATE run_tasks SET state = 'failed', error = $2, outcome = 'unfinished', outcome_note = $3, finished_at = $4::timestamptz, updated_at = $5
                     WHERE id = $1 RETURNING *`, [id, why, `the task could not start: ${why}`, store.iso(), store.now()]);
                 await taskOutbox.emitTask(failed, 'queued');
+                if (benchAttemptEnded && actorRef && asObject(actorRef).bench) {
+                    await benchAttemptEnded(failed).catch((publishError) => log.warn(`[Codes] benchmark publish failed for task ${failed.id}: ${String(publishError && publishError.message).slice(0, 200)}`));
+                }
                 return failed;
             });
         }
