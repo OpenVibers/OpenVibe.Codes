@@ -97,7 +97,7 @@ function lineOf(raw) {
 function createSessionLines({ store, config = {}, log = console, media = null }) {
     const db = store.db;
     const retentionDays = Math.max(1, Number(config.sessions && config.sessions.retentionDays) || 90);
-    const pictures = media && media.configured ? media : null;
+    const pictures = media && typeof media.configured === 'function' && media.configured() ? media : null;
 
     /** The bytes of a data URL, or null when it is not one. */
     function bytesOf(url) {
