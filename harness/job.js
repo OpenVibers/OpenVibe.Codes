@@ -292,7 +292,7 @@ function sessionLog(lines) {
     list = list.map((l) => (l.attachments && l.attachments.length)
         ? { ...l, attachments: l.attachments.map((x) => (x && typeof x.url === 'string' && x.url.startsWith('data:')) ? { ...x, url: undefined } : x) }
         : l);
-    total = list.reduce((n, l) => size(l), 0);
+    total = list.reduce((n, l) => n + size(l), 0);
     if (total <= MAX_LOG) return list;
     const ended = new Set(list.filter((l) => l.t === 'tool_result').map((l) => l.id));
     list = list.filter((l) => !(l.t === 'tool_progress' && ended.has(l.id)));
