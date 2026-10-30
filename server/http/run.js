@@ -114,6 +114,7 @@ ${projects.length ? formHtml({ projects, values, error }) : html`<form class="ru
 ${error ? html`<p class="run-notice run-notice-error" role="alert">${error}</p>` : ''}
 <h2>One thing first: a project</h2><p class="muted">Runs belong to a project on OpenVibe (that is where their usage is counted). You have none you can run jobs in yet.</p>
 <input type="hidden" name="prompt" value="${values && values.prompt || ''}">
+<input type="hidden" name="repo" value="${values && values.repo || ''}">
 <label class="run-field"><span>Project name</span><input name="name" value="My code" maxlength="80" required></label>
 <button class="run-btn run-btn-primary" type="submit">Create the project</button></form>`}
 <h2>Your tasks</h2>
@@ -121,7 +122,7 @@ ${tasksHtml(recent)}`;
         return page(req, res, { title: 'Run on your machine', body }, status);
     }
 
-    r.get('/run', (req, res) => runPage(req, res, { values: { prompt: String(req.query.prompt || '').slice(0, 16000), agent: String(req.query.agent || '').slice(0, 100) } }));
+    r.get('/run', (req, res) => runPage(req, res, { values: { prompt: String(req.query.prompt || '').slice(0, 16000), repo: String(req.query.repo || '').slice(0, 2000), agent: String(req.query.agent || '').slice(0, 100) } }));
 
     r.post('/run/project', form, async (req, res) => {
         if (!signedIn(req)) return res.redirect(303, '/auth/login?next=%2Frun');
@@ -137,10 +138,15 @@ ${tasksHtml(recent)}`;
                 if (!out.ok) throw new Error(`Network answered ${out.status}`);
             });
         } catch (e) {
-            return runPage(req, res, { values: { prompt: String(req.body && req.body.prompt || '').slice(0, 16000) }, error: `The project could not be created (${e.message}). Try again.`, status: 502 });
+            return runPage(req, res, { values: { prompt: String(req.body && req.body.prompt || '').slice(0, 16000), repo: String(req.body && req.body.repo || '').slice(0, 2000) }, error: `The project could not be created (${e.message}). Try again.`, status: 502 });
         }
         const prompt = String(req.body && req.body.prompt || '').slice(0, 16000);
-        return res.redirect(303, `/run${prompt ? `?prompt=${encodeURIComponent(prompt)}` : ''}`);
+        const repo = String(req.body && req.body.repo || '').slice(0, 2000);
+        const query = new URLSearchParams();
+        if (prompt) query.set('prompt', prompt);
+        if (repo) query.set('repo', repo);
+        const suffix = query.toString();
+        return res.redirect(303, `/run${suffix ? `?${suffix}` : ''}`);
     });
 
     r.post('/run', form, async (req, res) => {

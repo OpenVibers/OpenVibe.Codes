@@ -43,12 +43,17 @@ const { boot, check, done } = require('./helpers/boot');
     let project;
     await check('with no project to run in, the person creates one first', async () => {
         const first = await t.get('/run', { as: ada });
-        assert.ok(first.text.includes('One thing first: a project') && !first.text.includes('name="repo"'));
+        assert.ok(first.text.includes('One thing first: a project') && first.text.includes('type="hidden" name="repo"'));
+        const repo = 'https://github.com/OpenVibers/OpenVibe.Codes';
+        const prompt = 'Review the mobile workspace';
+        const prefilled = await t.get(`/run?prompt=${encodeURIComponent(prompt)}&repo=${encodeURIComponent(repo)}`, { as: ada });
+        assert.ok(prefilled.text.includes(`name="repo" value="${repo}"`) && prefilled.text.includes(`name="prompt" value="${prompt}"`));
         assert.strictEqual((await post('/run/project', ada, { name: 'My code' }, { origin: 'https://evil.example' })).status, 403, 'cross-site');
-        const made = await post('/run/project', ada, { name: 'My code' });
+        const made = await post('/run/project', ada, { name: 'My code', prompt, repo });
         assert.strictEqual(made.status, 303);
-        const page = await t.get('/run', { as: ada });
-        assert.ok(page.text.includes('name="repo"') && page.text.includes('My code'), page.text.slice(0, 400));
+        assert.ok(made.headers.get('location').includes(`repo=${encodeURIComponent(repo)}`));
+        const page = await t.get(made.headers.get('location'), { as: ada });
+        assert.ok(page.text.includes(`name="repo" type="url" required`) && page.text.includes('My code'), page.text.slice(0, 400));
         project = /<option value="(prj_[0-9A-Z]{26})"/.exec(page.text)[1];
     });
 
