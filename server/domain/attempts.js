@@ -86,6 +86,22 @@ const clip = (s, n) => String(s == null ? '' : s).slice(0, n);
 const runnerOf = (agent) => RUNNER_OF[agent] || (agent || 'auto');
 const wordsOf = (reason) => REASON_TEXT[reason] || REASON_TEXT.error;
 
+/**
+ * What an attempt that stopped at its budget says, in plain words: which budget it reached and what it spent.
+ * The dollars and the tokens are what OpenVibe.AI counted for the run token.
+ */
+function budgetNote(a) {
+    if (!a) return 'stopped at its budget';
+    const usd = a.cost_usd == null ? null : Number(a.cost_usd);
+    const tokens = a.tokens == null ? null : Number(a.tokens);
+    const limitUsd = a.budget_usd == null ? null : Number(a.budget_usd);
+    const limitTokens = a.budget_tokens == null ? null : Number(a.budget_tokens);
+    const parts = [];
+    if (limitUsd != null) parts.push(`$${usd == null ? 0 : usd.toFixed(4)} of $${limitUsd.toFixed(2)}`);
+    if (limitTokens != null) parts.push(`${tokens == null ? 0 : tokens} of ${limitTokens} tokens`);
+    return parts.length ? `stopped at its budget: ${parts.join(', ')} spent` : 'stopped at its budget';
+}
+
 function createAttempts({ store, config = {}, log = console, harnesses = null }) {
     const db = store.db;
     const catalog = harnesses || require('./harnesses').createHarnesses();
@@ -131,16 +147,18 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
      * One attempt. The fence: follow_up_of is unique, so an ending that starts a follow-up twice answers the same
      * attempt the second time and starts no second job. created tells the caller which of the two it was.
      */
-    async function create({ task, agent = null, model = null, machine = null, session = null, why = null, kind = 'first', followUpOf = null, state = 'queued' }) {
+    async function create({ task, agent = null, model = null, machine = null, session = null, why = null, kind = 'first', followUpOf = null, state = 'queued', budget = null }) {
         if (!task || !task.id) throw new Error('an attempt belongs to a task');
         for (let tries = 0; tries < 5; tries++) {
             const n = await db.one('SELECT COALESCE(MAX(n), 0) + 1 AS n FROM codes_attempts WHERE task_id = $1', [task.id]);
             const id = store.newId('att');
             const inserted = await db.maybe(
-                `INSERT INTO codes_attempts (id, task_id, n, agent, model, machine, session, state, why, kind, follow_up_of, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::timestamptz)
+                `INSERT INTO codes_attempts (id, task_id, n, agent, model, machine, session, state, why, kind, follow_up_of, budget_usd, budget_tokens, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::timestamptz)
                  ON CONFLICT DO NOTHING RETURNING *`,
-                [id, task.id, n.n, agent, model, machine, session, state, why, kind, followUpOf, store.iso()],
+                [id, task.id, n.n, agent, model, machine, session, state, why, kind, followUpOf,
+                    budget && Number(budget.usd) > 0 ? Number(budget.usd) : null,
+                    budget && Number(budget.tokens) > 0 ? Math.round(Number(budget.tokens)) : null, store.iso()],
             );
             if (inserted) {
                 await db.exec('UPDATE run_tasks SET attempts_count = $2 WHERE id = $1', [task.id, n.n]);
@@ -167,7 +185,7 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
     }
 
     /** An attempt ended: its state, why, what it cost. */
-    async function end(id, { state = 'failed', reason = null, why = null, cost_usd = null, tokens = null, steps = null, session = null, model = null, machine = null, finished_at = null } = {}) {
+    async function end(id, { state = 'failed', reason = null, why = null, cost_usd = null, tokens = null, steps = null, session = null, model = null, machine = null, budget_hit = null, finished_at = null } = {}) {
         return await db.one(
             `UPDATE codes_attempts SET state = $2,
                 reason = COALESCE($3, reason),
@@ -178,9 +196,18 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
                 session = COALESCE($8, session),
                 model = COALESCE($9, model),
                 machine = COALESCE($10, machine),
-                finished_at = COALESCE($11::timestamptz, finished_at)
+                budget_hit = COALESCE($11, budget_hit),
+                finished_at = COALESCE($12::timestamptz, finished_at)
              WHERE id = $1 RETURNING *`,
-            [id, state, reason, why, cost_usd == null ? null : String(cost_usd), tokens, steps, session, model, machine, finished_at || store.iso()],
+            [id, state, reason, why, cost_usd == null ? null : String(cost_usd), tokens, steps, session, model, machine, budget_hit, finished_at || store.iso()],
+        );
+    }
+
+    /** What an attempt really spent, counted by OpenVibe.AI (a run refused for its budget stops mid-turn). */
+    async function spend(id, { cost_usd = null, tokens = null } = {}) {
+        return await db.one(
+            `UPDATE codes_attempts SET cost_usd = COALESCE($2::numeric, cost_usd), tokens = COALESCE($3, tokens) WHERE id = $1 RETURNING *`,
+            [id, cost_usd == null ? null : String(cost_usd), tokens],
         );
     }
 
@@ -267,7 +294,7 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
             prev: prev ? prev.id : null,
             parent: a.follow_up_of || null,
             stopped: a.state === 'stopped',
-            budget: reason === 'budget' ? { hit: 'steps' } : undefined,
+            budget: reason === 'budget' ? { hit: a.budget_hit || 'steps' } : undefined,
             wrapUp: a.kind === 'wrap-up',
             hung: reason === 'hung',
             facts: {
@@ -338,6 +365,11 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
         const words = wordsOf(reason);
         const continues = upto.filter((a) => a.kind === 'continue').length;
 
+        // An attempt that ran out of money (OpenVibe.AI refused it) ends the task there: no wrap-up turn buys
+        // another request the budget will not pay for, and no other agent takes over with the same cap.
+        if (reason === 'budget' && ['usd', 'tokens'].includes(ending.budget_hit)) {
+            return { outcome: 'unfinished', note: budgetNote(ending) };
+        }
         if (step.action === 'done') return { outcome: 'done', note: 'the task finished' };
         if (step.action === 'stop') return { outcome: 'stopped', note: 'the task was stopped on purpose' };
         if (step.action === 'wait') return { outcome: null, note: null };
@@ -411,8 +443,8 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
 
     return {
         STATES, REASONS, KINDS, REASON_TEXT, RUNNER_OF, HARNESS_OF,
-        list, get, byJob, create, bind, end, decide, present, routing, nextAgent, nameOf, wordsOf,
+        list, get, byJob, create, bind, end, spend, decide, present, routing, nextAgent, nameOf, wordsOf, budgetNote,
     };
 }
 
-module.exports = { createAttempts, RUNNER_OF, HARNESS_OF, STATES, REASONS, KINDS, REASON_TEXT, ERROR_TEXT };
+module.exports = { createAttempts, RUNNER_OF, HARNESS_OF, STATES, REASONS, KINDS, REASON_TEXT, ERROR_TEXT, budgetNote };

@@ -120,6 +120,8 @@ function load(env = process.env) {
             steps: int(env.CODES_TASK_STEPS, 0),
             minutes: int(env.CODES_TASK_MINUTES, 0),
             usd: Number(env.CODES_TASK_USD || 0) || 0,
+            // The tokens one attempt may spend, when the task does not say (a run token's budget, Codes C3).
+            tokens: int(env.CODES_TASK_TOKENS, 0),
         },
         // The task's timeline (stage C2): how many automatic continues one task may have before it needs a person.
         task: { maxContinues: Math.max(0, int(env.CODES_TASK_MAX_CONTINUES, 2)) },
