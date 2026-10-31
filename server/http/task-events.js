@@ -28,7 +28,7 @@ function createTaskEvents({ store, config = {}, log = console, attempts = null }
     const frame = (event, data, id = null) => (id == null ? '' : `id: ${id}\n`) + `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
     const started = (a) => ({
-        type: 'attempt_started', attempt_n: Number(a.n), id: a.id, agent: a.agent || null, model: a.model || null,
+        type: 'attempt_started', attempt_n: Number(a.n), id: a.id, agent: a.agent || null, model: a.model || null, effort: a.effort || null,
         why: a.why || null, state: 'queued', at: a.created_at ? new Date(a.created_at).toISOString() : null,
     });
     const ended = (a) => ({

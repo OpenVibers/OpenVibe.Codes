@@ -100,6 +100,8 @@ function parseArgs(raw, env = process.env) {
     let a;
     try { a = JSON.parse(String(raw || '').trim() || '{}'); } catch { throw new Error('the job input is not JSON'); }
     if (!a || typeof a !== 'object' || Array.isArray(a)) throw new Error('the job input must be an object');
+    const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+    const effort = EFFORTS.includes(a.effort) ? a.effort : null;
     const kind = a.kind === 'bench' ? 'bench' : a.kind === 'conductor' ? 'conductor' : 'code';
     const prompt = typeof a.prompt === 'string' ? a.prompt.trim() : '';
     if (!prompt || prompt.length > MAX_PROMPT) throw new Error(`prompt must be 1-${MAX_PROMPT} characters`);
@@ -124,6 +126,7 @@ function parseArgs(raw, env = process.env) {
             folder, safety, mcp: a.mcp === true, codesUrl,
             taskId: typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? a.task_id : null,
             model: typeof a.model === 'string' && a.model.length <= 100 ? a.model : null,
+            ...(effort ? { effort } : {}),
             agent: 'claude-code',
             ...(files.length ? { attachments: files } : {}),
             ...(resume ? { resume } : {}),
@@ -165,6 +168,7 @@ function parseArgs(raw, env = process.env) {
         ...(Object.keys(wanted).length ? { env: wanted } : {}),
         agent: typeof a.agent === 'string' && /^[a-z0-9-]{1,40}$/.test(a.agent) ? a.agent : null,
         model: typeof a.model === 'string' && a.model.length <= 100 ? a.model : null,
+        ...(effort ? { effort } : {}),
     };
 }
 
@@ -490,7 +494,7 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             say({ t: 'step', text: 'Preparing an empty benchmark workspace' });
         }
         const run = harness.run({
-            prompt: job.prompt, task: 'edit', agent: job.agent, model: job.model, cwd: work,
+            prompt: job.prompt, task: 'edit', agent: job.agent, model: job.model, effort: job.effort || null, cwd: work,
             permission: job.permission, handoff: !job.agent, maxAttempts: job.kind === 'conductor' ? 1 : 3,
             // A task carried on in the same conversation resumes its session (RESUME in the environment, or the job's
             // own resume field).

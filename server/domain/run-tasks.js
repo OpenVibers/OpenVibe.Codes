@@ -558,7 +558,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         // The budget of the attempt: the task's limits (a benchmark's per-task limits) or the person's default.
         const budget = budgetFor(runArgs.limits);
         const first = await attemptStore.create({
-            task: inserted, agent: agent || null, model: model || null, why,
+            task: inserted, agent: agent || null, model: model || null, effort: runArgs.effort || null, why,
             kind: 'first', state: 'queued', budget,
         });
         let job;
@@ -796,7 +796,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
      * continue after a crash, a wrap-up, another manual press — that attempt is returned, and no second one is started
      * beside it. Two sessions on one worktree would fight over the same files.
      */
-    async function continueTask(row, { note = null, agent = null } = {}) {
+    async function continueTask(row, { note = null, agent = null, model = null, effort = null } = {}) {
         if (!row || !row.id) return { error: 'no such task' };
         const attempts = await attemptStore.list(row.id);
         const ending = attempts[attempts.length - 1];
@@ -806,12 +806,12 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const text = note ? String(note).trim().slice(0, 4000) : '';
         const plan = agent
             ? {
-                kind: 'switch', agent, model: null, session: null,
+                kind: 'switch', agent, model: model || null, effort: effort || null, session: null,
                 prompt: `${row.prompt}\n\n---\n## Hand-over (written by openvibe.codes)\n\n${attemptStore.nameOf(agent)} takes over from ${attemptStore.nameOf(ending.agent)}, which ${attemptStore.wordsOf(ending.reason || 'error')}. Keep the work that was done, do not redo it, and finish the task.\n`,
                 why: `${attemptStore.nameOf(agent)} took over at the owner's request`,
             }
             : {
-                kind: 'manual', agent: ending.agent, model: ending.model, session: null,
+                kind: 'manual', agent: ending.agent, model: model || ending.model, effort: effort || ending.effort || null, session: null,
                 prompt: `${row.prompt}${text ? `\n\n---\n## A note from the owner\n\n${text}\n` : ''}`,
                 why: text ? `carried on by the owner: ${text.slice(0, 200)}` : 'carried on by the owner',
             };
@@ -835,7 +835,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             if (!TERMINAL.has(current.state)) return { error: 'the task is still running' };
             if (current.outcome === 'stopped') return { error: 'the task was stopped on purpose' };
             const made = await attemptStore.create({
-                task: current, agent: plan.agent, model: plan.model, session: null, why: plan.why, kind: plan.kind, state: 'queued', budget: left.left,
+                task: current, agent: plan.agent, model: plan.model, effort: plan.effort || null, session: null, why: plan.why, kind: plan.kind, state: 'queued', budget: left.left,
             });
             attempt = made.attempt;
             await db.one(`UPDATE run_tasks SET state = 'queued', outcome = NULL, outcome_note = NULL, error = NULL, job_id = NULL, finished_at = NULL, updated_at = $2 WHERE id = $1 RETURNING *`,
@@ -869,6 +869,8 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         return parseArgs(JSON.stringify({
             repo: row.repo, ref: row.ref || null, prompt: plan.prompt || row.prompt,
             agent: plan.agent || null, permission: 'edit',
+            ...(plan.model ? { model: plan.model } : {}),
+            ...(plan.effort ? { effort: plan.effort } : {}),
             ...(row.push ? { push: { pull_request: !!row.pull_request } } : {}),
             ...(plan.session ? { resume: plan.session } : {}),
         }));

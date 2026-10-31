@@ -202,7 +202,8 @@ ${rows.length ? '' : '<p class="ch-empty-rail">Your conversations appear here.</
         const answer = (done && done.text) || said[said.length - 1] || '';
         const along = said.slice(0, answer && said[said.length - 1] === answer ? -1 : undefined);
         const alongSteps = along.map((text) => ({ name: 'Said', what: firstLine(text, 140), kind: 'sub', ok: null }));
-        const who = `<div class="ch-who">${avatar(a)}<b>${esc(a.name)}</b>${attempt && attempt.model ? `<span>${esc(attempt.model)}</span>` : ''}</div>`;
+        const ran = attempt ? [attempt.model, attempt.effort ? effortWord(attempt.effort) : null].filter(Boolean).join(' · ') : '';
+        const who = `<div class="ch-who">${avatar(a)}<b>${esc(a.name)}</b>${ran ? `<span>${esc(ran)}</span>` : ''}</div>`;
         const body = answer ? `<div class="ch-md">${markdown(answer)}</div>` : live ? '' : `<p class="ch-quiet">${esc(attempt && attempt.end_why ? attempt.end_why : 'It ended without a word.')}</p>`;
         const working = live ? `<div class="ch-working" data-ch-working><span class="ch-dots" aria-hidden="true"><i></i><i></i><i></i></span><span data-ch-working-text>${steps.length ? esc(`${steps[steps.length - 1].name} ${steps[steps.length - 1].what || ''}`.trim()) : 'Starting…'}</span></div>` : '';
         return `<div class="ch-turn ch-agent${live ? ' is-live' : ''}"${attempt ? ` data-attempt="${Number(attempt.n)}"` : ''}>${who}${stepsHtml([...alongSteps, ...steps], ms, live)}${body}${working}</div>`;
@@ -295,6 +296,12 @@ ${rows.length ? '' : '<p class="ch-empty-rail">Your conversations appear here.</
         const list = harnesses?.list?.() || [];
         return `<label class="ch-pick" title="${esc(label)}"><span class="ch-sr">${esc(label)}</span><select name="agent" data-ch-agent><option value="">${esc(auto)}</option>${list.map((a) => `<option value="${esc(a.id)}"${selected === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
+    // The effort in plain words (the shared ladder underneath; each agent gets the nearest level it accepts).
+    const EFFORT = [['', 'Effort: auto'], ['low', 'Quick'], ['medium', 'Balanced'], ['high', 'Thorough'], ['max', 'Deepest']];
+    const effortWord = (v) => (EFFORT.find(([k]) => k === v) || [null, v])[1];
+    function effortPicker(selected = '') {
+        return `<label class="ch-pick" title="How hard it thinks"><span class="ch-sr">Effort</span>${ico('sub')}<select name="effort" data-ch-effort>${EFFORT.map(([v, l]) => `<option value="${v}"${selected === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+    }
     function composer({ action, api = '', placeholder, pickers = '', live = false, stopAction = '', hidden = '', note = '' }) {
         return `<form class="ch-composer" method="post" action="${esc(action)}"${api ? ` data-ch-api="${esc(api)}"` : ''} data-ch-composer>${hidden}
 <label class="ch-sr" for="ch-text">${esc(placeholder)}</label>
@@ -349,7 +356,7 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         const error = String(req.query.error || '').slice(0, 200);
         const name = String(req.viewer.displayName || req.viewer.username || '').split(' ')[0];
         const ideas = ['Fix the failing tests', 'Explain how this project is laid out', 'Make the home page faster on phones', 'Find and fix one bug'];
-        const pickers = `<label class="ch-pick ch-pick-repo" title="Repository"><span class="ch-sr">Repository</span>${ico('repo')}<input name="repo" type="url" value="${esc(repo)}" placeholder="Repository URL" list="ch-repos" autocomplete="url" required data-ch-repo data-ch-repo-url="/api/v1/me/repos"><datalist id="ch-repos">${repos.map((x) => `<option value="${esc(x.url)}">${esc(x.full_name)}</option>`).join('')}</datalist></label>${agentPicker(settings.default_agent || '')}`;
+        const pickers = `<label class="ch-pick ch-pick-repo" title="Repository"><span class="ch-sr">Repository</span>${ico('repo')}<input name="repo" type="url" value="${esc(repo)}" placeholder="Repository URL" list="ch-repos" autocomplete="url" required data-ch-repo data-ch-repo-url="/api/v1/me/repos"><datalist id="ch-repos">${repos.map((x) => `<option value="${esc(x.url)}">${esc(x.full_name)}</option>`).join('')}</datalist></label>${agentPicker(settings.default_agent || '')}${effortPicker('')}`;
         const thread = `<div class="ch-hello"><span class="ov-mark" data-size="56" aria-hidden="true"></span><h1>${name ? `What should we build, ${esc(name)}?` : 'What should we build?'}</h1><p>Say it the way you would to a colleague. Codes picks the agent, runs it on your machine, and shows you what changed.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}<div class="ch-ideas" aria-label="Ideas">${ideas.map((t) => `<button class="ch-chip" type="button" data-ch-idea="${esc(t)}">${esc(t)}</button>`).join('')}</div>${repos.length > 1 ? `<div class="ch-ideas ch-recent" aria-label="Your recent repositories">${repos.map((x) => `<button class="ch-chip" type="button" data-ch-saved-repo="${esc(x.url)}">${ico('repo')}${esc(x.full_name)}</button>`).join('')}</div>` : ''}</div>`;
         return frame(req, res, {
             title: 'New chat', empty: true, head: '<h1 class="ch-title">New chat</h1>', thread,
@@ -370,7 +377,7 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         let args;
         try {
             const { parseArgs } = require('../../harness/job');
-            args = parseArgs(JSON.stringify({ repo: String(b.repo || '').trim(), prompt: text, agent: agent || null, permission: 'edit' }));
+            args = parseArgs(JSON.stringify({ repo: String(b.repo || '').trim(), prompt: text, agent: agent || null, permission: 'edit', ...(b.effort ? { effort: String(b.effort) } : {}) }));
         } catch (e) { return back(`Check the repository: ${e.message}.`); }
         let project = null;
         try { project = (await tasks.latestProject?.(req.viewer.subject)) || await conductor.projectFor(req.viewer.token || null, req.viewer.subject); } catch { project = null; }
@@ -405,7 +412,7 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         // The stream starts after the last line this page already shows.
         const seqRow = live ? await db.maybe('SELECT max(seq) AS seq FROM codes_session_lines WHERE task_id = $1', [row.id]) : null;
         const lastSeq = seqRow && seqRow.seq != null ? Number(seqRow.seq) : 0;
-        const pickers = agentPicker('', { label: 'Who carries on', auto: `Same agent (${agentOf(row.agent, agentNames()).name})` });
+        const pickers = agentPicker('', { label: 'Who carries on', auto: `Same agent (${agentOf(row.agent, agentNames()).name})` }) + effortPicker('');
         return frame(req, res, {
             currentId: row.id, title: titleOf(row), head, side: await sideHtml(row),
             thread: (error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : '') + await taskThread(row),
@@ -428,7 +435,8 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         const b = req.body || {};
         const agent = String(b.agent || '').trim() || null;
         if (agent && !(harnesses?.list?.() || []).some((a) => a.id === agent)) return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}?error=${encodeURIComponent('Choose an agent from the list.')}`);
-        const out = await tasks.continueTask(row, { note: String(b.text || '').slice(0, 4000), agent });
+        const effort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(b.effort) ? b.effort : null;
+        const out = await tasks.continueTask(row, { note: String(b.text || '').slice(0, 4000), agent, effort });
         return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}${out.error ? `?error=${encodeURIComponent(out.error)}` : ''}`);
     });
 

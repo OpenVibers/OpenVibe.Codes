@@ -154,7 +154,7 @@ function createHarness({ env = process.env, fetch: fetchImpl = globalThis.fetch,
         return decision;
     }
 
-    function run({ prompt, task = 'edit', agent = null, model = null, cwd = process.cwd(), permission = 'edit', resume = null, handoff = true, maxAttempts = 3, stallMs = 10 * 60_000, timeoutMs, maxTurns, requirements = {}, signal, adapterOptions = null } = {}) {
+    function run({ prompt, task = 'edit', agent = null, model = null, effort = null, cwd = process.cwd(), permission = 'edit', resume = null, handoff = true, maxAttempts = 3, stallMs = 10 * 60_000, timeoutMs, maxTurns, requirements = {}, signal, adapterOptions = null } = {}) {
         if (!prompt || !String(prompt).trim()) throw new Error('a run needs a prompt');
         if (!['read', 'edit', 'full'].includes(permission)) throw new Error('permission is read, edit or full');
         const runId = store.newRunId();
@@ -200,7 +200,7 @@ function createHarness({ env = process.env, fetch: fetchImpl = globalThis.fetch,
                 const controller = new AbortController();
                 if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true });
                 current = adapter.start({
-                    prompt: nextPrompt, cwd, model: modelFor, resume: attempt === 1 ? resume : null, permission, maxTurns, timeoutMs, signal: controller.signal,
+                    prompt: nextPrompt, cwd, model: modelFor, effort, resume: attempt === 1 ? resume : null, permission, maxTurns, timeoutMs, signal: controller.signal,
                     // Extra flags a caller needs (the conductor's MCP config and permission rules); the adapter decides
                     // which of them its CLI understands. Nothing here can replace the fields above.
                     ...(adapterOptions && typeof adapterOptions === 'object' ? { options: adapterOptions } : {}),
