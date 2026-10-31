@@ -224,9 +224,10 @@ function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = c
         for (const [harness, row] of Object.entries(by)) {
             const runner = harnessOf ? harnessOf(harness) : harness;
             if (!runner) continue;
+            const best = (row.machines || []).find((m) => m.machine === row.machine) || (row.machines || [])[0] || null;
             out[runner] = {
                 signed_in: row.signed_in, installed: row.installed, windows: row.windows,
-                machine: row.machine, room: row.room, balance_usd: row.balance_usd ?? null,
+                machine: row.machine, name: best ? best.name : null, room: row.room, balance_usd: row.balance_usd ?? null,
             };
         }
         return out;

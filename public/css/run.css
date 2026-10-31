@@ -41,3 +41,6 @@
 .run-proof-head { margin: 0; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .run-proof-summary { margin: 4px 0 0; color: var(--text-muted, #7386a3); overflow-wrap: anywhere; }
 .run-proof-item[data-ok="false"] { border-color: var(--danger, #e5484d); }
+
+/* Placement A1: the one line saying why this task went where it did, first on the timeline. */
+.run-placed { margin: 8px 0 12px; padding: 8px 12px; border-left: 3px solid var(--accent, #3b82f6); border-radius: 6px; background: var(--bg-card, #131c2e); overflow-wrap: anywhere; }

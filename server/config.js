@@ -91,6 +91,10 @@ function load(env = process.env) {
             renderOrigin: trim(env.CODES_BENCH_RENDER_ORIGIN || 'https://bench-render.openvibe.services'),
             dailyTasks: Math.max(1, int(env.CODES_BENCH_DAILY_TASKS, 50)),
             maxMatrixSize: Math.max(1, int(env.CODES_BENCH_MAX_MATRIX, 100)),
+            // Placement A1: Bench's quality priors, cached an hour. On in production; off in tests unless asked for, so a
+            // unit test never reaches the real Bench. CODES_BENCH_PRIORS=off turns it off everywhere.
+            priors: env.CODES_BENCH_PRIORS != null ? bool(env.CODES_BENCH_PRIORS) : nodeEnv !== 'test',
+            priorsTtlMs: Math.max(0, int(env.CODES_BENCH_PRIORS_TTL_MS, 60 * 60_000)),
         },
         // OpenVibe.Events (ADR-033): account export and deletion arrive at POST /internal/events, signed with one of
         // these; run.job.* subscriptions are created at boot. The outbox relay publishes codes.task.* with the

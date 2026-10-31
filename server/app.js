@@ -55,6 +55,9 @@ const { createMemory } = require('./domain/memory');
 const { createFleet } = require('./domain/fleet');
 const { createNotices } = require('./domain/notices');
 const { createUserSettings } = require('./domain/user-settings');
+const { createPlacementOutcomes } = require('./domain/placement-outcomes');
+const { createBenchPriors } = require('./domain/bench-priors');
+const { createPlacementContext } = require('./domain/placement-context');
 const { createGitHub } = require('./domain/github');
 const { createUsage } = require('./domain/usage');
 const { assetVersion, send } = require('./render/layout');
@@ -95,8 +98,12 @@ async function createApp(opts = {}) {
     const notify = opts.notify || createNotify({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     const notices = createNotices({ store, config, notify, userSettings, log });
     const benchPublisher = createBenchPublisher({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
-    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher };
+    // Placement A1: the learned counts, Bench's priors (an hour), and the context place() gets for a task.
+    const placementOutcomes = opts.placementOutcomes || createPlacementOutcomes({ store, now: store.now, log });
+    const benchPriors = opts.benchPriors || createBenchPriors({ config, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log, ttlMs: config.bench.priorsTtlMs });
+    const placementContext = createPlacementContext({ store, config, userSettings, outcomes: placementOutcomes, priors: benchPriors, harnesses, now: store.now });
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
+    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext };
     ctx.forgejo = createForgejoClient({ config, log });
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });

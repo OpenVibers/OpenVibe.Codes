@@ -145,7 +145,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -162,6 +162,45 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     const setConductor = (turns) => { conductorTurns = turns; };
     /** An attempt's state when it ended: a limit reached is a budget-stop, never a plain failure. */
     const ENDED = new Set(['done', 'failed', 'stopped', 'budget-stopped', 'interrupted']);
+
+    /**
+     * The person's own machine for the placement's noCloud rule: the harnesses the fleet reports installed, and one
+     * name to show. No fleet (Bot unconfigured or quiet) means no own machine, so noCloud refuses every cloud option.
+     */
+    function ownMachineOf(fleetRows) {
+        if (!fleetRows || typeof fleetRows !== 'object') return null;
+        const agents = new Set();
+        let name = null;
+        for (const [runner, row] of Object.entries(fleetRows)) {
+            if (!row || row.installed === false) continue;
+            const harness = attemptStore.HARNESS_OF[runner] || runner;
+            if (!harness) continue;
+            agents.add(harness);
+            if (!name) name = row.name || row.machine || null;
+        }
+        return agents.size ? { name, agents: [...agents] } : null;
+    }
+
+    /** Record one placement outcome at the task's end, exactly once. A stopped task is the person's own act: not counted. */
+    async function recordPlacementOutcome(row) {
+        if (!row || !row.placement_option_key || !row.placement_step_kind || !placementContext) return row;
+        const claimed = await db.maybe(
+            'UPDATE run_tasks SET placement_recorded = true WHERE id = $1 AND placement_recorded = false RETURNING *',
+            [row.id],
+        );
+        if (!claimed) return row;
+        if (row.state === 'cancelled' || row.outcome === 'stopped') return row;
+        try {
+            await placementContext.record({
+                person: row.subject, key: row.placement_option_key, kind: row.placement_step_kind,
+                ok: row.outcome === 'done', at: store.now(),
+            });
+        } catch (e) {
+            // A failure to learn must not turn a finished task into an error; the next task's placement uses the default.
+            log.warn(`[Codes] placement outcome for task ${row.id} was not recorded: ${String((e && e.message) || e).slice(0, 200)}`);
+        }
+        return row;
+    }
 
     // ── The person's connections (Codes C3) ──
     // What they may run: the providers they keep a key for and the plans on their machines. It is read from
@@ -491,11 +530,27 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         }
         const runArgs = { ...args, agent, model };
         const actorRefValue = actorRef && typeof actorRef === 'object' && !Array.isArray(actorRef) ? JSON.stringify(actorRef) : null;
+        // Placement A1: the task's kind, its harness, and why the placer put it there. The person's rules, Bench priors
+        // and learned counts are read once here; the placement itself is pure. A task whose task kind is review is
+        // placed as a review, otherwise as an edit.
+        const taskKind = actorRef && actorRef.bench && actorRef.bench.kind === 'review' ? 'review' : 'edit';
+        let placed = null;
+        if (agent && placementContext && harnesses) {
+            try {
+                const context = await placementContext.forTask({ subject, task: taskKind, ownMachine: async () => ownMachineOf(await fleetFor(subject)), onlyAgent: agent });
+                placed = require('./harness-placement').route({ task: taskKind, harnesses, now: store.now(), context });
+            } catch (e) {
+                log.warn(`[Codes] task ${id}: placement could not be explained: ${String((e && e.message) || e).slice(0, 200)}`);
+            }
+        }
+        const placementLine = placed ? placed.line : null;
+        const placementKey = placed ? placed.option_key : null;
+        const placementKind = placed ? `harness.${taskKind}` : null;
         let inserted;
         await store.tx(async () => {
-            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $13) RETURNING *`,
-            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, at]);
+            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $16) RETURNING *`,
+            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, at]);
             await taskOutbox.emitTask(inserted, null);
             return inserted;
         });
@@ -527,6 +582,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                 return row;
             });
             if (notices) await notices.needs(failed, `the task could not start: ${why}`);
+            await recordPlacementOutcome(failed);
             return failed;
         }
         await attemptStore.bind(first.attempt.id, { job_id: job.id, state: 'queued' });
@@ -631,6 +687,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             const saved = await db.one('UPDATE run_tasks SET outcome = $2, outcome_note = $3, updated_at = $4 WHERE id = $1 RETURNING *',
                 [row.id, done ? 'done' : 'unfinished', note, store.now()]);
             await notifyOutcome(saved);
+            await recordPlacementOutcome(saved);
             return saved;
         }
         const attempts = await attemptStore.list(row.id);
@@ -645,6 +702,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             const saved = await db.one('UPDATE run_tasks SET outcome = $2, outcome_note = $3, updated_at = $4 WHERE id = $1 RETURNING *',
                 [row.id, outcome.state, outcome.note, store.now()]);
             await notifyOutcome(saved);
+            await recordPlacementOutcome(saved);
             return saved;
         }
         if (!plan.kind) return row;
@@ -685,6 +743,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         if (left.exhausted) {
             const stopped = await db.one(`UPDATE run_tasks SET outcome = 'unfinished', outcome_note = $2, updated_at = $3 WHERE id = $1 RETURNING *`,
                 [row.id, budgetLeftNote(left), store.now()]);
+            await recordPlacementOutcome(stopped);
             return { attempt: null, created: false, row: stopped, error: 'the task has no budget left' };
         }
         const { attempt, created } = await attemptStore.create({
@@ -701,6 +760,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             const failed = await db.one(`UPDATE run_tasks SET outcome = 'unfinished', outcome_note = $2, updated_at = $3 WHERE id = $1 RETURNING *`,
                 [row.id, `the next attempt could not be prepared: ${e.message}`, store.now()]);
             await notifyOutcome(failed);
+            await recordPlacementOutcome(failed);
             return { attempt, created: true, row: failed, error: e.message };
         }
         let job;
@@ -716,6 +776,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             const failed = await db.one(`UPDATE run_tasks SET outcome = 'unfinished', outcome_note = $2, updated_at = $3 WHERE id = $1 RETURNING *`,
                 [row.id, `the next attempt could not start: ${why}`, store.now()]);
             await notifyOutcome(failed);
+            await recordPlacementOutcome(failed);
             return { attempt, created: true, row: failed, error: why };
         }
         await attemptStore.bind(attempt.id, { job_id: job.id, state: 'queued' });
@@ -765,6 +826,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         if (left.exhausted) {
             const stopped = await db.one(`UPDATE run_tasks SET outcome = 'unfinished', outcome_note = $2, updated_at = $3 WHERE id = $1 RETURNING *`,
                 [row.id, budgetLeftNote(left), store.now()]);
+            await recordPlacementOutcome(stopped);
             return { error: 'the task has no budget left', row: stopped };
         }
         const locked = await store.tx(async () => {
@@ -793,6 +855,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             const failed = await db.one(`UPDATE run_tasks SET state = 'failed', error = $2, outcome = 'unfinished', outcome_note = $3, finished_at = $4::timestamptz, updated_at = $5 WHERE id = $1 RETURNING *`,
                 [row.id, why, `the next attempt could not start: ${why}`, store.iso(), store.now()]);
             await notifyOutcome(failed);
+            await recordPlacementOutcome(failed);
             return { error: why, row: failed, attempt };
         }
         await attemptStore.bind(attempt.id, { job_id: job.id, state: 'queued' });
