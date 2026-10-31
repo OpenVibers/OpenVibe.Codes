@@ -35,16 +35,23 @@ const { boot, check, done } = require('./helpers/boot');
 
     const t = await boot();
     try {
-        await check('the home presents the Codes workspace and its composer', async () => {
-            let r = await t.get('/');
+        await check('a visitor gets the front door: the product shown, the composer, never empty panels', async () => {
+            const r = await t.get('/');
             assert.strictEqual(r.status, 200);
-            assert.match(r.text, /Every coding agent\. One place\./);
+            assert.match(r.text, /<h1>Every coding agent\.<span class="sc-accent"> One place\.<\/span><\/h1>/);
             assert.match(r.text, /What should an agent do\?/);
-            assert.match(r.text, /Needs you/);
-            assert.match(r.text, /Recent tasks/);
+            assert.ok(r.text.includes('class="c4-demo"') && r.text.includes('Codex took over'), 'a hand-over shown');
+            assert.ok(r.text.includes('id="how"') && r.text.includes('id="yours"') && r.text.includes('id="conductor"'), 'how it works, yours, the conductor');
+            assert.ok(!r.text.includes('Needs you') && !r.text.includes('Recent tasks'), 'no empty panels for a visitor');
             const blocks = [...r.text.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => JSON.parse(m[1]));
             assert.ok(blocks.some((b) => b['@type'] === 'WebSite'), 'the home keeps its website metadata');
             assert.strictEqual((r.text.match(/<h1[\s>]/g) || []).length, 1, 'one h1');
+        });
+        await check('a signed-in person gets the chat, not the front door', async () => {
+            const r = await t.get('/', { as: t.network.addUser('rosa') });
+            assert.strictEqual(r.status, 200);
+            assert.match(r.text, /What should we build/);
+            assert.ok(!r.text.includes('class="c4-demo"'), 'no front door once signed in');
         });
     } finally { await t.close(); }
     done();

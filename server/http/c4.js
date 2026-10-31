@@ -309,6 +309,55 @@ ${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="
         page(req, res, 'Conductor', wrap(content));
     }
 
+    // ── The front door (a visitor): what Codes is, shown rather than told ──
+    // The owner, 10-31: the empty "Running" and "Recent tasks" panels made the site look unfinished. A visitor gets the
+    // product: one conversation where an agent hands over to another, every agent in the catalogue, your own plans and
+    // keys, your machine or ours, the conductor, and the questions people ask. The composer stays: it is the start.
+    function visitorHome() {
+        const agents = (harnesses?.list?.() || []);
+        const thread = `<div class="c4-demo" aria-label="An example conversation">
+<p class="c4-demo-you">Add a dark mode switch to the settings page, with a test.</p>
+<div class="c4-demo-agent"><span class="c4-demo-face" aria-hidden="true">CC</span><div><b>Claude Code</b><span class="c4-demo-meta">Worked 3 min · 14 steps · read, edit, run</span><p>Added the switch to <code>settings.js</code>, saved the choice per person, and wrote <code>settings.test.js</code>. Two of three tests pass.</p></div></div>
+<p class="c4-demo-hand" role="note">Codex took over: Claude Code hit its plan limit</p>
+<div class="c4-demo-agent"><span class="c4-demo-face is-cx" aria-hidden="true">CX</span><div><b>Codex</b><span class="c4-demo-meta">Worked 1 min · 6 steps · picked up the diff</span><p>Fixed the failing case (the saved choice loaded after first paint).</p></div></div>
+<div class="c4-demo-result"><b>PR #42</b><span>3 files · +84 −12</span><span class="c4-demo-ok">CI passed</span><span class="c4-demo-ok">Deployed</span></div>
+</div>`;
+        const composer = `<section class="c4-card c4-composer c4-composer-front"><form method="post" action="/start"><label for="c4-prompt">What should an agent do?</label><textarea id="c4-prompt" name="prompt" placeholder="Describe the change, question or fix" required></textarea><div class="c4-composer-foot"><span class="c4-muted">Free with your own plans and keys. Sign in to start.</span><button class="c4-button" type="submit">Start a task</button></div></form></section>`;
+        return `${showcase.hero({
+            eyebrow: 'OpenVibe.Codes · alpha',
+            title: 'Every coding agent.', accent: 'One place.',
+            lede: 'Claude Code, Codex, OpenCode, Command Code, DeepSeek and models you run yourself, in one conversation. Bring the plans and keys you already pay for, run on your computer or ours, and follow the work from your phone.',
+            actions: [{ label: 'Start a task', href: '#c4-prompt', primary: true }, { label: 'How it works', href: '#how' }],
+            note: 'Open source (AGPL-3.0). No fee on your own plans and keys.',
+            aside: { html: thread },
+        })}
+${composer}
+${showcase.steps({ id: 'how', title: 'How it works', items: [
+            { title: 'Say what you want', text: 'A change, a question or a fix, in plain words, on any screen.' },
+            { title: 'Pick who works on it', text: 'Auto, or any agent and its model, with how hard it should think on each turn.' },
+            { title: 'It runs where you choose', text: 'Your own computer, paired with one command, with your tools and logins. A hosted sandbox is coming.' },
+            { title: 'Watch, approve, ship', text: 'Every step as it happens, the diff, the tests, page shots, then the pull request with CI and the deploy.' },
+        ] })}
+${agents.length ? showcase.features({ id: 'agents', title: 'Every agent you use', lede: `${agents.length} agents in the catalogue. When one stops or hits its limit, the next picks up with the diff and a summary.`, items: agents.map((o) => ({ title: o.name, text: [o.provider, ...(o.capabilities ? Object.keys(o.capabilities).filter((k) => o.capabilities[k] === true).slice(0, 2) : [])].filter(Boolean).join(' · '), href: `/harnesses#${o.id}` })) }) : ''}
+${showcase.features({ id: 'yours', title: 'Your plans, your keys, your machine', items: [
+            { title: 'Your subscriptions', text: 'Sign in with the Claude, ChatGPT, OpenCode or Command Code plan you already have. No key of ours and no fee.' },
+            { title: 'Your keys', text: 'Saved once in OpenVibe AI and used by every OpenVibe site. Never shown again, never sent anywhere else.' },
+            { title: 'Your computer', text: 'Pair it once from openvibe.network. Tasks run there with your own tools, and your logins never leave it.', href: '/run' },
+            { title: 'Costs you can follow', text: 'Every turn shows its tokens, what came from cache and who paid, on openvibe.report.' },
+        ] })}
+${showcase.features({ id: 'conductor', title: 'A conductor for the big jobs', lede: 'One Claude Code session plans the work, hands the parts to other agents in parallel, reads what they did, and asks you before anything risky.', items: [
+            { title: 'Plans, then delegates', text: 'Backend to one agent, tests to another, docs to a third, at the same time.' },
+            { title: 'Asks before it acts', text: 'Pushing, deleting or spending waits for your Allow in the app.' },
+            { title: 'Remembers the thread', text: 'One long conversation you can pick up from any device.' },
+        ] })}
+${showcase.faq({ items: [
+            ['Do I need an OpenVibe key?', 'No. Codes runs on the plans and keys you already have. An OpenVibe key is there for people who want one bill, with a small fee.'],
+            ['Where does my code run?', 'On a computer you pair, with your own tools. A hosted sandbox is coming for people without one.'],
+            ['Can I switch agents in the middle?', 'Yes. Any turn can name another agent; it picks up the diff and a summary of the conversation so far.'],
+            ['Is it open source?', 'Yes, AGPL-3.0, with the command-line harness you can run on its own.'],
+        ] })}`;
+    }
+
     // ── Home ────────────────────────────────────────────────────────────────────────────────────────────────────
     r.get('/', async (req, res) => {
         const rows = await ownTasks(req, 8);
@@ -330,7 +379,8 @@ ${signedIn ? `<section class="c4-card c4-conductor-cta"><div class="c4-card-head
 <section class="c4-card"><div class="c4-card-head"><h2>Recent tasks</h2><a href="/tasks">View all</a></div>${rows.slice(0, 5).map(rowHtml).join('') || '<div class="c4-emptyline">No tasks yet. <a href="/#c4-prompt">Start a task</a></div>'}</section>
 ${signedIn && !mine.ok && mine.problem ? note(`Your machines could not be read, so the machine picker has only Auto. ${esc(mine.problem.detail || '')}`, 'bad') : ''}
 ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h2><div class="c4-grid">${[['Any agent', 'Bring a key or plan. Auto picks a good fit and can hand over when one gets stuck.'], ['Your computer or ours', 'Pair your computer with one command. A hosted sandbox is coming soon.'], ['Proof you can inspect', 'See the changes, tests, screenshots and review before you approve.'], ['A cost you can follow', 'Track task costs and plan limits. Set caps that stop with a wrap-up.']].map(([a, b]) => `<article><h3>${a}</h3><p>${b}</p></article>`).join('')}</div></section>`}`;
-        page(req, res, null, wrap(content), signedIn ? {} : { index: true, styles: [showcase.STYLESHEET], jsonLd: homeJsonLd(config) });
+        if (!signedIn) return page(req, res, null, wrap(visitorHome()), { index: true, styles: [showcase.STYLESHEET], jsonLd: homeJsonLd(config) });
+        page(req, res, null, wrap(content), {});
     });
 
     /**

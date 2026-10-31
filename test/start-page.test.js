@@ -24,11 +24,12 @@ const { version } = require('../package.json');
         assert.match(r.text, /<link rel="canonical" href="https:\/\/openvibe\.codes\/start">/);
     });
 
-    await check('the workspace home leads to task creation and exposes its status sections', async () => {
+    await check('the home leads to task creation: the composer and Run for a visitor, the chat for a signed-in person', async () => {
         const r = await t.get('/');
         assert.ok(r.text.includes('href="/run"'));
         assert.ok(r.text.includes('What should an agent do?'));
-        assert.ok(r.text.includes('Needs you') && r.text.includes('Running') && r.text.includes('Recent tasks'));
+        const me = await t.get('/', { as: t.network.addUser('ada') });
+        assert.match(me.text, /What should we build/);
     });
 
     await check('the command line prints this version and points at the guide', () => {
