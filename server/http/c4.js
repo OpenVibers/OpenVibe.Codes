@@ -64,7 +64,9 @@ const asObject = (v) => {
     if (typeof v === 'string') { try { const p = JSON.parse(v); return p && typeof p === 'object' && !Array.isArray(p) ? p : null; } catch { return null; } }
     return null;
 };
-const PROVIDER_NAMES = { anthropic: 'Anthropic', openai: 'OpenAI', deepseek: 'DeepSeek', minimax: 'MiniMax', openrouter: 'OpenRouter', custom: 'Custom (OpenAI-compatible)' };
+const PROVIDER_NAMES = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Google Gemini', deepseek: 'DeepSeek', mistral: 'Mistral', xai: 'xAI', groq: 'Groq', cerebras: 'Cerebras', together: 'Together AI', fireworks: 'Fireworks', minimax: 'MiniMax', openrouter: 'OpenRouter', custom: 'Custom (OpenAI-compatible)' };
+// A person's keys live in one place for every site and agent (plan L36, L39): Codes shows them and links there.
+const YOUR_AI = 'https://ai.openvibe.services/you';
 
 function createC4Routes(ctx) {
     const r = asyncRouter();
@@ -556,33 +558,29 @@ ${list ? `<ul class="c4-rows c4-fleet">${list}</ul>` : `<div class="c4-emptyline
     };
 
     // ── Agents: the person's connections (keys live in OpenVibe.AI) ────────────────────────────────────────────
-    const connectionsCard = async (req) => {
+    const connectionsCard = async (req, res = null) => {
         let list = { keys: [], plans: [] };
+        let mine = null;
         let problem = null;
         try { list = await connections.list(req.viewer.subject); } catch (e) {
             problem = { status: e && e.status, detail: (e && e.message) || 'the connections could not be read' };
         }
-        const now = Date.now();
-        const rows = (list.keys || []).map((k) => `<li class="c4-row c4-row-flat"><span class="c4-row-dot c4-dot-ok" aria-hidden="true"></span><span class="c4-row-label">${esc(PROVIDER_NAMES[k.provider] || k.provider)}</span><span class="c4-row-note">${esc(k.hint || 'key stored')}${k.budget_usd_per_day != null ? ` · cap $${Number(k.budget_usd_per_day).toFixed(2)} a day` : ''}${k.last_used_at ? ` · last used ${esc(age(k.last_used_at))}` : ''}</span><span class="c4-inline-actions"><form method="post" action="/agents/connections/${esc(k.provider)}/test"><button class="c4-opill" type="submit">Test</button></form><form method="post" action="/agents/connections/${esc(k.provider)}/remove"><button class="c4-opill c4-opill-quiet" type="submit">Remove</button></form></span></li>`).join('');
+        try { mine = await sso.asViewer(req, res, (token) => connections.mine(token)); } catch (e) { mine = null; }
+        const state = (k) => (k.status === 'ok' ? pill('Working', 'ok') : k.status === 'failing' ? pill('Not working', 'bad') : pill('Not tested', 'skip'));
+        const own = ((mine && mine.credentials) || []).map((k) => `<li class="c4-row c4-row-flat"><span class="c4-row-dot${k.status === 'ok' ? ' c4-dot-ok' : k.status === 'failing' ? ' c4-dot-bad' : ''}" aria-hidden="true"></span><span class="c4-row-label">${esc(PROVIDER_NAMES[k.provider] || k.provider)}</span><span class="c4-row-note">\u2026${esc(k.hint || '????')}${k.checked_at ? ` · checked ${esc(age(k.checked_at))}` : ''}</span>${state(k)}</li>`).join('');
+        const before = (list.keys || []).map((k) => `<li class="c4-row c4-row-flat"><span class="c4-row-dot c4-dot-skip" aria-hidden="true"></span><span class="c4-row-label">${esc(PROVIDER_NAMES[k.provider] || k.provider)}</span><span class="c4-row-note">${esc(k.hint || 'key stored')}${k.last_used_at ? ` · last used ${esc(age(k.last_used_at))}` : ''}</span><span class="c4-inline-actions"><form method="post" action="/agents/connections/${esc(k.provider)}/test"><button class="c4-opill" type="submit">Test</button></form><form method="post" action="/agents/connections/${esc(k.provider)}/remove"><button class="c4-opill c4-opill-quiet" type="submit">Remove</button></form></span></li>`).join('');
         const plans = (list.plans || []).map((p) => `<li class="c4-row c4-row-flat"><span class="c4-row-dot c4-dot-skip" aria-hidden="true"></span><span class="c4-row-label">${esc(p.label || p.provider || 'a plan')}</span><span class="c4-row-note">on ${esc(p.machine || 'your machine')}</span>${pill('On your machine', 'skip')}</li>`).join('');
-        return `<section class="c4-card" id="connections"><div class="c4-card-head"><h2>Connections</h2></div>
-<p class="c4-sub">Keys live in OpenVibe.AI, never here</p>
-${problem ? note(`Your connections could not be read: ${esc(problem.detail)}`, 'bad') : ''}
-${rows || plans ? `<ul class="c4-rows">${rows}${plans}</ul>` : `<div class="c4-emptyline">No provider keys yet. Add one below and the router can use it, and so can a task.</div>`}
-<h3 class="c4-subhead">Add or replace a key</h3>
-<form class="c4-form" method="post" action="/agents/connections">
-  <label>Provider <select name="provider">${connections.PROVIDERS.map((p) => `<option value="${esc(p)}">${esc(PROVIDER_NAMES[p] || p)}</option>`).join('')}</select></label>
-  <label>Key <input type="password" name="key" required minlength="8" maxlength="400" autocomplete="off" spellcheck="false" placeholder="sk-…"></label>
-  <label>Base URL <input type="url" name="base_url" placeholder="Only for a custom provider" autocomplete="off"></label>
-  <label>Daily cap <input type="number" name="budget_usd_per_day" min="0" step="0.01" placeholder="Optional, in dollars"></label>
-  <button class="c4-button" type="submit">Save the key</button>
-</form>
-<p class="c4-hint">The key is forwarded to OpenVibe.AI and sealed there; Codes keeps only the four-character hint. Test sends one tiny request with your key.</p>
+        return `<section class="c4-card" id="connections"><div class="c4-card-head"><h2>Your AI keys</h2><a class="c4-button" href="${YOUR_AI}">Add or manage keys \u2197</a></div>
+<p class="c4-sub">One place for every OpenVibe site and agent: your tasks here use these first, with no fee.</p>
+${own ? `<ul class="c4-rows">${own}</ul>` : `<div class="c4-emptyline">${mine ? 'No keys yet.' : 'Your keys could not be read just now.'} <a href="${YOUR_AI}">Add one on Your AI</a>: Anthropic, OpenAI, Google, DeepSeek and more.</div>`}
+${plans ? `<h3 class="c4-subhead">Plans on your machines</h3><ul class="c4-rows">${plans}</ul>` : ''}
+${problem ? note(`The keys saved in Codes could not be read: ${esc(problem.detail)}`, 'bad') : ''}
+${before ? `<h3 class="c4-subhead">Saved in Codes before</h3><ul class="c4-rows">${before}</ul><p class="c4-hint">These still work for your tasks. Add them on <a href="${YOUR_AI}">Your AI</a> to use them on every site, then remove them here.</p>` : ''}
 </section>`;
     };
 
     r.get('/agents', async (req, res) => {
-        const content = `${header('Agents', 'The agents your tasks can run, what they have left, and the keys behind them.')}${viewer(req) ? `${flash(req)}${await fleetCard(req, res)}${await connectionsCard(req)}` : signIn(req)}`;
+        const content = `${header('Agents', 'The agents your tasks can run, what they have left, and the keys behind them.')}${viewer(req) ? `${flash(req)}${await fleetCard(req, res)}${await connectionsCard(req, res)}` : signIn(req)}`;
         page(req, res, 'Agents', wrap(content));
     });
     r.post('/agents/connections', form, async (req, res) => {

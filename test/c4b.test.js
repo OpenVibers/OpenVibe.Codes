@@ -123,7 +123,20 @@ const TASK3 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAX';
             const remove = await t.get('/agents/connections/deepseek/remove', { as: ada, method: 'POST', form: { x: '1' } });
             assert.strictEqual(remove.status, 303);
             const after = await t.get('/agents', { as: ada });
-            assert.ok(after.text.includes('No provider keys yet'), 'the key is forgotten');
+            assert.ok(!after.text.includes('Saved in Codes before'), 'the key is forgotten');
+        });
+
+        await check('Agents: your keys from Your AI, read with your own token, and the one place to manage them', async () => {
+            t.network.state.selfKeys = [{ provider: 'anthropic', hint: 'WXYZ', status: 'ok', checked_at: new Date().toISOString() }, { provider: 'gemini', hint: 'AB12', status: 'failing' }];
+            const page = await t.get('/agents', { as: ada });
+            assert.ok(page.text.includes('<h2>Your AI keys</h2>') && page.text.includes('href="https://ai.openvibe.services/you"'), 'the one place');
+            assert.ok(page.text.includes('Anthropic') && page.text.includes('\u2026WXYZ') && page.text.includes('Working'));
+            assert.ok(page.text.includes('Google Gemini') && page.text.includes('Not working'));
+            assert.ok(t.network.state.meRequests.some((h) => h.startsWith('Bearer ')), 'read as the person');
+            assert.ok(!page.text.includes('action="/agents/connections"'), 'no second place to add a key');
+            t.network.state.selfKeys = [];
+            const empty = await t.get('/agents', { as: ada });
+            assert.ok(empty.text.includes('No keys yet.') && empty.text.includes('Add one on Your AI'));
         });
 
         await check('Machines: the person&rsquo;s own machines, their state, and Node&rsquo;s pairing code flow', async () => {
