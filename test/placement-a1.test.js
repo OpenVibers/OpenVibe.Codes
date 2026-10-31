@@ -101,7 +101,8 @@ const { boot, check, done } = require('./helpers/boot');
                 person: ada.subject, rules: { noCloud: true }, ownMachine: { name: 'ada-laptop', agents: ['codex'] }, onlyAgent: 'codex',
             } });
             assert.strictEqual(own.selected, 'codex:codex-default');
-            assert.strictEqual(own.explain.line, 'On ada-laptop: your own machine, and it\'s free.');
+            assert.strictEqual(own.explain.line, 'On Codex: your own machine, and it\'s free.');
+            assert.ok(!own.explain.line.includes('codex:codex-default'), 'the line never shows a raw offer id');
             const none = route({ task: 'edit', harnesses, now: Date.parse('2026-10-30T12:00:00Z'), context: {
                 person: bo.subject, rules: { noCloud: true }, ownMachine: null, onlyAgent: 'codex',
             } });

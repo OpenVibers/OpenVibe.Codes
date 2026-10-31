@@ -101,10 +101,9 @@ function route({ task, extra = {}, harnesses, opts = {}, now = Date.now(), conte
         offers = offers.filter((offer) => runs.has(offer.detail.id)).map((offer) => ({
             ...offer, trust: 'user-owned', owner: context.person,
         }));
-        for (const offer of offers) if (own.name) names[offer.offer_id] = own.name;
-    } else {
-        for (const offer of offers) if (!names[offer.offer_id]) names[offer.offer_id] = offer.detail.name;
     }
+    // The line names the harness as the catalog does ("Codex", "Claude Code"), never its offer id, in both modes.
+    for (const offer of offers) if (!names[offer.offer_id]) names[offer.offer_id] = offer.detail.name;
     // onlyFree: a paid harness is out; the person's own machine (owned capacity) and a free offer stay. The SDK's rule
     // also sets max_cost_usd 0, but Codes' catalog has no rate card to price a token with, so the price is read here.
     if (context.rules && context.rules.onlyFree) {
