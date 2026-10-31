@@ -6,180 +6,194 @@
 // - a running turn streams into the thread: each step appears as the agent takes it, and the page renders the
 //   finished turn when the attempt ends;
 // - the conductor's images go up with the message through the JSON API.
+//
+// Codes moves between pages with openvibe-shared/boost, which swaps the page in place without running this file
+// again: each page is set up on its first load and on every ov:boost:load, and a live stream is closed when the page
+// moves away (the owner, 2026-10-31: the rail's button did nothing on a phone after a move to Machines).
 (() => {
-    const app = document.querySelector('[data-chat]');
-    if (!app) return;
     const $ = (sel, root = document) => root.querySelector(sel);
+    let page = null;   // { app, es, setOpen } for the page on screen
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && page) { page.setOpen('rail-open', false); page.setOpen('side-open', false); } });
+    document.addEventListener('ov:boost:before', () => { if (page && page.es) page.es.close(); page = null; });
+    document.addEventListener('ov:boost:load', init);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
-    // ── The rail and the side on narrow screens ──
-    const scrim = $('[data-ch-scrim]', app);
-    const setOpen = (cls, on) => {
-        app.classList.toggle(cls, on);
-        const any = app.classList.contains('rail-open') || app.classList.contains('side-open');
-        if (scrim) scrim.hidden = !any;
-        if (on) { const first = $(cls === 'rail-open' ? '.ch-rail a, .ch-rail input' : '.ch-side button', app); if (first) first.focus({ preventScroll: true }); }
-    };
-    app.addEventListener('click', (e) => {
-        const t = e.target.closest('[data-ch-rail-open],[data-ch-rail-close],[data-ch-side-open],[data-ch-side-close],[data-ch-scrim]');
-        if (!t) return;
-        if (t.matches('[data-ch-rail-open]')) setOpen('rail-open', true);
-        else if (t.matches('[data-ch-side-open]')) setOpen('side-open', true);
-        else { setOpen('rail-open', false); setOpen('side-open', false); }
-    });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { setOpen('rail-open', false); setOpen('side-open', false); } });
+    function init() {
+        const app = document.querySelector('[data-chat]');
+        if (!app || app.dataset.chReady) return;
+        app.dataset.chReady = '1';
+        page = { app, es: null, setOpen: () => {} };
 
-    // ── The rail's search: filter as you type (Enter still searches every task) ──
-    const find = $('[data-ch-find]', app);
-    if (find) {
-        find.addEventListener('input', () => {
-            const q = find.value.trim().toLowerCase();
-            app.querySelectorAll('.ch-list .ch-item').forEach((a) => { a.hidden = !!q && !a.textContent.toLowerCase().includes(q); });
-            app.querySelectorAll('.ch-list .ch-group').forEach((g) => {
-                let n = g.nextElementSibling, shown = false;
-                while (n && !n.classList.contains('ch-group')) { if (n.classList.contains('ch-item') && !n.hidden) shown = true; n = n.nextElementSibling; }
-                g.hidden = !!q && !shown;
-            });
+        // ── The rail and the side on narrow screens ──
+        const scrim = $('[data-ch-scrim]', app);
+        const setOpen = (cls, on) => {
+            app.classList.toggle(cls, on);
+            const any = app.classList.contains('rail-open') || app.classList.contains('side-open');
+            if (scrim) scrim.hidden = !any;
+            if (on) { const first = $(cls === 'rail-open' ? '.ch-rail a, .ch-rail input' : '.ch-side button', app); if (first) first.focus({ preventScroll: true }); }
+        };
+        app.addEventListener('click', (e) => {
+            const t = e.target.closest('[data-ch-rail-open],[data-ch-rail-close],[data-ch-side-open],[data-ch-side-close],[data-ch-scrim]');
+            if (!t) return;
+            if (t.matches('[data-ch-rail-open]')) setOpen('rail-open', true);
+            else if (t.matches('[data-ch-side-open]')) setOpen('side-open', true);
+            else { setOpen('rail-open', false); setOpen('side-open', false); }
         });
-    }
+        page.setOpen = setOpen;
 
-    // ── The composer ──
-    const form = $('[data-ch-composer]', app);
-    const text = form && $('[data-ch-text]', form);
-    const status = form && $('[data-ch-status]', form);
-    const say = (msg, bad) => { if (status) { status.textContent = msg; status.classList.toggle('is-bad', !!bad); } };
-    if (text) {
-        const grow = () => { text.style.height = 'auto'; text.style.height = `${Math.min(text.scrollHeight, window.innerHeight * 0.4)}px`; };
-        text.addEventListener('input', grow);
-        text.addEventListener('keydown', (e) => {
-            if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return;
-            // On a phone the keyboard's return is a new line; the send button sends.
-            if (matchMedia('(pointer: coarse)').matches && !e.metaKey && !e.ctrlKey) return;
-            e.preventDefault();
-            if (text.value.trim()) form.requestSubmit();
-        });
-        app.querySelectorAll('[data-ch-idea]').forEach((b) => b.addEventListener('click', () => { text.value = b.dataset.chIdea; grow(); text.focus(); }));
-        // The repository: a recent one is a tap away, and typing searches every repository the person can reach.
-        const repo = $('[data-ch-repo]', form);
-        app.querySelectorAll('[data-ch-saved-repo]').forEach((b) => b.addEventListener('click', () => { if (repo) { repo.value = b.dataset.chSavedRepo; text.focus(); } }));
-        if (repo && repo.dataset.chRepoUrl) {
-            const list = document.getElementById(repo.getAttribute('list'));
-            let timer = 0, seq = 0;
-            repo.addEventListener('input', () => {
-                clearTimeout(timer);
-                timer = setTimeout(async () => {
-                    const q = repo.value.trim();
-                    if (!list || q.length < 2 || /^https?:\/\//i.test(q)) return;
-                    const mine = ++seq;
-                    try {
-                        const res = await fetch(`${repo.dataset.chRepoUrl}?q=${encodeURIComponent(q)}`, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-                        if (!res.ok || mine !== seq) return;
-                        const doc = await res.json();
-                        if (mine !== seq) return;
-                        list.textContent = '';
-                        (doc.repos || []).forEach((r) => { const o = document.createElement('option'); o.value = r.url; o.label = r.full_name + (r.recent ? ' · used here' : ''); list.appendChild(o); });
-                    } catch { /* the typed URL still works */ }
-                }, 250);
+        // ── The rail's search: filter as you type (Enter still searches every task) ──
+        const find = $('[data-ch-find]', app);
+        if (find) {
+            find.addEventListener('input', () => {
+                const q = find.value.trim().toLowerCase();
+                app.querySelectorAll('.ch-list .ch-item').forEach((a) => { a.hidden = !!q && !a.textContent.toLowerCase().includes(q); });
+                app.querySelectorAll('.ch-list .ch-group').forEach((g) => {
+                    let n = g.nextElementSibling, shown = false;
+                    while (n && !n.classList.contains('ch-group')) { if (n.classList.contains('ch-item') && !n.hidden) shown = true; n = n.nextElementSibling; }
+                    g.hidden = !!q && !shown;
+                });
             });
         }
-        // The keyboard hint only where Enter sends (a phone keyboard's return is a new line).
-        if (status && !status.textContent && !matchMedia('(pointer: coarse)').matches) status.textContent = 'Enter sends · Shift+Enter for a new line';
-        if (app.classList.contains('is-empty')) text.focus({ preventScroll: true });
-        grow();
-    }
-    if (form) {
-        const images = $('[data-ch-images]', form);
-        if (images) images.addEventListener('change', () => {
-            const n = (images.files || []).length;
-            images.closest('.ch-pick-file').classList.toggle('has-files', n > 0);
-            say(n ? `${n} image${n === 1 ? '' : 's'} will go with your message` : '');
-        });
-        form.addEventListener('submit', async (e) => {
-            const submitter = e.submitter;
-            if (submitter && submitter.formAction && submitter.formAction !== form.action) return; // Stop: a plain post
-            const files = images ? Array.from(images.files || []).slice(0, 4) : [];
-            form.classList.add('is-sending');
-            form.querySelectorAll('button').forEach((b) => { b.disabled = b.classList.contains('ch-send'); });
-            if (!files.length) { say('Sending…'); return; }       // words alone: the plain form post
-            e.preventDefault();
-            say(files.length === 1 ? 'Sending the image…' : `Sending ${files.length} images…`);
-            const asData = (file) => new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve({ name: file.name, mime: file.type, data: String(r.result || '') }); r.onerror = () => resolve(null); r.readAsDataURL(file); });
-            try {
-                const attachments = (await Promise.all(files.map(asData))).filter(Boolean);
-                const res = await fetch(form.dataset.chApi, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ text: text.value, attachments }) });
-                const doc = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(doc.detail || `the message was refused (${res.status})`);
-                location.reload();
-            } catch (err) {
-                say(String((err && err.message) || 'the message could not be sent'), true);
-                form.classList.remove('is-sending');
-                form.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+
+        // ── The composer ──
+        const form = $('[data-ch-composer]', app);
+        const text = form && $('[data-ch-text]', form);
+        const status = form && $('[data-ch-status]', form);
+        const say = (msg, bad) => { if (status) { status.textContent = msg; status.classList.toggle('is-bad', !!bad); } };
+        if (text) {
+            const grow = () => { text.style.height = 'auto'; text.style.height = `${Math.min(text.scrollHeight, window.innerHeight * 0.4)}px`; };
+            text.addEventListener('input', grow);
+            text.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+                // On a phone the keyboard's return is a new line; the send button sends.
+                if (matchMedia('(pointer: coarse)').matches && !e.metaKey && !e.ctrlKey) return;
+                e.preventDefault();
+                if (text.value.trim()) form.requestSubmit();
+            });
+            app.querySelectorAll('[data-ch-idea]').forEach((b) => b.addEventListener('click', () => { text.value = b.dataset.chIdea; grow(); text.focus(); }));
+            // The repository: a recent one is a tap away, and typing searches every repository the person can reach.
+            const repo = $('[data-ch-repo]', form);
+            app.querySelectorAll('[data-ch-saved-repo]').forEach((b) => b.addEventListener('click', () => { if (repo) { repo.value = b.dataset.chSavedRepo; text.focus(); } }));
+            if (repo && repo.dataset.chRepoUrl) {
+                const list = document.getElementById(repo.getAttribute('list'));
+                let timer = 0, seq = 0;
+                repo.addEventListener('input', () => {
+                    clearTimeout(timer);
+                    timer = setTimeout(async () => {
+                        const q = repo.value.trim();
+                        if (!list || q.length < 2 || /^https?:\/\//i.test(q)) return;
+                        const mine = ++seq;
+                        try {
+                            const res = await fetch(`${repo.dataset.chRepoUrl}?q=${encodeURIComponent(q)}`, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                            if (!res.ok || mine !== seq) return;
+                            const doc = await res.json();
+                            if (mine !== seq) return;
+                            list.textContent = '';
+                            (doc.repos || []).forEach((r) => { const o = document.createElement('option'); o.value = r.url; o.label = r.full_name + (r.recent ? ' · used here' : ''); list.appendChild(o); });
+                        } catch { /* the typed URL still works */ }
+                    }, 250);
+                });
             }
-        });
-    }
-
-    // ── The thread: start at the latest turn, and stream a running one ──
-    const thread = $('#ch-thread');
-    if (thread && !app.classList.contains('is-empty')) thread.scrollTop = thread.scrollHeight;
-    const stream = thread && thread.dataset.chStream;
-    const live = thread && thread.querySelector('.ch-agent.is-live');
-    if (!stream || !live || typeof EventSource === 'undefined') return;
-    const near = () => thread.scrollHeight - thread.scrollTop - thread.clientHeight < 160;
-    const kindOf = (name) => {
-        const n = String(name || '').toLowerCase();
-        if (/^(read|view|cat|ls|glob|list|open)|read_file|list_dir/.test(n)) return 'read';
-        if (/(grep|search|find|rg)/.test(n) && !/web/.test(n)) return 'find';
-        if (/(edit|write|patch|apply|create|replace|multiedit|str_replace)/.test(n)) return 'edit';
-        if (/(bash|shell|exec|run|command|terminal)/.test(n)) return 'run';
-        if (/(web|fetch|browse|http|url)/.test(n)) return 'web';
-        if (/(task|agent|delegate|subagent)/.test(n)) return 'sub';
-        return 'tool';
-    };
-    // The step's sign: the server drew one of each kind already; reuse its icon when there is one.
-    const iconFor = (kind) => {
-        const drawn = thread.querySelector(`.ch-step[data-kind="${kind}"] svg`);
-        if (drawn) return drawn.cloneNode(true);
-        const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        s.setAttribute('class', 'ch-i'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '1.8');
-        const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); c.setAttribute('cx', '12'); c.setAttribute('cy', '12'); c.setAttribute('r', '3');
-        s.appendChild(c); return s;
-    };
-    let steps = live.querySelector('.ch-steps');
-    const list = () => {
-        if (!steps) {
-            steps = document.createElement('details'); steps.className = 'ch-steps'; steps.open = true;
-            const sum = document.createElement('summary'); sum.textContent = 'Working'; steps.append(sum, document.createElement('ol'));
-            live.querySelector('.ch-who').after(steps);
+            // The keyboard hint only where Enter sends (a phone keyboard's return is a new line).
+            if (status && !status.textContent && !matchMedia('(pointer: coarse)').matches) status.textContent = 'Enter sends · Shift+Enter for a new line';
+            if (app.classList.contains('is-empty')) text.focus({ preventScroll: true });
+            grow();
         }
-        return steps.querySelector('ol');
-    };
-    const count = () => { const n = list().children.length; const sum = steps.querySelector('summary'); if (sum && sum.firstChild && sum.firstChild.nodeType === 3) sum.firstChild.textContent = `Working · ${n} step${n === 1 ? '' : 's'}`; };
-    const working = live.querySelector('[data-ch-working-text]');
-    const attemptN = Number(live.dataset.attempt || 0);
-    const es = new EventSource(stream);
-    let reloading = false;
-    const reload = () => { if (reloading) return; reloading = true; es.close(); setTimeout(() => location.reload(), 500); };
-    es.addEventListener('line', (ev) => {
-        let d; try { d = JSON.parse(ev.data); } catch { return; }
-        if (attemptN && d.attempt_n && Number(d.attempt_n) !== attemptN) return;
-        const b = d.body && typeof d.body === 'object' ? d.body : { t: d.kind, text: String(d.body || '') };
-        const stick = near();
-        if (b.t === 'tool') {
-            const li = document.createElement('li'); li.className = 'ch-step is-new'; li.dataset.kind = kindOf(b.name);
-            const n = document.createElement('span'); n.className = 'ch-step-n'; n.textContent = b.name || 'tool';
-            const w = document.createElement('span'); w.className = 'ch-step-w'; w.textContent = b.what || '';
-            li.append(iconFor(li.dataset.kind), n, w); list().appendChild(li); count();
-            if (working) working.textContent = `${b.name || 'Working'} ${b.what || ''}`.trim();
-        } else if (b.t === 'tool_result' && b.ok === false) {
-            const last = list().lastElementChild; if (last) last.classList.add('is-bad');
-        } else if (b.t === 'text' && b.text && working) {
-            working.textContent = String(b.text).split('\n').find(Boolean) || working.textContent;
-        } else if (b.t === 'done' || b.t === 'end' || d.kind === 'end') reload();
-        if (stick) thread.scrollTop = thread.scrollHeight;
-    });
-    es.addEventListener('attempt', (ev) => {
-        let d; try { d = JSON.parse(ev.data); } catch { return; }
-        // The stream replays every attempt on connect: only the live one ending, or a newer one starting, is news.
-        if ((d.type === 'attempt_ended' && attemptN && Number(d.attempt_n) === attemptN) || (d.type === 'attempt_started' && attemptN && Number(d.attempt_n) > attemptN)) reload();
-    });
-    es.addEventListener('end', reload);
+        if (form) {
+            const images = $('[data-ch-images]', form);
+            if (images) images.addEventListener('change', () => {
+                const n = (images.files || []).length;
+                images.closest('.ch-pick-file').classList.toggle('has-files', n > 0);
+                say(n ? `${n} image${n === 1 ? '' : 's'} will go with your message` : '');
+            });
+            form.addEventListener('submit', async (e) => {
+                const submitter = e.submitter;
+                if (submitter && submitter.formAction && submitter.formAction !== form.action) return; // Stop: a plain post
+                const files = images ? Array.from(images.files || []).slice(0, 4) : [];
+                form.classList.add('is-sending');
+                form.querySelectorAll('button').forEach((b) => { b.disabled = b.classList.contains('ch-send'); });
+                if (!files.length) { say('Sending…'); return; }       // words alone: the plain form post
+                e.preventDefault();
+                say(files.length === 1 ? 'Sending the image…' : `Sending ${files.length} images…`);
+                const asData = (file) => new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve({ name: file.name, mime: file.type, data: String(r.result || '') }); r.onerror = () => resolve(null); r.readAsDataURL(file); });
+                try {
+                    const attachments = (await Promise.all(files.map(asData))).filter(Boolean);
+                    const res = await fetch(form.dataset.chApi, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ text: text.value, attachments }) });
+                    const doc = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(doc.detail || `the message was refused (${res.status})`);
+                    location.reload();
+                } catch (err) {
+                    say(String((err && err.message) || 'the message could not be sent'), true);
+                    form.classList.remove('is-sending');
+                    form.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+                }
+            });
+        }
+
+        // ── The thread: start at the latest turn, and stream a running one ──
+        const thread = $('#ch-thread');
+        if (thread && !app.classList.contains('is-empty')) thread.scrollTop = thread.scrollHeight;
+        const stream = thread && thread.dataset.chStream;
+        const live = thread && thread.querySelector('.ch-agent.is-live');
+        if (!stream || !live || typeof EventSource === 'undefined') return;
+        const near = () => thread.scrollHeight - thread.scrollTop - thread.clientHeight < 160;
+        const kindOf = (name) => {
+            const n = String(name || '').toLowerCase();
+            if (/^(read|view|cat|ls|glob|list|open)|read_file|list_dir/.test(n)) return 'read';
+            if (/(grep|search|find|rg)/.test(n) && !/web/.test(n)) return 'find';
+            if (/(edit|write|patch|apply|create|replace|multiedit|str_replace)/.test(n)) return 'edit';
+            if (/(bash|shell|exec|run|command|terminal)/.test(n)) return 'run';
+            if (/(web|fetch|browse|http|url)/.test(n)) return 'web';
+            if (/(task|agent|delegate|subagent)/.test(n)) return 'sub';
+            return 'tool';
+        };
+        // The step's sign: the server drew one of each kind already; reuse its icon when there is one.
+        const iconFor = (kind) => {
+            const drawn = thread.querySelector(`.ch-step[data-kind="${kind}"] svg`);
+            if (drawn) return drawn.cloneNode(true);
+            const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            s.setAttribute('class', 'ch-i'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '1.8');
+            const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); c.setAttribute('cx', '12'); c.setAttribute('cy', '12'); c.setAttribute('r', '3');
+            s.appendChild(c); return s;
+        };
+        let steps = live.querySelector('.ch-steps');
+        const list = () => {
+            if (!steps) {
+                steps = document.createElement('details'); steps.className = 'ch-steps'; steps.open = true;
+                const sum = document.createElement('summary'); sum.textContent = 'Working'; steps.append(sum, document.createElement('ol'));
+                live.querySelector('.ch-who').after(steps);
+            }
+            return steps.querySelector('ol');
+        };
+        const count = () => { const n = list().children.length; const sum = steps.querySelector('summary'); if (sum && sum.firstChild && sum.firstChild.nodeType === 3) sum.firstChild.textContent = `Working · ${n} step${n === 1 ? '' : 's'}`; };
+        const working = live.querySelector('[data-ch-working-text]');
+        const attemptN = Number(live.dataset.attempt || 0);
+        const es = page.es = new EventSource(stream);
+        let reloading = false;
+        const reload = () => { if (reloading) return; reloading = true; es.close(); setTimeout(() => location.reload(), 500); };
+        es.addEventListener('line', (ev) => {
+            let d; try { d = JSON.parse(ev.data); } catch { return; }
+            if (attemptN && d.attempt_n && Number(d.attempt_n) !== attemptN) return;
+            const b = d.body && typeof d.body === 'object' ? d.body : { t: d.kind, text: String(d.body || '') };
+            const stick = near();
+            if (b.t === 'tool') {
+                const li = document.createElement('li'); li.className = 'ch-step is-new'; li.dataset.kind = kindOf(b.name);
+                const n = document.createElement('span'); n.className = 'ch-step-n'; n.textContent = b.name || 'tool';
+                const w = document.createElement('span'); w.className = 'ch-step-w'; w.textContent = b.what || '';
+                li.append(iconFor(li.dataset.kind), n, w); list().appendChild(li); count();
+                if (working) working.textContent = `${b.name || 'Working'} ${b.what || ''}`.trim();
+            } else if (b.t === 'tool_result' && b.ok === false) {
+                const last = list().lastElementChild; if (last) last.classList.add('is-bad');
+            } else if (b.t === 'text' && b.text && working) {
+                working.textContent = String(b.text).split('\n').find(Boolean) || working.textContent;
+            } else if (b.t === 'done' || b.t === 'end' || d.kind === 'end') reload();
+            if (stick) thread.scrollTop = thread.scrollHeight;
+        });
+        es.addEventListener('attempt', (ev) => {
+            let d; try { d = JSON.parse(ev.data); } catch { return; }
+            // The stream replays every attempt on connect: only the live one ending, or a newer one starting, is news.
+            if ((d.type === 'attempt_ended' && attemptN && Number(d.attempt_n) === attemptN) || (d.type === 'attempt_started' && attemptN && Number(d.attempt_n) > attemptN)) reload();
+        });
+        es.addEventListener('end', reload);
+    }
 })();
