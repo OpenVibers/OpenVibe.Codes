@@ -96,7 +96,7 @@ meter.headroom { width: 8rem; max-width: 100%; vertical-align: middle; }
 .codes-faq p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text-secondary, #96a7c2); }
 
 /* The home on phones (2026-10-29): a taste and a door. The agents are one sideways row (all of them still there), four
-   repositories show, how it works is one fold under its heading, the questions are closed. */
+   repository is in one sideways row, how it works starts open, the questions are closed. */
 .codes-fold { border: 1px solid var(--border, #1f2d47); border-radius: 16px; background: var(--bg-secondary, #101828); }
 .codes-fold > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 0 18px; cursor: pointer; list-style: none; }
 .codes-fold > summary::-webkit-details-marker { display: none; }
@@ -112,8 +112,10 @@ meter.headroom { width: 8rem; max-width: 100%; vertical-align: middle; }
   #agents .sc-grid { display: flex; flex-wrap: nowrap; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; scrollbar-width: none; gap: 10px; margin-left: -16px; margin-right: -16px; padding: 0 16px 4px; }
   #agents .sc-grid::-webkit-scrollbar { display: none; }
   #agents .sc-grid > * { flex: 0 0 78%; min-width: 0; scroll-snap-align: start; }
-  .codes-repos > li:nth-child(n+5) { display: none; }
-  .codes-fold > summary span { display: none; }
+  /* Every repository stays: the list scrolls sideways rather than dropping the later ones. */
+  .codes-repos { display: flex; flex-wrap: nowrap; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; scrollbar-width: none; gap: 10px; margin-left: -16px; margin-right: -16px; padding: 0 16px 4px; }
+  .codes-repos::-webkit-scrollbar { display: none; }
+  .codes-repos > li { flex: 0 0 78%; min-width: 0; scroll-snap-align: start; }
 }
 
 /* Touch targets on phones (fleet audit 2026-10-29): the touch-only hit area for this group. Nothing moves with a mouse. */
