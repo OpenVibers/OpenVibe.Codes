@@ -136,7 +136,7 @@ function createChatRoutes(ctx) {
                FROM run_tasks WHERE subject = $1 ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 120`, [subject],
         );
     }
-    function railHtml(rows, currentId, waitingIds) {
+    function railHtml(rows, currentId, waitingIds, here = '') {
         const now = new Date();
         const day0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
         const bucket = (row) => {
@@ -160,7 +160,7 @@ function createChatRoutes(ctx) {
             groups[groups.length - 1][1].push(row);
         }
         const foot = [['Agents', '/agents', 'agents'], ['Machines', '/machines', 'machines'], ['Memory', '/memory', 'memory'], ['Usage', '/usage', 'usage'], ['Settings', '/settings', 'settings']]
-            .map(([label, href, i]) => `<a href="${href}" title="${label}">${ico(i)}<span>${label}</span></a>`).join('');
+            .map(([label, href, i]) => `<a href="${href}" title="${label}"${here === href ? ' class="is-here" aria-current="page"' : ''}>${ico(i)}<span>${label}</span></a>`).join('');
         return `<aside class="ch-rail" id="ch-rail" aria-label="Your conversations">
 <div class="ch-rail-top"><a class="ch-new" href="/">${ico('new')}<span>New chat</span></a><button class="ch-icon-btn ch-rail-close" type="button" data-ch-rail-close aria-label="Close the list">${ico('close')}</button></div>
 <form class="ch-find" role="search" method="get" action="/tasks"><label class="ch-sr" for="ch-find">Search your conversations</label>${ico('search')}<input id="ch-find" name="q" placeholder="Search" autocomplete="off" data-ch-find></form>
@@ -222,9 +222,9 @@ ${rows.length ? '' : '<p class="ch-empty-rail">Your conversations appear here.</
             const n = Number(a.n);
             if (prev) {
                 const note = /^carried on by the owner: /.exec(a.why || '') ? String(a.why).replace(/^carried on by the owner: /, '') : null;
-                if (a.kind === 'manual' && note) out.push(you(note));
-                else if (a.agent && prev.agent && a.agent !== prev.agent) out.push(divider(`${agentOf(a.agent, names).name} took over${prev.end_why ? `: ${agentOf(prev.agent, names).name} ${prev.end_why}` : ''}`));
-                else if (a.why) out.push(divider(String(a.why), 'handover'));
+                if (note) out.push(you(note));
+                if (a.agent && prev.agent && a.agent !== prev.agent) out.push(divider(`${agentOf(a.agent, names).name} took over${prev.end_why ? `: ${agentOf(prev.agent, names).name} ${prev.end_why}` : ''}`));
+                else if (a.why && !note) out.push(divider(String(a.why), 'handover'));
             }
             const isLive = live && n === Number(attempts[attempts.length - 1].n);
             out.push(agentTurn(agentOf(a.agent || row.agent, names), byAttempt.get(n) || [], { live: isLive, attempt: a }));
@@ -312,21 +312,21 @@ ${note ? `<p class="ch-note" data-ch-status role="status">${note}</p>` : '<p cla
     }
 
     // ── Pages ────────────────────────────────────────────────────────────────────────────────────────────────────
-    async function frame(req, res, { currentId = null, title, head = '', thread = '', composerHtml = '', side = '', streamUrl = '', empty = false }) {
+    async function frame(req, res, { currentId = null, title, head = '', thread = '', composerHtml = '', side = '', streamUrl = '', empty = false, page = null, here = '', css = [], scripts = [] }) {
         const rows = await conversations(req.viewer.subject);
         const waiting = approvals ? await approvals.inbox(req.viewer.subject).catch(() => []) : [];
         const waitingIds = new Set(waiting.map((a) => a.task_id));
-        const body = `<div class="ch${side ? ' has-side' : ''}${empty ? ' is-empty' : ''}" data-chat>
-${railHtml(rows, currentId, waitingIds)}
+        const body = `<div class="ch${side ? ' has-side' : ''}${empty ? ' is-empty' : ''}${page != null ? ' is-page' : ''}" data-chat>
+${railHtml(rows, currentId, waitingIds, here)}
 <div class="ch-scrim" data-ch-scrim hidden></div>
 <section class="ch-main" aria-label="Conversation">
 <header class="ch-head"><button class="ch-icon-btn ch-rail-open" type="button" data-ch-rail-open aria-label="Your conversations" aria-controls="ch-rail">${ico('rail')}</button>${head}${side ? `<button class="ch-icon-btn ch-side-open" type="button" data-ch-side-open aria-label="What it did" aria-controls="ch-side">${ico('side')}</button>` : ''}</header>
-<div class="ch-thread" id="ch-thread"${streamUrl ? ` data-ch-stream="${esc(streamUrl)}"` : ''}>${thread}</div>
-${composerHtml}
+${page != null ? `<div class="ch-page">${page}</div>` : `<div class="ch-thread" id="ch-thread"${streamUrl ? ` data-ch-stream="${esc(streamUrl)}"` : ''}>${thread}</div>
+${composerHtml}`}
 </section>
 ${side}
 </div>`;
-        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: ['css/chat.css'], scripts: ['js/chat.js'], body: raw(body) });
+        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], scripts: [...scripts, 'js/chat.js'], body: raw(body) });
     }
 
     /** The side: who worked on it, and where the work is. */
@@ -346,6 +346,10 @@ ${people ? `<section><p class="ch-group">Agents</p><ul class="ch-people">${peopl
 ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${facts.map(([i, t]) => `<li>${i}<span>${t}</span></li>`).join('')}</ul></section>` : ''}
 </aside>`;
     }
+
+    ctx.chatShell = (req, res, { title, body, css = [], scripts = [], here = '' }) => frame(req, res, {
+        title, page: body, here, css, scripts, head: '',
+    });
 
     // A new conversation: the greeting, the repository and the agent, and the composer.
     r.get('/', async (req, res, next) => {

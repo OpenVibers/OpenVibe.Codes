@@ -79,16 +79,12 @@ function renderPage(o) {
     // the current one active, and the product's own places fold into More; a visitor who is not signed in keeps the
     // product's links, because the sections hold the visitor's own work and a visitor has none yet.
     const here = (href) => pathOnly === href || (href !== '/' && pathOnly.startsWith(`${href}/`));
-    // A conversation (a signed-in /, /tasks/:id) is the chat app: its rail is the navigation, so the bar carries none.
-    const chatPage = signedIn && (pathOnly === '/' || /^\/tasks\/tsk_[0-9A-Z]{26}$/.test(pathOnly));
-    const links = chatPage ? []
-        : (signedIn && c4Workspace)
-        ? [
-            ...WORKSPACE_NAV.map((l) => ({ ...l, active: here(l.href) })),
-            // The catalogue of harnesses is the product's Agents page; the workspace's own Agents page is above, so the
-            // product's one is named for what it is.
-            ...NAV.map((l) => ({ ...l, more: true, label: l.href === '/harnesses' ? 'Agent catalogue' : l.label })),
-        ]
+    // A signed-in person's workspace is one app (Codes L31): its rail is the navigation (the conversations, and the
+    // workspace's own pages at its foot), so the navbar keeps only the product's places, in More. The catalogue of
+    // harnesses is named for what it is, beside the workspace's own Agents page in the rail.
+    const inApp = signedIn && c4Workspace;
+    const links = inApp
+        ? NAV.map((l) => ({ ...l, more: true, label: l.href === '/harnesses' ? 'Agent catalogue' : l.label }))
         : NAV.map((l) => ({ ...l, active: pathNow === l.href || pathNow.startsWith(`${l.href}/`) }));
     const nav = {
         service: 'codes',
@@ -98,7 +94,8 @@ function renderPage(o) {
         // Phones: one tab bar, the Frame's own (Shared 4.20). On a workspace page a signed-in person gets the workspace's
         // sections there — the first four (Home, Tasks, Conductor, Agents) and More, which opens the navbar's drawer with
         // the rest; the section the person is in is marked. Everyone else keeps the product's four.
-        appBar: c4Workspace && signedIn ? true : [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Start', href: '/start', icon: 'fa-play' }, { label: 'Run', href: '/run', icon: 'fa-microchip' }, { label: 'Agents', href: '/harnesses', icon: 'fa-robot' }],
+        // Phones: in the app the rail is a drawer and the conversation owns the screen, so no tab bar (L31).
+        appBar: inApp ? false : [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Start', href: '/start', icon: 'fa-play' }, { label: 'Run', href: '/run', icon: 'fa-microchip' }, { label: 'Agents', href: '/harnesses', icon: 'fa-robot' }],
         history: { type: 'page', title: o.title || SITE_NAME },
         silentLogin: `${o.config.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',

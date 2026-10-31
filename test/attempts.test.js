@@ -294,6 +294,19 @@ const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
             assert.strictEqual((await attemptsOf(id)).length, 3, 'no third continue');
         });
 
+        await check('the next turn carries the work and the conversation so far, to the same agent or another (L31 CH4)', async () => {
+            const id = await startTask();
+            const patch = 'diff --git a/cache.js b/cache.js\nnew file mode 100644\n--- /dev/null\n+++ b/cache.js\n@@ -0,0 +1 @@\n+module.exports = new Map();\n';
+            await endAttempt(id, { state: 'succeeded', result: { ok: true, summary: 'I added the cache.', files: [{ path: 'cache.js', added: 1, removed: 0 }], patch, log: [{ t: 'done', ok: true, text: 'I added the cache.' }] } });
+            const continued = await call('POST', `/tasks/${id}/continue`, { body: { note: 'Now the tests.' } });
+            assert.strictEqual(continued.status, 200, JSON.stringify(continued.json));
+            const submits = calls.filter((c) => c[0] === 'submit');
+            const args = submits[submits.length - 1][1].args;
+            assert.strictEqual(args.base_patch, patch, 'the work so far travels as the diff');
+            assert.ok(args.prompt.includes('## The conversation so far') && args.prompt.includes('Now the tests.'), 'and the conversation as words');
+            assert.ok(args.prompt.indexOf('## The conversation so far') < args.prompt.indexOf('Now the tests.'), 'the history before the new note');
+        });
+
         await check('the owner needs no token: their own task reads, continues and stops', async () => {
             const id = await startTask();
             const mine = await t.get(`/api/v1/tasks/${id}`, { as: ada });
