@@ -146,6 +146,7 @@ const TASK3 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAX';
             assert.ok(page.text.includes('Online'), 'with its state');
             assert.ok(page.text.includes(`/machines/${NODE}/revoke`), 'and a way to revoke it');
             assert.ok(page.text.includes('Pair a machine') && page.text.includes('openvibe.bot/machines'), 'the pairing flow is Nodes');
+            assert.ok(page.text.includes('All your machines are on openvibe.network/machines'), 'the page points at the network&rsquo;s machines hub');
             assert.ok(page.text.includes('"appBar":false') && !page.text.includes('c4-mobile') && page.text.includes('data-ovk-sidebar-open'), 'the app has no tab bar: the rail is its navigation (L31)');
             const coded = await t.get('/machines?code=abcd-2345', { as: ada });
             assert.ok(coded.text.includes('"appBar":false') && coded.text.includes('data-ovk-sidebar-open'), 'a query string keeps the page in the app');
