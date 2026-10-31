@@ -57,7 +57,8 @@
     "run a coding task on your own machine from any browser (/run; openvibe-codes job through OpenVibe Run and the person's own OpenVibe Node)",
     "user JSON API for signed-in people to list, start, read and cancel their own tasks",
     "proof of a finished task: its tests, screenshots, diff and a second-model review, and the outcome in plain words",
-    "the conductor (C9b): one Claude Code session on the person's own machine, driven from the browser or the phone, with its approvals"
+    "the conductor (C9b): one Claude Code session on the person's own machine, driven from the browser or the phone, with its approvals",
+    "the job runner (CLI 0.6.0): each turn at the effort a person picks, in each agent's own words, and a conversation's next turn starting from the work before it (the last diff applied with git apply --3way, and the conversation so far), on any agent"
   ],
   "updated": "2026-10-31"
 }
