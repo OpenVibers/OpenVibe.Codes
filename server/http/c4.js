@@ -72,6 +72,10 @@ function createC4Routes(ctx) {
     const db = store.db;
     const form = express.urlencoded({ extended: false, limit: '16kb' });
     const page = (req, res, title, body, extra = {}) => {
+        if (viewer(req) && ctx.chatShell && !extra.index) {
+            const here = '/' + (String(req.path || '/').split('/')[1] || '');
+            return ctx.chatShell(req, res, { title: title || 'Codes', body: String(body), css: ['css/c4.css'], scripts: ['js/c4.js'], here });
+        }
         const wantsScript = req.path === '/' || /^\/tasks\/tsk_/.test(req.path) || /^\/(agents|machines|conductor)/.test(req.path);
         return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, ...(title ? { title: `${title} · Codes` } : {}), css: ['css/c4.css'], scripts: wantsScript ? ['js/c4.js'] : [], body: raw(body), ...extra });
     };

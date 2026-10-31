@@ -30,20 +30,15 @@ const split = (links) => ({
     const t = await boot();
     const ada = t.network.addUser('c4c-ada');
     try {
-        await check('a signed-in person&rsquo;s workspace page has one navigation: the Frame navbar&rsquo;s sections', async () => {
-            const page = await t.get('/tasks', { as: ada });
+        await check('a signed-in person&rsquo;s workspace is one app: the rail is its navigation (L31)', async () => {
+            const page = await t.get('/agents', { as: ada });
             assert.strictEqual(page.status, 200);
-            const links = navbarOf(page.text).links;
-            const { top, more } = split(links);
-            assert.deepStrictEqual(top, ['Home', 'Tasks', 'Conductor', 'Agents', 'Machines', 'Memory', 'Usage', 'Settings'], 'the sections are the navbar');
-            assert.ok(more.includes('Get started') && more.includes('Run on your machine'), 'the product&rsquo;s places fold into More');
-            assert.ok(!top.includes('Agents') || top.filter((l) => l === 'Agents').length === 1, 'Agents is in one place only');
-            const tasks = links.find((l) => l.href === '/tasks');
-            assert.ok(tasks && tasks.active, 'the section the person is in is active');
-            assert.ok(!links.find((l) => l.href === '/agents').active, 'and no other one is');
-            // The page carries no sidebar of its own: the Frame owns the navigation.
-            assert.ok(!page.text.includes('c4-side'), 'no second navigation on the page');
-            assert.ok(!page.text.includes('c4-layout'), 'and no sidebar column');
+            const { top, more } = split(navbarOf(page.text).links);
+            assert.deepStrictEqual(top, [], 'the navbar carries no sections');
+            assert.ok(more.includes('Get started') && more.includes('Run on your machine'), 'only the product&rsquo;s places, in More');
+            assert.ok(page.text.includes('aria-label="Your conversations"'), 'the rail is on the page');
+            assert.ok(/<a href="\/agents" title="Agents" class="is-here" aria-current="page">/.test(page.text), 'and marks the page the person is on');
+            assert.ok(!page.text.includes('c4-side') && !page.text.includes('c4-layout'), 'no other sidebar');
         });
 
         await check('the section that is not the person&rsquo;s own &mdash; the product&rsquo;s catalogue &mdash; is named for what it is', async () => {
@@ -70,19 +65,18 @@ const split = (links) => ({
             assert.ok(!top.includes('Machines'), 'and the workspace&rsquo;s sections are not');
         });
 
-        await check('the phone page reserves the Frame app bar&rsquo;s height, and has no bar of its own', async () => {
+        await check('on a phone the app has no tab bar: the rail is a drawer, and the page reserves no bar&rsquo;s height', async () => {
             const page = await t.get('/settings', { as: ada });
-            assert.ok(page.text.includes('<body class="ov-workspace">'), 'the workspace page says it carries a tab bar');
-            assert.ok(!page.text.includes('c4-mobile'), 'and it draws no second bar of its own');
-            const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'c4.css'), 'utf8');
-            assert.ok(/body\.ov-workspace\{[^}]*padding-bottom:var\(--ovnav-appbar-h,calc\(58px \+ env\(safe-area-inset-bottom,0px\)\)\)/.test(css),
-                'the page reserves the Frame bar&rsquo;s height, its safe area included');
+            assert.strictEqual(navbarOf(page.text).appBar, false, 'no Frame tab bar in the app');
+            assert.ok(!page.text.includes('c4-mobile'), 'and no bar of its own');
+            const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'chat.css'), 'utf8');
+            assert.ok(css.includes('body.ov-workspace:has(.ch){padding-bottom:0}'), 'so nothing is reserved for one');
+            assert.ok(page.text.includes('data-ch-rail-open'), 'the rail opens from the page&rsquo;s own header');
         });
 
-        await check('the Frame&rsquo;s app bar is the workspace&rsquo;s sections for a signed-in person, and the product&rsquo;s for a visitor', async () => {
+        await check('the Frame&rsquo;s app bar: none in a signed-in person&rsquo;s app, the product&rsquo;s for a visitor', async () => {
             const signedIn = await t.get('/tasks', { as: ada });
-            assert.strictEqual(navbarOf(signedIn.text).appBar, true,
-                'the bar takes the navbar&rsquo;s own sections: the first four and More (Shared appbar.js)');
+            assert.strictEqual(navbarOf(signedIn.text).appBar, false, 'in the app the rail is the navigation, not a tab bar');
             const visitor = await t.get('/tasks');
             const bar = navbarOf(visitor.text).appBar;
             assert.ok(Array.isArray(bar) && bar.length <= 5, 'a visitor&rsquo;s bar is at most five places');

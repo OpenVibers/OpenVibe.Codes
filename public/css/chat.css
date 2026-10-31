@@ -33,6 +33,7 @@ main.page:has(> .ch){max-width:none;margin:0;padding:0}
 .ch-rail-foot{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;padding:8px;border-top:1px solid var(--ch-line)}
 .ch-rail-foot a{display:grid;justify-items:center;gap:3px;padding:7px 2px;border-radius:10px;color:var(--ch-muted);text-decoration:none;font-size:10.5px;font-weight:600}
 .ch-rail-foot a:hover{background:var(--ch-hover);color:var(--ch-ink)}
+.ch-rail-foot a.is-here{background:var(--ch-hover);color:var(--ch-accent)}
 
 /* Faces: an agent's initials in its own colour; the conductor's is its sign. */
 .ch-av{display:inline-grid;place-items:center;width:24px;height:24px;flex:none;border-radius:50%;font-size:10.5px;font-weight:800;letter-spacing:-.02em;color:var(--av,#64748b);background:color-mix(in srgb,var(--av,#64748b) 18%,transparent)}
@@ -184,6 +185,13 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch-ideas{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:10px}
 .ch-recent{margin-top:2px}
 .ch-recent .ch-chip{font-size:12.5px;padding:4px 10px;color:var(--ch-muted)}
+
+/* The workspace's other pages (Agents, Machines, Usage, Settings…) in the conversation's place: they scroll there and
+   keep their own heading, so the bar above them is only the phone's way to the rail. */
+.ch-page{flex:1;min-height:0;overflow-y:auto}
+.ch-page .c4{max-width:none;padding:0 max(20px,calc((100% - 980px) / 2)) 44px}
+.ch.is-page .ch-head{display:none}
+@media (max-width:760px){.ch.is-page .ch-head{display:flex;border-bottom:0;min-height:44px}.ch-page .c4{padding:0 14px 32px}.ch-page .c4-main{padding-top:6px}}
 
 /* ── The side: what it did ── */
 .ch-side{min-height:0;overflow-y:auto;padding:10px 14px 18px;border-left:1px solid var(--ch-line);background:var(--ch-rail)}
