@@ -8,12 +8,12 @@
   "port": 4900,
   "domain": "openvibe.codes",
   "contracts": "openvibe-contracts v0.247.0",
-  "sdk": "openvibe-sdk v0.74.0",
-  "shared": "openvibe-shared v4.55.0",
+  "sdk": "openvibe-sdk v0.76.0",
+  "shared": "openvibe-shared v4.57.1",
   "packages": [
     "openvibe-contracts v0.247.0",
-    "openvibe-sdk v0.74.0",
-    "openvibe-shared v4.55.0"
+    "openvibe-sdk v0.76.0",
+    "openvibe-shared v4.57.1"
   ],
   "summary": "Public at https://openvibe.codes (sudo ovhost deploy codes; unit openvibe-codes on 127.0.0.1:4900). Since 2026-10-08 Codes is the open coding-agent harness: openvibe-codes (a command-line tool and Node.js module, v0.5.2) runs a coding task on Claude Code, Claude Code on another provider, Codex, OpenCode, Command Code, MiniMax Code, Aider, the DeepSeek API or a person's own OpenAI-compatible model on their machine, hands it to the next agent when one fails or goes quiet, and keeps every run; the site carries the agent catalog with a public routing API, getting started, Improve OpenVibe and the community documents. The developer console that used to live here moved to OpenVibe.Services (https://openvibe.services) and every one of its addresses answers a permanent redirect there.",
   "works": [
@@ -59,5 +59,5 @@
     "proof of a finished task: its tests, screenshots, diff and a second-model review, and the outcome in plain words",
     "the conductor (C9b): one Claude Code session on the person's own machine, driven from the browser or the phone, with its approvals"
   ],
-  "updated": "2026-10-30"
+  "updated": "2026-10-31"
 }
