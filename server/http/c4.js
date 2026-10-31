@@ -700,6 +700,11 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
 <label>Time per task ${limitSelect('minutes', settings.minutes, [[45, '45'], [90, '90'], [180, '180'], [360, '360']], 'min')}</label>
 </div>
 <p class="c4-hint">For every agent. The harness's own turn cap and timer follow these; No limit means none. A task that reaches a limit lands its work in one last turn and carries on with a fresh budget.</p>
+<h3 class="c4-subhead">Placement</h3>
+<div class="c4-checks">
+  <label class="c4-check"><input type="checkbox" name="no_cloud" value="1"${settings.no_cloud ? ' checked' : ''}><span><b>Never send my code to the cloud</b><small>Keep every task on your own machine. With no machine of yours available, nothing can run it.</small></span></label>
+  <label class="c4-check"><input type="checkbox" name="only_free" value="1"${settings.only_free ? ' checked' : ''}><span><b>Only free</b><small>Use free allowances and your own machine; never a paid option.</small></span></label>
+</div>
 <h3 class="c4-subhead">Notifications</h3>
 <div class="c4-checks">
   <label class="c4-check"><input type="checkbox" name="notify_done" value="1"${settings.notify_done ? ' checked' : ''}><span><b>A task finishes</b><small>Tell me when it ends, with its outcome.</small></span></label>
@@ -721,6 +726,8 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
                 default_machine: b.default_machine === undefined ? undefined : b.default_machine,
                 notify_done: b.notify_done === '1',
                 notify_needs: b.notify_needs === '1',
+                no_cloud: b.no_cloud === '1',
+                only_free: b.only_free === '1',
                 ...(b.safety ? { safety: b.safety } : {}),
                 steps: b.steps === undefined ? undefined : b.steps,
                 minutes: b.minutes === undefined ? undefined : b.minutes,

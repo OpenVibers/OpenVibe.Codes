@@ -38,6 +38,11 @@ const rows = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'server', 'da
         const agents = rows.reduce((n, row) => n + row.agents.length, 0);
         assert.strictEqual(body.candidates.length, agents);
         assert.ok(body.candidates.some((c) => c.id === body.selected && c.included === true));
+        // Placement A1: the API explains the pick beside today's fields.
+        assert.strictEqual(typeof body.explain.line, 'string');
+        assert.ok(body.explain.line.length > 0);
+        assert.ok(Array.isArray(body.explain.ranked));
+        assert.ok(Array.isArray(body.explain.rejected));
     });
 
     await check('the router can select each of the harnesses the engine adapters added', async () => {

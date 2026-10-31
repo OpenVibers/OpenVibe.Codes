@@ -208,6 +208,7 @@ ${typeof d.duration_ms === 'number' ? html`<p class="muted">${Math.round(d.durat
             : '';
         return html`<section class="run-timeline" data-timeline data-attempts="${attempts.length}">
 <h2>The attempts</h2>
+${row.placement_line ? html`<p class="run-placed" data-placement>Placed: ${row.placement_line}</p>` : ''}
 <ol class="run-attempts">${attempts.map((a) => html`<li class="run-attempt" data-attempt="${a.n}" data-attempt-id="${a.id}" data-state="${a.state}" data-reason="${a.reason || ''}" data-kind="${a.kind || 'first'}" data-agent="${a.agent || ''}">
 <p class="run-attempt-head"><b>Attempt ${a.n}</b>${a.agent ? html` · ${a.agent}` : ''} <span class="run-pill run-pill-${a.state}">${a.state}</span></p>
 <p class="run-attempt-why" data-why>${a.why || ''}</p>

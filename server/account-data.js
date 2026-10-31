@@ -7,7 +7,8 @@
  * - each task's attempts (codes_attempts, C2), the task's proof (codes_task_proof, C8) and the events Codes took in
  *   about it (codes_events_inbox);
  * - the run tokens minted for their attempts (codes_run_tokens, C3: ids and expiry, never the token);
- * - their workspace choices (codes_user_settings, C4b);
+ * - their workspace choices (codes_user_settings, C4b) and their placement rules;
+ * - the placement counts learned about their tasks (placement_outcomes, A1): option keys and weights, never text;
  * - their conductor's turns (codes_conductor_messages, C9b) and the approvals it asked them (codes_approvals);
  * - the events Codes sent about them (codes_outbox);
  * - telemetry samples that name them: the SDK covers telemetry_samples itself (telemetry.json, then subject NULL).
@@ -34,6 +35,8 @@ const TABLES = [
         erase: { keep: 'erased with its task-keyed rows by the service extraErase' },
     },
     { table: 'codes_user_settings', subject: 'subject', file: 'settings.json', order: 'updated_at' },
+    // Placement A1's learned counts: the person's rows leave and are erased with them. No text, no payload.
+    { table: 'placement_outcomes', subject: 'person_id', file: 'placement-outcomes.json', order: 'updated_at', columns: ['person_id', 'option_key', 'step_kind', 'ok_w', 'n_w', 'updated_at'] },
     // What each of the person's machines reported with its heartbeat (Codes C9c): labels, numbers and times only, no
     // key, token or account name. Theirs to export and to erase.
     { table: 'codes_machine_fleet', subject: 'subject', file: 'fleet.json', order: 'machine', columns: ['machine', 'node_id', 'name', 'agent', 'installed', 'signed_in', 'windows', 'online', 'reported_at', 'updated_at'] },
