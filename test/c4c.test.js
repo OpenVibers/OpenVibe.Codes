@@ -36,8 +36,8 @@ const split = (links) => ({
             const { top, more } = split(navbarOf(page.text).links);
             assert.deepStrictEqual(top, [], 'the navbar carries no sections');
             assert.ok(more.includes('Get started') && more.includes('Run on your machine'), 'only the product&rsquo;s places, in More');
-            assert.ok(page.text.includes('aria-label="Your conversations"'), 'the rail is on the page');
-            assert.ok(/<a href="\/agents" title="Agents" class="is-here" aria-current="page">/.test(page.text), 'and marks the page the person is on');
+            assert.ok(page.text.includes('<aside class="ovk-sidebar" id="ch-rail"'), 'the rail is on the page');
+            assert.ok(page.text.includes('<a class="ovk-sidebar-link is-here" href="/agents" aria-current="page">'), 'and marks the page the person is on, a row of the network&rsquo;s sidebar');
             assert.ok(!page.text.includes('c4-side') && !page.text.includes('c4-layout'), 'no other sidebar');
         });
 
@@ -71,7 +71,7 @@ const split = (links) => ({
             assert.ok(!page.text.includes('c4-mobile'), 'and no bar of its own');
             const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'chat.css'), 'utf8');
             assert.ok(css.includes('body.ov-workspace:has(.ch){padding-bottom:0}'), 'so nothing is reserved for one');
-            assert.ok(page.text.includes('data-ch-rail-open'), 'the rail opens from the page&rsquo;s own header');
+            assert.ok(page.text.includes('data-ovk-sidebar-open aria-controls="ch-rail"'), 'the rail opens from the page&rsquo;s own header');
         });
 
         await check('the Frame&rsquo;s app bar: none in a signed-in person&rsquo;s app, the product&rsquo;s for a visitor', async () => {
