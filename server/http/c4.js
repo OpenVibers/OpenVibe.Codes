@@ -342,7 +342,7 @@ ${agents.length ? showcase.features({ id: 'agents', title: 'Every agent you use'
 ${showcase.features({ id: 'yours', title: 'Your plans, your keys, your machine', items: [
             { title: 'Your subscriptions', text: 'Sign in with the Claude, ChatGPT, OpenCode or Command Code plan you already have. No key of ours and no fee.' },
             { title: 'Your keys', text: 'Saved once in OpenVibe AI and used by every OpenVibe site. Never shown again, never sent anywhere else.' },
-            { title: 'Your computer', text: 'Pair it once from openvibe.network. Tasks run there with your own tools, and your logins never leave it.' },
+            { title: 'Your computer', text: 'Pair it once from openvibe.network. Tasks run there with your own tools, and your logins never leave it.', href: '/run' },
             { title: 'Costs you can follow', text: 'Every turn shows its tokens, what came from cache and who paid, on openvibe.report.' },
         ] })}
 ${showcase.features({ id: 'conductor', title: 'A conductor for the big jobs', lede: 'One Claude Code session plans the work, hands the parts to other agents in parallel, reads what they did, and asks you before anything risky.', items: [
