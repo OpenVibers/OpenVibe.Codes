@@ -19,6 +19,19 @@ const { boot, check, done } = require('./helpers/boot');
             assert.ok(task.text.includes('Sign in to see your work'));
         });
 
+        await check('a visitor gets the front door, never empty panels (owner, 10-31)', async () => {
+            const home = await t.get('/');
+            assert.strictEqual(home.status, 200);
+            const h = home.text;
+            assert.ok(h.includes('Every coding agent.') && h.includes('One place.'), 'the hero');
+            assert.ok(h.includes('class="c4-demo"') && h.includes('Codex took over: Claude Code hit its plan limit'), 'a conversation that shows a hand-over');
+            assert.ok(h.includes('id="how"') && h.includes('Pick who works on it'), 'how it works');
+            assert.ok(h.includes('Your plans, your keys, your machine') && h.includes('A conductor for the big jobs'));
+            assert.ok(h.includes('action="/start"') && h.includes('id="c4-prompt"'), 'the composer is the start');
+            assert.ok(!h.includes('<h2>Running</h2>') && !h.includes('<h2>Recent tasks</h2>') && !h.includes('No tasks yet'), 'no empty panels for a visitor');
+            assert.match(require('fs').readFileSync(require('path').join(__dirname, '..', 'server/http/c4.js'), 'utf8'), /if \(!signedIn\) return page\(req, res, null, wrap\(visitorHome\(\)\)/, 'the route sends a visitor to the front door');
+        });
+
         await check('task details are owner scoped and management pages honor sign-in', async () => {
             const settings = await t.get('/settings', { as: ada });
             assert.strictEqual(settings.status, 200);
