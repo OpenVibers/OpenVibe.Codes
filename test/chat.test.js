@@ -78,6 +78,22 @@ const { stepKind } = require('../server/http/chat');
             assert.ok(home.text.includes('name="effort"') && home.text.includes('>Thorough</option>'), 'the composer offers it in plain words');
         });
 
+        await check('who works on it: an agent and its model in one control, kept on the first attempt (L31 CH5)', async () => {
+            const home = await t.get('/', { as: ada });
+            assert.ok(home.text.includes('name="who"') && home.text.includes('value="claude-code|sonnet"') && home.text.includes('Claude Code · Sonnet'), 'the choices in words');
+            const made = await t.get('/chat', { as: ada, form: { text: 'A quick fix', repo: 'https://github.com/OpenVibers/OpenVibe.Live', who: 'claude-code|sonnet' } });
+            assert.strictEqual(made.status, 303);
+            const id = made.headers.get('location').split('/').pop();
+            const att = await db.maybe('SELECT agent, model FROM codes_attempts WHERE task_id = $1 ORDER BY n LIMIT 1', [id]);
+            assert.ok(att && att.model === 'sonnet', `the model rides on the attempt (${JSON.stringify(att)})`);
+            const bad = await t.get('/chat', { as: ada, form: { text: 'x', repo: 'https://github.com/OpenVibers/OpenVibe.Live', who: 'claude-code|gpt-9' } });
+            assert.match(bad.headers.get('location'), /Choose%20who%20works%20on%20it/, 'a model Codes does not offer is refused in words');
+            const cat = await t.get('/api/v1/harnesses/models');
+            assert.strictEqual(cat.status, 200);
+            const claude = cat.json().agents.find((a) => a.agent === 'claude-code');
+            assert.ok(claude && claude.models.some((m) => m.id === 'opus' && /strongest/.test(m.note)) && claude.efforts.includes('max'), 'the public catalogue says what each offers');
+        });
+
         await check('a visitor who is not signed in gets the product&rsquo;s home, not the app', async () => {
             const page = await t.get('/');
             assert.strictEqual(page.status, 200);
