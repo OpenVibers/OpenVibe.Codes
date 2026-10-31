@@ -307,6 +307,13 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
             return json(200, { access_token: mintApp(a, body.audience, wanted), token_type: 'Bearer', expires_in: 300, scope: wanted.join(' ') });
         }
         // ── OpenVibe.AI's stand-in (Codes C3): the vault of a person's own keys and the two model endpoints ──
+        // The person's own keys on Your AI (L36): read with their own token; tests put rows in st.selfKeys.
+        if (url.pathname === '/api/v1/me/credentials' && req.method === 'GET') {
+            st.meRequests = st.meRequests || [];
+            st.meRequests.push(String(req.headers.authorization || ''));
+            if (!String(req.headers.authorization || '').startsWith('Bearer ')) return problem(json, 401, 'token.missing', 'a person token is required');
+            return json(200, { credentials: st.selfKeys || [] });
+        }
         if (url.pathname.startsWith('/api/v1/credentials/')) {
             const parts = url.pathname.split('/').filter(Boolean);   // api, v1, credentials, subject, provider
             const subject = parts[3]; const provider = parts[4];

@@ -18,6 +18,12 @@
  *     put(subject, provider, body)      → the connection as AI stored it (the hint, never the key)
  *     remove(subject, provider)         → true when there was one
  *     test(subject, provider)           → { ok, detail }: one tiny request through AI, or why not
+ *     mine(token)                       → the person's own keys in OpenVibe.AI (their "Your AI" page, L36), read with
+ *                                         their own token: { credentials: [{ provider, hint, status, … }] }
+ *
+ * Since 2026-10-31 a person keeps their keys in one place, ai.openvibe.services/you, for every site and agent; Codes'
+ * tasks run on the person's behalf, so OpenVibe.AI uses those keys first. The keys stored here before stay usable
+ * until the person removes them.
  */
 
 const { createServiceTokenClient } = require('openvibe-sdk/auth');
@@ -165,7 +171,21 @@ function createConnections({ config, fetchImpl = globalThis.fetch, log = console
         return keys.map((k) => k.provider);
     }
 
-    return { list, put, remove, test, providers, present, PROVIDERS };
+    /** The person's own keys in OpenVibe.AI (GET /api/v1/me/credentials with their own token): hints and states only. */
+    async function mine(token) {
+        if (!token) throw Object.assign(new Error('the person is not signed in'), { status: 401, code: 'token.missing' });
+        let res;
+        try {
+            res = await fetchImpl(`${base}/api/v1/me/credentials`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+        } catch (e) {
+            throw Object.assign(new Error('OpenVibe.AI did not answer'), { status: 502, code: 'ai.unavailable' });
+        }
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw Object.assign(new Error((body && (body.detail || body.title)) || `OpenVibe.AI answered ${res.status}`), { status: res.status, code: (body && body.code) || 'ai.error' });
+        return { credentials: Array.isArray(body.credentials) ? body.credentials : [] };
+    }
+
+    return { list, put, remove, test, mine, providers, present, PROVIDERS };
 }
 
 module.exports = { createConnections, PROVIDERS, ANTHROPIC_FORMAT, providerOf, present };
