@@ -150,18 +150,18 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
      * One attempt. The fence: follow_up_of is unique, so an ending that starts a follow-up twice answers the same
      * attempt the second time and starts no second job. created tells the caller which of the two it was.
      */
-    async function create({ task, agent = null, model = null, machine = null, session = null, why = null, kind = 'first', followUpOf = null, state = 'queued', budget = null }) {
+    async function create({ task, agent = null, model = null, effort = null, machine = null, session = null, why = null, kind = 'first', followUpOf = null, state = 'queued', budget = null }) {
         if (!task || !task.id) throw new Error('an attempt belongs to a task');
         for (let tries = 0; tries < 5; tries++) {
             const n = await db.one('SELECT COALESCE(MAX(n), 0) + 1 AS n FROM codes_attempts WHERE task_id = $1', [task.id]);
             const id = store.newId('att');
             const inserted = await db.maybe(
-                `INSERT INTO codes_attempts (id, task_id, n, agent, model, machine, session, state, why, kind, follow_up_of, budget_usd, budget_tokens, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::timestamptz)
+                `INSERT INTO codes_attempts (id, task_id, n, agent, model, machine, session, state, why, kind, follow_up_of, budget_usd, budget_tokens, created_at, effort)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::timestamptz, $15)
                  ON CONFLICT DO NOTHING RETURNING *`,
                 [id, task.id, n.n, agent, model, machine, session, state, why, kind, followUpOf,
                     budget && Number(budget.usd) > 0 ? Number(budget.usd) : null,
-                    budget && Number(budget.tokens) > 0 ? Math.round(Number(budget.tokens)) : null, store.iso()],
+                    budget && Number(budget.tokens) > 0 ? Math.round(Number(budget.tokens)) : null, store.iso(), effort || null],
             );
             if (inserted) {
                 await db.exec('UPDATE run_tasks SET attempts_count = $2 WHERE id = $1', [task.id, n.n]);

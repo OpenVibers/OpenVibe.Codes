@@ -68,6 +68,16 @@ const { stepKind } = require('../server/http/chat');
             assert.ok(row && row.prompt === 'Make the footer quieter' && row.subject === ada.subject, 'the brief is the person&rsquo;s own task');
         });
 
+        await check('the effort a person picks rides on the first attempt, and the thread says it in words', async () => {
+            const made = await t.get('/chat', { as: ada, form: { text: 'Think hard about the cache', repo: 'https://github.com/OpenVibers/OpenVibe.Live', effort: 'high' } });
+            assert.strictEqual(made.status, 303);
+            const id = made.headers.get('location').split('/').pop();
+            const att = await db.maybe('SELECT effort FROM codes_attempts WHERE task_id = $1 ORDER BY n LIMIT 1', [id]);
+            assert.ok(att && att.effort === 'high', `the attempt keeps it (${att && att.effort})`);
+            const home = await t.get('/', { as: ada });
+            assert.ok(home.text.includes('name="effort"') && home.text.includes('>Thorough</option>'), 'the composer offers it in plain words');
+        });
+
         await check('a visitor who is not signed in gets the product&rsquo;s home, not the app', async () => {
             const page = await t.get('/');
             assert.strictEqual(page.status, 200);

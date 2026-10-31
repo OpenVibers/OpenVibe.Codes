@@ -64,6 +64,7 @@ const EFFORT_LEVELS = {
     codex: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
     'command-code': ['off', 'low', 'high', 'max'],
     opencode: [],
+    aider: ['low', 'medium', 'high'],
     'minimax-code': ['low', 'medium', 'high', 'xhigh', 'max'],
 };
 

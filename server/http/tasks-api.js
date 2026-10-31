@@ -326,7 +326,10 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         const note = typeof b.note === 'string' ? b.note.slice(0, 4000) : null;
         const agent = typeof b.agent === 'string' && b.agent ? b.agent : null;
         if (agent && !harnesses.list().some((a) => a.id === agent)) return problem(req, res, 422, 'codes.agent_unknown', 'agent is one of GET /api/v1/harnesses');
-        const out = await taskStore.continueTask(row, { note, agent });
+        const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+        const model = typeof b.model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:\/#-]{0,99}$/.test(b.model) ? b.model : null;
+        const effort = EFFORTS.includes(b.effort) ? b.effort : null;
+        const out = await taskStore.continueTask(row, { note: note || (typeof b.text === 'string' ? b.text.slice(0, 4000) : null), agent, model, effort });
         if (out.error) return problem(req, res, 409, 'codes.task_conflict', out.error);
         // One continuation at a time: an attempt that is already live answers this press, and no second one starts.
         if (!out.live) log.info(`[Codes] task ${row.id} carried on (${agent ? `with ${agent}` : 'by the owner'})`);

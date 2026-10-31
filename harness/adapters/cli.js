@@ -5,7 +5,8 @@
  * and how to read what it prints into the shared events (harness/events.js):
  *
  *   { id, name, kind: 'cli', bin, start(task, ctx) }     ctx: { env } (the harness's environment: PATH finds the CLI)
- *   task: { prompt, cwd, model, resume, permission: 'read' | 'edit' | 'full', maxTurns, timeoutMs, signal }
+ *   task: { prompt, cwd, model, effort, resume, permission: 'read' | 'edit' | 'full', maxTurns, timeoutMs, signal }
+ *   effort is the shared ladder (low … max); each CLI gets the nearest level it accepts, or none (OpenCode has no flag)
  *
  * Permission levels mean the same for every agent, mapped onto what each CLI offers:
  *   read   look and answer: no file is changed and no command that changes anything runs
@@ -62,6 +63,7 @@ const claudeCode = {
         const mode = o.permissionMode || { read: 'plan', edit: 'acceptEdits', full: 'bypassPermissions' }[t.permission] || 'plan';
         const args = ['-p', t.prompt, '--output-format', 'stream-json', '--verbose', '--permission-mode', mode];
         if (t.model) args.push('--model', t.model);
+        if (t.effort) args.push('--effort', effortFor('claude-code', t.effort));
         if (t.resume) args.push('--resume', t.resume);
         if (t.maxTurns) args.push('--max-turns', String(t.maxTurns));
         // MCP servers this session may use (the conductor's Codes tools): a config file, and the tools it may call
@@ -95,6 +97,7 @@ const codex = {
             ? ['exec', 'resume', t.resume, '--json', '--skip-git-repo-check']
             : ['exec', '--json', '--skip-git-repo-check', '-C', t.cwd, '-s', sandbox];
         if (t.model) args.push('-m', t.model);
+        if (t.effort) args.push('-c', `model_reasoning_effort="${effortFor('codex', t.effort)}"`);
         args.push(t.prompt);
         const startedAt = Date.now();
         const parser = jsonLines(codex, (e, emit, st) => {
@@ -191,6 +194,7 @@ const commandCode = {
         const args = [`--print=${t.prompt}`, '--output-format', 'json', '--skip-onboarding', '--no-auto-update', '-t'];
         if (t.permission !== 'read') args.push('--yolo');
         if (t.model) args.push('-m', t.model);
+        if (t.effort) args.push('--effort', effortFor('command-code', t.effort));
         if (t.resume) args.push('--resume', t.resume);
         if (t.maxTurns) args.push('--max-turns', String(t.maxTurns));
         const startedAt = Date.now();
@@ -227,6 +231,7 @@ const aider = {
         const args = ['--message', t.prompt, '--yes-always', '--no-pretty', '--no-stream', '--no-check-update', '--no-show-release-notes'];
         if (t.permission === 'read') args.push('--dry-run');
         if (t.model) args.push('--model', t.model);
+        if (t.effort) args.push('--reasoning-effort', effortFor('aider', t.effort));
         const startedAt = Date.now();
         const lines = [];
         let started = false;
