@@ -1,0 +1,225 @@
+/* Codes as a chat app (plan L31 CH1): the rail of conversations, the conversation and its composer, and what the work
+   produced at the side. Every colour comes from the person's theme (the Frame's tokens), so a conversation looks like
+   the rest of their OpenVibe; the agents' own colours only tint their faces. One column of reading width in the
+   middle (760px), as in the chat apps people know. */
+.ch{--ch-bg:var(--bg-primary,#0f1419);--ch-rail:var(--bg-secondary,#141a21);--ch-card:var(--bg-card,#171e26);--ch-hover:var(--bg-hover,rgba(127,140,160,.12));--ch-ink:var(--text-primary,#e8edf3);--ch-soft:var(--text-secondary,#b4bfcc);--ch-muted:var(--text-muted,#8793a3);--ch-line:var(--border,rgba(127,140,160,.22));--ch-accent:var(--accent,#7c6cff);--ch-on-accent:var(--on-accent,#fff);--ch-ok:var(--success,#22c55e);--ch-bad:var(--danger,#ef4444);--ch-warn:var(--warning,#f59e0b);--ch-col:760px;
+  display:grid;grid-template-columns:272px minmax(0,1fr);height:calc(100dvh - 52px);min-height:420px;background:var(--ch-bg);color:var(--ch-ink);font-size:15px}
+.ch.has-side{grid-template-columns:272px minmax(0,1fr) 300px}
+.ch-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.ch-i{width:18px;height:18px;flex:none}
+/* The page is the app: no footer under it, no phone tab bar over it (the rail is the navigation here). */
+body:has(.ch) #ov-footer,body:has(.ch) .openvibe-footer{display:none}
+body.ov-workspace:has(.ch){padding-bottom:0}
+main.page:has(> .ch){max-width:none;margin:0;padding:0}
+
+/* ── The rail ── */
+.ch-rail{display:flex;flex-direction:column;min-height:0;background:var(--ch-rail);border-right:1px solid var(--ch-line)}
+.ch-rail-top{display:flex;gap:6px;padding:12px 10px 6px}
+.ch-new{flex:1;display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:12px;color:var(--ch-ink);text-decoration:none;font-weight:600;font-size:14px;border:1px solid var(--ch-line);background:var(--ch-card)}
+.ch-new:hover{border-color:color-mix(in srgb,var(--ch-accent) 45%,var(--ch-line))}
+.ch-find{position:relative;margin:4px 10px 6px}
+.ch-find .ch-i{position:absolute;left:10px;top:50%;translate:0 -50%;width:15px;height:15px;color:var(--ch-muted)}
+.ch-find input{width:100%;box-sizing:border-box;padding:8px 10px 8px 32px;border-radius:10px;border:1px solid transparent;background:var(--ch-hover);color:var(--ch-ink);font:inherit;font-size:13.5px}
+.ch-find input:focus{outline:none;border-color:color-mix(in srgb,var(--ch-accent) 55%,transparent)}
+.ch-list{flex:1;min-height:0;overflow-y:auto;padding:2px 8px 10px;scrollbar-width:thin}
+.ch-group{margin:14px 8px 4px;font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ch-muted)}
+.ch-item{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:10px;color:var(--ch-soft);text-decoration:none;font-size:14px;line-height:1.3;min-height:36px}
+.ch-item:hover{background:var(--ch-hover);color:var(--ch-ink)}
+.ch-item.is-here{background:var(--ch-hover);color:var(--ch-ink);font-weight:600}
+.ch-item-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-item-m{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ch-muted);font-weight:500}
+.ch-item-cta{color:var(--ch-accent);font-weight:600}
+.ch-empty-rail{margin:16px 8px;color:var(--ch-muted);font-size:13px}
+.ch-rail-foot{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;padding:8px;border-top:1px solid var(--ch-line)}
+.ch-rail-foot a{display:grid;justify-items:center;gap:3px;padding:7px 2px;border-radius:10px;color:var(--ch-muted);text-decoration:none;font-size:10.5px;font-weight:600}
+.ch-rail-foot a:hover{background:var(--ch-hover);color:var(--ch-ink)}
+
+/* Faces: an agent's initials in its own colour; the conductor's is its sign. */
+.ch-av{display:inline-grid;place-items:center;width:24px;height:24px;flex:none;border-radius:50%;font-size:10.5px;font-weight:800;letter-spacing:-.02em;color:var(--av,#64748b);background:color-mix(in srgb,var(--av,#64748b) 18%,transparent)}
+.ch-av-conductor{color:var(--ch-accent);background:color-mix(in srgb,var(--ch-accent) 16%,transparent)}
+.ch-av-conductor .ch-i{width:14px;height:14px}
+/* State dots: they breathe while something works; nothing spins. */
+.ch-dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--ch-muted)}
+.ch-dot.is-busy{background:var(--ch-accent);animation:ch-breathe 1.6s ease-in-out infinite}
+.ch-dot.is-needs{background:var(--ch-warn)}
+.ch-dot.is-bad{background:var(--ch-bad)}
+@keyframes ch-breathe{0%,100%{opacity:.45;scale:.8}50%{opacity:1;scale:1.1}}
+
+/* ── The conversation ── */
+.ch-main{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+.ch-head{display:flex;align-items:center;gap:10px;min-height:52px;padding:6px 16px;border-bottom:1px solid var(--ch-line)}
+.ch-title{flex:1;min-width:0;margin:0;font-size:15px;font-weight:650;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-state{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:600;color:var(--ch-soft);background:var(--ch-hover);white-space:nowrap}
+.ch-state.is-ok{color:var(--ch-ok);background:color-mix(in srgb,var(--ch-ok) 12%,transparent)}
+.ch-state.is-bad{color:var(--ch-bad);background:color-mix(in srgb,var(--ch-bad) 12%,transparent)}
+.ch-state.is-busy{color:var(--ch-accent);background:color-mix(in srgb,var(--ch-accent) 12%,transparent)}
+.ch-icon-btn{display:inline-grid;place-items:center;width:36px;height:36px;flex:none;border:0;border-radius:10px;background:transparent;color:var(--ch-soft);cursor:pointer}
+.ch-icon-btn:hover{background:var(--ch-hover);color:var(--ch-ink)}
+.ch-rail-open,.ch-side-open,.ch-icon-btn.ch-rail-close{display:none}
+.ch-thread{flex:1;min-height:0;overflow-y:auto;padding:28px max(20px,calc((100% - var(--ch-col)) / 2)) 24px;display:flex;flex-direction:column;gap:22px;scroll-behavior:smooth}
+.ch-turn{display:flex;flex-direction:column;gap:8px;min-width:0}
+.ch-you{align-items:flex-end}
+.ch-bubble{max-width:min(82%,620px);padding:11px 15px;border-radius:20px 20px 6px 20px;background:color-mix(in srgb,var(--ch-accent) 15%,var(--ch-card));white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55}
+.ch-files{display:flex;flex-wrap:wrap;gap:6px;margin:0;justify-content:flex-end}
+.ch-who{display:flex;align-items:center;gap:8px;font-size:13.5px}
+.ch-who span:not(.ch-av){color:var(--ch-muted);font-size:12.5px}
+.ch-md{line-height:1.68;overflow-wrap:anywhere}
+.ch-md>:first-child{margin-top:0}.ch-md>:last-child{margin-bottom:0}
+.ch-md p{margin:0 0 .8em}
+.ch-md pre{overflow-x:auto;padding:12px 14px;border-radius:12px;background:var(--ch-rail);border:1px solid var(--ch-line);font-size:13px;line-height:1.5}
+.ch-md code{font-size:.9em;padding:.1em .35em;border-radius:6px;background:var(--ch-hover)}
+.ch-md pre code{padding:0;background:none}
+.ch-md a{color:var(--ch-accent)}
+.ch-md h1,.ch-md h2,.ch-md h3{font-size:1.02em;margin:1.1em 0 .4em}
+.ch-md table{border-collapse:collapse;display:block;overflow-x:auto}
+.ch-md td,.ch-md th{border:1px solid var(--ch-line);padding:5px 9px}
+.ch-quiet{margin:0;color:var(--ch-muted);font-size:14px}
+.ch-error{margin:0;padding:10px 14px;border-radius:12px;color:var(--ch-bad);background:color-mix(in srgb,var(--ch-bad) 10%,transparent);font-size:14px}
+
+/* The steps an agent took: one quiet fold per turn, each step with the sign of what it did. */
+.ch-steps{align-self:flex-start;max-width:100%}
+.ch-steps summary{display:inline-flex;align-items:center;gap:6px;padding:4px 10px 4px 12px;border-radius:999px;background:var(--ch-hover);color:var(--ch-soft);font-size:12.5px;font-weight:600;cursor:pointer;list-style:none}
+.ch-steps summary::-webkit-details-marker{display:none}
+.ch-caret{width:14px;height:14px;transition:rotate .2s}
+details[open]>summary .ch-caret{rotate:180deg}
+.ch-steps ol{list-style:none;margin:8px 0 0;padding:4px 0 0 12px;border-left:2px solid var(--ch-line);display:grid;gap:2px;max-height:min(46vh,420px);overflow-y:auto}
+.ch-step{display:flex;align-items:center;gap:8px;min-width:0;padding:3px 6px;border-radius:8px;font-size:13px;color:var(--ch-soft)}
+.ch-step .ch-i{width:15px;height:15px;color:var(--ch-muted)}
+.ch-step-n{font-weight:600;color:var(--ch-ink);white-space:nowrap}
+.ch-step-w{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ch-muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.ch-step.is-bad .ch-i,.ch-step.is-bad .ch-step-n{color:var(--ch-bad)}
+.ch-step.is-new{animation:ch-in .35s ease-out}
+@keyframes ch-in{from{opacity:0;translate:0 4px}}
+/* Working: three dots hopping in turn, and the step it is on. */
+.ch-working{display:flex;align-items:center;gap:10px;color:var(--ch-muted);font-size:13.5px;min-width:0}
+.ch-working span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-dots{display:inline-flex;gap:4px}
+.ch-dots i{width:6px;height:6px;border-radius:50%;background:var(--ch-accent);animation:ch-hop 1s ease-in-out infinite}
+.ch-dots i:nth-child(2){animation-delay:.15s}.ch-dots i:nth-child(3){animation-delay:.3s}
+@keyframes ch-hop{0%,80%,100%{translate:0 0;opacity:.45}40%{translate:0 -4px;opacity:1}}
+/* A hand-over, a wait: a quiet line across the thread. */
+.ch-divider{display:flex;align-items:center;gap:10px;color:var(--ch-muted);font-size:12.5px;font-weight:600}
+.ch-divider::before,.ch-divider::after{content:'';flex:1;height:1px;background:var(--ch-line)}
+.ch-divider .ch-i{width:15px;height:15px}
+/* How it ended. */
+.ch-result{display:grid;gap:2px;padding:6px;border:1px solid var(--ch-line);border-radius:16px;background:var(--ch-card)}
+.ch-res-line,.ch-res-fold summary{display:flex;align-items:center;gap:9px;margin:0;padding:9px 10px;border-radius:11px;font-size:14px}
+.ch-res-line.is-bad{color:var(--ch-bad)}
+.ch-res-fold summary{cursor:pointer;list-style:none}
+.ch-res-fold summary::-webkit-details-marker{display:none}
+.ch-res-fold summary:hover{background:var(--ch-hover)}
+.ch-res-fold summary .ch-caret{margin-left:auto}
+.ch-res-fold ul{list-style:none;margin:0 0 6px;padding:0 10px 4px 37px;display:grid;gap:4px;font-size:13px}
+.ch-res-fold li{display:flex;align-items:center;gap:8px;min-width:0}
+.ch-res-fold li code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-res-fold li .ch-i{width:15px;height:15px}
+.ch-res-fold li.is-ok .ch-i{color:var(--ch-ok)}.ch-res-fold li.is-bad .ch-i{color:var(--ch-bad)}
+.ch-res-fold li span{color:var(--ch-muted)}
+.ch-res-line a{color:var(--ch-accent);font-weight:600}
+.ch-res-line.ch-muted{font-size:13.5px}
+.ch-proof li{flex-wrap:wrap}
+.ch-proof em{font-style:normal;font-size:12px;font-weight:650;color:var(--ch-muted)}
+.ch-proof li.is-ok em{color:var(--ch-ok)}.ch-proof li.is-bad em{color:var(--ch-bad)}
+.ch-proof li>span{flex-basis:100%;padding-left:23px}
+.ch-shots{list-style:none;margin:2px 0 0;padding:0 0 0 23px;flex-basis:100%;display:grid;gap:2px;font-size:12.5px;color:var(--ch-muted)}
+.ch-shots li.is-bad{color:var(--ch-bad)}
+.ch-diff{margin:6px 0 0}
+.ch-diff summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--ch-soft)}
+.ch-diff pre{max-height:50vh;overflow:auto;margin:6px 0 0;padding:10px 12px;border-radius:10px;background:var(--ch-rail);font-size:12px;line-height:1.5}
+.ch-cap{font-size:12px;font-weight:650;color:var(--ch-muted)}
+.ch-add{color:var(--ch-ok);font-variant-numeric:tabular-nums;font-size:12.5px}.ch-del{color:var(--ch-bad);font-variant-numeric:tabular-nums;font-size:12.5px}
+.ch-muted{color:var(--ch-muted);font-size:13px}
+/* What waits for a yes. */
+.ch-approval{display:grid;gap:10px;padding:14px;border-radius:16px;border:1px solid color-mix(in srgb,var(--ch-warn) 45%,var(--ch-line));background:color-mix(in srgb,var(--ch-warn) 7%,var(--ch-card))}
+.ch-approval-h{display:flex;align-items:center;gap:8px;margin:0;font-size:14px}
+.ch-approval code{display:block;overflow-x:auto;padding:8px 10px;border-radius:10px;background:var(--ch-rail);font-size:12.5px;white-space:pre}
+.ch-approval-a{display:flex;gap:8px}
+.ch-btn{padding:8px 16px;border:0;border-radius:999px;background:var(--ch-accent);color:var(--ch-on-accent);font:inherit;font-size:14px;font-weight:650;cursor:pointer}
+.ch-btn-quiet{background:var(--ch-hover);color:var(--ch-ink)}
+.ch-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;border:1px solid var(--ch-line);background:var(--ch-card);color:var(--ch-soft);font:inherit;font-size:13px;text-decoration:none;cursor:pointer}
+.ch-chip:hover{color:var(--ch-ink);border-color:color-mix(in srgb,var(--ch-accent) 40%,var(--ch-line))}
+.ch-chip .ch-i{width:15px;height:15px}
+.ch-chip-static{cursor:default;padding:4px 10px 4px 4px}
+.ch-chip-static .ch-av{width:22px;height:22px}
+
+/* ── The composer ── */
+.ch-composer{position:relative;margin:0 max(16px,calc((100% - var(--ch-col)) / 2)) 14px;padding:10px 10px 8px 16px;border:1px solid var(--ch-line);border-radius:22px;background:var(--ch-card);box-shadow:0 8px 28px rgba(0,0,0,.14)}
+.ch-composer:focus-within{border-color:color-mix(in srgb,var(--ch-accent) 55%,var(--ch-line))}
+.ch-composer textarea{display:block;width:100%;box-sizing:border-box;min-height:28px;max-height:40vh;padding:6px 0 8px;border:0;outline:0;resize:none;background:transparent;color:var(--ch-ink);font:inherit;font-size:15.5px;line-height:1.5}
+.ch-composer textarea::placeholder{color:var(--ch-muted)}
+.ch-bar{display:flex;align-items:center;gap:8px}
+.ch-picks{flex:1;min-width:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ch-pick{position:relative;display:inline-flex;align-items:center;gap:6px;max-width:100%;height:32px;padding:0 10px;border-radius:999px;border:1px solid var(--ch-line);color:var(--ch-soft);font-size:13px}
+.ch-pick:hover{background:var(--ch-hover);color:var(--ch-ink)}
+.ch-pick select{appearance:none;-webkit-appearance:none;border:0;background:transparent;color:inherit;font:inherit;font-weight:600;padding:0 16px 0 0;max-width:200px;cursor:pointer}
+.ch-pick select:focus{outline:none}
+.ch-pick:focus-within{border-color:color-mix(in srgb,var(--ch-accent) 55%,var(--ch-line))}
+.ch-pick .ch-caret{position:absolute;right:8px;pointer-events:none}
+.ch-pick .ch-i:not(.ch-caret){width:15px;height:15px}
+.ch-pick-repo input{width:min(260px,52vw);border:0;background:transparent;color:inherit;font:inherit;font-size:13px}
+.ch-pick-repo input:focus{outline:none}
+.ch-pick-file{cursor:pointer;padding:0 9px}
+.ch-pick-file input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.ch-pick-file.has-files{color:var(--ch-accent);border-color:color-mix(in srgb,var(--ch-accent) 50%,var(--ch-line))}
+.ch-send{display:inline-grid;place-items:center;width:36px;height:36px;flex:none;border:0;border-radius:50%;background:var(--ch-accent);color:var(--ch-on-accent);cursor:pointer;transition:opacity .2s,scale .15s}
+.ch-send .ch-i{width:18px;height:18px;stroke-width:2.2}
+.ch-send:active{scale:.92}
+.ch-composer:has(textarea:placeholder-shown) .ch-send{opacity:.45}
+.ch-send[disabled]{opacity:.45;cursor:default}
+.ch-stop{width:36px;height:36px;border-radius:50%;background:var(--ch-hover);color:var(--ch-ink)}
+.ch-stop .ch-i rect{fill:currentColor}
+.ch-stop:hover{background:color-mix(in srgb,var(--ch-bad) 18%,transparent);color:var(--ch-bad)}
+.ch-note{margin:4px 2px 0;min-height:1em;color:var(--ch-muted);font-size:12px}
+.ch-note.is-bad{color:var(--ch-bad)}
+.ch-composer.is-sending textarea{opacity:.6}
+
+/* A new chat: the greeting and the composer meet in the middle, as in the chat apps people know. */
+.ch.is-empty .ch-main{justify-content:center}
+.ch.is-empty .ch-head{position:absolute;inset:0 0 auto;border-bottom:0}
+.ch.is-empty .ch-head .ch-title{opacity:0}
+.ch.is-empty .ch-thread{flex:none;overflow:visible;padding-bottom:18px}
+.ch-hello{display:grid;justify-items:center;gap:10px;text-align:center}
+.ch-hello h1{margin:6px 0 0;font-size:clamp(24px,3.2vw,32px);letter-spacing:-.03em;line-height:1.15;text-wrap:balance}
+.ch-hello p{margin:0;max-width:52ch;color:var(--ch-soft);line-height:1.55}
+.ch-ideas{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:10px}
+.ch-recent{margin-top:2px}
+.ch-recent .ch-chip{font-size:12.5px;padding:4px 10px;color:var(--ch-muted)}
+
+/* ── The side: what it did ── */
+.ch-side{min-height:0;overflow-y:auto;padding:10px 14px 18px;border-left:1px solid var(--ch-line);background:var(--ch-rail)}
+.ch-side-head{display:flex;align-items:center;justify-content:space-between;min-height:40px;font-size:14px}
+.ch-side-head .ch-icon-btn{display:none}
+.ch-side .ch-group{margin-left:0}
+.ch-people,.ch-facts{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.ch-people li{display:flex;align-items:center;gap:10px;font-size:13.5px}
+.ch-people small{display:block;color:var(--ch-muted);font-size:12px}
+.ch-facts li{display:flex;align-items:flex-start;gap:9px;font-size:13.5px;min-width:0}
+.ch-facts li span{min-width:0;overflow-wrap:anywhere}
+.ch-facts .ch-i{width:16px;height:16px;color:var(--ch-muted);margin-top:2px}
+.ch-facts a{color:var(--ch-accent)}
+
+/* Narrower: the side becomes a sheet from the right. */
+@media (max-width:1180px){
+  .ch.has-side{grid-template-columns:272px minmax(0,1fr)}
+  .ch-side-open{display:inline-grid}
+  .ch-side{position:fixed;z-index:10060;top:0;right:0;bottom:0;width:min(340px,88vw);translate:100% 0;transition:translate .25s ease;box-shadow:-12px 0 32px rgba(0,0,0,.25)}
+  .ch.side-open .ch-side{translate:0 0}
+  .ch-side-head .ch-icon-btn{display:inline-grid}
+}
+/* A phone: the conversation owns the screen; the rail is a drawer, the composer sits on the safe area. */
+@media (max-width:760px){
+  .ch,.ch.has-side{grid-template-columns:minmax(0,1fr);height:calc(100dvh - 52px)}
+  body:has(.ch) .ovnav-appbar{display:none!important}
+  body:has(.ch){--ovnav-appbar-h:0px}
+  .ch-rail{position:fixed;z-index:10060;top:0;left:0;bottom:0;width:min(320px,86vw);translate:-100% 0;transition:translate .25s ease;box-shadow:12px 0 32px rgba(0,0,0,.25)}
+  .ch.rail-open .ch-rail{translate:0 0}
+  .ch-rail-open,.ch-icon-btn.ch-rail-close{display:inline-grid}
+  .ch-head{padding:4px 8px}
+  .ch-thread{padding:18px 14px 16px}
+  .ch-bubble{max-width:88%}
+  .ch-composer{margin:0 8px calc(8px + env(safe-area-inset-bottom,0px));border-radius:20px}
+  .ch-pick-repo input{width:46vw}
+  .ch.is-empty .ch-thread{padding-top:56px}
+}
+.ch-scrim{position:fixed;inset:0;z-index:10050;background:rgba(0,0,0,.4)}
+@media (prefers-reduced-motion:reduce){.ch-dot.is-busy,.ch-dots i,.ch-step.is-new{animation:none}.ch-rail,.ch-side{transition:none}.ch-thread{scroll-behavior:auto}}

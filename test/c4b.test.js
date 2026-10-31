@@ -39,9 +39,10 @@ const TASK3 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAX';
             const codes = home.text.indexOf('https://github.com/OpenVibers/OpenVibe.Codes');
             assert.ok(shared > -1 && codes > -1, 'both repositories are offered');
             assert.ok(shared < codes, 'the last one used comes first');
-            assert.ok(home.text.includes('<option value="' + NODE + '">Desk'), 'the machine picker offers the paired machine');
-            assert.ok(home.text.includes('data-c4-repo-search'), 'the repository field searches');
-            assert.ok(home.text.includes('data-c4-saved-repo="https://github.com/OpenVibers/OpenVibe.Shared"'), 'and the saved ones are a pill away');
+            assert.ok(home.text.includes('data-ch-repo-url="/api/v1/me/repos"'), 'the repository field searches');
+            assert.ok(home.text.includes('data-ch-saved-repo="https://github.com/OpenVibers/OpenVibe.Shared"'), 'and the recent ones are a tap away');
+            // A task cannot be pinned to a machine yet (Run's pin is a Bot device): the default machine is chosen in Settings.
+            assert.ok(!home.text.includes('<option value="' + NODE + '">Desk'), 'the chat offers no machine it could not honour');
         });
 
         await check('the machine picker is in the order of use, on Home and on Settings', async () => {
@@ -49,7 +50,7 @@ const TASK3 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAX';
             await db.exec(`INSERT INTO codes_attempts (id, task_id, n, agent, machine, state, started_at, finished_at, created_at)
                 VALUES ('att_01ARZ3NDEKTSV4RRFFQ69G5FAC',$1,2,'codex',$2,'done', now() - interval '2 hours', now() - interval '2 hours', now() - interval '2 hours')`, [TASK2, NODE]);
             await t.ctx.userSettings.save(ada.subject, { default_machine: OTHER });
-            for (const page of ['/', '/settings']) {
+            for (const page of ['/settings']) {
                 const shown = await t.get(page, { as: ada });
                 assert.strictEqual(shown.status, 200);
                 const desk = shown.text.indexOf(`<option value="${NODE}">Desk`);
@@ -84,10 +85,10 @@ const TASK3 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAX';
             assert.strictEqual(page.status, 200, page.text.slice(0, 200));
             // Changes: the files first, then the diff folded out.
             assert.ok(page.text.includes('server/http/c4.js') && page.text.includes('public/css/c4.css'), 'the changed files are listed');
-            assert.ok(page.text.includes('<span class="c4-add">+42</span>') || page.text.includes('c4-add'), 'with their counts');
+            assert.ok(page.text.includes('<span class="ch-add">+42</span>'), 'with their counts');
             assert.ok(page.text.includes('The diff') && page.text.includes('+the change'), 'and the diff itself');
             // Proof: one calm row per item, each with its own state.
-            assert.ok(page.text.includes('data-proof-kind') || page.text.includes('c4-row-label">tests'), 'a proof row per item');
+            assert.ok(page.text.includes('<b>tests</b>') && page.text.includes('<b>screenshots</b>') && page.text.includes('<b>review</b>'), 'a proof row per item');
             assert.ok(page.text.includes('Passed') && page.text.includes('Skipped') && page.text.includes('Failed'), 'each row carries its state');
             assert.ok(page.text.includes('390 px') && page.text.includes('1440 px'), 'the shots are listed by width and route');
             assert.ok(page.text.includes('the page is 1500px wide'), 'and what the shot found');

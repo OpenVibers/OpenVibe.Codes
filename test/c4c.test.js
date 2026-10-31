@@ -89,12 +89,12 @@ const split = (links) => ({
             assert.deepStrictEqual(bar.map((l) => l.label), ['Home', 'Start', 'Run', 'Agents'], 'and they are the product&rsquo;s');
         });
 
-        await check('a card&rsquo;s muted note sits under its heading, not beside it', async () => {
+        await check('a signed-in person&rsquo;s home is a new chat, not a page of cards (plan L31)', async () => {
             const page = await t.get('/', { as: ada });
             assert.strictEqual(page.status, 200);
-            assert.ok(page.text.includes('<h2>Needs you</h2></div><p class="c4-sub">Approvals and questions</p>'),
-                'the note is the card&rsquo;s subtitle');
-            assert.ok(!page.text.includes('<h2>Needs you</h2><span'), 'and not a second title beside the heading');
+            assert.ok(page.text.includes('What should we build') && page.text.includes('action="/chat"'), 'the greeting and the composer');
+            assert.ok(!page.text.includes('class="c4-card'), 'no cards');
+            assert.ok(page.text.includes('aria-label="Your conversations"'), 'the rail of conversations is the navigation');
         });
     } finally { await t.close(); }
     done();

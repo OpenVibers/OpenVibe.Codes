@@ -247,6 +247,8 @@ async function createApp(opts = {}) {
         if (req.path !== '/.well-known/agent.json' && !twin) return next();
         return agentLayer(req, res, next);
     });
+    // The chat app (L31 CH1) answers a signed-in person's / and /tasks/:id; everyone else falls through to C4.
+    app.use(require('./http/chat').createChatRoutes(ctx));
     // C4 workspace pages sit before the legacy marketing pages and share the existing owner-scoped task store.
     app.use(require('./http/c4').createC4Routes(ctx));
     app.use(pageRoutes);
