@@ -127,7 +127,7 @@ ${raw(showcase.features({
                 id: 'agents', title: 'The agents', lede: `${offers.length} harnesses in the catalog, each with the models it runs. Routing picks one by what the task needs first, then by cost.`,
                 items: offers.map((o) => ({ title: o.name, text: [o.provider, ...flagsOf(o.capabilities).slice(0, 3)].join(' · '), href: `/harnesses#${o.id}` })),
             }))}
-<section class="sc-sec" aria-labelledby="h-how"><details class="codes-fold"><summary><h2 id="h-how">How it works</h2><span>routing, the quick start, what works today</span></summary>${raw(showcase.steps({
+<section class="sc-sec" aria-labelledby="h-how"><details class="codes-fold" open><summary><h2 id="h-how">How it works</h2><span>routing, the quick start, what works today</span></summary>${raw(showcase.steps({
                 title: 'How a task finds its agent',
                 items: [
                     { title: 'Describe the task', text: `One of ${tasks.join(', ')}, plus anything it must have: a capability, a runtime, a ceiling on cost.` },
