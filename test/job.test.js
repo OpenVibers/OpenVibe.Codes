@@ -114,6 +114,22 @@ function fakeHarness({ fail = false } = {}) {
         assert.strictEqual(fs.readFileSync(path.join(src.dir, 'README.md'), 'utf8'), '# Demo\n');
     });
 
+    await check('a conversation\'s next turn starts from the work of the turns before it (L31 CH4)', async () => {
+        const src = repository();
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codes-tmp-'));
+        const turn = (extra) => runJob({ input: JSON.stringify({ repo: src.url, prompt: 'Add a line', ...extra }), harness: fakeHarness(), emit: () => {}, writeResult: () => {}, env, tmp });
+        const first = await turn({});
+        assert.ok(first.patch && first.patch.includes('+Added by the agent.'), 'the first turn\'s diff');
+        const lines = [];
+        const second = await runJob({ input: JSON.stringify({ repo: src.url, prompt: 'Add another', base_patch: first.patch }), harness: fakeHarness(), emit: (l) => lines.push(JSON.parse(l)), writeResult: () => {}, env, tmp });
+        assert.strictEqual(second.base_patch, 'applied', 'the earlier work was picked up');
+        assert.strictEqual((second.patch.match(/\+Added by the agent\./g) || []).length, 2, 'and the new diff holds both turns');
+        assert.ok(lines.some((l) => /Picked up the changes from the earlier turns/.test(JSON.stringify(l))), 'and says so');
+        const stale = await turn({ base_patch: 'diff --git a/NOPE.md b/NOPE.md\n--- a/NOPE.md\n+++ b/NOPE.md\n@@ -1 +1 @@\n-x\n+y\n' });
+        assert.strictEqual(stale.base_patch, 'failed', 'a diff that no longer applies is said');
+        assert.ok(stale.patch && stale.patch.includes('+Added by the agent.'), 'and the turn still runs from the branch as it is');
+    });
+
     await check('a push is only ever a new branch: never the base, a protected name, an existing branch, or unchecked', () => {
         const { pushTarget } = require('../harness/job');
         assert.deepStrictEqual(pushTarget('fix/typo', 'main'), { branch: 'fix/typo' });

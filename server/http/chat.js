@@ -222,9 +222,9 @@ ${rows.length ? '' : '<p class="ch-empty-rail">Your conversations appear here.</
             const n = Number(a.n);
             if (prev) {
                 const note = /^carried on by the owner: /.exec(a.why || '') ? String(a.why).replace(/^carried on by the owner: /, '') : null;
-                if (a.kind === 'manual' && note) out.push(you(note));
-                else if (a.agent && prev.agent && a.agent !== prev.agent) out.push(divider(`${agentOf(a.agent, names).name} took over${prev.end_why ? `: ${agentOf(prev.agent, names).name} ${prev.end_why}` : ''}`));
-                else if (a.why) out.push(divider(String(a.why), 'handover'));
+                if (note) out.push(you(note));
+                if (a.agent && prev.agent && a.agent !== prev.agent) out.push(divider(`${agentOf(a.agent, names).name} took over${prev.end_why ? `: ${agentOf(prev.agent, names).name} ${prev.end_why}` : ''}`));
+                else if (a.why && !note) out.push(divider(String(a.why), 'handover'));
             }
             const isLive = live && n === Number(attempts[attempts.length - 1].n);
             out.push(agentTurn(agentOf(a.agent || row.agent, names), byAttempt.get(n) || [], { live: isLive, attempt: a }));

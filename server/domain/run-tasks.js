@@ -804,15 +804,18 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const live = attempts.slice().reverse().find((a) => !ENDED.has(a.state));
         if (live) return { attempt: live, live: true, row };
         const text = note ? String(note).trim().slice(0, 4000) : '';
+        const lastResult = asObject(row.result) || {};
+        const basePatch = typeof lastResult.patch === 'string' && lastResult.patch && !lastResult.patch_truncated ? lastResult.patch : null;
+        const soFar = await conversationSoFar(row);
         const plan = agent
             ? {
-                kind: 'switch', agent, model: model || null, effort: effort || null, session: null,
-                prompt: `${row.prompt}\n\n---\n## Hand-over (written by openvibe.codes)\n\n${attemptStore.nameOf(agent)} takes over from ${attemptStore.nameOf(ending.agent)}, which ${attemptStore.wordsOf(ending.reason || 'error')}. Keep the work that was done, do not redo it, and finish the task.\n`,
-                why: `${attemptStore.nameOf(agent)} took over at the owner's request`,
+                kind: 'switch', agent, model: model || null, effort: effort || null, session: null, basePatch,
+                prompt: `${row.prompt}${soFar}\n\n---\n## Hand-over (written by openvibe.codes)\n\n${attemptStore.nameOf(agent)} takes over from ${attemptStore.nameOf(ending.agent)}, which ${attemptStore.wordsOf(ending.reason || 'error')}. Keep the work that was done, do not redo it, and finish the task.\n${text ? `\n---\n## A note from the owner\n\n${text}\n` : ''}`,
+                why: text ? `carried on by the owner: ${text.slice(0, 200)}` : `${attemptStore.nameOf(agent)} took over at the owner's request`,
             }
             : {
-                kind: 'manual', agent: ending.agent, model: model || ending.model, effort: effort || ending.effort || null, session: null,
-                prompt: `${row.prompt}${text ? `\n\n---\n## A note from the owner\n\n${text}\n` : ''}`,
+                kind: 'manual', agent: ending.agent, model: model || ending.model, effort: effort || ending.effort || null, session: null, basePatch,
+                prompt: `${row.prompt}${soFar}${text ? `\n\n---\n## A note from the owner\n\n${text}\n` : ''}`,
                 why: text ? `carried on by the owner: ${text.slice(0, 200)}` : 'carried on by the owner',
             };
         let attempt = null;
@@ -865,12 +868,42 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     }
 
     /** The job's arguments for a follow-up: the task's own repository, the plan's prompt and the session to resume. */
+    /**
+     * The conversation so far (Codes L31 CH4), for the next turn's brief: each earlier turn's agent and the words it
+     * ended with, and what the person said between turns. Compact (each answer cut to 1 200 characters, the whole to
+     * about 6 000), so any agent can pick the conversation up without its predecessor's session; the work itself
+     * travels as the diff (base_patch).
+     */
+    async function conversationSoFar(row) {
+        const attempts = await attemptStore.list(row.id);
+        if (!attempts.length) return '';
+        const ends = await db.many(
+            `SELECT DISTINCT ON (attempt_n) attempt_n, body FROM codes_session_lines
+              WHERE task_id = $1 AND kind IN ('done', 'text') ORDER BY attempt_n, (kind = 'done') DESC, seq DESC`, [row.id],
+        ).catch(() => []);
+        const said = new Map(ends.map((l) => [Number(l.attempt_n), String((l.body && l.body.text) || '').trim()]));
+        const parts = [];
+        for (const a of attempts) {
+            const note = /^carried on by the owner: /.test(a.why || '') ? String(a.why).replace(/^carried on by the owner: /, '') : null;
+            if (note && Number(a.n) > 1) parts.push(`**The owner:** ${note}`);
+            const text = said.get(Number(a.n));
+            const who = attemptStore.nameOf(a.agent);
+            parts.push(`**Turn ${a.n} · ${who}${a.state && a.state !== 'done' ? ` (${attemptStore.wordsOf(a.reason || a.state)})` : ''}:** ${text ? (text.length > 1200 ? `${text.slice(0, 1200)}…` : text) : 'it ended without a word.'}`);
+        }
+        let out = parts.join('\n\n');
+        if (out.length > 6000) out = `…${out.slice(-6000)}`;
+        return `\n\n---\n## The conversation so far (written by openvibe.codes)\n\n${out}\n\nThe changes from these turns are already in your working tree.\n`;
+    }
+
     function followUpArgs(row, plan) {
         return parseArgs(JSON.stringify({
             repo: row.repo, ref: row.ref || null, prompt: plan.prompt || row.prompt,
             agent: plan.agent || null, permission: 'edit',
             ...(plan.model ? { model: plan.model } : {}),
             ...(plan.effort ? { effort: plan.effort } : {}),
+            // The work so far: the last turn's diff (against the branch the task started from, so it holds every
+            // earlier turn's changes too). A diff cut to fit the result channel would not apply, so it is not sent.
+            ...(plan.basePatch ? { base_patch: plan.basePatch } : {}),
             ...(row.push ? { push: { pull_request: !!row.pull_request } } : {}),
             ...(plan.session ? { resume: plan.session } : {}),
         }));

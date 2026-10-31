@@ -169,6 +169,8 @@ function parseArgs(raw, env = process.env) {
         agent: typeof a.agent === 'string' && /^[a-z0-9-]{1,40}$/.test(a.agent) ? a.agent : null,
         model: typeof a.model === 'string' && a.model.length <= 100 ? a.model : null,
         ...(effort ? { effort } : {}),
+        // The conversation's work so far (Codes L31 CH4): applied to the clone before the agent starts.
+        ...(typeof a.base_patch === 'string' && a.base_patch.trim() && a.base_patch.length <= MAX_PATCH ? { base_patch: a.base_patch } : {}),
     };
 }
 
@@ -465,6 +467,20 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             base = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: work })).trim();
             result.base = base;
             say({ t: 'step', text: `Working on ${base}` });
+            // A turn of a conversation starts from the work of the turns before it. A diff that no longer applies
+            // (the branch moved under it) is said, and the turn starts from the branch as it is.
+            if (job.base_patch) {
+                const file = path.join(dir, 'conversation.patch');
+                fs.writeFileSync(file, job.base_patch.endsWith('\n') ? job.base_patch : `${job.base_patch}\n`);
+                try {
+                    await git(['apply', '--3way', '--whitespace=nowarn', file], { cwd: work });
+                    result.base_patch = 'applied';
+                    say({ t: 'step', text: 'Picked up the changes from the earlier turns' });
+                } catch (e) {
+                    result.base_patch = 'failed';
+                    say({ t: 'note', level: 'warning', text: 'The earlier turns\' changes no longer apply to the branch; this turn starts from the branch as it is.' });
+                }
+            }
         } else if (job.kind === 'conductor') {
             // The owner's own folder: never a clone, never touched by git. Claude Code opens it, so it loads that
             // project's memory and AGENTS.md.
