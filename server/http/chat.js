@@ -21,6 +21,7 @@ const { markdown } = require('../render/markdown');
 const { asyncRouter } = require('./router');
 const { sessionLogOf } = require('../domain/run-tasks');
 const models = require('../data/models');
+const kit = require('openvibe-shared/kit');
 
 const LIVE = ['queued', 'placed', 'running'];
 const safeId = (s) => /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(s || ''));
@@ -138,6 +139,8 @@ function createChatRoutes(ctx) {
         );
     }
     function railHtml(rows, currentId, waitingIds, here = '') {
+        // The network's one sidebar (openvibe-shared kit.sidebar, plan L35): New chat and search on top, Codes' places as
+        // vertical rows, then the conversations by when they last moved. A drawer on a phone (kit-web.js opens it).
         const now = new Date();
         const day0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
         const bucket = (row) => {
@@ -146,32 +149,38 @@ function createChatRoutes(ctx) {
         };
         const names = agentNames();
         const item = (row) => {
-            const [word, tone] = stateOf(row);
-            const needs = waitingIds.has(row.id);
-            const dot = needs ? '<span class="ch-dot is-needs" title="Needs you"></span>' : tone === 'busy' ? `<span class="ch-dot is-busy" title="${esc(word)}"></span>` : tone === 'bad' ? `<span class="ch-dot is-bad" title="${esc(word)}"></span>` : '';
-            const face = row.kind === 'conductor' ? `<span class="ch-av ch-av-conductor" aria-hidden="true">${ico('conductor')}</span>` : avatar(agentOf(row.agent, names));
-            return `<a class="ch-item${row.id === currentId ? ' is-here' : ''}" href="/tasks/${encodeURIComponent(row.id)}"${row.id === currentId ? ' aria-current="page"' : ''}>${face}<span class="ch-item-t">${esc(titleOf(row))}</span><span class="ch-item-m">${dot}${esc(ago(row.updated_at || row.created_at))}</span></a>`;
+            const [, tone] = stateOf(row);
+            const dot = waitingIds.has(row.id) ? 'needs' : tone === 'busy' ? 'busy' : tone === 'bad' ? 'bad' : null;
+            const mark = row.kind === 'conductor' ? `<span class="ch-av ch-av-conductor" aria-hidden="true">${ico('conductor')}</span>` : avatar(agentOf(row.agent, names));
+            return { href: `/tasks/${encodeURIComponent(row.id)}`, label: titleOf(row), mark, meta: dot ? '' : ago(row.updated_at || row.created_at), here: row.id === currentId, dot };
         };
         const pinned = rows.filter((x) => x.kind === 'conductor' && x.outcome !== 'stopped').slice(0, 2);
-        const rest = rows.filter((x) => !pinned.includes(x));
         const groups = [];
-        for (const row of rest) {
+        for (const row of rows.filter((x) => !pinned.includes(x))) {
             const b = bucket(row);
-            if (!groups.length || groups[groups.length - 1][0] !== b) groups.push([b, []]);
-            groups[groups.length - 1][1].push(row);
+            if (!groups.length || groups[groups.length - 1].title !== b) groups.push({ title: b, items: [] });
+            groups[groups.length - 1].items.push(item(row));
         }
-        const foot = [['Agents', '/agents', 'agents'], ['Machines', '/machines', 'machines'], ['Memory', '/memory', 'memory'], ['Usage', '/usage', 'usage'], ['Settings', '/settings', 'settings']]
-            .map(([label, href, i]) => `<a href="${href}" title="${label}"${here === href ? ' class="is-here" aria-current="page"' : ''}>${ico(i)}<span>${label}</span></a>`).join('');
-        return `<aside class="ch-rail" id="ch-rail" aria-label="Your conversations">
-<div class="ch-rail-top"><a class="ch-new" href="/">${ico('new')}<span>New chat</span></a><button class="ch-icon-btn ch-rail-close" type="button" data-ch-rail-close aria-label="Close the list">${ico('close')}</button></div>
-<form class="ch-find" role="search" method="get" action="/tasks"><label class="ch-sr" for="ch-find">Search your conversations</label>${ico('search')}<input id="ch-find" name="q" placeholder="Search" autocomplete="off" data-ch-find></form>
-<nav class="ch-list" aria-label="Conversations">
-${pinned.length ? `<p class="ch-group">Pinned</p>${pinned.map(item).join('')}` : `<a class="ch-item ch-item-cta" href="/conductor"><span class="ch-av ch-av-conductor" aria-hidden="true">${ico('conductor')}</span><span class="ch-item-t">Start your conductor</span></a>`}
-${groups.map(([label, list]) => `<p class="ch-group">${label}</p>${list.map(item).join('')}`).join('')}
-${rows.length ? '' : '<p class="ch-empty-rail">Your conversations appear here.</p>'}
-</nav>
-<nav class="ch-rail-foot" aria-label="Codes">${foot}</nav>
-</aside>`;
+        const place = (label, href, icon, extra = {}) => ({ href, label, iconHtml: ico(icon), here: here === href, ...extra });
+        return kit.sidebar({
+            id: 'ch-rail', label: 'Codes',
+            action: { href: '/', label: 'New chat', icon: 'pencil' },
+            find: { action: '/tasks', name: 'q', placeholder: 'Search conversations', label: 'Search your conversations' },
+            nav: [
+                place('Conductor', '/conductor', 'conductor'),
+                place('Agents', '/agents', 'agents'),
+                place('Machines', '/machines', 'machines'),
+                place('Memory', '/memory', 'memory'),
+                place('Usage', '/usage', 'usage'),
+                ...(waitingIds.size ? [{ href: '/approvals', label: 'Approvals', icon: 'hand', here: here === '/approvals', count: waitingIds.size }] : []),
+                place('Settings', '/settings', 'settings'),
+            ],
+            sections: [
+                ...(pinned.length ? [{ title: 'Pinned', items: pinned.map(item) }] : []),
+                ...groups,
+                ...(rows.length ? [] : [{ title: '', items: [], empty: 'Your conversations appear here.' }]),
+            ],
+        });
     }
 
     // ── The thread ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -323,15 +332,16 @@ ${note ? `<p class="ch-note" data-ch-status role="status">${note}</p>` : '<p cla
         const waitingIds = new Set(waiting.map((a) => a.task_id));
         const body = `<div class="ch${side ? ' has-side' : ''}${empty ? ' is-empty' : ''}${page != null ? ' is-page' : ''}" data-chat>
 ${railHtml(rows, currentId, waitingIds, here)}
+<div class="ovk-sidebar-scrim" data-ovk-sidebar-scrim hidden></div>
 <div class="ch-scrim" data-ch-scrim hidden></div>
 <section class="ch-main" aria-label="Conversation">
-<header class="ch-head"><button class="ch-icon-btn ch-rail-open" type="button" data-ch-rail-open aria-label="Your conversations" aria-controls="ch-rail">${ico('rail')}</button>${head}${side ? `<button class="ch-icon-btn ch-side-open" type="button" data-ch-side-open aria-label="What it did" aria-controls="ch-side">${ico('side')}</button>` : ''}</header>
+<header class="ch-head">${kit.sidebarButton({ id: 'ch-rail', label: 'Your conversations' })}${head}${side ? `<button class="ch-icon-btn ch-side-open" type="button" data-ch-side-open aria-label="What it did" aria-controls="ch-side">${ico('side')}</button>` : ''}</header>
 ${page != null ? `<div class="ch-page">${page}</div>` : `<div class="ch-thread" id="ch-thread"${streamUrl ? ` data-ch-stream="${esc(streamUrl)}"` : ''}>${thread}</div>
 ${composerHtml}`}
 </section>
 ${side}
 </div>`;
-        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], scripts: [...scripts, 'js/chat.js'], body: raw(body) });
+        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css'], sharedScripts: ['kit-web.js'], scripts: [...scripts, 'js/chat.js'], body: raw(body) });
     }
 
     /** The side: who worked on it, and where the work is. */

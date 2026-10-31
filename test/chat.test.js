@@ -35,7 +35,7 @@ const { stepKind } = require('../server/http/chat');
             assert.strictEqual(page.status, 200);
             assert.ok(page.text.includes('Fit the home page to a 360 px phone'), 'their conversation is in the rail');
             assert.ok(!page.text.includes('Someone else entirely'), 'another person&rsquo;s is not');
-            assert.ok(page.text.includes('<p class="ch-group">Today</p>'), 'grouped by when it last moved');
+            assert.ok(page.text.includes('<h2 class="ovk-sidebar-h">Today</h2>'), 'grouped by when it last moved');
             const theirs = await t.get(`/tasks/${THEIRS}`, { as: ada });
             assert.notStrictEqual(theirs.status, 200, 'another person&rsquo;s conversation does not open');
         });

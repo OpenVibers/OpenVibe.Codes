@@ -13,27 +13,7 @@ body.ov-workspace:has(.ch){padding-bottom:0}
 main.page:has(> .ch){max-width:none;margin:0;padding:0}
 
 /* ── The rail ── */
-.ch-rail{display:flex;flex-direction:column;min-height:0;background:var(--ch-rail);border-right:1px solid var(--ch-line)}
-.ch-rail-top{display:flex;gap:6px;padding:12px 10px 6px}
-.ch-new{flex:1;display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:12px;color:var(--ch-ink);text-decoration:none;font-weight:600;font-size:14px;border:1px solid var(--ch-line);background:var(--ch-card)}
-.ch-new:hover{border-color:color-mix(in srgb,var(--ch-accent) 45%,var(--ch-line))}
-.ch-find{position:relative;margin:4px 10px 6px}
-.ch-find .ch-i{position:absolute;left:10px;top:50%;translate:0 -50%;width:15px;height:15px;color:var(--ch-muted)}
-.ch-find input{width:100%;box-sizing:border-box;padding:8px 10px 8px 32px;border-radius:10px;border:1px solid transparent;background:var(--ch-hover);color:var(--ch-ink);font:inherit;font-size:13.5px}
-.ch-find input:focus{outline:none;border-color:color-mix(in srgb,var(--ch-accent) 55%,transparent)}
-.ch-list{flex:1;min-height:0;overflow-y:auto;padding:2px 8px 10px;scrollbar-width:thin}
 .ch-group{margin:14px 8px 4px;font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ch-muted)}
-.ch-item{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:10px;color:var(--ch-soft);text-decoration:none;font-size:14px;line-height:1.3;min-height:36px}
-.ch-item:hover{background:var(--ch-hover);color:var(--ch-ink)}
-.ch-item.is-here{background:var(--ch-hover);color:var(--ch-ink);font-weight:600}
-.ch-item-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ch-item-m{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ch-muted);font-weight:500}
-.ch-item-cta{color:var(--ch-accent);font-weight:600}
-.ch-empty-rail{margin:16px 8px;color:var(--ch-muted);font-size:13px}
-.ch-rail-foot{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;padding:8px;border-top:1px solid var(--ch-line)}
-.ch-rail-foot a{display:grid;justify-items:center;gap:3px;padding:7px 2px;border-radius:10px;color:var(--ch-muted);text-decoration:none;font-size:10.5px;font-weight:600}
-.ch-rail-foot a:hover{background:var(--ch-hover);color:var(--ch-ink)}
-.ch-rail-foot a.is-here{background:var(--ch-hover);color:var(--ch-accent)}
 
 /* Faces: an agent's initials in its own colour; the conductor's is its sign. */
 .ch-av{display:inline-grid;place-items:center;width:24px;height:24px;flex:none;border-radius:50%;font-size:10.5px;font-weight:800;letter-spacing:-.02em;color:var(--av,#64748b);background:color-mix(in srgb,var(--av,#64748b) 18%,transparent)}
@@ -56,7 +36,12 @@ main.page:has(> .ch){max-width:none;margin:0;padding:0}
 .ch-state.is-busy{color:var(--ch-accent);background:color-mix(in srgb,var(--ch-accent) 12%,transparent)}
 .ch-icon-btn{display:inline-grid;place-items:center;width:36px;height:36px;flex:none;border:0;border-radius:10px;background:transparent;color:var(--ch-soft);cursor:pointer}
 .ch-icon-btn:hover{background:var(--ch-hover);color:var(--ch-ink)}
-.ch-rail-open,.ch-side-open,.ch-icon-btn.ch-rail-close{display:none}
+.ch-side-open{display:none}
+/* The rail is the network's sidebar (openvibe-shared kit.sidebar): the grid's first column on a computer, a drawer on
+   a phone (kit.css). Its avatars are Codes' own. */
+@media (min-width:761px){.ch > .ovk-sidebar{position:relative;top:auto;height:auto;min-height:0}}
+.ch .ovk-sidebar-item .ch-av{width:24px;height:24px;font-size:11px}
+.ch-head .ovk-sidebar-open{color:var(--ch-ink)}
 .ch-thread{flex:1;min-height:0;overflow-y:auto;padding:28px max(20px,calc((100% - var(--ch-col)) / 2)) 24px;display:flex;flex-direction:column;gap:22px;scroll-behavior:smooth}
 .ch-turn{display:flex;flex-direction:column;gap:8px;min-width:0}
 .ch-you{align-items:flex-end}
@@ -219,9 +204,6 @@ details[open]>summary .ch-caret{rotate:180deg}
   .ch,.ch.has-side{grid-template-columns:minmax(0,1fr);height:calc(100dvh - 52px)}
   body:has(.ch) .ovnav-appbar{display:none!important}
   body:has(.ch){--ovnav-appbar-h:0px}
-  .ch-rail{position:fixed;z-index:10060;top:0;left:0;bottom:0;width:min(320px,86vw);translate:-100% 0;transition:translate .25s ease;box-shadow:12px 0 32px rgba(0,0,0,.25)}
-  .ch.rail-open .ch-rail{translate:0 0}
-  .ch-rail-open,.ch-icon-btn.ch-rail-close{display:inline-grid}
   .ch-head{padding:4px 8px}
   .ch-thread{padding:18px 14px 16px}
   .ch-bubble{max-width:88%}
@@ -230,4 +212,4 @@ details[open]>summary .ch-caret{rotate:180deg}
   .ch.is-empty .ch-thread{padding-top:56px}
 }
 .ch-scrim{position:fixed;inset:0;z-index:10050;background:rgba(0,0,0,.4)}
-@media (prefers-reduced-motion:reduce){.ch-dot.is-busy,.ch-dots i,.ch-step.is-new{animation:none}.ch-rail,.ch-side{transition:none}.ch-thread{scroll-behavior:auto}}
+@media (prefers-reduced-motion:reduce){.ch-dot.is-busy,.ch-dots i,.ch-step.is-new{animation:none}.ch-side{transition:none}.ch-thread{scroll-behavior:auto}}

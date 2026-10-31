@@ -13,7 +13,7 @@
 (() => {
     const $ = (sel, root = document) => root.querySelector(sel);
     let page = null;   // { app, es, setOpen } for the page on screen
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && page) { page.setOpen('rail-open', false); page.setOpen('side-open', false); } });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && page) page.setOpen('side-open', false); });
     document.addEventListener('ov:boost:before', () => { if (page && page.es) page.es.close(); page = null; });
     document.addEventListener('ov:boost:load', init);
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
@@ -24,33 +24,29 @@
         app.dataset.chReady = '1';
         page = { app, es: null, setOpen: () => {} };
 
-        // ── The rail and the side on narrow screens ──
+        // ── The side on narrow screens (the rail is the network's sidebar: kit-web.js opens and closes it) ──
         const scrim = $('[data-ch-scrim]', app);
         const setOpen = (cls, on) => {
             app.classList.toggle(cls, on);
-            const any = app.classList.contains('rail-open') || app.classList.contains('side-open');
-            if (scrim) scrim.hidden = !any;
-            if (on) { const first = $(cls === 'rail-open' ? '.ch-rail a, .ch-rail input' : '.ch-side button', app); if (first) first.focus({ preventScroll: true }); }
+            if (scrim) scrim.hidden = !app.classList.contains('side-open');
+            if (on) { const first = $('.ch-side button', app); if (first) first.focus({ preventScroll: true }); }
         };
         app.addEventListener('click', (e) => {
-            const t = e.target.closest('[data-ch-rail-open],[data-ch-rail-close],[data-ch-side-open],[data-ch-side-close],[data-ch-scrim]');
+            const t = e.target.closest('[data-ch-side-open],[data-ch-side-close],[data-ch-scrim]');
             if (!t) return;
-            if (t.matches('[data-ch-rail-open]')) setOpen('rail-open', true);
-            else if (t.matches('[data-ch-side-open]')) setOpen('side-open', true);
-            else { setOpen('rail-open', false); setOpen('side-open', false); }
+            setOpen('side-open', t.matches('[data-ch-side-open]'));
         });
         page.setOpen = setOpen;
 
         // ── The rail's search: filter as you type (Enter still searches every task) ──
-        const find = $('[data-ch-find]', app);
+        const find = $('.ovk-sidebar-find input', app);
         if (find) {
             find.addEventListener('input', () => {
                 const q = find.value.trim().toLowerCase();
-                app.querySelectorAll('.ch-list .ch-item').forEach((a) => { a.hidden = !!q && !a.textContent.toLowerCase().includes(q); });
-                app.querySelectorAll('.ch-list .ch-group').forEach((g) => {
-                    let n = g.nextElementSibling, shown = false;
-                    while (n && !n.classList.contains('ch-group')) { if (n.classList.contains('ch-item') && !n.hidden) shown = true; n = n.nextElementSibling; }
-                    g.hidden = !!q && !shown;
+                app.querySelectorAll('.ovk-sidebar-sec').forEach((sec) => {
+                    let shown = false;
+                    sec.querySelectorAll('.ovk-sidebar-item').forEach((a) => { a.hidden = !!q && !a.textContent.toLowerCase().includes(q); if (!a.hidden) shown = true; });
+                    sec.hidden = !!q && !shown;
                 });
             });
         }
