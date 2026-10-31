@@ -9,6 +9,7 @@
  *   /agents           the person's connections: their provider keys (they live in OpenVibe.AI), added, tested, removed
  *   /machines         their paired Node machines, their state, and Node's pairing flow with a one-time code
  *   /usage            what Codes knows: runs, minutes and tokens per day (no prices: Billing is Billing's)
+ *   /memory           what the person's own assistants know about them (the notes live in OpenVibe.AI's store)
  *   /settings         their choices, remembered per person (codes_user_settings)
  *
  * Every write is a form post from this site (Origin checked), every read is the signed-in person's own.
@@ -737,6 +738,10 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
             return res.redirect(303, `/settings?error=${encodeURIComponent(String((e && e.message) || 'the settings could not be saved').slice(0, 180))}`);
         }
     });
+
+    // The Memory page (OpenVibe Memory M2b): the person's own notes, in Codes' own kit. The routes live in their own
+    // module and borrow this one's kit (the page, the frame, the card, the pill, the flash and the same-origin check).
+    r.use(require('./memory').createMemoryRoutes(ctx, { page, wrap, header, pill, flash, sameOrigin, viewer, form, signIn, note }));
 
     return r;
 }

@@ -51,6 +51,7 @@ const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
 const { createForgejoClient } = require('./domain/forgejo');
 const { createMachines } = require('./domain/machines');
+const { createMemory } = require('./domain/memory');
 const { createFleet } = require('./domain/fleet');
 const { createNotices } = require('./domain/notices');
 const { createUserSettings } = require('./domain/user-settings');
@@ -106,6 +107,9 @@ async function createApp(opts = {}) {
     ctx.forgejo = createForgejoClient({ config, log });
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    // The person's own memory store (OpenVibe Memory M2b): the notes live in OpenVibe.AI, sealed there, and only the
+    // person's own token opens them. Codes forwards the token and renders the answer; it never holds a note.
+    ctx.memory = createMemory({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     ctx.github = createGitHub({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
     ctx.usage = createUsage({ store });
     // The conductor (Codes C9b) and its approvals inbox. The conductor starts Run jobs and reads their events through
