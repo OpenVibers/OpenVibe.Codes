@@ -79,7 +79,10 @@ function renderPage(o) {
     // the current one active, and the product's own places fold into More; a visitor who is not signed in keeps the
     // product's links, because the sections hold the visitor's own work and a visitor has none yet.
     const here = (href) => pathOnly === href || (href !== '/' && pathOnly.startsWith(`${href}/`));
-    const links = (signedIn && c4Workspace)
+    // A conversation (a signed-in /, /tasks/:id) is the chat app: its rail is the navigation, so the bar carries none.
+    const chatPage = signedIn && (pathOnly === '/' || /^\/tasks\/tsk_[0-9A-Z]{26}$/.test(pathOnly));
+    const links = chatPage ? []
+        : (signedIn && c4Workspace)
         ? [
             ...WORKSPACE_NAV.map((l) => ({ ...l, active: here(l.href) })),
             // The catalogue of harnesses is the product's Agents page; the workspace's own Agents page is above, so the

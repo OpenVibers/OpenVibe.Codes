@@ -216,7 +216,7 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
             const res = await get(`/tasks/${taskId}`);
             assert.strictEqual(res.status, 200);
             assert.match(res.text, /Hand-over brief/, 'the first turn is labelled');
-            assert.match(res.text, /data-c4-conductor-stream/, 'the transcript streams over the C2 events');
+            assert.match(res.text, /data-ch-stream="\/api\/v1\/tasks\/[^"]+\/events/, 'the conversation streams over the C2 events');
             assert.match(res.text, /What next\?|Say something/, 'the box for the next turn');
         });
 
