@@ -26,6 +26,9 @@ function createApi(ctx) {
     const limiter = rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true, legacyHeaders: false });
     const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
 
+    // The models each agent offers, in words a beginner understands, with the effort levels it takes (Codes L31 CH5).
+    r.get('/harnesses/models', reads, (req, res) => res.set('Cache-Control', 'public, max-age=300').json({ agents: require('../data/models').list(harnesses) }));
+
     r.get('/harnesses', reads, (req, res) => {
         res.json({ harnesses: harnesses.list().map((h) => ({ ...h, agents: harnesses.agents(h.id) })) });
     });

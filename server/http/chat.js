@@ -20,6 +20,7 @@ const { raw, esc } = require('../render/html');
 const { markdown } = require('../render/markdown');
 const { asyncRouter } = require('./router');
 const { sessionLogOf } = require('../domain/run-tasks');
+const models = require('../data/models');
 
 const LIVE = ['queued', 'placed', 'running'];
 const safeId = (s) => /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(s || ''));
@@ -292,9 +293,13 @@ ${rows.length ? '' : '<p class="ch-empty-rail">Your conversations appear here.</
     }
 
     // ── The composer ─────────────────────────────────────────────────────────────────────────────────────────────
-    function agentPicker(selected, { label = 'Agent', auto = 'Auto' } = {}) {
-        const list = harnesses?.list?.() || [];
-        return `<label class="ch-pick" title="${esc(label)}"><span class="ch-sr">${esc(label)}</span><select name="agent" data-ch-agent><option value="">${esc(auto)}</option>${list.map((a) => `<option value="${esc(a.id)}"${selected === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+    function whoPicker(selected, { label = 'Who works on it', auto = null } = {}) {
+        const all = models.choices(harnesses);
+        const groups = new Map();
+        for (const c of all.slice(1)) { if (!groups.has(c.group)) groups.set(c.group, []); groups.get(c.group).push(c); }
+        const opt = (c) => `<option value="${esc(c.value)}"${selected === c.value ? ' selected' : ''}${c.note ? ` title="${esc(c.note)}"` : ''}>${esc(c.label)}</option>`;
+        const first = auto ? `<option value="">${esc(auto)}</option>` : opt(all[0]);
+        return `<label class="ch-pick" title="${esc(label)}"><span class="ch-sr">${esc(label)}</span>${ico('agents')}<select name="who" data-ch-who>${first}${[...groups].map(([g, list]) => list.length > 1 ? `<optgroup label="${esc(g)}">${list.map(opt).join('')}</optgroup>` : opt(list[0])).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
     // The effort in plain words (the shared ladder underneath; each agent gets the nearest level it accepts).
     const EFFORT = [['', 'Effort: auto'], ['low', 'Quick'], ['medium', 'Balanced'], ['high', 'Thorough'], ['max', 'Deepest']];
@@ -360,7 +365,7 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         const error = String(req.query.error || '').slice(0, 200);
         const name = String(req.viewer.displayName || req.viewer.username || '').split(' ')[0];
         const ideas = ['Fix the failing tests', 'Explain how this project is laid out', 'Make the home page faster on phones', 'Find and fix one bug'];
-        const pickers = `<label class="ch-pick ch-pick-repo" title="Repository"><span class="ch-sr">Repository</span>${ico('repo')}<input name="repo" type="url" value="${esc(repo)}" placeholder="Repository URL" list="ch-repos" autocomplete="url" required data-ch-repo data-ch-repo-url="/api/v1/me/repos"><datalist id="ch-repos">${repos.map((x) => `<option value="${esc(x.url)}">${esc(x.full_name)}</option>`).join('')}</datalist></label>${agentPicker(settings.default_agent || '')}${effortPicker('')}`;
+        const pickers = `<label class="ch-pick ch-pick-repo" title="Repository"><span class="ch-sr">Repository</span>${ico('repo')}<input name="repo" type="url" value="${esc(repo)}" placeholder="Repository URL" list="ch-repos" autocomplete="url" required data-ch-repo data-ch-repo-url="/api/v1/me/repos"><datalist id="ch-repos">${repos.map((x) => `<option value="${esc(x.url)}">${esc(x.full_name)}</option>`).join('')}</datalist></label>${whoPicker(settings.default_agent ? `${settings.default_agent}|` : '')}${effortPicker('')}`;
         const thread = `<div class="ch-hello"><span class="ov-mark" data-size="56" aria-hidden="true"></span><h1>${name ? `What should we build, ${esc(name)}?` : 'What should we build?'}</h1><p>Say it the way you would to a colleague. Codes picks the agent, runs it on your machine, and shows you what changed.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}<div class="ch-ideas" aria-label="Ideas">${ideas.map((t) => `<button class="ch-chip" type="button" data-ch-idea="${esc(t)}">${esc(t)}</button>`).join('')}</div>${repos.length > 1 ? `<div class="ch-ideas ch-recent" aria-label="Your recent repositories">${repos.map((x) => `<button class="ch-chip" type="button" data-ch-saved-repo="${esc(x.url)}">${ico('repo')}${esc(x.full_name)}</button>`).join('')}</div>` : ''}</div>`;
         return frame(req, res, {
             title: 'New chat', empty: true, head: '<h1 class="ch-title">New chat</h1>', thread,
@@ -376,12 +381,13 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         const back = (msg) => res.redirect(303, `/?error=${encodeURIComponent(msg)}${b.repo ? `&repo=${encodeURIComponent(String(b.repo).slice(0, 300))}` : ''}`);
         const text = String(b.text || '').trim().slice(0, 16000);
         if (!text) return back('Write what you want done first.');
-        const agent = String(b.agent || '').trim();
-        if (agent && !(harnesses?.list?.() || []).some((a) => a.id === agent)) return back('Choose an agent from the list.');
+        const who = models.parse(b.who !== undefined ? b.who : (b.agent ? `${String(b.agent).trim()}|` : ''), harnesses);
+        if (!who) return back('Choose who works on it from the list.');
+        const agent = who.agent || '';
         let args;
         try {
             const { parseArgs } = require('../../harness/job');
-            args = parseArgs(JSON.stringify({ repo: String(b.repo || '').trim(), prompt: text, agent: agent || null, permission: 'edit', ...(b.effort ? { effort: String(b.effort) } : {}) }));
+            args = parseArgs(JSON.stringify({ repo: String(b.repo || '').trim(), prompt: text, agent: agent || null, ...(who.model ? { model: who.model } : {}), permission: 'edit', ...(b.effort ? { effort: String(b.effort) } : {}) }));
         } catch (e) { return back(`Check the repository: ${e.message}.`); }
         let project = null;
         try { project = (await tasks.latestProject?.(req.viewer.subject)) || await conductor.projectFor(req.viewer.token || null, req.viewer.subject); } catch { project = null; }
@@ -416,7 +422,7 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         // The stream starts after the last line this page already shows.
         const seqRow = live ? await db.maybe('SELECT max(seq) AS seq FROM codes_session_lines WHERE task_id = $1', [row.id]) : null;
         const lastSeq = seqRow && seqRow.seq != null ? Number(seqRow.seq) : 0;
-        const pickers = agentPicker('', { label: 'Who carries on', auto: `Same agent (${agentOf(row.agent, agentNames()).name})` }) + effortPicker('');
+        const pickers = whoPicker('', { label: 'Who carries on', auto: `Same agent (${agentOf(row.agent, agentNames()).name})` }) + effortPicker('');
         return frame(req, res, {
             currentId: row.id, title: titleOf(row), head, side: await sideHtml(row),
             thread: (error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : '') + await taskThread(row),
@@ -437,10 +443,12 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         const row = await db.maybe("SELECT * FROM run_tasks WHERE id = $1 AND subject = $2 AND kind <> 'conductor'", [req.params.id, req.viewer.subject]);
         if (!row) return res.status(404).send('Not found');
         const b = req.body || {};
-        const agent = String(b.agent || '').trim() || null;
-        if (agent && !(harnesses?.list?.() || []).some((a) => a.id === agent)) return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}?error=${encodeURIComponent('Choose an agent from the list.')}`);
+        const who = models.parse(b.who !== undefined ? b.who : (b.agent ? `${String(b.agent).trim()}|` : ''), harnesses);
+        if (!who) return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}?error=${encodeURIComponent('Choose who carries on from the list.')}`);
+        // The same agent with another model carries on; another agent takes over.
+        const agent = who.agent && who.agent !== row.agent ? who.agent : null;
         const effort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(b.effort) ? b.effort : null;
-        const out = await tasks.continueTask(row, { note: String(b.text || '').slice(0, 4000), agent, effort });
+        const out = await tasks.continueTask(row, { note: String(b.text || '').slice(0, 4000), agent, model: who.model, effort });
         return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}${out.error ? `?error=${encodeURIComponent(out.error)}` : ''}`);
     });
 
