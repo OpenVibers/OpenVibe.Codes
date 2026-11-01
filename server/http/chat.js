@@ -410,7 +410,7 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         const repo = asked || (repos[0] && repos[0].url) || '';
         const mode = start.MODES.includes(req.query.mode) ? req.query.mode : asked ? 'code' : repos.length ? 'code' : 'new';
         const kind = start.KINDS[req.query.kind] ? req.query.kind : 'website';
-        const chosenProject = start.project(req.query.project) ? String(req.query.project) : 'OpenVibers/OpenVibe.Live';
+        const chosenProject = start.project(req.query.project) ? String(req.query.project) : 'auto';
         const error = String(req.query.error || '').slice(0, 200);
         const name = String(req.viewer.displayName || req.viewer.username || '').split(' ')[0];
 
@@ -425,13 +425,14 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         // The pickers: each shows for the way it belongs to (CSS reads the checked card).
         const kindPick = `<label class="ch-pick ch-for-new" title="What it is"><span class="ch-sr">What it is</span>${ico('web')}<select name="kind" data-ch-kind>${Object.entries(start.KINDS).map(([v, k]) => `<option value="${v}"${kind === v ? ' selected' : ''}>${esc(k.label)}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
         const groups = [...new Set(start.PROJECTS.map((p) => p.group))];
-        const projectPick = `<label class="ch-pick ch-for-openvibe" title="Which OpenVibe project"><span class="ch-sr">Which OpenVibe project</span>${ico('ov')}<select name="project" data-ch-project>${groups.map((g) => `<optgroup label="${esc(g)}">${start.PROJECTS.filter((p) => p.group === g).map((p) => `<option value="${esc(p.repository)}"${chosenProject === p.repository ? ' selected' : ''}${p.line ? ` title="${esc(p.line)}"` : ''}>${esc(p.name)}${p.domain ? ` · ${esc(p.domain)}` : ''}</option>`).join('')}</optgroup>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+        const projectPick = `<label class="ch-pick ch-for-openvibe" title="Which OpenVibe project"><span class="ch-sr">Which OpenVibe project</span>${ico('ov')}<select name="project" data-ch-project><option value="auto"${chosenProject === 'auto' ? ' selected' : ''}>Codes picks for you</option>${groups.map((g) => `<optgroup label="${esc(g)}">${start.PROJECTS.filter((p) => p.group === g).map((p) => `<option value="${esc(p.repository)}"${chosenProject === p.repository ? ' selected' : ''}${p.line ? ` title="${esc(p.line)}"` : ''}>${esc(p.name)}${p.domain ? ` · ${esc(p.domain)}` : ''}</option>`).join('')}</optgroup>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
         const repoPick = `<label class="ch-pick ch-pick-repo ch-for-code" title="Repository"><span class="ch-sr">Repository: owner/name or any Git URL</span>${ico('repo')}<input name="repo" type="text" inputmode="url" spellcheck="false" autocapitalize="off" value="${esc(repo)}" placeholder="owner/name or any Git URL" list="ch-repos" autocomplete="off" data-ch-repo data-ch-repo-url="/api/v1/me/repos"><datalist id="ch-repos">${repos.map((x) => `<option value="${esc(x.url)}">${esc(x.full_name)}</option>`).join('')}</datalist></label>`;
         const pickers = kindPick + projectPick + repoPick + whoPicker(settings.default_agent ? `${settings.default_agent}|` : '', { cls: 'ch-for-agents' }) + effortPicker('', 'ch-for-agents');
         // The repositories a person used last are a tap away (the box also searches every one they can reach).
         const newRepo = `<a class="ch-chip ch-chip-new" href="/git">${ico('new')}New on OpenVibe Git</a>`;
         const recent = `<div class="ch-recent ch-for-code" role="group" aria-label="Your repositories">${newRepo}${repos.length > 1 ? repos.map((x) => `<button class="ch-chip" type="button" data-ch-saved-repo="${esc(x.url)}">${ico('repo')}${esc(x.full_name)}</button>`).join('') : ''}</div>`;
-        const where = `${recent}<p class="ch-where"><span class="ch-for-new">${ico('web')}<span>Built on OpenVibe’s servers at <b>openvibe.space</b> <span class="ch-where-tail">and you get a live link; you check it before anything is built</span></span></span><span class="ch-for-agents">${whereAgents(mine)}</span></p>`;
+        const picked = `<p class="ch-picked ch-for-openvibe" data-ch-picked data-ch-match-url="/chat/match" aria-live="polite">${ico('ov')}<span data-ch-picked-text>Say what you want changed and which site, in your own words: Codes works out which projects to change.</span></p>`;
+        const where = `${recent}${picked}<p class="ch-where"><span class="ch-for-new">${ico('web')}<span>Built on OpenVibe’s servers at <b>openvibe.space</b> <span class="ch-where-tail">and you get a live link; you check it before anything is built</span></span></span><span class="ch-for-agents">${whereAgents(mine)}</span></p>`;
 
         // The ideas rail: it drifts sideways, stops under a pointer or the keyboard, and has its own pause. A press fills
         // the box (and picks the way it belongs to), ready to be changed. The second copy is only there for the loop.
@@ -446,6 +447,13 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
             title: 'New chat', empty: true, head: '<h1 class="ch-title">New chat</h1>', thread,
             composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'Describe the change, question or fix', pickers, where }) + ideas,
         });
+    });
+
+    /** Which OpenVibe projects a request is about (start.matchProjects), for the composer as the person types. */
+    r.get('/chat/match', (req, res) => {
+        if (!viewer(req)) return res.status(401).json({ projects: [] });
+        const projects = start.matchProjects(String(req.query.text || '').slice(0, 4000)).map((p) => ({ name: p.name, repository: p.repository }));
+        return res.set('Cache-Control', 'no-store').json({ projects });
     });
 
     /** Start a conversation: the brief becomes a task on the person's project, and the page is its conversation. */
@@ -465,10 +473,18 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         // until the person presses Build, so a handed-over description is never spent behind their back.
         if (mode === 'new') return res.redirect(303, start.spaceHref({ kind: b.kind, text }));
         let repoUrl = '';
+        let targets = null;   // several OpenVibe projects for one request: one task each, the first one opens
         if (mode === 'openvibe') {
-            const p = start.project(b.project);
-            if (!p) return back('Pick one of the OpenVibe projects from the list.');
-            repoUrl = p.url;
+            if (!b.project || b.project === 'auto') {
+                const found = start.matchProjects(text);
+                if (!found.length) return back('Say which OpenVibe site this is for, in your own words (like Live, Chat or Games, or "the navbar"), or pick it from the list.');
+                targets = found;
+                repoUrl = found[0].url;
+            } else {
+                const p = start.project(b.project);
+                if (!p) return back('Pick one of the OpenVibe projects from the list.');
+                repoUrl = p.url;
+            }
         } else {
             repoUrl = start.normalizeRepo(b.repo);
             if (!repoUrl) return back(String(b.repo || '').trim() ? 'That is not a Git address Codes can clone: use https://…, git@host:owner/name or owner/name, with no password in it.' : 'Pick a repository (owner/name or any Git URL), choose an OpenVibe site, or start something new.');
@@ -477,14 +493,27 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         if (!who) return back('Choose who works on it from the list.');
         const agent = who.agent || '';
         let args;
+        const { parseArgs } = require('../../harness/job');
+        const jobInput = (repo, prompt) => JSON.stringify({ repo, prompt, agent: agent || null, ...(who.model ? { model: who.model } : {}), permission: 'edit', ...(b.effort ? { effort: String(b.effort) } : {}) });
         try {
-            const { parseArgs } = require('../../harness/job');
-            args = parseArgs(JSON.stringify({ repo: repoUrl, prompt: text, agent: agent || null, ...(who.model ? { model: who.model } : {}), permission: 'edit', ...(b.effort ? { effort: String(b.effort) } : {}) }));
+            args = parseArgs(jobInput(repoUrl, text));
         } catch (e) { return back(`Check the repository: ${e.message}.`); }
         let project = null;
         try { project = (await tasks.latestProject?.(req.viewer.subject)) || await conductor.projectFor(req.viewer.token || null, req.viewer.subject); } catch { project = null; }
         if (!project) return back('Codes could not find or make a project for you on OpenVibe.Services: sign in again and retry.');
         if (agent) await userSettings.save(req.viewer.subject, { default_agent: agent }).catch(() => {});
+        if (targets && targets.length > 1) {
+            // One request across several projects: a task for each, each told what the others are, so the parts agree.
+            const names = targets.map((x) => x.repository.replace(/^OpenVibers\//, ''));
+            let first = null;
+            for (const [i, x] of targets.entries()) {
+                const note = `\n\n(This request spans ${names.join(', ')}. This task is the ${names[i]} part; the others are separate tasks. Change only what this repository needs, and keep the names and behaviour consistent with the other parts.)`;
+                const each = parseArgs(jobInput(x.url, `${text}${note}`.slice(0, 16000)));
+                const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args: each });
+                if (!first) first = row;
+            }
+            return res.redirect(303, `/tasks/${encodeURIComponent(first.id)}`);
+        }
         const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args });
         return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}`);
     });
