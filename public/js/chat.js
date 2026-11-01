@@ -18,6 +18,76 @@
     document.addEventListener('ov:boost:load', init);
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
+    // ── A new chat: the three ways to start, and the ideas rail ──
+    // The cards are radio buttons of the composer's form (CSS shows each one's pickers); here a card also swaps the
+    // placeholder and the rail's ideas, and an idea fills the box and picks the card it belongs to.
+    function startPage(app, form, text, grow) {
+        const rail = $('[data-ch-ideas]', app);
+        const track = rail && $('[data-ch-ideas-track]', rail);
+        const kind = $('[data-ch-kind]', form);
+        const modes = Array.from(app.querySelectorAll('[data-ch-mode]'));
+        let sets = {};
+        try { sets = rail ? JSON.parse(rail.dataset.chIdeasets || '{}') : {}; } catch { sets = {}; }
+        const PLACEHOLDER = { new: 'Describe your website, game or app', openvibe: 'Describe the change, question or fix', code: 'Describe the change, question or fix' };
+        const ICON = (i) => (i.kind === 'game' ? 'game' : i.kind === 'app' ? 'app' : i.kind === 'website' ? 'web' : i.mode === 'openvibe' ? 'ov' : 'spark');
+        // The rail's speed follows its length: about 32 px a second, whatever the ideas.
+        const pace = () => { if (track) track.style.setProperty('--ch-drift', `${Math.max(30, Math.round(track.scrollWidth / 2 / 32))}s`); };
+        function card(i, copy) {
+            const li = document.createElement('li');
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = 'ch-idea';
+            if (copy) b.tabIndex = -1;
+            b.dataset.chIdea = i.text; b.dataset.chIdeaMode = i.mode;
+            if (i.kind) b.dataset.chIdeaKind = i.kind;
+            const svg = icons.get(ICON(i));
+            if (svg) { const c = svg.cloneNode(true); c.removeAttribute('data-icon'); b.appendChild(c); }
+            const span = document.createElement('span'); span.textContent = i.text; b.appendChild(span);
+            li.appendChild(b);
+            return li;
+        }
+        // The icons come from the page (a <template> of the rail's five); this script draws none of its own.
+        const icons = new Map();
+        const tpl = rail && $('template[data-ch-idea-icons]', rail);
+        if (tpl) tpl.content.querySelectorAll('svg[data-icon]').forEach((svg) => icons.set(svg.dataset.icon, svg));
+        function fill(mode) {
+            if (!track || !sets[mode]) return;
+            const lists = track.querySelectorAll('.ch-spark-list');
+            lists.forEach((ul, n) => { ul.textContent = ''; sets[mode].forEach((i) => ul.appendChild(card(i, n > 0))); });
+            pace();
+        }
+        function choose(mode, { focus = false } = {}) {
+            const radio = modes.find((r) => r.value === mode);
+            if (radio && !radio.checked) radio.checked = true;
+            if (text && PLACEHOLDER[mode]) text.placeholder = PLACEHOLDER[mode];
+            if (rail && rail.dataset.chShown !== mode) { rail.dataset.chShown = mode; fill(mode); }
+            if (focus && text) text.focus();
+        }
+        modes.forEach((r) => r.addEventListener('change', () => { if (r.checked) choose(r.value, { focus: true }); }));
+        const current = modes.find((r) => r.checked);
+        if (rail && current) rail.dataset.chShown = current.value;
+        pace();
+        if (rail) {
+            rail.addEventListener('click', (e) => {
+                const b = e.target.closest('[data-ch-idea]');
+                if (!b) return;
+                choose(b.dataset.chIdeaMode);
+                if (kind && b.dataset.chIdeaKind) kind.value = b.dataset.chIdeaKind;
+                text.value = b.dataset.chIdea;
+                grow();
+                text.focus();
+                // The words are the person's to change: the caret goes to the end.
+                text.setSelectionRange(text.value.length, text.value.length);
+            });
+            const pause = $('[data-ch-ideas-pause]', rail);
+            if (pause) pause.addEventListener('click', () => {
+                const paused = rail.classList.toggle('is-paused');
+                pause.setAttribute('aria-pressed', String(paused));
+                pause.setAttribute('aria-label', paused ? 'Play the ideas' : 'Pause the ideas');
+                pause.title = pause.getAttribute('aria-label');
+            });
+        }
+    }
+
     function init() {
         const app = document.querySelector('[data-chat]');
         if (!app || app.dataset.chReady) return;
@@ -66,7 +136,7 @@
                 e.preventDefault();
                 if (text.value.trim()) form.requestSubmit();
             });
-            app.querySelectorAll('[data-ch-idea]').forEach((b) => b.addEventListener('click', () => { text.value = b.dataset.chIdea; grow(); text.focus(); }));
+            startPage(app, form, text, grow);
             // The repository: a recent one is a tap away, and typing searches every repository the person can reach.
             const repo = $('[data-ch-repo]', form);
             app.querySelectorAll('[data-ch-saved-repo]').forEach((b) => b.addEventListener('click', () => { if (repo) { repo.value = b.dataset.chSavedRepo; text.focus(); } }));

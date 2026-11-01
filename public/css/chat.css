@@ -142,7 +142,7 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch-pick:focus-within{border-color:color-mix(in srgb,var(--ch-accent) 55%,var(--ch-line))}
 .ch-pick .ch-caret{position:absolute;right:8px;pointer-events:none}
 .ch-pick .ch-i:not(.ch-caret){width:15px;height:15px}
-.ch-pick-repo input{width:min(260px,52vw);border:0;background:transparent;color:inherit;font:inherit;font-size:13px}
+.ch-pick-repo input{width:min(240px,48vw);border:0;background:transparent;color:inherit;font:inherit;font-size:13px}
 .ch-pick-repo input:focus{outline:none}
 .ch-pick-file{cursor:pointer;padding:0 9px}
 .ch-pick-file input{position:absolute;inset:0;opacity:0;cursor:pointer}
@@ -167,9 +167,54 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch-hello{display:grid;justify-items:center;gap:10px;text-align:center}
 .ch-hello h1{margin:6px 0 0;font-size:clamp(24px,3.2vw,32px);letter-spacing:-.03em;line-height:1.15;text-wrap:balance}
 .ch-hello p{margin:0;max-width:52ch;color:var(--ch-soft);line-height:1.55}
-.ch-ideas{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:10px}
-.ch-recent{margin-top:2px}
-.ch-recent .ch-chip{font-size:12.5px;padding:4px 10px;color:var(--ch-muted)}
+/* What you are making: three cards that belong to the composer's form. Each says where its work runs. */
+.ch-modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;width:100%;margin:14px 0 0;padding:0;border:0;min-width:0}
+.ch-mode{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);align-content:start;gap:2px 11px;padding:12px 14px;border:1px solid var(--ch-line);border-radius:16px;background:var(--ch-card);text-align:left;cursor:pointer;transition:border-color .15s,background-color .15s}
+.ch-mode:hover{border-color:color-mix(in srgb,var(--ch-accent) 35%,var(--ch-line))}
+.ch-mode input{position:absolute;inset:0;margin:0;opacity:0;cursor:pointer}
+.ch-mode-i{grid-row:span 2;display:grid;place-items:center;width:34px;height:34px;border-radius:11px;color:var(--ch-accent);background:color-mix(in srgb,var(--ch-accent) 12%,transparent)}
+.ch-mode-i .ch-i{width:18px;height:18px}
+.ch-mode b{font-size:14.5px;letter-spacing:-.01em;color:var(--ch-ink)}
+.ch-mode small{font-size:12.5px;line-height:1.4;color:var(--ch-muted)}
+.ch-mode:has(input:checked){border-color:color-mix(in srgb,var(--ch-accent) 70%,var(--ch-line));background:color-mix(in srgb,var(--ch-accent) 9%,var(--ch-card))}
+.ch-mode:has(input:checked) .ch-mode-i{color:var(--ch-on-accent);background:var(--ch-accent)}
+.ch-mode:has(input:focus-visible){outline:2px solid var(--ch-accent);outline-offset:2px}
+/* Each picker and line shows for the way it belongs to. */
+.ch:has([data-ch-mode][value="new"]:checked) :is(.ch-for-openvibe,.ch-for-code,.ch-for-agents),
+.ch:has([data-ch-mode][value="openvibe"]:checked) :is(.ch-for-new,.ch-for-code),
+.ch:has([data-ch-mode][value="code"]:checked) :is(.ch-for-new,.ch-for-openvibe){display:none}
+/* The repositories used last, one tap each: a sideways row that never wraps the composer taller. */
+.ch-recent{display:flex;gap:6px;margin:8px 0 0;overflow-x:auto;scrollbar-width:none}
+.ch-recent .ch-chip{flex:none;font-size:12.5px;padding:4px 10px;color:var(--ch-muted)}
+/* Where the work runs, under the bar. */
+.ch-where{margin:6px 2px 0;font-size:12.5px;line-height:1.45;color:var(--ch-soft)}
+.ch-where>span{display:flex;align-items:flex-start;gap:7px}
+.ch-where .ch-i{width:15px;height:15px;margin-top:1px;color:var(--ch-accent)}
+.ch-where b{color:var(--ch-ink);font-weight:650}
+.ch-where a{color:var(--ch-accent);font-weight:600}
+.ch-where-tail{color:var(--ch-muted)}
+.ch-on{display:inline-flex;align-items:center;gap:4px;font-style:normal;font-weight:600;color:var(--ch-ok)}
+.ch-on::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
+/* The ideas rail: it drifts sideways and stops under a pointer, the keyboard or its own pause. Two copies make the
+   loop seamless; the second is hidden from assistive tech and the keyboard. Calm motion (either preference) makes
+   it a still row that scrolls by hand. */
+.ch-spark{display:flex;align-items:center;gap:4px;margin:0 max(16px,calc((100% - var(--ch-col)) / 2)) 12px}
+.ch-spark-view{flex:1;min-width:0;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent);mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent)}
+.ch-spark-track{display:flex;width:max-content;animation:ch-drift var(--ch-drift,80s) linear infinite}
+.ch-spark-list{display:flex;gap:8px;margin:0;padding:2px 8px 2px 0;list-style:none}
+.ch-spark:hover .ch-spark-track,.ch-spark:focus-within .ch-spark-track,.ch-spark.is-paused .ch-spark-track{animation-play-state:paused}
+@keyframes ch-drift{to{translate:-50% 0}}
+.ch-idea{display:inline-flex;align-items:center;gap:8px;padding:8px 14px 8px 11px;border-radius:14px;border:1px solid var(--ch-line);background:var(--ch-card);color:var(--ch-soft);font:inherit;font-size:13px;white-space:nowrap;cursor:pointer;transition:color .15s,border-color .15s}
+.ch-idea:hover,.ch-idea:focus-visible{color:var(--ch-ink);border-color:color-mix(in srgb,var(--ch-accent) 45%,var(--ch-line))}
+.ch-idea .ch-i{width:15px;height:15px;color:var(--ch-accent)}
+.ch-spark-pause{width:32px;height:32px}
+.ch-spark-pause .ch-i{width:15px;height:15px}
+.ch-spark .ch-i-play,.ch-spark.is-paused .ch-i-pause{display:none}
+.ch-spark.is-paused .ch-i-play{display:block}
+@media (prefers-reduced-motion:reduce){.ch-spark-track{animation:none}.ch-spark-view{overflow-x:auto;scrollbar-width:none}.ch-spark-list[aria-hidden]{display:none}.ch-spark-pause{display:none}}
+html[data-ov-motion=reduced] .ch-spark-track{animation:none}
+html[data-ov-motion=reduced] .ch-spark-view{overflow-x:auto;scrollbar-width:none}
+html[data-ov-motion=reduced] .ch-spark-list[aria-hidden],html[data-ov-motion=reduced] .ch-spark-pause{display:none}
 
 /* The workspace's other pages (Agents, Machines, Usage, Settings…) in the conversation's place: they scroll there and
    keep their own heading, so the bar above them is only the phone's way to the rail. */
@@ -208,8 +253,18 @@ details[open]>summary .ch-caret{rotate:180deg}
   .ch-thread{padding:18px 14px 16px}
   .ch-bubble{max-width:88%}
   .ch-composer{margin:0 8px calc(8px + env(safe-area-inset-bottom,0px));border-radius:20px}
-  .ch-pick-repo input{width:46vw}
-  .ch.is-empty .ch-thread{padding-top:56px}
+  .ch-pick-repo{flex:1 1 100%}
+  .ch-pick-repo input{width:auto;flex:1;min-width:0}
+  .ch.is-empty .ch-thread{padding-top:52px}
+  .ch-hello{gap:8px}
+  .ch-hello h1{font-size:23px}
+  .ch-hello p{font-size:14px}
+  .ch-modes{grid-template-columns:minmax(0,1fr);gap:6px;margin-top:8px}
+  .ch-mode{gap:1px 11px;padding:9px 12px;border-radius:14px}
+  .ch-mode-i{width:32px;height:32px;border-radius:10px;align-self:center}
+  .ch-mode b{font-size:14px}
+  .ch-mode small{font-size:12px;line-height:1.35}
+  .ch-spark{margin:0 8px 10px}
 }
 .ch-scrim{position:fixed;inset:0;z-index:10050;background:rgba(0,0,0,.4)}
 @media (prefers-reduced-motion:reduce){.ch-dot.is-busy,.ch-dots i,.ch-step.is-new{animation:none}.ch-side{transition:none}.ch-thread{scroll-behavior:auto}}

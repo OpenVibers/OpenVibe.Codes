@@ -22,6 +22,7 @@ const { asyncRouter } = require('./router');
 const { sessionLogOf } = require('../domain/run-tasks');
 const models = require('../data/models');
 const kit = require('openvibe-shared/kit');
+const start = require('./start');
 
 const LIVE = ['queued', 'placed', 'running'];
 const safeId = (s) => /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(s || ''));
@@ -57,6 +58,12 @@ const P = {
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
     repo: '<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3Z"/><path d="M5 17a3 3 0 0 1 3-3h11"/>',
     chevron: '<path d="m6 9 6 6 6-6"/>',
+    spark: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9Z"/><path d="M19 15v4M17 17h4"/>',
+    ov: '<circle cx="8.5" cy="12" r="5"/><path d="m14 7 3.5 10L21 7"/>',
+    game: '<rect x="2.5" y="7" width="19" height="11" rx="5.5"/><path d="M7 11v3M5.5 12.5h3M15.5 12h.01M18 13.5h.01"/>',
+    app: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
+    pause: '<path d="M9 6v12M15 6v12"/>',
+    play: '<path d="M8 5.5v13l10-6.5Z"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
 };
 const ico = (name, cls = '') => `<svg class="ch-i${cls ? ` ${cls}` : ''}" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${P[name] || P.tool}</svg>`;
@@ -120,7 +127,7 @@ const repoLabel = (repo) => { try { return new URL(String(repo)).pathname.split(
 
 function createChatRoutes(ctx) {
     const r = asyncRouter();
-    const { config, store, harnesses, tasks, conductor, approvals, userSettings, github } = ctx;
+    const { config, store, harnesses, tasks, conductor, approvals, userSettings, github, machines } = ctx;
     const db = store.db;
     const form = express.urlencoded({ extended: false, limit: '32kb' });
     const viewer = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
@@ -302,26 +309,26 @@ function createChatRoutes(ctx) {
     }
 
     // ── The composer ─────────────────────────────────────────────────────────────────────────────────────────────
-    function whoPicker(selected, { label = 'Who works on it', auto = null } = {}) {
+    function whoPicker(selected, { label = 'Who works on it', auto = null, cls = '' } = {}) {
         const all = models.choices(harnesses);
         const groups = new Map();
         for (const c of all.slice(1)) { if (!groups.has(c.group)) groups.set(c.group, []); groups.get(c.group).push(c); }
         const opt = (c) => `<option value="${esc(c.value)}"${selected === c.value ? ' selected' : ''}${c.note ? ` title="${esc(c.note)}"` : ''}>${esc(c.label)}</option>`;
         const first = auto ? `<option value="">${esc(auto)}</option>` : opt(all[0]);
-        return `<label class="ch-pick" title="${esc(label)}"><span class="ch-sr">${esc(label)}</span>${ico('agents')}<select name="who" data-ch-who>${first}${[...groups].map(([g, list]) => list.length > 1 ? `<optgroup label="${esc(g)}">${list.map(opt).join('')}</optgroup>` : opt(list[0])).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+        return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="${esc(label)}"><span class="ch-sr">${esc(label)}</span>${ico('agents')}<select name="who" data-ch-who>${first}${[...groups].map(([g, list]) => list.length > 1 ? `<optgroup label="${esc(g)}">${list.map(opt).join('')}</optgroup>` : opt(list[0])).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
     // The effort in plain words (the shared ladder underneath; each agent gets the nearest level it accepts).
     const EFFORT = [['', 'Effort: auto'], ['low', 'Quick'], ['medium', 'Balanced'], ['high', 'Thorough'], ['max', 'Deepest']];
     const effortWord = (v) => (EFFORT.find(([k]) => k === v) || [null, v])[1];
-    function effortPicker(selected = '') {
-        return `<label class="ch-pick" title="How hard it thinks"><span class="ch-sr">Effort</span>${ico('sub')}<select name="effort" data-ch-effort>${EFFORT.map(([v, l]) => `<option value="${v}"${selected === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+    function effortPicker(selected = '', cls = '') {
+        return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="How hard it thinks"><span class="ch-sr">Effort</span>${ico('sub')}<select name="effort" data-ch-effort>${EFFORT.map(([v, l]) => `<option value="${v}"${selected === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
-    function composer({ action, api = '', placeholder, pickers = '', live = false, stopAction = '', hidden = '', note = '' }) {
-        return `<form class="ch-composer" method="post" action="${esc(action)}"${api ? ` data-ch-api="${esc(api)}"` : ''} data-ch-composer>${hidden}
+    function composer({ action, api = '', placeholder, pickers = '', live = false, stopAction = '', hidden = '', note = '', id = '', where = '' }) {
+        return `<form class="ch-composer"${id ? ` id="${esc(id)}"` : ''} method="post" action="${esc(action)}"${api ? ` data-ch-api="${esc(api)}"` : ''} data-ch-composer>${hidden}
 <label class="ch-sr" for="ch-text">${esc(placeholder)}</label>
 <textarea id="ch-text" name="text" rows="1" placeholder="${esc(placeholder)}" required data-ch-text></textarea>
 <div class="ch-bar"><div class="ch-picks">${pickers}</div>${live && stopAction ? `<button class="ch-icon-btn ch-stop" formaction="${esc(stopAction)}" formnovalidate aria-label="Stop" title="Stop">${ico('stop')}</button>` : ''}<button class="ch-send" type="submit" aria-label="Send" title="Send">${ico('send')}</button></div>
-${note ? `<p class="ch-note" data-ch-status role="status">${note}</p>` : '<p class="ch-note" data-ch-status role="status"></p>'}
+${where}${note ? `<p class="ch-note" data-ch-status role="status">${note}</p>` : '<p class="ch-note" data-ch-status role="status"></p>'}
 </form>`;
     }
 
@@ -366,20 +373,76 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         title, page: body, here, css, scripts, head: '',
     });
 
-    // A new conversation: the greeting, the repository and the agent, and the composer.
+    /** The person's machines, for the line that says where the work runs: never more than 1.5 s, never fatal. */
+    async function machinesFor(req) {
+        // The current token only: a refresh here would rotate the session with no response to save it on.
+        const token = req.token || (req.viewer && req.viewer.token) || null;
+        if (!token || !machines || !machines.list) return null;
+        let timer;
+        const late = new Promise((resolve) => { timer = setTimeout(resolve, 1500, null); if (timer.unref) timer.unref(); });
+        const read = Promise.resolve().then(() => machines.list(token)).catch(() => null);
+        const out = await Promise.race([read, late]).finally(() => clearTimeout(timer));
+        return out && out.ok ? (out.machines || []).filter((m) => m && m.state !== 'revoked') : null;
+    }
+    /** Where an agent's work runs, in one line: the person's own computer (which one, or how to pair one). */
+    function whereAgents(list) {
+        const tail = '<span class="ch-where-tail">in a fresh copy of the code, with a pull request at the end</span>';
+        if (list == null) return `${ico('machines')}<span>Runs on your computer ${tail}</span>`;
+        if (!list.length) return `${ico('machines')}<span>Runs on your computer. <a href="/machines">Pair it first</a>: it takes a minute, and the task waits for it.</span>`;
+        const on = list.find((m) => m.state === 'online');
+        const m = on || list[0];
+        const name = esc(m.name || m.node_id || 'your computer');
+        return `${ico('machines')}<span>Runs on <b>${name}</b>${on ? ' <em class="ch-on">online</em>' : ' when it is on'} ${tail}</span>`;
+    }
+
+    // A new conversation: what you are making (something new, an OpenVibe project or your own code), the ideas rail,
+    // and the composer. Every choice is a form field, so it all works without JavaScript; public/js/chat.js only makes
+    // the rail move, fills the box from an idea and swaps the placeholder.
     r.get('/', async (req, res, next) => {
         if (!viewer(req)) return next();
         const settings = await userSettings.get(req.viewer.subject).catch(() => ({}));
-        const repos = github ? await github.recent(req.viewer.subject, 6).catch(() => []) : [];
-        const repo = String(req.query.repo || (repos[0] && repos[0].url) || '');
+        const [repos, mine] = await Promise.all([
+            github ? github.recent(req.viewer.subject, 6).catch(() => []) : [],
+            machinesFor(req),
+        ]);
+        const asked = String(req.query.repo || '');
+        const repo = asked || (repos[0] && repos[0].url) || '';
+        const mode = start.MODES.includes(req.query.mode) ? req.query.mode : asked ? 'code' : repos.length ? 'code' : 'new';
+        const kind = start.KINDS[req.query.kind] ? req.query.kind : 'website';
+        const chosenProject = start.project(req.query.project) ? String(req.query.project) : 'OpenVibers/OpenVibe.Live';
         const error = String(req.query.error || '').slice(0, 200);
         const name = String(req.viewer.displayName || req.viewer.username || '').split(' ')[0];
-        const ideas = ['Fix the failing tests', 'Explain how this project is laid out', 'Make the home page faster on phones', 'Find and fix one bug'];
-        const pickers = `<label class="ch-pick ch-pick-repo" title="Repository"><span class="ch-sr">Repository</span>${ico('repo')}<input name="repo" type="url" value="${esc(repo)}" placeholder="Repository URL" list="ch-repos" autocomplete="url" required data-ch-repo data-ch-repo-url="/api/v1/me/repos"><datalist id="ch-repos">${repos.map((x) => `<option value="${esc(x.url)}">${esc(x.full_name)}</option>`).join('')}</datalist></label>${whoPicker(settings.default_agent ? `${settings.default_agent}|` : '')}${effortPicker('')}`;
-        const thread = `<div class="ch-hello"><span class="ov-mark" data-size="56" aria-hidden="true"></span><h1>${name ? `What should we build, ${esc(name)}?` : 'What should we build?'}</h1><p>Say it the way you would to a colleague. Codes picks the agent, runs it on your machine, and shows you what changed.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}<div class="ch-ideas" aria-label="Ideas">${ideas.map((t) => `<button class="ch-chip" type="button" data-ch-idea="${esc(t)}">${esc(t)}</button>`).join('')}</div>${repos.length > 1 ? `<div class="ch-ideas ch-recent" aria-label="Your recent repositories">${repos.map((x) => `<button class="ch-chip" type="button" data-ch-saved-repo="${esc(x.url)}">${ico('repo')}${esc(x.full_name)}</button>`).join('')}</div>` : ''}</div>`;
+
+        // The three ways to start: radio cards above the composer (they belong to its form by id).
+        const MODE_CARDS = [
+            ['new', 'spark', 'Something new', 'A website, game or app. OpenVibe AI builds it online: nothing to install.'],
+            ['openvibe', 'ov', 'An OpenVibe site', `Improve Live, Chat, Games or any of ${start.PROJECTS.length} projects.`],
+            ['code', 'repo', 'Your code', 'Any Git repository, private ones too. Agents work on your computer.'],
+        ];
+        const modes = `<fieldset class="ch-modes"><legend class="ch-sr">What are you making?</legend>${MODE_CARDS.map(([v, icon, title, line]) => `<label class="ch-mode"><input type="radio" name="mode" value="${v}" form="ch-start"${mode === v ? ' checked' : ''} data-ch-mode><span class="ch-mode-i">${ico(icon)}</span><b>${esc(title)}</b><small>${esc(line)}</small></label>`).join('')}</fieldset>`;
+
+        // The pickers: each shows for the way it belongs to (CSS reads the checked card).
+        const kindPick = `<label class="ch-pick ch-for-new" title="What it is"><span class="ch-sr">What it is</span>${ico('web')}<select name="kind" data-ch-kind>${Object.entries(start.KINDS).map(([v, k]) => `<option value="${v}"${kind === v ? ' selected' : ''}>${esc(k.label)}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+        const groups = [...new Set(start.PROJECTS.map((p) => p.group))];
+        const projectPick = `<label class="ch-pick ch-for-openvibe" title="Which OpenVibe project"><span class="ch-sr">Which OpenVibe project</span>${ico('ov')}<select name="project" data-ch-project>${groups.map((g) => `<optgroup label="${esc(g)}">${start.PROJECTS.filter((p) => p.group === g).map((p) => `<option value="${esc(p.repository)}"${chosenProject === p.repository ? ' selected' : ''}${p.line ? ` title="${esc(p.line)}"` : ''}>${esc(p.name)}${p.domain ? ` · ${esc(p.domain)}` : ''}</option>`).join('')}</optgroup>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+        const repoPick = `<label class="ch-pick ch-pick-repo ch-for-code" title="Repository"><span class="ch-sr">Repository: owner/name or any Git URL</span>${ico('repo')}<input name="repo" type="text" inputmode="url" spellcheck="false" autocapitalize="off" value="${esc(repo)}" placeholder="owner/name or any Git URL" list="ch-repos" autocomplete="off" data-ch-repo data-ch-repo-url="/api/v1/me/repos"><datalist id="ch-repos">${repos.map((x) => `<option value="${esc(x.url)}">${esc(x.full_name)}</option>`).join('')}</datalist></label>`;
+        const pickers = kindPick + projectPick + repoPick + whoPicker(settings.default_agent ? `${settings.default_agent}|` : '', { cls: 'ch-for-agents' }) + effortPicker('', 'ch-for-agents');
+        // The repositories a person used last are a tap away (the box also searches every one they can reach).
+        const recent = repos.length > 1 ? `<div class="ch-recent ch-for-code" role="group" aria-label="Your recent repositories">${repos.map((x) => `<button class="ch-chip" type="button" data-ch-saved-repo="${esc(x.url)}">${ico('repo')}${esc(x.full_name)}</button>`).join('')}</div>` : '';
+        const where = `${recent}<p class="ch-where"><span class="ch-for-new">${ico('web')}<span>Built on OpenVibe’s servers at <b>openvibe.space</b> <span class="ch-where-tail">and you get a live link; you check it before anything is built</span></span></span><span class="ch-for-agents">${whereAgents(mine)}</span></p>`;
+
+        // The ideas rail: it drifts sideways, stops under a pointer or the keyboard, and has its own pause. A press fills
+        // the box (and picks the way it belongs to), ready to be changed. The second copy is only there for the loop.
+        const sets = Object.fromEntries(start.MODES.map((m) => [m, start.ideasFor(m)]));
+        const kindIcon = (i) => (i.kind === 'game' ? 'game' : i.kind === 'app' ? 'app' : i.kind === 'website' ? 'web' : i.mode === 'openvibe' ? 'ov' : 'spark');
+        const card = (i, copy) => `<li><button class="ch-idea" type="button"${copy ? ' tabindex="-1"' : ''} data-ch-idea="${esc(i.text)}" data-ch-idea-mode="${esc(i.mode)}"${i.kind ? ` data-ch-idea-kind="${esc(i.kind)}"` : ''}>${ico(kindIcon(i))}<span>${esc(i.text)}</span></button></li>`;
+        const rail = (list) => `<ul class="ch-spark-list">${list.map((i) => card(i, false)).join('')}</ul><ul class="ch-spark-list" aria-hidden="true">${list.map((i) => card(i, true)).join('')}</ul>`;
+        const ideas = `<section class="ch-spark" aria-label="Ideas to start from" data-ch-ideas data-ch-ideasets="${esc(JSON.stringify(sets))}"><div class="ch-spark-view"><div class="ch-spark-track" data-ch-ideas-track>${rail(sets[mode])}</div></div><template data-ch-idea-icons>${['web', 'game', 'app', 'ov', 'spark'].map((n) => ico(n).replace('<svg ', `<svg data-icon="${n}" `)).join('')}</template><button class="ch-icon-btn ch-spark-pause" type="button" data-ch-ideas-pause aria-pressed="false" aria-label="Pause the ideas" title="Pause the ideas">${ico('pause', 'ch-i-pause')}${ico('play', 'ch-i-play')}</button></section>`;
+
+        const thread = `<div class="ch-hello"><span class="ov-mark" data-size="56" aria-hidden="true"></span><h1>${name ? `What should we build, ${esc(name)}?` : 'What should we build?'}</h1><p>Say it the way you would to a friend. Pick what it is, and Codes sends it to the right place.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
         return frame(req, res, {
             title: 'New chat', empty: true, head: '<h1 class="ch-title">New chat</h1>', thread,
-            composerHtml: composer({ action: '/chat', placeholder: 'Describe the change, question or fix', pickers }),
+            composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'Describe the change, question or fix', pickers, where }) + ideas,
         });
     });
 
@@ -388,16 +451,33 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         if (!viewer(req)) return res.redirect(303, '/auth/login?next=%2F');
         if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
         const b = req.body || {};
-        const back = (msg) => res.redirect(303, `/?error=${encodeURIComponent(msg)}${b.repo ? `&repo=${encodeURIComponent(String(b.repo).slice(0, 300))}` : ''}`);
+        // The way it starts: a form from before the three cards (or the API's shape) names only a repo or a project.
+        const mode = start.MODES.includes(b.mode) ? b.mode : (b.project && !b.repo ? 'openvibe' : 'code');
+        // A typed address that carries a password never goes back into a URL (logs keep URLs).
+        const typed = String(b.repo || '');
+        const keep = [['mode', mode], ['repo', /:\/\/[^/]*@|^[^/]*:[^/]*@/.test(typed) ? '' : typed], ['project', b.project], ['kind', b.kind]].filter(([, v]) => v).map(([k, v]) => `&${k}=${encodeURIComponent(String(v).slice(0, 300))}`).join('');
+        const back = (msg) => res.redirect(303, `/?error=${encodeURIComponent(msg)}${keep}`);
         const text = String(b.text || '').trim().slice(0, 16000);
-        if (!text) return back('Write what you want done first.');
+        if (!text) return back('Write what you want made or changed first.');
+        // Something new: OpenVibe AI builds it on openvibe.space. The words go there in the box; nothing is built
+        // until the person presses Build, so a handed-over description is never spent behind their back.
+        if (mode === 'new') return res.redirect(303, start.spaceHref({ kind: b.kind, text }));
+        let repoUrl = '';
+        if (mode === 'openvibe') {
+            const p = start.project(b.project);
+            if (!p) return back('Pick one of the OpenVibe projects from the list.');
+            repoUrl = p.url;
+        } else {
+            repoUrl = start.normalizeRepo(b.repo);
+            if (!repoUrl) return back(String(b.repo || '').trim() ? 'That is not a Git address Codes can clone: use https://…, git@host:owner/name or owner/name, with no password in it.' : 'Pick a repository (owner/name or any Git URL), choose an OpenVibe site, or start something new.');
+        }
         const who = models.parse(b.who !== undefined ? b.who : (b.agent ? `${String(b.agent).trim()}|` : ''), harnesses);
         if (!who) return back('Choose who works on it from the list.');
         const agent = who.agent || '';
         let args;
         try {
             const { parseArgs } = require('../../harness/job');
-            args = parseArgs(JSON.stringify({ repo: String(b.repo || '').trim(), prompt: text, agent: agent || null, ...(who.model ? { model: who.model } : {}), permission: 'edit', ...(b.effort ? { effort: String(b.effort) } : {}) }));
+            args = parseArgs(JSON.stringify({ repo: repoUrl, prompt: text, agent: agent || null, ...(who.model ? { model: who.model } : {}), permission: 'edit', ...(b.effort ? { effort: String(b.effort) } : {}) }));
         } catch (e) { return back(`Check the repository: ${e.message}.`); }
         let project = null;
         try { project = (await tasks.latestProject?.(req.viewer.subject)) || await conductor.projectFor(req.viewer.token || null, req.viewer.subject); } catch { project = null; }
