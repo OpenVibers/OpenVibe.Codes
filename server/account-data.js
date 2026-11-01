@@ -43,6 +43,8 @@ const TABLES = [
     // The token itself is never stored; its jti is an internal handle and stays out of the export.
     { table: 'codes_run_tokens', subject: 'subject', file: 'run-tokens.json', order: 'created_at', columns: ['id', 'task_id', 'attempt_id', 'provider', 'expires_at', 'created_at'] },
     { table: 'codes_outbox', subject: 'subject', file: 'events-sent.json', order: 'created_at', columns: ['event_id', 'topic', 'created_at', 'published_at'] },
+    // The OpenVibe Git link: which forge account, and since when. The sealed tokens never leave; erased with the rest.
+    { table: 'codes_forge_links', subject: 'subject', file: 'openvibe-git-link.json', order: 'created_at', columns: ['forge_user', 'expires_at', 'created_at', 'updated_at'] },
 ];
 
 // The rows that hang under a person's tasks: exported under the task, erased before it.

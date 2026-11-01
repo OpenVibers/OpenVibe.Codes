@@ -111,6 +111,9 @@ async function createApp(opts = {}) {
     // person's own token opens them. Codes forwards the token and renders the answer; it never holds a note.
     ctx.memory = createMemory({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     ctx.github = createGitHub({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
+    // OpenVibe Git through the person's own account (server/domain/forge.js): off until the forge trusts Codes as an app.
+    ctx.forge = opts.forge || require('./domain/forge').createForge({ config, store, log });
+    tasks.setForge?.(ctx.forge);
     ctx.usage = createUsage({ store });
     // The conductor (Codes C9b) and its approvals inbox. The conductor starts Run jobs and reads their events through
     // tasks, so the two are wired to each other here, not in a constructor (which would be a cycle).
@@ -249,6 +252,7 @@ async function createApp(opts = {}) {
     });
     // The chat app (L31 CH1) answers a signed-in person's / and /tasks/:id; everyone else falls through to C4.
     app.use(require('./http/chat').createChatRoutes(ctx));
+    app.use(require('./http/git').createGitRoutes(ctx));   // after the chat app: it renders in ctx.chatShell
     // C4 workspace pages sit before the legacy marketing pages and share the existing owner-scoped task store.
     app.use(require('./http/c4').createC4Routes(ctx));
     app.use(pageRoutes);

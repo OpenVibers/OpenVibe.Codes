@@ -78,10 +78,10 @@ function pushTarget(requested, base, { exists = false, now = Date.now() } = {}) 
  * command line, never in the clone's remote URL, never in .git/config the agent can read.
  * → { env } to add to git's environment, or {} when no token is for this host.
  */
-function gitAuthFor(repo, env = process.env) {
+function credentialFor(repo, env = process.env) {
     let u;
-    try { u = new URL(String(repo || '')); } catch { return {}; }
-    if (u.protocol !== 'https:') return {};
+    try { u = new URL(String(repo || '')); } catch { return null; }
+    if (u.protocol !== 'https:') return null;
     const host = u.host.toLowerCase();
     const creds = new Map();
     if (env.GITHUB_TOKEN) creds.set('github.com', { user: 'x-access-token', token: String(env.GITHUB_TOKEN) });
@@ -93,7 +93,13 @@ function gitAuthFor(repo, env = process.env) {
         } catch { /* a line that is not https://user:token@host is skipped */ }
     });
     const c = creds.get(host);
-    if (!c || !c.token || /[\r\n]/.test(c.token + c.user)) return {};
+    if (!c || !c.token || /[\r\n]/.test(c.token + c.user)) return null;
+    return { ...c, host };
+}
+function gitAuthFor(repo, env = process.env) {
+    const c = credentialFor(repo, env);
+    if (!c) return {};
+    const host = c.host;
     const basic = Buffer.from(`${c.user}:${c.token}`).toString('base64');
     return { env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `http.https://${host}/.extraheader`, GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}` } };
 }
@@ -122,6 +128,9 @@ const ENV_NAMES = new Set([
     'DEEPSEEK_BASE_URL', 'DEEPSEEK_API_KEY',
     'OPENVIBE_AI_URL', 'OPENVIBE_AI_TOKEN', 'OPENVIBE_CODES_BASE_URL', 'OPENVIBE_CODES_API_KEY',
     'OPENVIBE_CODES_MODEL', 'OPENVIBE_CODES_HEADERS',
+    // A repository on OpenVibe Git: the person's credential line for the forge (Codes' forge link). For git only:
+    // bin/openvibe-codes.js keeps it out of the agent's environment.
+    'OPENVIBE_GIT_CREDENTIALS',
 ]);
 
 /** The environment a job's input asks for: the allowlisted names only, each a short string. */
@@ -446,9 +455,58 @@ async function writeAttachments(job, { dir, env, fetchImpl, say }) {
  * exist yet: never the base, never a protected name, never someone's existing branch (GitHub is asked first, and a push
  * is never forced, so a branch made meanwhile is not overwritten either).
  */
+// The forges that answer Gitea's API (Forgejo, Gitea): OpenVibe Git, and any the machine names in OPENVIBE_GITEA_HOSTS.
+function giteaHosts(env = process.env) {
+    return new Set(['git.openvibe.codes', ...String(env.OPENVIBE_GITEA_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean)]);
+}
+
+/** Push the branch to a Gitea-compatible forge with the machine's credential for it, and open the pull request there. */
+async function pushForge(dir, job, { env, fetchImpl, base }) {
+    const cred = credentialFor(job.repo, env);
+    let u;
+    try { u = new URL(job.repo); } catch { return { pushed: false, reason: 'the repository address is not a URL' }; }
+    const host = u.host.toLowerCase();
+    if (!cred) return { pushed: false, reason: `this machine has no token for ${host}` };
+    const [owner, name, ...rest] = u.pathname.replace(/\.git$/i, '').split('/').filter(Boolean);
+    if (!owner || !name || rest.length) return { pushed: false, reason: 'push is for owner/name repositories' };
+    const auth = gitAuthFor(job.repo, env).env;
+    const first = pushTarget(job.push.branch, base);
+    if (first.refused) return { pushed: false, reason: first.refused };
+    const branch = first.branch;
+    let exists = null;
+    try { exists = (await git(['ls-remote', '--heads', job.repo, `refs/heads/${branch}`], { cwd: dir, timeout: 60_000, env: auth })).trim() !== ''; } catch { exists = null; }
+    const checked = pushTarget(branch, base, { exists });
+    if (checked.refused) return { pushed: false, reason: checked.refused.replace('GitHub could not say', `${host} could not say`) };
+    const who = {
+        GIT_AUTHOR_NAME: env.GIT_AUTHOR_NAME || 'OpenVibe.Codes', GIT_AUTHOR_EMAIL: env.GIT_AUTHOR_EMAIL || 'codes@openvibe.codes',
+        GIT_COMMITTER_NAME: env.GIT_AUTHOR_NAME || 'OpenVibe.Codes', GIT_COMMITTER_EMAIL: env.GIT_AUTHOR_EMAIL || 'codes@openvibe.codes',
+    };
+    await git(['checkout', '-b', branch], { cwd: dir });
+    await git(['commit', '-m', job.prompt.split('\n')[0].slice(0, 72) || 'OpenVibe.Codes task'], { cwd: dir, env: who });
+    await git(['push', job.repo, `HEAD:refs/heads/${branch}`], { cwd: dir, timeout: 180_000, env: auth });
+    const out = { pushed: true, branch, branch_url: `https://${host}/${owner}/${name}/src/branch/${encodeURIComponent(branch)}` };
+    if (job.push.pull_request) {
+        const r = await fetchImpl(`https://${host}/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls`, {
+            method: 'POST',
+            headers: { Authorization: `token ${cred.token}`, Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'openvibe-codes' },
+            body: JSON.stringify({ title: job.prompt.split('\n')[0].slice(0, 120), head: branch, base, body: `Made with OpenVibe.Codes on the requester's own machine.\n\n${job.prompt.slice(0, 4000)}` }),
+            signal: AbortSignal.timeout(30_000),
+        }).catch(() => null);
+        const doc = r ? await r.json().catch(() => null) : null;
+        if (r && r.ok && doc && doc.html_url) out.pull_request = doc.html_url;
+        else out.pull_request_error = r ? `${host} answered ${r.status}` : `${host} did not answer`;
+    }
+    return out;
+}
+
 async function pushBranch(dir, job, { env, fetchImpl, base }) {
     const token = env.GITHUB_TOKEN;
     const gh = githubRepo(job.repo);
+    if (!gh) {
+        let host = '';
+        try { host = new URL(job.repo).host.toLowerCase(); } catch { host = ''; }
+        if (host && giteaHosts(env).has(host)) return pushForge(dir, job, { env, fetchImpl, base });
+    }
     if (!token || !gh) return { pushed: false, reason: !gh ? 'push is for github.com repositories' : 'this machine has no GITHUB_TOKEN' };
     const first = pushTarget(job.push.branch, base);
     if (first.refused) return { pushed: false, reason: first.refused };
@@ -640,4 +698,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { gitAuthFor, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments };
+module.exports = { gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments };
