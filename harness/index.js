@@ -130,6 +130,16 @@ function handoffNote({ prompt, from, why, tally, cwd }) {
     ].filter((l) => l !== '').join('\n');
 }
 
+/**
+ * Why an agent cannot take a run at this permission, or null. An agent with no edits-only mode (OpenCode, Command Code:
+ * their unattended flag approves the shell too) takes an "edit" run only inside a sandbox; on the person's own
+ * computer it takes "full" (they asked for anything) or nothing.
+ */
+function unfitFor(adapter, { permission, sandboxed }) {
+    if (!adapter || adapter.editsOnly !== false || permission !== 'edit' || sandboxed) return null;
+    return `${adapter.name || adapter.id} has no edits-only mode: outside a sandbox it would run any command. Use --permission full, or run it on a paired machine`;
+}
+
 function createHarness({ env = process.env, fetch: fetchImpl = globalThis.fetch, store = createStore({ env }), catalog = createHarnesses() } = {}) {
     const adapters = adaptersFor(env);
 
@@ -138,15 +148,16 @@ function createHarness({ env = process.env, fetch: fetchImpl = globalThis.fetch,
     }
 
     /** The placement decision among the agents available here; `exclude` leaves harnesses out (a hand-off's earlier attempts). */
-    function route({ task = 'edit', requirements = {}, exclude = [] } = {}) {
+    function route({ task = 'edit', requirements = {}, exclude = [], permission = null, sandboxed = false } = {}) {
         const opts = {};
         const why = {};
         for (const h of catalog.list()) {
             const a = availability(adapters[h.id], env);
-            const down = !a.available || exclude.includes(h.id);
+            const unfit = unfitFor(adapters[h.id], { permission, sandboxed });
+            const down = !a.available || exclude.includes(h.id) || !!unfit;
             for (const agent of catalog.agents(h.id)) {
                 const id = `${h.id}:${agent.id || agent.model}`;
-                if (down) { opts[id] = { health: 'down' }; why[id] = exclude.includes(h.id) ? 'already tried in this run' : a.reason; }
+                if (down) { opts[id] = { health: 'down' }; why[id] = exclude.includes(h.id) ? 'already tried in this run' : unfit || a.reason; }
             }
         }
         const decision = placement.route({ task, extra: requirements, harnesses: catalog, opts });
@@ -154,7 +165,7 @@ function createHarness({ env = process.env, fetch: fetchImpl = globalThis.fetch,
         return decision;
     }
 
-    function run({ prompt, task = 'edit', agent = null, model = null, effort = null, cwd = process.cwd(), permission = 'edit', resume = null, handoff = true, maxAttempts = 3, stallMs = 10 * 60_000, timeoutMs, maxTurns, requirements = {}, signal, adapterOptions = null } = {}) {
+    function run({ prompt, task = 'edit', agent = null, model = null, effort = null, cwd = process.cwd(), permission = 'edit', resume = null, handoff = true, maxAttempts = 3, stallMs = 10 * 60_000, timeoutMs, maxTurns, requirements = {}, signal, adapterOptions = null, sandboxed = false } = {}) {
         if (!prompt || !String(prompt).trim()) throw new Error('a run needs a prompt');
         if (!['read', 'edit', 'full'].includes(permission)) throw new Error('permission is read, edit or full');
         const runId = store.newRunId();
@@ -177,8 +188,10 @@ function createHarness({ env = process.env, fetch: fetchImpl = globalThis.fetch,
                         final = ev.result({ ok: false, text: `${agent} is not available here: ${a.reason || 'unknown agent'}` });
                         yield final; break;
                     }
+                    const unfit = unfitFor(adapters[agent], { permission, sandboxed });
+                    if (unfit) { final = ev.result({ ok: false, text: unfit }); yield final; break; }
                 } else {
-                    const decision = route({ task, requirements, exclude: tried });
+                    const decision = route({ task, requirements, exclude: tried, permission, sandboxed });
                     if (!decision.selected) {
                         const reason = attempt === 1 ? 'no available agent can take this task' : 'no other agent is available to take over';
                         const text = `${reason}: ${(decision.candidates || []).map((c) => `${c.id} (${c.reason || 'excluded'})`).join('; ')}`;
@@ -200,7 +213,7 @@ function createHarness({ env = process.env, fetch: fetchImpl = globalThis.fetch,
                 const controller = new AbortController();
                 if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true });
                 current = adapter.start({
-                    prompt: nextPrompt, cwd, model: modelFor, effort, resume: attempt === 1 ? resume : null, permission, maxTurns, timeoutMs, signal: controller.signal,
+                    prompt: nextPrompt, cwd, model: modelFor, effort, resume: attempt === 1 ? resume : null, permission, sandboxed: sandboxed === true, maxTurns, timeoutMs, signal: controller.signal,
                     // Extra flags a caller needs (the conductor's MCP config and permission rules); the adapter decides
                     // which of them its CLI understands. Nothing here can replace the fields above.
                     ...(adapterOptions && typeof adapterOptions === 'object' ? { options: adapterOptions } : {}),

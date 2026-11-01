@@ -512,6 +512,10 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         const run = harness.run({
             prompt: job.prompt, task: 'edit', agent: job.agent, model: job.model, effort: job.effort || null, cwd: work,
             permission: job.permission, handoff: !job.agent, maxAttempts: job.kind === 'conductor' ? 1 : 3,
+            // A job on the person's Node runs in its sandbox (own namespaces, a read-only root, no home folder, only
+            // what the job was given); the Node sets OPENVIBE_JOB_ID there. Only inside it may an agent with no
+            // edits-only mode take an "edit" task unattended (harness/index.js unfitFor).
+            sandboxed: !!env.OPENVIBE_JOB_ID,
             // A task carried on in the same conversation resumes its session (RESUME in the environment, or the job's
             // own resume field).
             resume: job.resume || null,
