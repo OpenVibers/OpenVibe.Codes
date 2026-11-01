@@ -50,6 +50,12 @@ function load(env = process.env) {
         git: {
             internalUrl: trim(env.CODES_GIT_INTERNAL_URL || 'http://127.0.0.1:5060'),
             publicUrl: trim(env.CODES_GIT_URL || 'https://git.openvibe.codes'),
+            // Linking a person's OpenVibe Git account (the owner, 11-01: "make a repository through your OpenVibe
+            // account on our actual Git"): an OAuth2 application on the forge, and the key that seals the tokens it
+            // hands Codes (32 bytes, base64). Without all three, linking is off and the page says so.
+            clientId: env.CODES_FORGE_CLIENT_ID || '',
+            clientSecret: env.CODES_FORGE_CLIENT_SECRET || '',
+            sealKey: env.CODES_SEAL_KEY || '',
         },
         // The audience of the Network service tokens a first-party service calls /api/v1/tasks with (codes.task.*).
         serviceAudience: env.CODES_AUDIENCE || 'openvibe.codes',

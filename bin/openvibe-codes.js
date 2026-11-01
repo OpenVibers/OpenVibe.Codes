@@ -170,17 +170,19 @@ async function main() {
         // harness is built with it, so the agent's process gets the token and never the job's other input.
         let wanted = {};
         try { wanted = jobEnv(JSON.parse(input)); } catch { wanted = {}; }
-        const jobHarness = createHarness({ env: { ...process.env, ...wanted } });
+        // A forge credential line is for git alone (the clone and the push): the agent's environment never has it.
+        const { OPENVIBE_GIT_CREDENTIALS: gitCredentials, ...forAgents } = { ...process.env, ...wanted };
+        const jobHarness = createHarness({ env: forAgents });
         // The proof adapters: the repo's own tests, its pages in a browser, its diff, and the second model. The review
         // spends the same run token the attempt already carries, so it names the same person.
         const proof = createProofAdapters({
             cwd: process.cwd(),
-            env: { ...process.env, ...wanted },
-            jobEnv: wanted,
+            env: forAgents,
+            jobEnv: (({ OPENVIBE_GIT_CREDENTIALS: _drop, ...rest }) => rest)(wanted),
             // The models this machine can offer a reviewer: the catalog's own.
             models: (jobHarness.agents() || []).flatMap((a) => (a.agents || []).map((x) => x.model)).filter(Boolean),
         });
-        await runJob({ input, harness: jobHarness, emit: out, writeResult: resultWriter(out), proof });
+        await runJob({ input, harness: jobHarness, emit: out, writeResult: resultWriter(out), proof, env: { ...forAgents, ...(gitCredentials ? { OPENVIBE_GIT_CREDENTIALS: gitCredentials } : {}) } });
         return 0;
     }
     if (cmd === 'runs') {

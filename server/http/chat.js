@@ -177,6 +177,7 @@ function createChatRoutes(ctx) {
                 place('Conductor', '/conductor', 'conductor'),
                 place('Agents', '/agents', 'agents'),
                 place('Machines', '/machines', 'machines'),
+                place('OpenVibe Git', '/git', 'repo'),
                 place('Memory', '/memory', 'memory'),
                 place('Usage', '/usage', 'usage'),
                 ...(waitingIds.size ? [{ href: '/approvals', label: 'Approvals', icon: 'hand', here: here === '/approvals', count: waitingIds.size }] : []),
@@ -428,7 +429,8 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         const repoPick = `<label class="ch-pick ch-pick-repo ch-for-code" title="Repository"><span class="ch-sr">Repository: owner/name or any Git URL</span>${ico('repo')}<input name="repo" type="text" inputmode="url" spellcheck="false" autocapitalize="off" value="${esc(repo)}" placeholder="owner/name or any Git URL" list="ch-repos" autocomplete="off" data-ch-repo data-ch-repo-url="/api/v1/me/repos"><datalist id="ch-repos">${repos.map((x) => `<option value="${esc(x.url)}">${esc(x.full_name)}</option>`).join('')}</datalist></label>`;
         const pickers = kindPick + projectPick + repoPick + whoPicker(settings.default_agent ? `${settings.default_agent}|` : '', { cls: 'ch-for-agents' }) + effortPicker('', 'ch-for-agents');
         // The repositories a person used last are a tap away (the box also searches every one they can reach).
-        const recent = repos.length > 1 ? `<div class="ch-recent ch-for-code" role="group" aria-label="Your recent repositories">${repos.map((x) => `<button class="ch-chip" type="button" data-ch-saved-repo="${esc(x.url)}">${ico('repo')}${esc(x.full_name)}</button>`).join('')}</div>` : '';
+        const newRepo = `<a class="ch-chip ch-chip-new" href="/git">${ico('new')}New on OpenVibe Git</a>`;
+        const recent = `<div class="ch-recent ch-for-code" role="group" aria-label="Your repositories">${newRepo}${repos.length > 1 ? repos.map((x) => `<button class="ch-chip" type="button" data-ch-saved-repo="${esc(x.url)}">${ico('repo')}${esc(x.full_name)}</button>`).join('') : ''}</div>`;
         const where = `${recent}<p class="ch-where"><span class="ch-for-new">${ico('web')}<span>Built on OpenVibe’s servers at <b>openvibe.space</b> <span class="ch-where-tail">and you get a live link; you check it before anything is built</span></span></span><span class="ch-for-agents">${whereAgents(mine)}</span></p>`;
 
         // The ideas rail: it drifts sideways, stops under a pointer or the keyboard, and has its own pause. A press fills

@@ -251,6 +251,18 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
      *
      * → { env, mode } with mode 'ai' (through OpenVibe.AI), 'plan' (the person's own subscription) or 'none'
      */
+    /**
+     * A job's input with its environment: the run token's (attemptEnv), and for a repository on OpenVibe Git the
+     * person's credential line for the forge (server/domain/forge.js jobEnv), so their machine clones a private
+     * repository and pushes the branch. The job keeps the line out of the agent's environment (harness/job.js).
+     */
+    let forge = null;
+    async function withEnv(subject, args, env) {
+        const git = forge && args && args.repo ? await forge.jobEnv(subject, args.repo).catch(() => null) : null;
+        const all = { ...(env || {}), ...(git || {}) };
+        return Object.keys(all).length ? { ...args, env: all } : args;
+    }
+
     async function attemptEnv({ subject, taskId, attemptId = null, agent = null, budget = null }) {
         if (!runTokens) return { env: null, mode: 'none' };
         try {
@@ -568,7 +580,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             // travels with the job's input and the machine's worker hands it to the harness.
             const funding = await attemptEnv({ subject, taskId: id, attemptId: first.attempt.id, agent: agent || null, budget });
             await attemptStore.bind(first.attempt.id, { run_mode: funding.mode });
-            job = await run.submit({ subject, project, args: funding.env ? { ...runArgs, env: funding.env } : runArgs, key: id });
+            job = await run.submit({ subject, project, args: await withEnv(subject, runArgs, funding.env), key: id });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             await attemptStore.end(first.attempt.id, { state: 'failed', reason: refusal ? 'refused' : 'error', finished_at: store.iso() });
@@ -769,7 +781,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             // through AI is capped like any other attempt.
             const funding = await attemptEnv({ subject: row.subject, taskId: row.id, attemptId: attempt.id, agent: plan.agent || null, budget: left.left });
             await attemptStore.bind(attempt.id, { run_mode: funding.mode });
-            job = await run.submit({ subject: row.subject, project: row.project_id, args: funding.env ? { ...args, env: funding.env } : args, key: attempt.id });
+            job = await run.submit({ subject: row.subject, project: row.project_id, args: await withEnv(row.subject, args, funding.env), key: attempt.id });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             await attemptStore.end(attempt.id, { state: 'failed', reason: 'error', finished_at: store.iso() });
@@ -851,7 +863,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             const funding = await attemptEnv({ subject: row.subject, taskId: row.id, attemptId: attempt.id, agent: plan.agent || null, budget: left.left });
             await attemptStore.bind(attempt.id, { run_mode: funding.mode });
             const args = followUpArgs(row, plan);
-            job = await run.submit({ subject: row.subject, project: row.project_id, args: funding.env ? { ...args, env: funding.env } : args, key: attempt.id });
+            job = await run.submit({ subject: row.subject, project: row.project_id, args: await withEnv(row.subject, args, funding.env), key: attempt.id });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             await attemptStore.end(attempt.id, { state: 'failed', reason: 'error', finished_at: store.iso() });
@@ -953,6 +965,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     return {
         start, refresh, applyJob, applyEvent, recordState, afterEnd, continueTask, stopTask, proof: taskProof,
         latestProject, present, who, attempts: attemptStore, setConductor,
+        setForge(f) { forge = f || null; },
     };
 }
 

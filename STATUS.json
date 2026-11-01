@@ -59,7 +59,8 @@
     "proof of a finished task: its tests, screenshots, diff and a second-model review, and the outcome in plain words",
     "the conductor (C9b): one Claude Code session on the person's own machine, driven from the browser or the phone, with its approvals",
     "the job runner (CLI 0.6.0): each turn at the effort a person picks, in each agent's own words, and a conversation's next turn starting from the work before it (the last diff applied with git apply --3way, and the conversation so far), on any agent",
-    "the job runner (CLI 0.6.1): \"edit\" means edits on the person's own computer (OpenCode and Command Code run unattended only in a Node sandbox or for full; Aider suggests no shell commands there), and a private repository clones with a token the machine holds (GITHUB_TOKEN, GITLAB_TOKEN, OPENVIBE_GIT_CREDENTIALS) sent as a header, never in the URL or .git/config"
+    "the job runner (CLI 0.6.1): \"edit\" means edits on the person's own computer (OpenCode and Command Code run unattended only in a Node sandbox or for full; Aider suggests no shell commands there), and a private repository clones with a token the machine holds (GITHUB_TOKEN, GITLAB_TOKEN, OPENVIBE_GIT_CREDENTIALS) sent as a header, never in the URL or .git/config",
+    "OpenVibe Git through the person's own account (/git, CLI 0.6.2): link once (the forge's OAuth2 consent with PKCE, tokens sealed with CODES_SEAL_KEY), make a repository in your name and start a chat on it; a task on a forge repository takes the person's credential line to their machine for git only (never the agent), and the branch and its pull request open on OpenVibe Git"
   ],
   "updated": "2026-10-31"
 }
