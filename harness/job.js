@@ -65,6 +65,48 @@ function pushTarget(requested, base, { exists = false, now = Date.now() } = {}) 
 }
 
 /** Any credential an URL or a message might carry, replaced. */
+/**
+ * A private repository clones with a token the machine holds (the owner, 2026-11-01: "some people might have private
+ * Gits"). The tokens are the person's, in their Node's config for this runner (docs/worker.md): they never pass through
+ * OpenVibe. Inside the job's sandbox nothing else of theirs is reachable, so these are the only way in:
+ *
+ *   GITHUB_TOKEN                  github.com (the same token that pushes the branch)
+ *   GITLAB_TOKEN                  gitlab.com
+ *   OPENVIBE_GIT_CREDENTIALS      any host, one per line in git's credential-store form: https://user:token@host
+ *
+ * The token goes to git as an Authorization header for that origin only, through GIT_CONFIG_* variables: never in the
+ * command line, never in the clone's remote URL, never in .git/config the agent can read.
+ * → { env } to add to git's environment, or {} when no token is for this host.
+ */
+function gitAuthFor(repo, env = process.env) {
+    let u;
+    try { u = new URL(String(repo || '')); } catch { return {}; }
+    if (u.protocol !== 'https:') return {};
+    const host = u.host.toLowerCase();
+    const creds = new Map();
+    if (env.GITHUB_TOKEN) creds.set('github.com', { user: 'x-access-token', token: String(env.GITHUB_TOKEN) });
+    if (env.GITLAB_TOKEN) creds.set('gitlab.com', { user: 'oauth2', token: String(env.GITLAB_TOKEN) });
+    String(env.OPENVIBE_GIT_CREDENTIALS || '').split(/[\n,]+/).map((l) => l.trim()).filter(Boolean).forEach((line) => {
+        try {
+            const c = new URL(line);
+            if (c.protocol === 'https:' && c.password) creds.set(c.host.toLowerCase(), { user: decodeURIComponent(c.username || 'git'), token: decodeURIComponent(c.password) });
+        } catch { /* a line that is not https://user:token@host is skipped */ }
+    });
+    const c = creds.get(host);
+    if (!c || !c.token || /[\r\n]/.test(c.token + c.user)) return {};
+    const basic = Buffer.from(`${c.user}:${c.token}`).toString('base64');
+    return { env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `http.https://${host}/.extraheader`, GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}` } };
+}
+
+/** Why a clone failed, in words a person can act on (a private repository with no token for its host). */
+function cloneProblem(message, repo) {
+    const m = String(message || '');
+    if (!/could not read Username|Authentication failed|terminal prompts disabled|403|401|not found/i.test(m)) return m;
+    let host = 'its host';
+    try { host = new URL(String(repo)).host; } catch { /* keep the words */ }
+    return `${m} — if the repository is private, give this machine's Codes runner a token for ${host} (GITHUB_TOKEN, GITLAB_TOKEN, or an OPENVIBE_GIT_CREDENTIALS line https://you:token@${host}) in the Node's config.json env, then restart the Node`;
+}
+
 function scrub(s) {
     return String(s).replace(/(https?:\/\/)[^@/\s]+@/g, '$1***@').replace(/gh[pousr]_[A-Za-z0-9]{20,}/g, '***');
 }
@@ -463,7 +505,11 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         let adapterOptions = null;
         if (job.kind === 'code') {
             say({ t: 'step', text: `Cloning ${scrub(job.repo)}${job.ref ? ` (${job.ref})` : ''}` });
-            await git(['clone', '--depth', '50', ...(job.ref ? ['--branch', job.ref] : []), '--', job.repo, work], { timeout: 300_000 });
+            const auth = gitAuthFor(job.repo, env);
+            try {
+                await git(['clone', '--depth', '50', ...(job.ref ? ['--branch', job.ref] : []), '--', job.repo, work], { timeout: 300_000, ...(auth.env ? { env: auth.env } : {}) });
+            } catch (e) { throw new Error(cloneProblem(e.message, job.repo)); }
+            if (auth.env) say({ t: 'step', text: 'Cloned with this machine\'s token for a private repository' });
             base = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: work })).trim();
             result.base = base;
             say({ t: 'step', text: `Working on ${base}` });
@@ -594,4 +640,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments };
+module.exports = { gitAuthFor, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments };
