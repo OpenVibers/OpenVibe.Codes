@@ -183,6 +183,9 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch:has([data-ch-mode][value="new"]:checked) :is(.ch-for-openvibe,.ch-for-code,.ch-for-agents),
 .ch:has([data-ch-mode][value="openvibe"]:checked) :is(.ch-for-new,.ch-for-code),
 .ch:has([data-ch-mode][value="code"]:checked) :is(.ch-for-new,.ch-for-openvibe){display:none}
+/* The repositories used last, one tap each: a sideways row that never wraps the composer taller. */
+.ch-recent{display:flex;gap:6px;margin:8px 0 0;overflow-x:auto;scrollbar-width:none}
+.ch-recent .ch-chip{flex:none;font-size:12.5px;padding:4px 10px;color:var(--ch-muted)}
 /* Where the work runs, under the bar. */
 .ch-where{margin:6px 2px 0;font-size:12.5px;line-height:1.45;color:var(--ch-soft)}
 .ch-where>span{display:flex;align-items:flex-start;gap:7px}

@@ -137,8 +137,9 @@
                 if (text.value.trim()) form.requestSubmit();
             });
             startPage(app, form, text, grow);
-            // The repository: typing searches every repository the person can reach.
+            // The repository: a recent one is a tap away, and typing searches every repository the person can reach.
             const repo = $('[data-ch-repo]', form);
+            app.querySelectorAll('[data-ch-saved-repo]').forEach((b) => b.addEventListener('click', () => { if (repo) { repo.value = b.dataset.chSavedRepo; text.focus(); } }));
             if (repo && repo.dataset.chRepoUrl) {
                 const list = document.getElementById(repo.getAttribute('list'));
                 let timer = 0, seq = 0;
