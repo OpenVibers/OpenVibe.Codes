@@ -94,7 +94,7 @@ More: [docs/cli.md](docs/cli.md).
 
 - **OpenVibe.Network** — SSO (OAuth client `codes`, PKCE S256) and its JWKS.
 - **PostgreSQL 18 and Valkey 9** (OpenVibe.Host `roles/data/`, ADR-035): `openvibe-sdk/db`; Valkey holds the per-actor limit counters (optional).
-- **openvibe-contracts v0.243.0**, **openvibe-sdk v0.74.0**, **openvibe-shared v4.82.0** (pinned tag tarballs).
+- **openvibe-contracts v0.243.0**, **openvibe-sdk v0.74.0**, **openvibe-shared v4.83.0** (pinned tag tarballs).
 
 No path in Codes sends or accepts a shared loopback key (tested by grep and at runtime).
 
@@ -171,5 +171,5 @@ Part of the [OpenVibe network](https://openvibe.network). Built in the open by [
 <!-- versions:start -->
 - openvibe-contracts: v0.261.0
 - openvibe-sdk: v0.76.0
-- openvibe-shared: v4.82.0
+- openvibe-shared: v4.83.0
 <!-- versions:end -->
