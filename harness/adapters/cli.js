@@ -142,12 +142,21 @@ const codex = {
 };
 
 // ── OpenCode: `opencode run --format json` (text, tool_use, step_finish, error parts) ──
+/**
+ * May an agent with no edits-only mode run unattended (approve every tool, the shell included)? For "full", or for
+ * "edit" inside a sandbox (a job on the person's Node: its own namespaces, a read-only root, no home folder), never
+ * for "edit" on the person's own computer, where "edit" promises file changes only.
+ */
+const unattended = (t) => t.permission === 'full' || (t.permission === 'edit' && t.sandboxed === true);
+
 const OC_NAMES = { shell: 'Bash', bash: 'Bash', read: 'Read', edit: 'Edit', write: 'Write', patch: 'Edit', multiedit: 'Edit', grep: 'Grep', glob: 'Glob', list: 'LS', webfetch: 'WebFetch', websearch: 'WebSearch', task: 'Task', todowrite: 'TodoWrite' };
 const opencode = {
     id: 'opencode', name: 'OpenCode', kind: 'cli', bin: 'opencode',
+    // --auto approves every tool, the shell included: there is no edits-only mode (harness/index.js unattended()).
+    editsOnly: false,
     start(t, ctx = {}) {
         const args = ['run', '--format', 'json'];
-        if (t.permission !== 'read') args.push('--auto');
+        if (unattended(t)) args.push('--auto');
         if (t.model) args.push('-m', t.model);
         if (t.resume) args.push('-s', t.resume);
         args.push('--', t.prompt);
@@ -190,9 +199,11 @@ const opencode = {
 const CC_NAMES = { read_file: 'Read', shell: 'Bash', run_shell: 'Bash', shell_command: 'Bash', read_directory: 'LS', grep: 'Grep', glob: 'Glob', edit_file: 'Edit', write_file: 'Write', list_directory: 'LS', web_fetch: 'WebFetch', task: 'Task' };
 const commandCode = {
     id: 'command-code', name: 'Command Code', kind: 'cli', bin: 'cmd',
+    // --yolo approves everything: there is no edits-only mode (harness/index.js unattended()).
+    editsOnly: false,
     start(t, ctx = {}) {
         const args = [`--print=${t.prompt}`, '--output-format', 'json', '--skip-onboarding', '--no-auto-update', '-t'];
-        if (t.permission !== 'read') args.push('--yolo');
+        if (unattended(t)) args.push('--yolo');
         if (t.model) args.push('-m', t.model);
         if (t.effort) args.push('--effort', effortFor('command-code', t.effort));
         if (t.resume) args.push('--resume', t.resume);
@@ -229,6 +240,8 @@ const aider = {
     id: 'aider', name: 'Aider', kind: 'cli', bin: 'aider',
     start(t, ctx = {}) {
         const args = ['--message', t.prompt, '--yes-always', '--no-pretty', '--no-stream', '--no-check-update', '--no-show-release-notes'];
+        // --yes-always would also run every shell command it suggests: outside a sandbox, "edit" is edits only.
+        if (t.permission === 'edit' && !t.sandboxed) args.push('--no-suggest-shell-commands');
         if (t.permission === 'read') args.push('--dry-run');
         if (t.model) args.push('--model', t.model);
         if (t.effort) args.push('--reasoning-effort', effortFor('aider', t.effort));

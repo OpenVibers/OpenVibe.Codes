@@ -25,7 +25,9 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
                                        aider, minimax-code, deepseek, openai-compatible
       --model <name>                   the first agent's model
       --permission read|edit|full      read: look and answer; edit: change files (default);
-                                       full: anything, unattended
+                                       full: anything, unattended. OpenCode and Command Code have no
+                                       edits-only mode: here they need full (on a paired machine's
+                                       sandboxed jobs, edit is enough)
       --cwd <dir>                      where the agent works (default: here)
       --no-handoff                     stop at the first agent's result
       --attempts <n>                   at most this many agents in one run (default 3)

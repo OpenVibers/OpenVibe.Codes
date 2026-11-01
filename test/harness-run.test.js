@@ -43,7 +43,8 @@ const results = (events) => events.filter((e) => e.type === 'result');
 
     for (const [agent, word] of [['claude-code', 'claude'], ['codex', 'codex'], ['opencode', 'opencode'], ['command-code', 'cmd']]) {
         await check(`${agent}: the agent's output becomes the shared events, with one result`, async () => {
-            const events = await collect(harness().run({ prompt: 'fix a.js', agent, cwd: f.work, handoff: false }));
+            // OpenCode and Command Code take an "edit" run only inside a sandbox (test/harness-sandbox.test.js): run as a Node job.
+            const events = await collect(harness().run({ prompt: 'fix a.js', agent, cwd: f.work, handoff: false, sandboxed: true }));
             assert.strictEqual(events[0].type, 'system');
             assert.strictEqual(events[0].subtype, 'init');
             assert.ok(events[0].session_id, 'a session id to resume');
