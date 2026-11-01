@@ -289,7 +289,10 @@
 :root[data-theme-mode="dark"] .c4-form textarea{background:#11181b;color:var(--c4-ink)}
 
 /* The front door's example conversation (a visitor's home): one turn, a hand-over, the result. */
-.c4-demo{display:grid;gap:10px;padding:16px;border-radius:18px;border:1px solid var(--c4-line);background:var(--c4-card,#fff);font-size:14px;line-height:1.45;max-width:460px}
+/* The surface and ink of the theme: --c4-card was never defined, so the home's demo drew white under the dark theme's
+   light text, the conversation nearly invisible (2026-11-01). On the home it can sit outside .c4, so the theme's own
+   tokens are the fallbacks. */
+.c4-demo{display:grid;gap:10px;padding:16px;border-radius:18px;border:1px solid var(--c4-line,var(--border,#2d393d));background:var(--c4-surface,var(--bg-secondary,#171f23));color:var(--c4-ink,var(--text-primary,#eaf0f1));font-size:14px;line-height:1.45;max-width:460px}
 .c4-demo-you{justify-self:end;max-width:85%;margin:0;padding:9px 13px;border-radius:16px 16px 4px 16px;background:color-mix(in srgb,var(--c4-accent,#2563eb) 14%,transparent)}
 .c4-demo-agent{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start}
 .c4-demo-agent p{margin:4px 0 0}
@@ -299,6 +302,6 @@
 .c4-demo-hand{margin:2px 0;text-align:center;font-size:12px;color:var(--c4-muted,#64748b);display:flex;align-items:center;gap:10px}
 .c4-demo-hand::before,.c4-demo-hand::after{content:"";flex:1;height:1px;background:var(--c4-line)}
 .c4-demo-result{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border-radius:12px;border:1px solid var(--c4-line);font-size:13px}
-.c4-demo-ok{padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;color:#15803d;background:color-mix(in srgb,#22c55e 14%,transparent)}
+.c4-demo-ok{padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;color:color-mix(in srgb,#22c55e 55%,var(--c4-ink,var(--text-primary,#eaf0f1)));background:color-mix(in srgb,#22c55e 14%,transparent)}
 .c4-composer-front{margin:8px 0 4px}
 .c4-composer-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
