@@ -103,6 +103,83 @@ const PROJECTS = (() => {
 const project = (repository) => PROJECTS.find((p) => p.repository === String(repository || '')) || null;
 
 /**
+ * Which OpenVibe projects a request is about, from the words alone (the owner, 2026-11-01: "it can just automatically
+ * figure out which repositories it needs to work on based on your request… people aren't going to know… they should
+ * just explain it: I want to do this or that to this website or these websites").
+ *
+ * Many names are plain words ("live", "chat", "food", "work"), so the signals are weighed:
+ *   3  the site's domain ("openvibe.live") or "OpenVibe Live" / "OpenVibe.Live"
+ *   2  the name written as a name ("Live", "Chat") anywhere but the first word, or a topic only one project owns
+ *      ("go live", "sign in", "navbar", "coins")
+ *   1  the bare word ("live", "chat"): counted only when nothing stronger was said
+ * → up to three projects, strongest first: [{ repository, name, url, why }]. [] when the words name none.
+ */
+const TOPICS = {
+    'OpenVibers/OpenVibe.Live': ['go live', 'going live', 'livestream', 'live stream', 'streaming', 'streamer', 'broadcast', 'obs', 'vod', 'vods', 'clips?', 'whip', 'rtmp', 'stream key', 'channel page', 'the player'],
+    'OpenVibers/OpenVibe.Chat': ['chat', 'chats', 'dms?', 'direct messages?', 'emotes?', 'chat box', 'moderators?', 'mods'],
+    'OpenVibers/OpenVibe.Network': ['sign in', 'sign-in', 'signing in', 'log in', 'login', 'logout', 'account', 'accounts', 'profile', 'password', 'two-factor', '2fa', 'notifications', 'my page', 'followers?', 'following'],
+    'OpenVibers/OpenVibe.Shared': ['navbar', 'nav bar', 'top bar', 'menu bar', 'footer', 'the logo', 'site switcher', 'every site', 'all sites', 'all the sites', 'across the network', 'everywhere'],
+    'OpenVibers/OpenVibe.Design': ['themes?', 'colou?rs', 'dark mode', 'light mode', 'fonts?', 'the look', 'icons'],
+    'OpenVibers/OpenVibe.Billing': ['payments?', 'pay', 'checkout', 'coins', 'opencoins', 'vibes', 'cash ?out', 'refunds?', 'prices?'],
+    'OpenVibers/OpenVibe.Tips': ['tips?', 'tipping', 'donations?', 'donate', 'paid messages?', 'alerts?'],
+    'OpenVibers/OpenVibe.VIP': ['memberships?', 'subscriptions?', 'subscribers?', 'subs', 'vip'],
+    'OpenVibers/OpenVibe.Games': ['games?', 'gaming', 'game worlds?', 'leaderboards?'],
+    'OpenVibers/OpenVibe.Media': ['uploads?', 'recordings?', 'thumbnails?', 'video files?'],
+    'OpenVibers/OpenVibe.Space': ['spaces?', 'no-code', 'app builder', 'website builder'],
+    'OpenVibers/OpenVibe.Codes': ['codes', 'coding agents?', 'vibe coding', 'this page', 'the composer'],
+    'OpenVibers/OpenVibe.Search': ['search', 'searching', 'search results'],
+    'OpenVibers/OpenVibe.AI': ['ai models?', 'the ai', 'models', 'api keys?'],
+    'OpenVibers/OpenVibe.Bot': ['robots?', 'robot', 'drive the robot'],
+    'OpenVibers/OpenRestream': ['restream', 'restreaming', 'twitch', 'youtube', 'kick'],
+    'OpenVibers/OpenVibe.Community': ['pastes?', 'posts?', 'forums?', 'comments?'],
+    'OpenVibers/OpenVibe.Wiki': ['wiki', 'articles?'],
+    'OpenVibers/OpenVibe.News': ['news', 'headlines?'],
+    'OpenVibers/OpenVibe.Food': ['food', 'recipes?', 'restaurants?', 'what to eat'],
+    'OpenVibers/OpenVibe.Work': ['jobs board', 'job listings?', 'hiring', 'resumes?'],
+    'OpenVibers/OpenVibe.Rent': ['rentals?', 'apartments?', 'listings to rent'],
+    'OpenVibers/OpenVibe.Help': ['help pages?', 'faq', 'support'],
+    'OpenVibers/OpenVibe.Tools': ['online tools?', 'converters?', 'calculators?', 'whois'],
+    'OpenVibers/OpenVibe.Meme': ['memes?'],
+    'OpenVibers/OpenVibe.Today': ['holidays?', 'on this day', 'today page'],
+    'OpenVibers/OpenVibe.Watch': ['price alerts?', 'watch for changes', 'change alerts?'],
+    'OpenVibers/OpenVibe.Quest': ['quests?', 'badges?', 'achievements?'],
+    'OpenVibers/OpenVibe.Report': ['stats', 'statistics', 'analytics', 'numbers', 'the rundown'],
+};
+const escRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const MATCHERS = PROJECTS.map((p) => {
+    const short = p.repository.replace(/^OpenVibers\//, '');           // OpenVibe.Live, OpenRestream
+    const bare = String(p.name || '').trim();
+    const domains = [p.domain, short.toLowerCase()].filter(Boolean).map((d) => escRe(String(d).toLowerCase()));
+    const word = escRe(bare);
+    return {
+        p,
+        strong: new RegExp(`(?:\\b(?:${domains.join('|')})\\b|\\bopenvibe[ .]${word}\\b)`, 'i'),
+        named: bare.length > 1 ? new RegExp(`(?<!^)(?<![.!?]\\s)\\b${word}\\b`) : null,   // "Live", not the first word
+        topic: TOPICS[p.repository] ? new RegExp(`\\b(?:${TOPICS[p.repository].join('|')})\\b`, 'i') : null,
+        bare: bare.length > 2 ? new RegExp(`\\b${escRe(bare.toLowerCase())}\\b`, 'i') : null,
+    };
+});
+function matchProjects(text, { max = 3 } = {}) {
+    const t = String(text || '').slice(0, 4000);
+    if (!t.trim()) return [];
+    const scored = MATCHERS.map((m) => {
+        let score = 0;
+        let why = '';
+        if (m.strong.test(t)) { score = 3; why = 'named'; }
+        else if (m.named && m.named.test(t)) { score = 2; why = 'named'; }
+        else if (m.topic && m.topic.test(t)) { score = 2; why = 'topic'; }
+        else if (m.bare && m.bare.test(t)) { score = 1; why = 'word'; }
+        return { m, score, why };
+    }).filter((x) => x.score > 0);
+    if (!scored.length) return [];
+    const top = Math.max(...scored.map((x) => x.score));
+    // A bare word counts only when nothing stronger was said; otherwise keep everything at 2 or more.
+    const kept = scored.filter((x) => (top >= 2 ? x.score >= 2 : true));
+    kept.sort((a, b) => b.score - a.score || PROJECTS.indexOf(a.m.p) - PROJECTS.indexOf(b.m.p));
+    return kept.slice(0, max).map(({ m, why }) => ({ repository: m.p.repository, name: m.p.name, url: m.p.url, why }));
+}
+
+/**
  * Any Git address the person types, as the https URL a task clones. "owner/name" is a GitHub repository; an ssh address
  * (git@host:owner/name.git or ssh://git@host/owner/name) becomes its https twin; a bare host/path gains https://.
  * → string, or '' when it cannot be a repository address (credentials in it, another scheme, no path).
@@ -139,4 +216,4 @@ function spaceHref({ kind, text, origin = SPACE }) {
     return href;
 }
 
-module.exports = { MODES, KINDS, IDEAS, ideasFor, PROJECTS, project, normalizeRepo, spaceHref, SPACE };
+module.exports = { MODES, KINDS, IDEAS, ideasFor, PROJECTS, project, matchProjects, normalizeRepo, spaceHref, SPACE };

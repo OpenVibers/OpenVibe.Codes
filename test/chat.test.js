@@ -129,6 +129,31 @@ const { stepKind } = require('../server/http/chat');
             assert.match(none.headers.get('location'), /error=Pick%20a%20repository/, 'no repository is asked for in words');
         });
 
+        await check('an OpenVibe site picked from the words: one project, several, or a question when none is named', async () => {
+            const home = await t.get('/', { as: ada });
+            assert.match(home.text, /<select name="project" data-ch-project><option value="auto" selected>Codes picks for you<\/option>/, 'the default is to work it out');
+            assert.match(home.text, /data-ch-picked data-ch-match-url="\/chat\/match"/);
+            const m = await t.get(`/chat/match?text=${encodeURIComponent('Make the navbar smaller')}`, { as: ada });
+            assert.deepStrictEqual(JSON.parse(m.text).projects.map((p) => p.name), ['Shared']);
+            assert.strictEqual((await t.get('/chat/match?text=x')).status, 401, 'a visitor gets nothing');
+
+            const one = await t.get('/chat', { as: ada, form: { mode: 'openvibe', project: 'auto', text: 'Make the navbar smaller on phones' } });
+            const oneRow = await db.maybe('SELECT repo FROM run_tasks WHERE id = $1', [one.headers.get('location').split('/').pop()]);
+            assert.strictEqual(oneRow.repo, 'https://github.com/OpenVibers/OpenVibe.Shared');
+
+            const before = await db.maybe('SELECT count(*)::int AS n FROM run_tasks WHERE subject = $1', [ada.subject]);
+            const two = await t.get('/chat', { as: ada, form: { mode: 'openvibe', project: 'auto', text: 'Add a leaderboard to Games and show it on Live' } });
+            assert.match(two.headers.get('location'), /^\/tasks\/tsk_/);
+            const made = await db.many('SELECT repo, prompt FROM run_tasks WHERE subject = $1 ORDER BY created_at DESC LIMIT 2', [ada.subject]);
+            const after = await db.maybe('SELECT count(*)::int AS n FROM run_tasks WHERE subject = $1', [ada.subject]);
+            assert.strictEqual(after.n - before.n, 2, 'one task per project');
+            assert.deepStrictEqual(made.map((r) => r.repo).sort(), ['https://github.com/OpenVibers/OpenVibe.Games', 'https://github.com/OpenVibers/OpenVibe.Live']);
+            assert.ok(made.every((r) => /This request spans OpenVibe\.Games, OpenVibe\.Live/.test(r.prompt)), 'each knows about the other');
+
+            const none = await t.get('/chat', { as: ada, form: { mode: 'openvibe', project: 'auto', text: 'make the home page load faster' } });
+            assert.match(decodeURIComponent(none.headers.get('location')), /Say which OpenVibe site this is for/);
+        });
+
         await check('the effort a person picks rides on the first attempt, and the thread says it in words', async () => {
             const made = await t.get('/chat', { as: ada, form: { text: 'Think hard about the cache', repo: 'https://github.com/OpenVibers/OpenVibe.Live', effort: 'high' } });
             assert.strictEqual(made.status, 303);

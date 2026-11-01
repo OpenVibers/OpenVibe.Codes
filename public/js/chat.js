@@ -62,7 +62,40 @@
             if (rail && rail.dataset.chShown !== mode) { rail.dataset.chShown = mode; fill(mode); }
             if (focus && text) text.focus();
         }
-        modes.forEach((r) => r.addEventListener('change', () => { if (r.checked) choose(r.value, { focus: true }); }));
+        modes.forEach((r) => r.addEventListener('change', () => { if (r.checked) { choose(r.value, { focus: true }); pick(); } }));
+
+        // An OpenVibe site, picked from the words: the line under the bar says which projects Codes will work on, as
+        // the person types (GET /chat/match; the server decides again when the message is sent).
+        const picked = $('[data-ch-picked]', form);
+        const pickedText = picked && $('[data-ch-picked-text]', picked);
+        const projectSel = $('[data-ch-project]', form);
+        const DEFAULT_PICK = pickedText ? pickedText.textContent : '';
+        let pickTimer = 0, pickSeq = 0;
+        const list = (names) => (names.length < 2 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
+        const say = (parts) => { if (!pickedText) return; pickedText.textContent = ''; parts.forEach((p) => pickedText.append(typeof p === 'string' ? document.createTextNode(p) : p)); };
+        const bold = (t) => { const b = document.createElement('b'); b.textContent = t; return b; };
+        function pick() {
+            if (!picked || !projectSel) return;
+            const mode = (modes.find((r) => r.checked) || {}).value;
+            if (mode !== 'openvibe') return;
+            if (projectSel.value !== 'auto') { say(['You picked ', bold(projectSel.selectedOptions[0] ? projectSel.selectedOptions[0].textContent.split(' · ')[0] : projectSel.value), '. Choose "Codes picks for you" to let it work out the projects from your words.']); return; }
+            const q = text.value.trim();
+            clearTimeout(pickTimer);
+            if (!q) { say([DEFAULT_PICK]); return; }
+            pickTimer = setTimeout(async () => {
+                const mine = ++pickSeq;
+                try {
+                    const res = await fetch(`${picked.dataset.chMatchUrl}?text=${encodeURIComponent(q.slice(0, 2000))}`, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+                    if (!res.ok || mine !== pickSeq) return;
+                    const names = ((await res.json()).projects || []).map((p) => p.name);
+                    if (mine !== pickSeq) return;
+                    if (!names.length) say(['No site named yet: say which one (like Live, Chat or Games, or "the navbar"), or pick it from the list.']);
+                    else say(['Codes will work on ', bold(list(names)), names.length > 1 ? ': one task each, told about the others.' : '.']);
+                } catch { /* the server decides when it is sent */ }
+            }, 300);
+        }
+        if (text) text.addEventListener('input', pick);
+        if (projectSel) projectSel.addEventListener('change', pick);
         const current = modes.find((r) => r.checked);
         if (rail && current) rail.dataset.chShown = current.value;
         pace();

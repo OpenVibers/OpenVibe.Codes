@@ -187,6 +187,10 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch-recent{display:flex;gap:6px;margin:8px 0 0;overflow-x:auto;scrollbar-width:none}
 .ch-recent .ch-chip{flex:none;font-size:12.5px;padding:4px 10px;color:var(--ch-muted)}
 .ch-recent .ch-chip-new{color:var(--ch-accent);border-color:color-mix(in srgb,var(--ch-accent) 40%,var(--ch-line))}
+/* An OpenVibe site picked from the words: which projects Codes will work on. */
+.ch-picked{display:flex;align-items:flex-start;gap:7px;margin:6px 2px 0;font-size:12.5px;line-height:1.45;color:var(--ch-soft)}
+.ch-picked .ch-i{width:15px;height:15px;margin-top:1px;color:var(--ch-accent)}
+.ch-picked b{color:var(--ch-ink);font-weight:650}
 /* Where the work runs, under the bar. */
 .ch-where{margin:6px 2px 0;font-size:12.5px;line-height:1.45;color:var(--ch-soft)}
 .ch-where>span{display:flex;align-items:flex-start;gap:7px}

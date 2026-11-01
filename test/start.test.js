@@ -56,6 +56,19 @@ const start = require('../server/http/start');
         start.PROJECTS.forEach((p) => assert.match(p.url, /^https:\/\/github\.com\/OpenVibers\/[A-Za-z0-9._-]+$/, p.repository));
     });
 
+    await check('the projects a request is about come from its own words (owner, 11-01)', async () => {
+        const names = (t) => start.matchProjects(t).map((p) => p.name);
+        assert.deepStrictEqual(names('Make the navbar smaller on phones'), ['Shared'], 'a topic only one project owns');
+        assert.deepStrictEqual(names('Fix the sign in page'), ['Network']);
+        assert.deepStrictEqual(names('Add a leaderboard to Games and show it on Live'), ['Games', 'Live'], 'two sites named: both');
+        assert.ok(names('Add a dark mode to openvibe.live')[0] === 'Live', 'the domain leads');
+        assert.ok(names('Let me drive the robot from Live').includes('Bot') && names('Let me drive the robot from Live').includes('Live'));
+        assert.deepStrictEqual(names('make the home page load faster'), [], 'no site named, none guessed');
+        assert.deepStrictEqual(names('I want a better world'), [], 'a plain word is not a project');
+        assert.ok(start.matchProjects('Live Chat Games Tips Food News Wiki and Rent').length <= 3, 'three at most');
+        assert.deepStrictEqual(names(''), []);
+    });
+
     await check('the ideas rail: something new mixes the three kinds, every way has its own ideas', async () => {
         const fresh = start.ideasFor('new');
         assert.deepStrictEqual(fresh.slice(0, 3).map((i) => i.kind), ['website', 'game', 'app']);
