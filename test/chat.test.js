@@ -59,13 +59,74 @@ const { stepKind } = require('../server/http/chat');
         await check('a new chat starts a task from the composer, and an empty one is refused in words', async () => {
             const empty = await t.get('/chat', { as: ada, form: { text: '  ', repo: 'https://github.com/OpenVibers/OpenVibe.Live' } });
             assert.strictEqual(empty.status, 303);
-            assert.match(empty.headers.get('location'), /^\/\?error=Write%20what%20you%20want%20done%20first/);
+            assert.match(empty.headers.get('location'), /^\/\?error=Write%20what%20you%20want%20made%20or%20changed%20first.*&repo=/, 'refused in words, and the repository is kept');
             const made = await t.get('/chat', { as: ada, form: { text: 'Make the footer quieter', repo: 'https://github.com/OpenVibers/OpenVibe.Live', agent: '' } });
             assert.strictEqual(made.status, 303, made.text.slice(0, 200));
             const at = made.headers.get('location');
             assert.match(at, /^\/tasks\/tsk_[0-9A-Z]{26}$/, `opens the new conversation (${at})`);
             const row = await db.maybe('SELECT prompt, subject FROM run_tasks WHERE id = $1', [at.split('/').pop()]);
             assert.ok(row && row.prompt === 'Make the footer quieter' && row.subject === ada.subject, 'the brief is the person&rsquo;s own task');
+        });
+
+        // The owner, 2026-11-01: pick an OpenVibe project without typing a URL, any Git, and "something new" for people
+        // who have never coded, handed to openvibe.space.
+        await check('a new chat offers three ways to start, each saying where it runs, and an ideas rail', async () => {
+            const home = await t.get('/', { as: ada });
+            const h = home.text;
+            ['new', 'openvibe', 'code'].forEach((v) => assert.match(h, new RegExp(`<input type="radio" name="mode" value="${v}" form="ch-start"`), `the ${v} card belongs to the form`));
+            assert.ok(h.includes('<form class="ch-composer" id="ch-start"'), 'the composer is the form the cards name');
+            assert.ok(!/name="repo"[^>]*required/.test(h), 'the repository is not required: something new needs none');
+            assert.match(h, /<select name="project"[^>]*>[\s\S]*?<option value="OpenVibers\/OpenVibe\.Live"[^>]*>Live · openvibe\.live<\/option>/, 'OpenVibe projects are a list');
+            assert.match(h, /<option value="OpenVibers\/OpenVibe\.Shared"/, 'the shared libraries too');
+            assert.match(h, /<select name="kind"[^>]*>[\s\S]*?>Website<\/option>[\s\S]*?>Game<\/option>/, 'something new is a website, a game or an app');
+            assert.match(h, /class="ch-where"[\s\S]*?openvibe\.space[\s\S]*?Runs on/, 'each way says where it runs');
+            assert.match(h, /<section class="ch-spark" aria-label="Ideas to start from"[^>]*data-ch-ideasets="/, 'the ideas rail, with every set for the script');
+            assert.match(h, /<ul class="ch-spark-list" aria-hidden="true">[\s\S]*?tabindex="-1"/, 'the loop copy is hidden from the keyboard and assistive tech');
+            assert.match(h, /data-ch-ideas-pause aria-pressed="false" aria-label="Pause the ideas"/, 'the moving rail has a pause');
+            const fresh = await t.get('/?mode=new&kind=game', { as: ada });
+            assert.match(fresh.text, /value="new" form="ch-start" checked/, 'the chosen way is kept');
+            assert.match(fresh.text, /<option value="game" selected>Game<\/option>/);
+            assert.match(fresh.text, /data-ch-idea-mode="new" data-ch-idea-kind="website"[\s\S]*?data-ch-idea-kind="game"[\s\S]*?data-ch-idea-kind="app"/, 'something new mixes the three kinds');
+        });
+
+        await check('something new goes to openvibe.space with the words in the box, and nothing is built here', async () => {
+            const before = await db.maybe('SELECT count(*)::int AS n FROM run_tasks WHERE subject = $1', [ada.subject]);
+            const r = await t.get('/chat', { as: ada, form: { mode: 'new', kind: 'game', text: 'Snake with a leaderboard & sound' } });
+            assert.strictEqual(r.status, 303);
+            const at = new URL(r.headers.get('location'));
+            assert.strictEqual(at.origin, 'https://openvibe.space');
+            assert.strictEqual(at.pathname, '/auth/login', 'through sign-in, which keeps the query');
+            const next = new URL(at.searchParams.get('next'), 'https://openvibe.space');
+            assert.strictEqual(next.pathname, '/spaces/new');
+            assert.strictEqual(next.searchParams.get('prompt'), 'A browser game: Snake with a leaderboard & sound');
+            assert.strictEqual(next.searchParams.get('from'), 'codes');
+            const site = await t.get('/chat', { as: ada, form: { mode: 'new', kind: 'website', text: 'My bakery website with hours' } });
+            const said = new URL(new URL(site.headers.get('location')).searchParams.get('next'), 'https://x').searchParams.get('prompt');
+            assert.strictEqual(said, 'My bakery website with hours', 'words that already say what it is are not led');
+            const long = await t.get('/chat', { as: ada, form: { mode: 'new', kind: 'app', text: 'ほ'.repeat(3000) } });
+            assert.ok(long.headers.get('location').length <= 6000, 'a long description is cut until the address fits');
+            const after = await db.maybe('SELECT count(*)::int AS n FROM run_tasks WHERE subject = $1', [ada.subject]);
+            assert.strictEqual(after.n, before.n, 'no task was made');
+        });
+
+        await check('an OpenVibe project is picked from the list, and any Git address is read as https', async () => {
+            const pick = await t.get('/chat', { as: ada, form: { mode: 'openvibe', project: 'OpenVibers/OpenVibe.Games', text: 'Add a daily challenge' } });
+            assert.match(pick.headers.get('location'), /^\/tasks\/tsk_/, pick.headers.get('location'));
+            const row = await db.maybe('SELECT repo FROM run_tasks WHERE id = $1', [pick.headers.get('location').split('/').pop()]);
+            assert.strictEqual(row.repo, 'https://github.com/OpenVibers/OpenVibe.Games');
+            const stranger = await t.get('/chat', { as: ada, form: { mode: 'openvibe', project: 'evil/repo', text: 'x y z' } });
+            assert.match(stranger.headers.get('location'), /error=Pick%20one%20of%20the%20OpenVibe%20projects/);
+            const ssh = await t.get('/chat', { as: ada, form: { mode: 'code', repo: 'git@gitlab.com:someone/thing.git', text: 'Fix the build' } });
+            const sshRow = await db.maybe('SELECT repo FROM run_tasks WHERE id = $1', [ssh.headers.get('location').split('/').pop()]);
+            assert.strictEqual(sshRow.repo, 'https://gitlab.com/someone/thing.git', 'an ssh address becomes its https twin');
+            const short = await t.get('/chat', { as: ada, form: { mode: 'code', repo: 'OpenVibers/OpenVibe.Chat', text: 'Fix the build' } });
+            const shortRow = await db.maybe('SELECT repo FROM run_tasks WHERE id = $1', [short.headers.get('location').split('/').pop()]);
+            assert.strictEqual(shortRow.repo, 'https://github.com/OpenVibers/OpenVibe.Chat', 'owner/name is a GitHub repository');
+            const secret = await t.get('/chat', { as: ada, form: { mode: 'code', repo: 'https://user:pass@example.com/a/b', text: 'Fix it' } });
+            assert.match(secret.headers.get('location'), /error=That%20is%20not%20a%20Git%20address/, 'a password in the address is refused');
+            assert.ok(!/user(%3A|:)pass/.test(secret.headers.get('location')), 'and it is not written back into the address');
+            const none = await t.get('/chat', { as: ada, form: { mode: 'code', repo: '', text: 'Fix it' } });
+            assert.match(none.headers.get('location'), /error=Pick%20a%20repository/, 'no repository is asked for in words');
         });
 
         await check('the effort a person picks rides on the first attempt, and the thread says it in words', async () => {

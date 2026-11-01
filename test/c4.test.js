@@ -46,7 +46,7 @@ const { boot, check, done } = require('./helpers/boot');
             const home = await t.get('/', { as: ada });
             assert.ok(!home.text.includes('Built for the way you work'));
             assert.ok(!home.text.includes('Recently shipped on'));
-            assert.ok(home.text.includes('What should we build') && home.text.includes('Repository URL'), 'the greeting and the repository');
+            assert.ok(home.text.includes('What should we build') && home.text.includes('owner/name or any Git URL') && home.text.includes('name="mode"'), 'the greeting, the three ways to start and the repository');
             assert.ok(home.text.includes('action="/chat"') && home.text.includes('data-ch-composer'), 'one composer that starts the conversation');
             const id = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAV';
             await t.ctx.store.db.exec(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, state, result, error, created_at, updated_at)
