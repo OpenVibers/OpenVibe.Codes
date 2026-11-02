@@ -4,6 +4,7 @@
 // conversations only; the thread shows the brief, each agent's turn with its steps, a hand-over as a divider and a
 // carry-on as their next message; a new chat starts a task from the composer; the step kinds name what an agent did.
 const assert = require('assert');
+const thread = require('openvibe-shared/thread');
 const { boot, check, done } = require('./helpers/boot');
 const { stepKind } = require('../server/http/chat');
 
@@ -44,13 +45,15 @@ const { stepKind } = require('../server/http/chat');
             const page = await t.get(`/tasks/${MINE}`, { as: ada });
             assert.strictEqual(page.status, 200);
             const text = page.text;
-            const brief = text.indexOf('class="ch-bubble">Fit the home page');
+            const brief = text.indexOf('class="ovt-bubble">Fit the home page');
             const handover = text.indexOf('Claude Code took over');
             const answer = text.indexOf('<strong>scrolls sideways</strong>');
-            const next = text.indexOf('class="ch-bubble">Keep the titles on one line.');
+            const next = text.indexOf('class="ovt-bubble">Keep the titles on one line.');
             const last = text.indexOf('Titles stay on one line.');
             assert.ok(brief > -1 && handover > brief && answer > handover && next > answer && last > next, 'in the order it happened');
-            assert.ok(text.includes('data-kind="read"') && text.includes('data-kind="edit"'), 'each step carries its kind');
+            assert.ok(text.includes(thread.icon('read')) && text.includes(thread.icon('edit')), 'each step carries the sign of its kind');
+            assert.ok(text.includes('<li class="ovt-divider">') && /<p class="ovt-who"><b>Claude Code<\/b>/.test(text), 'the hand-over is a line, and each reply says which agent');
+            assert.ok(text.includes('data-ovt-panel-open aria-controls="ch-side"') && text.includes('<aside class="ovt-panel" id="ch-side"'), 'what it did is the panel');
             assert.ok(text.includes('1 file changed') && text.includes('<span class="ch-add">+3</span>'), 'how it ended: the files');
             assert.ok(text.includes(`action="/tasks/${MINE}/continue"`), 'the composer carries it on');
             assert.ok(text.includes('aria-current="page"'), 'the rail marks the open conversation');
@@ -74,7 +77,8 @@ const { stepKind } = require('../server/http/chat');
             const home = await t.get('/', { as: ada });
             const h = home.text;
             ['new', 'openvibe', 'code'].forEach((v) => assert.match(h, new RegExp(`<input type="radio" name="mode" value="${v}" form="ch-start"`), `the ${v} card belongs to the form`));
-            assert.ok(h.includes('<form class="ch-composer" id="ch-start"'), 'the composer is the form the cards name');
+            assert.ok(h.includes('<form class="ovt-composer" id="ch-start"'), 'the composer is the form the cards name');
+            assert.ok(h.includes('<div class="ovt is-start" data-ovt>'), 'a start page: the greeting and the composer together');
             assert.ok(!/name="repo"[^>]*required/.test(h), 'the repository is not required: something new needs none');
             assert.match(h, /<select name="project"[^>]*>[\s\S]*?<option value="OpenVibers\/OpenVibe\.Live"[^>]*>Live · openvibe\.live<\/option>/, 'OpenVibe projects are a list');
             assert.match(h, /<option value="OpenVibers\/OpenVibe\.Shared"/, 'the shared libraries too');

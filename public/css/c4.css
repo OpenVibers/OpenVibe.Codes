@@ -8,7 +8,7 @@
 .c4-card{background:var(--c4-surface);border:1px solid var(--c4-line);border-radius:13px;padding:20px;margin:0 0 16px;box-shadow:0 1px 2px #1b29340a}
 .c4-card h2{font-size:16px;letter-spacing:-.02em;margin:0}
 .c4-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
-.c4-card-head a,.c4-card a:not(.c4-button){color:var(--c4-accent);font-size:13px}
+.c4-card-head a:not(.c4-button),.c4-card a:not(.c4-button){color:var(--c4-accent);font-size:13px}
 .c4-sub{margin:6px 0 12px;color:var(--c4-muted);font-size:13px;line-height:1.45}
 .c4-composer{border-color:#d5e4df;background:linear-gradient(140deg,#fff,#f8fcfa)}
 .c4-composer form>label{display:block;font-size:15px;font-weight:650;margin-bottom:12px}
