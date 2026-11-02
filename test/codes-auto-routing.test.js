@@ -2,15 +2,16 @@
 
 /**
  * Codes C9c, end to end: a task with no agent named is `auto`, and the router reads the fleet the machines reported.
- * Today (2026-10-30) Codex's week is spent, OpenCode's month is spent and Command Code is at 96% of its week, so auto
+ * On 2026-10-30 Codex's week was spent, OpenCode's month is spent and Command Code is at 96% of its week, so auto
  * must land on MiniMax or DeepSeek — and never on Claude. A finished or unfinished task then tells the person once.
  */
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/boot');
 
 const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N3';
-const RESET_WEEK = '2026-11-04T00:00:00Z';
-const RESET_MONTH = '2026-11-02T00:00:00Z';
+// Measured from now, so the fleet stays spent however late the test runs (fixed dates went stale on 2026-11-02).
+const RESET_WEEK = new Date(Date.now() + 4.5 * 86400000).toISOString();
+const RESET_MONTH = new Date(Date.now() + 2.5 * 86400000).toISOString();
 
 (async () => {
     const submits = [];
