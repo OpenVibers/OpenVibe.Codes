@@ -10,9 +10,11 @@ const assert = require('node:assert/strict');
 const { check, done } = require('./helpers/boot');
 const router = require('../engine/router');
 
-const NOW = Date.parse('2026-10-30T12:00:00Z');
-const RESET_WEEK = '2026-11-04T00:00:00Z';
-const RESET_MONTH = '2026-11-02T00:00:00Z';
+// The fleet as it was on 2026-10-30, measured from now: the router reads the clock itself in places, so fixed dates
+// went stale the day OpenCode's month really reset (2026-11-02).
+const NOW = Date.now();
+const RESET_WEEK = new Date(NOW + 4.5 * 86400000).toISOString();
+const RESET_MONTH = new Date(NOW + 2.5 * 86400000).toISOString();
 
 const runner = (enabled = true) => ({ enabled, max: 4 });
 const cfg = { subagents: { cx: runner(), mm: runner(), cc: runner(), oc: runner(), dsh: runner(), claude: runner(false) } };
@@ -36,7 +38,7 @@ const BASIC = 'Rename the variable in the one file and reformat it.';
         await check('a window at the full mark is spent, and one that has already reset is not', () => {
             assert.equal(router.windowFull({ pct: 96 }, NOW), true, '96% of a week is spent, not 4% left');
             assert.equal(router.windowFull({ used: 19, limit: 20 }, NOW), true, 'used/limit is the same reading');
-            assert.equal(router.windowFull({ pct: 100, resets_at: '2026-10-29T00:00:00Z' }, NOW), false, 'it freed yesterday');
+            assert.equal(router.windowFull({ pct: 100, resets_at: new Date(NOW - 86400000).toISOString() }, NOW), false, 'it freed yesterday');
             assert.equal(router.windowFull({ pct: 40 }, NOW), false);
             assert.equal(router.windowFull(null, NOW), false);
             assert.equal(router.FULL_PCT, 95);
