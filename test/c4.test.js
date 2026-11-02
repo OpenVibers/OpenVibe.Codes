@@ -47,13 +47,13 @@ const { boot, check, done } = require('./helpers/boot');
             assert.ok(!home.text.includes('Built for the way you work'));
             assert.ok(!home.text.includes('Recently shipped on'));
             assert.ok(home.text.includes('What should we build') && home.text.includes('owner/name or any Git URL') && home.text.includes('name="mode"'), 'the greeting, the three ways to start and the repository');
-            assert.ok(home.text.includes('action="/chat"') && home.text.includes('data-ch-composer'), 'one composer that starts the conversation');
+            assert.ok(home.text.includes('action="/chat"') && home.text.includes('data-ovt-composer'), 'one composer that starts the conversation');
             const id = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAV';
             await t.ctx.store.db.exec(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, state, result, error, created_at, updated_at)
                 VALUES ($1,$2,'prj_01ARZ3NDEKTSV4RRFFQ69G5FAW','https://github.com/OpenVibers/OpenVibe.Codes','main','Fix the full brief and keep the workspace readable on a phone','codex','failed','{"cost":0.42}'::jsonb,'The machine stopped.',$3,$3)`, [id, ada.subject, Date.now()]);
             const task = await t.get(`/tasks/${id}`, { as: ada });
             assert.strictEqual(task.status, 200);
-            assert.ok(task.text.includes('class="ch-bubble">Fix the full brief and keep the workspace readable on a phone'), 'the brief is the first message');
+            assert.ok(task.text.includes('class="ovt-bubble">Fix the full brief and keep the workspace readable on a phone'), 'the brief is the first message');
             assert.ok(task.text.includes("Didn&#39;t finish") || task.text.includes('Didn\'t finish'), 'the state is said in words');
             assert.ok(task.text.includes('Same agent (Codex)'), 'the composer carries on with the same agent, or another one');
             assert.ok(task.text.includes(`action="/tasks/${id}/continue"`), 'the next message is the next turn');

@@ -22,6 +22,7 @@ const { asyncRouter } = require('./router');
 const { sessionLogOf } = require('../domain/run-tasks');
 const models = require('../data/models');
 const kit = require('openvibe-shared/kit');
+const thread = require('openvibe-shared/thread');
 const start = require('./start');
 
 const LIVE = ['queued', 'placed', 'running'];
@@ -79,7 +80,8 @@ const agentOf = (id, names) => {
     const name = (names && names.get(id)) || (known && known[0]) || (id ? String(id) : 'Auto');
     return { name, initials: known ? known[1] : name.slice(0, 1).toUpperCase(), color: known ? known[2] : '#64748b' };
 };
-const avatar = (a) => `<span class="ch-av" style="--av:${esc(a.color)}" aria-hidden="true">${esc(a.initials)}</span>`;
+// The face is the conversation kit's (thread.face): the same in the rail, the thread and the panel.
+const avatar = (a) => thread.face(a);
 
 // A tool call's kind, by the names the agents give their tools.
 function stepKind(name) {
@@ -158,7 +160,7 @@ function createChatRoutes(ctx) {
         const item = (row) => {
             const [, tone] = stateOf(row);
             const dot = waitingIds.has(row.id) ? 'needs' : tone === 'busy' ? 'busy' : tone === 'bad' ? 'bad' : null;
-            const mark = row.kind === 'conductor' ? `<span class="ch-av ch-av-conductor" aria-hidden="true">${ico('conductor')}</span>` : avatar(agentOf(row.agent, names));
+            const mark = row.kind === 'conductor' ? thread.face({ name: 'Conductor', mark: ico('conductor'), color: 'var(--accent)' }) : avatar(agentOf(row.agent, names));
             return { href: `/tasks/${encodeURIComponent(row.id)}`, label: titleOf(row), mark, meta: dot ? '' : ago(row.updated_at || row.created_at), here: row.id === currentId, dot };
         };
         const pinned = rows.filter((x) => x.kind === 'conductor' && x.outcome !== 'stopped').slice(0, 2);
@@ -191,17 +193,21 @@ function createChatRoutes(ctx) {
         });
     }
 
-    // ── The thread ───────────────────────────────────────────────────────────────────────────────────────────────
-    const you = (text, extra = '', caption = '') => `<div class="ch-turn ch-you">${caption ? `<span class="ch-cap">${esc(caption)}</span>` : ''}<div class="ch-bubble">${esc(text)}</div>${extra}</div>`;
-    const divider = (text, icon = 'handover') => `<div class="ch-divider" role="note">${ico(icon)}<span>${esc(text)}</span></div>`;
-    function stepsHtml(steps, ms, open = false) {
-        if (!steps.length) return '';
-        const list = steps.map((s) => `<li class="ch-step${s.ok === false ? ' is-bad' : ''}" data-kind="${s.kind}">${ico(s.kind)}<span class="ch-step-n">${esc(s.name)}</span><span class="ch-step-w">${esc(s.what || '')}</span></li>`).join('');
-        const label = `Worked${ms ? ` ${minutes(ms)}` : ''} · ${steps.length} step${steps.length === 1 ? '' : 's'}`;
-        return `<details class="ch-steps"${open ? ' open' : ''}><summary>${label}${ico('chevron', 'ch-caret')}</summary><ol>${list}</ol></details>`;
+    // ── The thread (openvibe-shared/thread, plan L55 C4: one conversation UI for the network) ─────────────────────
+    // A conversation is a list of turns: what the person said, and the agent's reply under its face and name. A
+    // hand-over to another agent, or a wait, is a line across the thread. How a task ended is a card in its last reply.
+    const STEP_ICON = { read: 'read', find: 'find', edit: 'edit', run: 'run', web: 'web', sub: 'sub', tool: 'tool' };
+    const errorRow = (msg) => thread.turn({ avatar: false, reply: thread.card({ tone: 'bad', text: msg }), attrs: { role: 'alert' } });
+    /** The steps an agent took, as the kit's work rows: what it said along the way is a note, each tool a row. */
+    function workHtml(steps, ms, { live = false, liveText = '' } = {}) {
+        if (!steps.length && !live) return '';
+        const rows = steps.map((s, i) => (s.said
+            ? { kind: 'note', text: s.what }
+            : { kind: 'tool', name: s.name, input: s.what || '', icon: STEP_ICON[s.kind] || 'tool', ok: s.ok == null ? undefined : s.ok, running: live && s.ok == null && i === steps.length - 1 ? true : false }));
+        return thread.work({ open: live, live: liveText || 'Starting', took: ms ? minutes(ms) : null, rows });
     }
-    /** One agent's turn from its session lines: what it said, the steps it took, how it ended. */
-    function agentTurn(a, lines, { live = false, attempt = null } = {}) {
+    /** One agent's reply from its session lines: the steps it took, then what it said last (its answer). */
+    function agentReply(a, lines, { live = false, attempt = null } = {}) {
         const steps = [];
         const said = [];
         let done = null;
@@ -219,12 +225,13 @@ function createChatRoutes(ctx) {
         // The last thing it said is its answer; what it said along the way folds into the steps.
         const answer = (done && done.text) || said[said.length - 1] || '';
         const along = said.slice(0, answer && said[said.length - 1] === answer ? -1 : undefined);
-        const alongSteps = along.map((text) => ({ name: 'Said', what: firstLine(text, 140), kind: 'sub', ok: null }));
+        const all = [...along.map((text) => ({ said: true, what: firstLine(text, 140) })), ...steps];
         const ran = attempt ? [attempt.model, attempt.effort ? effortWord(attempt.effort) : null].filter(Boolean).join(' · ') : '';
-        const who = `<div class="ch-who">${avatar(a)}<b>${esc(a.name)}</b>${ran ? `<span>${esc(ran)}</span>` : ''}</div>`;
-        const body = answer ? `<div class="ch-md">${markdown(answer)}</div>` : live ? '' : `<p class="ch-quiet">${esc(attempt && attempt.end_why ? attempt.end_why : 'It ended without a word.')}</p>`;
-        const working = live ? `<div class="ch-working" data-ch-working><span class="ch-dots" aria-hidden="true"><i></i><i></i><i></i></span><span data-ch-working-text>${steps.length ? esc(`${steps[steps.length - 1].name} ${steps[steps.length - 1].what || ''}`.trim()) : 'Starting…'}</span></div>` : '';
-        return `<div class="ch-turn ch-agent${live ? ' is-live' : ''}"${attempt ? ` data-attempt="${Number(attempt.n)}"` : ''}>${who}${stepsHtml([...alongSteps, ...steps], ms, live)}${body}${working}</div>`;
+        const lastStep = steps[steps.length - 1];
+        const liveText = lastStep ? `${lastStep.name} ${lastStep.what || ''}`.trim() : '';
+        const body = answer ? thread.answer({ html: markdown(answer) })
+            : live ? '' : `<p class="ovt-muted">${esc(attempt && attempt.end_why ? attempt.end_why : 'It ended without a word.')}</p>`;
+        return { who: { ...a, sub: ran }, reply: workHtml(all, ms, { live, liveText }) + body };
     }
     async function taskThread(row) {
         const names = agentNames();
@@ -233,24 +240,30 @@ function createChatRoutes(ctx) {
         if (!lines.length) lines = (sessionLogOf(row) || []).map((body, i) => ({ seq: i + 1, at: null, kind: body && body.t, body, attempt_n: 1 }));
         const byAttempt = new Map();
         for (const l of lines) { const n = Number(l.attempt_n || 1); if (!byAttempt.has(n)) byAttempt.set(n, []); byAttempt.get(n).push(l); }
-        const out = [you(row.prompt || '')];
         const live = LIVE.includes(row.state);
+        // Each attempt is a turn; the brief (or a note to carry on) is its person's side, a hand-over a line before it.
+        const parts = [];
+        let mine = { text: row.prompt || '', caption: 'The brief' };
         let prev = null;
         for (const a of attempts) {
             const n = Number(a.n);
             if (prev) {
                 const note = /^carried on by the owner: /.exec(a.why || '') ? String(a.why).replace(/^carried on by the owner: /, '') : null;
-                if (note) out.push(you(note));
-                if (a.agent && prev.agent && a.agent !== prev.agent) out.push(divider(`${agentOf(a.agent, names).name} took over${prev.end_why ? `: ${agentOf(prev.agent, names).name} ${prev.end_why}` : ''}`));
-                else if (a.why && !note) out.push(divider(String(a.why), 'handover'));
+                if (note) mine = { text: note };
+                else if (a.agent && prev.agent && a.agent !== prev.agent) parts.push({ divider: `${agentOf(a.agent, names).name} took over${prev.end_why ? `: ${agentOf(prev.agent, names).name} ${prev.end_why}` : ''}` });
+                else if (a.why) parts.push({ divider: String(a.why) });
             }
             const isLive = live && n === Number(attempts[attempts.length - 1].n);
-            out.push(agentTurn(agentOf(a.agent || row.agent, names), byAttempt.get(n) || [], { live: isLive, attempt: a }));
+            parts.push({ n, open: isLive, you: mine, ...agentReply(agentOf(a.agent || row.agent, names), byAttempt.get(n) || [], { live: isLive, attempt: a }) });
+            mine = null;
             prev = a;
         }
-        if (!attempts.length) out.push(agentTurn(agentOf(row.agent, names), lines, { live }));
-        if (!live) out.push(await resultCard(row));
-        return out.join('');
+        if (!attempts.length) parts.push({ n: 1, open: live, you: mine, ...agentReply(agentOf(row.agent, names), lines, { live }) });
+        // How it ended goes in the last reply.
+        const lastTurn = parts.filter((p) => !p.divider).pop();
+        if (!live && lastTurn) lastTurn.reply += await resultCard(row);
+        return parts.map((p) => (p.divider ? thread.divider({ text: p.divider })
+            : thread.turn({ id: `a${p.n}`, open: p.open, state: p.open ? 'running' : null, you: p.you || {}, who: p.who, reply: p.reply, attrs: { 'data-attempt': p.n } })));
     }
     async function conductorThread(row, view) {
         const out = [];
@@ -258,20 +271,33 @@ function createChatRoutes(ctx) {
         const a = agentOf('claude-code', names);
         const live = LIVE.includes(row.state);
         const msgs = view.messages || [];
+        const who = { ...a, sub: row.model || '' };
         for (const m of msgs) {
-            out.push(you(m.n === 1 ? (m.prompt || 'Pick up the plan') : m.prompt, (m.attachments || []).length ? `<p class="ch-files">${m.attachments.map((f, i) => `<a class="ch-chip" href="/api/v1/tasks/${encodeURIComponent(row.id)}/messages/${encodeURIComponent(m.id)}/attachments/${i}">${ico('attach')}${esc(f.name)}</a>`).join('')}</p>` : '', m.n === 1 ? 'Hand-over brief' : ''));
+            const files = (m.attachments || []).map((f, i) => ({ href: `/api/v1/tasks/${encodeURIComponent(row.id)}/messages/${encodeURIComponent(m.id)}/attachments/${i}`, name: f.name, image: /^image\//.test(String(f.mime || '')) }));
+            const mine = { text: m.n === 1 ? (m.prompt || 'Pick up the plan') : m.prompt, caption: m.n === 1 ? 'Hand-over brief' : '', files };
+            const id = `m${Number(m.n) || out.length + 1}`;
             if (m.state === 'running' || (live && m === msgs[msgs.length - 1] && m.state !== 'done')) {
                 const lines = await db.many('SELECT seq, at, kind, body FROM codes_session_lines WHERE task_id = $1 ORDER BY seq DESC LIMIT 300', [row.id]);
-                out.push(agentTurn(a, lines.reverse(), { live: true, attempt: { model: row.model } }));
+                const r = agentReply(a, lines.reverse(), { live: true, attempt: { model: row.model } });
+                out.push(thread.turn({ id, open: true, state: 'running', you: mine, who: r.who, reply: r.reply }));
             } else if (m.result && m.result.summary) {
-                out.push(`<div class="ch-turn ch-agent"><div class="ch-who">${avatar(a)}<b>${esc(a.name)}</b>${row.model ? `<span>${esc(row.model)}</span>` : ''}</div><div class="ch-md">${markdown(m.result.summary)}</div></div>`);
-            } else if (m.error) out.push(`<div class="ch-turn ch-agent"><div class="ch-who">${avatar(a)}<b>${esc(a.name)}</b></div><p class="ch-quiet">${esc(m.error)}</p></div>`);
-            else if (m.state === 'queued') out.push(divider('Waiting for the turn before it to end', 'conductor'));
+                out.push(thread.turn({ id, you: mine, who, reply: thread.answer({ html: markdown(m.result.summary) }) }));
+            } else if (m.error) {
+                out.push(thread.turn({ id, you: mine, who, reply: `<p class="ovt-muted">${esc(m.error)}</p>` }));
+            } else if (m.state === 'queued') {
+                out.push(thread.turn({ id, you: mine, reply: null }));
+                out.push(thread.divider({ text: 'Waiting for the turn before it to end', icon: 'wait' }));
+            } else out.push(thread.turn({ id, you: mine, reply: null }));
         }
-        for (const ap of view.approvals || []) out.push(approvalCard(row, ap));
-        return out.join('');
+        // What waits for a yes, as a reply of its own at the end of the thread.
+        const asks = (view.approvals || []).map((ap) => approvalCard(row, ap)).join('');
+        if (asks) out.push(thread.turn({ id: 'asks', who, reply: asks }));
+        return out;
     }
-    const approvalCard = (row, ap) => `<form class="ch-approval" method="post" action="/tasks/${encodeURIComponent(row.id)}/approvals/${encodeURIComponent(ap.id)}"><p class="ch-approval-h">${ico('proof')}<b>${esc(ap.tool || 'A tool')}</b> wants to run</p><code tabindex="0">${esc(ap.summary || '')}</code><div class="ch-approval-a"><button class="ch-btn" name="decision" value="allow">Allow</button><button class="ch-btn ch-btn-quiet" name="decision" value="deny">Deny</button></div></form>`;
+    const approvalCard = (row, ap) => thread.card({
+        tone: 'wait', icon: 'shield', title: ap.tool || 'A tool', text: 'wants to run', code: ap.summary || '',
+        form: { action: `/tasks/${encodeURIComponent(row.id)}/approvals/${encodeURIComponent(ap.id)}`, buttons: [{ name: 'decision', value: 'allow', label: 'Allow' }, { name: 'decision', value: 'deny', label: 'Deny', quiet: true }] },
+    });
 
     /** How the task ended, as one card: the files and the diff, the proof item by item, and the pull request or why none. */
     async function resultCard(row) {
@@ -306,7 +332,7 @@ function createChatRoutes(ctx) {
                 : push.pushed ? 'The branch was pushed, but no pull request was asked for.' : 'This task did not ask for a pull request.';
             parts.push(`<p class="ch-res-line ch-muted">${ico('pr')}<span>${esc(why)}${push.branch_url ? ` <a href="${esc(push.branch_url)}" rel="noopener noreferrer">${esc(push.branch || 'the branch')}</a>` : ''}</span></p>`);
         }
-        return `<div class="ch-result">${parts.join('')}</div>`;
+        return thread.card({ tone: tone === 'bad' ? 'bad' : 'info', html: `<div class="ch-result">${parts.join('')}</div>` });
     }
 
     // ── The composer ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -324,54 +350,51 @@ function createChatRoutes(ctx) {
     function effortPicker(selected = '', cls = '') {
         return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="How hard it thinks"><span class="ch-sr">Effort</span>${ico('sub')}<select name="effort" data-ch-effort>${EFFORT.map(([v, l]) => `<option value="${v}"${selected === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
-    function composer({ action, api = '', placeholder, pickers = '', live = false, stopAction = '', hidden = '', note = '', id = '', where = '' }) {
-        return `<form class="ch-composer"${id ? ` id="${esc(id)}"` : ''} method="post" action="${esc(action)}"${api ? ` data-ch-api="${esc(api)}"` : ''} data-ch-composer>${hidden}
-<label class="ch-sr" for="ch-text">${esc(placeholder)}</label>
-<textarea id="ch-text" name="text" rows="1" placeholder="${esc(placeholder)}" required data-ch-text></textarea>
-<div class="ch-bar"><div class="ch-picks">${pickers}</div>${live && stopAction ? `<button class="ch-icon-btn ch-stop" formaction="${esc(stopAction)}" formnovalidate aria-label="Stop" title="Stop">${ico('stop')}</button>` : ''}<button class="ch-send" type="submit" aria-label="Send" title="Send">${ico('send')}</button></div>
-${where}${note ? `<p class="ch-note" data-ch-status role="status">${note}</p>` : '<p class="ch-note" data-ch-status role="status"></p>'}
-</form>`;
+    /** The kit's composer with Codes' pickers in its tools, where the work runs under the bar, and its JSON route. */
+    function composer({ action, api = '', placeholder, pickers = '', live = false, stopAction = '', note = '', id = null, where = '' }) {
+        return thread.composer({
+            action, id, placeholder, label: placeholder, tools: pickers, foot: where, note,
+            attrs: api ? { 'data-ch-api': api } : {},
+            busy: live, stopAction: live && stopAction ? stopAction : null, maxlength: 16000,
+        });
     }
 
     // ── Pages ────────────────────────────────────────────────────────────────────────────────────────────────────
-    async function frame(req, res, { currentId = null, title, head = '', thread = '', composerHtml = '', side = '', streamUrl = '', empty = false, page = null, here = '', css = [], scripts = [] }) {
+    /** The frame every signed-in page shares: the rail, the conversation (or a page) and, for a task, the panel. */
+    async function frame(req, res, { currentId = null, title, heading = null, state = '', turns = [], empty = '', composerHtml = '', panel = '', streamUrl = '', start = false, page = null, here = '', css = [], scripts = [] }) {
         const rows = await conversations(req.viewer.subject);
         const waiting = approvals ? await approvals.inbox(req.viewer.subject).catch(() => []) : [];
         const waitingIds = new Set(waiting.map((a) => a.task_id));
-        const body = `<div class="ch${side ? ' has-side' : ''}${empty ? ' is-empty' : ''}${page != null ? ' is-page' : ''}" data-chat>
-${railHtml(rows, currentId, waitingIds, here)}
-<div class="ovk-sidebar-scrim" data-ovk-sidebar-scrim hidden></div>
-<div class="ch-scrim" data-ch-scrim hidden></div>
-<section class="ch-main" aria-label="Conversation">
-<header class="ch-head">${kit.sidebarButton({ id: 'ch-rail', label: 'Your conversations' })}${head}${side ? `<button class="ch-icon-btn ch-side-open" type="button" data-ch-side-open aria-label="What it did" aria-controls="ch-side">${ico('side')}</button>` : ''}</header>
-${page != null ? `<div class="ch-page">${page}</div>` : `<div class="ch-thread" id="ch-thread"${streamUrl ? ` data-ch-stream="${esc(streamUrl)}"` : ''}>${thread}</div>
-${composerHtml}`}
-</section>
-${side}
-</div>`;
-        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css'], sharedScripts: ['kit-web.js'], scripts: [...scripts, 'js/chat.js'], body: raw(body) });
+        const view = thread.page({
+            sidebar: railHtml(rows, currentId, waitingIds, here),
+            head: thread.head({ title: heading == null ? '' : heading, sidebar: 'ch-rail', sidebarLabel: 'Your conversations', actions: state, panel: panel ? 'ch-side' : null, panelLabel: 'What it did' }),
+            turns, empty, composer: composerHtml, panel, main: page, center: start, label: page != null ? title : 'Conversation',
+            cls: page != null ? 'is-page' : '',
+        });
+        const body = `<div class="ch" data-chat${streamUrl ? ` data-ch-stream="${esc(streamUrl)}"` : ''}>${view}</div>`;
+        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css', 'thread.css'], sharedScripts: ['kit-web.js', 'ov-thread.js'], scripts: [...scripts, 'js/chat.js'], body: raw(body) });
     }
 
-    /** The side: who worked on it, and where the work is. */
+    /** The panel: who worked on it, and where the work is. */
     async function sideHtml(row) {
         const names = agentNames();
         const attempts = tasks?.attempts ? await tasks.attempts.list(row.id) : [];
         const result = asObject(row.result) || {};
         const repo = repoLabel(row.repo);
-        const facts = [
-            row.repo ? [ico('repo'), `<a href="${esc(row.repo)}" rel="noopener noreferrer">${esc(repo || 'The repository')}</a>`] : null,
-            row.folder ? [ico('folder'), `<code>${esc(row.folder)}</code>`] : null,
-            Number.isFinite(Number(result.cost_usd)) && Number(result.cost_usd) > 0 ? [ico('usage'), `about $${Number(result.cost_usd).toFixed(2)} of model use`] : null,
+        const where = [
+            row.repo ? { iconHtml: ico('repo'), html: `<a href="${esc(row.repo)}" rel="noopener noreferrer">${esc(repo || 'The repository')}</a>` } : null,
+            row.folder ? { iconHtml: ico('folder'), html: `<code>${esc(row.folder)}</code>` } : null,
+            Number.isFinite(Number(result.cost_usd)) && Number(result.cost_usd) > 0 ? { iconHtml: ico('usage'), html: `about $${Number(result.cost_usd).toFixed(2)} of model use` } : null,
         ].filter(Boolean);
-        const people = attempts.map((a) => { const g = agentOf(a.agent, names); return `<li>${avatar(g)}<span><b>${esc(g.name)}</b><small>${esc([a.model, tasks.attempts.wordsOf && a.reason ? tasks.attempts.wordsOf(a.reason) : a.state].filter(Boolean).join(' · '))}</small></span></li>`; }).join('');
-        return `<aside class="ch-side" id="ch-side" aria-label="What it did"><div class="ch-side-head"><b>What it did</b><button class="ch-icon-btn" type="button" data-ch-side-close aria-label="Close">${ico('close')}</button></div>
-${people ? `<section><p class="ch-group">Agents</p><ul class="ch-people">${people}</ul></section>` : ''}
-${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${facts.map(([i, t]) => `<li>${i}<span>${t}</span></li>`).join('')}</ul></section>` : ''}
-</aside>`;
+        const people = attempts.map((a) => { const g = agentOf(a.agent, names); return { who: g, title: g.name, sub: [a.model, tasks.attempts.wordsOf && a.reason ? tasks.attempts.wordsOf(a.reason) : a.state].filter(Boolean).join(' · ') }; });
+        return thread.panel({ id: 'ch-side', title: 'What it did', sections: [
+            people.length ? { title: 'Agents', rows: people } : null,
+            where.length ? { title: 'Where', rows: where } : null,
+        ] });
     }
 
     ctx.chatShell = (req, res, { title, body, css = [], scripts = [], here = '' }) => frame(req, res, {
-        title, page: body, here, css, scripts, head: '',
+        title, page: body, here, css, scripts,
     });
 
     /** The person's machines, for the line that says where the work runs: never more than 1.5 s, never fatal. */
@@ -442,9 +465,9 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         const rail = (list) => `<ul class="ch-spark-list">${list.map((i) => card(i, false)).join('')}</ul><ul class="ch-spark-list" aria-hidden="true">${list.map((i) => card(i, true)).join('')}</ul>`;
         const ideas = `<section class="ch-spark" aria-label="Ideas to start from" data-ch-ideas data-ch-ideasets="${esc(JSON.stringify(sets))}"><div class="ch-spark-view"><div class="ch-spark-track" data-ch-ideas-track>${rail(sets[mode])}</div></div><template data-ch-idea-icons>${['web', 'game', 'app', 'ov', 'spark'].map((n) => ico(n).replace('<svg ', `<svg data-icon="${n}" `)).join('')}</template><button class="ch-icon-btn ch-spark-pause" type="button" data-ch-ideas-pause aria-pressed="false" aria-label="Pause the ideas" title="Pause the ideas">${ico('pause', 'ch-i-pause')}${ico('play', 'ch-i-play')}</button></section>`;
 
-        const thread = `<div class="ch-hello"><span class="ov-mark" data-size="56" aria-hidden="true"></span><h1>${name ? `What should we build, ${esc(name)}?` : 'What should we build?'}</h1><p>Say it the way you would to a friend. Pick what it is, and Codes sends it to the right place.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
+        const hello = `<div class="ch-hello"><span class="ov-mark" data-size="56" aria-hidden="true"></span><h1>${name ? `What should we build, ${esc(name)}?` : 'What should we build?'}</h1><p>Say it the way you would to a friend. Pick what it is, and Codes sends it to the right place.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
         return frame(req, res, {
-            title: 'New chat', empty: true, head: '<h1 class="ch-title">New chat</h1>', thread,
+            title: 'New chat', heading: 'New chat', start: true, empty: hello,
             composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'Describe the change, question or fix', pickers, where }) + ideas,
         });
     });
@@ -527,15 +550,16 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         const [word, tone] = stateOf(row);
         const live = LIVE.includes(row.state);
         const error = String(req.query.error || '').slice(0, 200);
-        const head = `<h1 class="ch-title">${esc(titleOf(row))}</h1><span class="ch-state is-${tone}" data-ch-state>${tone === 'busy' ? '<span class="ch-dot is-busy"></span>' : ''}${esc(word)}</span>`;
+        const state = `<span class="ch-state is-${tone}" data-ch-state>${tone === 'busy' ? '<span class="ch-dot is-busy"></span>' : ''}${esc(word)}</span>`;
+        const errorTurns = error ? [errorRow(error)] : [];
         if (row.kind === 'conductor') {
             const view = await conductor.view(row);
             const last = await db.maybe('SELECT max(seq) AS seq FROM codes_session_lines WHERE task_id = $1', [row.id]);
             const model = String(row.model || 'opus');
             const pickers = `<span class="ch-chip ch-chip-static" title="The conductor runs Claude Code on your machine">${avatar(agentOf('claude-code'))}${esc(model)}</span><label class="ch-pick ch-pick-file" title="Attach an image">${ico('attach')}<span class="ch-sr">Attach an image</span><input type="file" accept="image/*" multiple data-ch-images></label>`;
             return frame(req, res, {
-                currentId: row.id, title: 'Conductor', head, side: await sideHtml(row),
-                thread: (error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : '') + await conductorThread(row, view),
+                currentId: row.id, title: 'Conductor', heading: titleOf(row), state, panel: await sideHtml(row),
+                turns: [...errorTurns, ...await conductorThread(row, view)],
                 streamUrl: `/api/v1/tasks/${encodeURIComponent(row.id)}/events?last_event_id=${last && last.seq != null ? Number(last.seq) : 0}`,
                 composerHtml: row.outcome === 'stopped' ? '' : composer({ action: `/tasks/${encodeURIComponent(row.id)}/messages`, api: `/api/v1/conductor/${encodeURIComponent(row.id)}/messages`, placeholder: live ? 'Say something: it is the next turn' : 'What next?', pickers, note: live ? 'A message waits until the current turn ends; it is not lost.' : '' }),
             });
@@ -545,8 +569,8 @@ ${facts.length ? `<section><p class="ch-group">Where</p><ul class="ch-facts">${f
         const lastSeq = seqRow && seqRow.seq != null ? Number(seqRow.seq) : 0;
         const pickers = whoPicker('', { label: 'Who carries on', auto: `Same agent (${agentOf(row.agent, agentNames()).name})` }) + effortPicker('');
         return frame(req, res, {
-            currentId: row.id, title: titleOf(row), head, side: await sideHtml(row),
-            thread: (error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : '') + await taskThread(row),
+            currentId: row.id, title: titleOf(row), heading: titleOf(row), state, panel: await sideHtml(row),
+            turns: [...errorTurns, ...await taskThread(row)],
             streamUrl: live ? `/api/v1/tasks/${encodeURIComponent(row.id)}/events?last_event_id=${lastSeq}` : '',
             composerHtml: row.outcome === 'stopped' ? '' : composer({
                 action: `/tasks/${encodeURIComponent(row.id)}/continue`, api: `/api/v1/tasks/${encodeURIComponent(row.id)}/continue`, live,

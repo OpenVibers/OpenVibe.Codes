@@ -1,19 +1,18 @@
 'use strict';
-// The chat app's conveniences (plan L31 CH1). The page works without this script; with it:
-// - the rail and the side open and close on narrow screens (Escape and the scrim close them);
-// - the composer grows with what is typed, Enter sends (Shift+Enter is a new line), an idea fills it;
-// - the rail's search filters the conversations as you type;
-// - a running turn streams into the thread: each step appears as the agent takes it, and the page renders the
-//   finished turn when the attempt ends;
-// - the conductor's images go up with the message through the JSON API.
+// Codes' own parts of the chat app (plan L31 CH1). The conversation UI is the network's (openvibe-shared/thread, plan
+// L55 C4): ov-thread.js grows the composer, sends on Enter, filters the rail, opens the panel on a narrow screen, adds
+// Copy and keeps the thread at the bottom; kit-web.js opens the rail on a phone. The page works without either. Here:
+// - a new chat's three ways to start, the ideas rail, the projects picked from the words and the repository search;
+// - the conductor's images go up with the message through the JSON API;
+// - a running turn streams into the thread (OVThread.tool / toolDone / live), and the page renders the finished turn
+//   when the attempt ends.
 //
 // Codes moves between pages with openvibe-shared/boost, which swaps the page in place without running this file
 // again: each page is set up on its first load and on every ov:boost:load, and a live stream is closed when the page
-// moves away (the owner, 2026-10-31: the rail's button did nothing on a phone after a move to Machines).
+// moves away.
 (() => {
     const $ = (sel, root = document) => root.querySelector(sel);
-    let page = null;   // { app, es, setOpen } for the page on screen
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && page) page.setOpen('side-open', false); });
+    let page = null;   // { app, es } for the page on screen
     document.addEventListener('ov:boost:before', () => { if (page && page.es) page.es.close(); page = null; });
     document.addEventListener('ov:boost:load', init);
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
@@ -21,7 +20,8 @@
     // ── A new chat: the three ways to start, and the ideas rail ──
     // The cards are radio buttons of the composer's form (CSS shows each one's pickers); here a card also swaps the
     // placeholder and the rail's ideas, and an idea fills the box and picks the card it belongs to.
-    function startPage(app, form, text, grow) {
+    function startPage(app, form, text) {
+        const grow = () => text.dispatchEvent(new Event('input', { bubbles: true }));
         const rail = $('[data-ch-ideas]', app);
         const track = rail && $('[data-ch-ideas-track]', rail);
         const kind = $('[data-ch-kind]', form);
@@ -125,51 +125,15 @@
         const app = document.querySelector('[data-chat]');
         if (!app || app.dataset.chReady) return;
         app.dataset.chReady = '1';
-        page = { app, es: null, setOpen: () => {} };
+        page = { app, es: null };
 
-        // ── The side on narrow screens (the rail is the network's sidebar: kit-web.js opens and closes it) ──
-        const scrim = $('[data-ch-scrim]', app);
-        const setOpen = (cls, on) => {
-            app.classList.toggle(cls, on);
-            if (scrim) scrim.hidden = !app.classList.contains('side-open');
-            if (on) { const first = $('.ch-side button', app); if (first) first.focus({ preventScroll: true }); }
-        };
-        app.addEventListener('click', (e) => {
-            const t = e.target.closest('[data-ch-side-open],[data-ch-side-close],[data-ch-scrim]');
-            if (!t) return;
-            setOpen('side-open', t.matches('[data-ch-side-open]'));
-        });
-        page.setOpen = setOpen;
-
-        // ── The rail's search: filter as you type (Enter still searches every task) ──
-        const find = $('.ovk-sidebar-find input', app);
-        if (find) {
-            find.addEventListener('input', () => {
-                const q = find.value.trim().toLowerCase();
-                app.querySelectorAll('.ovk-sidebar-sec').forEach((sec) => {
-                    let shown = false;
-                    sec.querySelectorAll('.ovk-sidebar-item').forEach((a) => { a.hidden = !!q && !a.textContent.toLowerCase().includes(q); if (!a.hidden) shown = true; });
-                    sec.hidden = !!q && !shown;
-                });
-            });
-        }
-
-        // ── The composer ──
-        const form = $('[data-ch-composer]', app);
-        const text = form && $('[data-ch-text]', form);
-        const status = form && $('[data-ch-status]', form);
+        // ── The composer (the kit's: it grows, Enter sends, Send waits for words) ──
+        const form = $('[data-ovt-composer]', app);
+        const text = form && $('[data-ovt-text]', form);
+        const status = form && $('[data-ovt-note]', form);
         const say = (msg, bad) => { if (status) { status.textContent = msg; status.classList.toggle('is-bad', !!bad); } };
         if (text) {
-            const grow = () => { text.style.height = 'auto'; text.style.height = `${Math.min(text.scrollHeight, window.innerHeight * 0.4)}px`; };
-            text.addEventListener('input', grow);
-            text.addEventListener('keydown', (e) => {
-                if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return;
-                // On a phone the keyboard's return is a new line; the send button sends.
-                if (matchMedia('(pointer: coarse)').matches && !e.metaKey && !e.ctrlKey) return;
-                e.preventDefault();
-                if (text.value.trim()) form.requestSubmit();
-            });
-            startPage(app, form, text, grow);
+            startPage(app, form, text);
             // The repository: a recent one is a tap away, and typing searches every repository the person can reach.
             const repo = $('[data-ch-repo]', form);
             app.querySelectorAll('[data-ch-saved-repo]').forEach((b) => b.addEventListener('click', () => { if (repo) { repo.value = b.dataset.chSavedRepo; text.focus(); } }));
@@ -195,8 +159,7 @@
             }
             // The keyboard hint only where Enter sends (a phone keyboard's return is a new line).
             if (status && !status.textContent && !matchMedia('(pointer: coarse)').matches) status.textContent = 'Enter sends · Shift+Enter for a new line';
-            if (app.classList.contains('is-empty')) text.focus({ preventScroll: true });
-            grow();
+            if ($('.ovt.is-start', app)) text.focus({ preventScroll: true });
         }
         if (form) {
             const images = $('[data-ch-images]', form);
@@ -210,7 +173,7 @@
                 if (submitter && submitter.formAction && submitter.formAction !== form.action) return; // Stop: a plain post
                 const files = images ? Array.from(images.files || []).slice(0, 4) : [];
                 form.classList.add('is-sending');
-                form.querySelectorAll('button').forEach((b) => { b.disabled = b.classList.contains('ch-send'); });
+                form.querySelectorAll('button').forEach((b) => { b.disabled = b.matches('[data-ovt-send]'); });
                 if (!files.length) { say('Sending…'); return; }       // words alone: the plain form post
                 e.preventDefault();
                 say(files.length === 1 ? 'Sending the image…' : `Sending ${files.length} images…`);
@@ -229,13 +192,12 @@
             });
         }
 
-        // ── The thread: start at the latest turn, and stream a running one ──
-        const thread = $('#ch-thread');
-        if (thread && !app.classList.contains('is-empty')) thread.scrollTop = thread.scrollHeight;
-        const stream = thread && thread.dataset.chStream;
-        const live = thread && thread.querySelector('.ch-agent.is-live');
-        if (!stream || !live || typeof EventSource === 'undefined') return;
-        const near = () => thread.scrollHeight - thread.scrollTop - thread.clientHeight < 160;
+        // ── A running turn streams in: each tool as the agent takes it, and the finished turn when the attempt ends ──
+        const stream = app.dataset.chStream;
+        const live = $('[data-ovt-thread] > .ovt-turn[data-open]', app);
+        const OV = window.OVThread;
+        if (!stream || !live || !OV || typeof EventSource === 'undefined') return;
+        const id = live.dataset.turn;
         const kindOf = (name) => {
             const n = String(name || '').toLowerCase();
             if (/^(read|view|cat|ls|glob|list|open)|read_file|list_dir/.test(n)) return 'read';
@@ -246,26 +208,6 @@
             if (/(task|agent|delegate|subagent)/.test(n)) return 'sub';
             return 'tool';
         };
-        // The step's sign: the server drew one of each kind already; reuse its icon when there is one.
-        const iconFor = (kind) => {
-            const drawn = thread.querySelector(`.ch-step[data-kind="${kind}"] svg`);
-            if (drawn) return drawn.cloneNode(true);
-            const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-            s.setAttribute('class', 'ch-i'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '1.8');
-            const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); c.setAttribute('cx', '12'); c.setAttribute('cy', '12'); c.setAttribute('r', '3');
-            s.appendChild(c); return s;
-        };
-        let steps = live.querySelector('.ch-steps');
-        const list = () => {
-            if (!steps) {
-                steps = document.createElement('details'); steps.className = 'ch-steps'; steps.open = true;
-                const sum = document.createElement('summary'); sum.textContent = 'Working'; steps.append(sum, document.createElement('ol'));
-                live.querySelector('.ch-who').after(steps);
-            }
-            return steps.querySelector('ol');
-        };
-        const count = () => { const n = list().children.length; const sum = steps.querySelector('summary'); if (sum && sum.firstChild && sum.firstChild.nodeType === 3) sum.firstChild.textContent = `Working · ${n} step${n === 1 ? '' : 's'}`; };
-        const working = live.querySelector('[data-ch-working-text]');
         const attemptN = Number(live.dataset.attempt || 0);
         const es = page.es = new EventSource(stream);
         let reloading = false;
@@ -274,19 +216,14 @@
             let d; try { d = JSON.parse(ev.data); } catch { return; }
             if (attemptN && d.attempt_n && Number(d.attempt_n) !== attemptN) return;
             const b = d.body && typeof d.body === 'object' ? d.body : { t: d.kind, text: String(d.body || '') };
-            const stick = near();
             if (b.t === 'tool') {
-                const li = document.createElement('li'); li.className = 'ch-step is-new'; li.dataset.kind = kindOf(b.name);
-                const n = document.createElement('span'); n.className = 'ch-step-n'; n.textContent = b.name || 'tool';
-                const w = document.createElement('span'); w.className = 'ch-step-w'; w.textContent = b.what || '';
-                li.append(iconFor(li.dataset.kind), n, w); list().appendChild(li); count();
-                if (working) working.textContent = `${b.name || 'Working'} ${b.what || ''}`.trim();
-            } else if (b.t === 'tool_result' && b.ok === false) {
-                const last = list().lastElementChild; if (last) last.classList.add('is-bad');
-            } else if (b.t === 'text' && b.text && working) {
-                working.textContent = String(b.text).split('\n').find(Boolean) || working.textContent;
+                OV.tool(id, { name: b.name || 'tool', input: b.what || '', icon: kindOf(b.name), key: b.id });
+                OV.live(id, `${b.name || 'Working'} ${b.what || ''}`.trim());
+            } else if (b.t === 'tool_result') {
+                OV.toolDone(id, b.ok !== false, b.id);
+            } else if (b.t === 'text' && b.text) {
+                OV.live(id, String(b.text).split('\n').find(Boolean) || 'Working');
             } else if (b.t === 'done' || b.t === 'end' || d.kind === 'end') reload();
-            if (stick) thread.scrollTop = thread.scrollHeight;
         });
         es.addEventListener('attempt', (ev) => {
             let d; try { d = JSON.parse(ev.data); } catch { return; }
