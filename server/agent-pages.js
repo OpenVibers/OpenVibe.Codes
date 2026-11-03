@@ -4,12 +4,13 @@
 // twin cannot drift from its page. Anonymous only; a run's page is a person's run and has no twin.
 const { renderPage } = require('./render/layout');
 
-function createAgentPages(ctx, publicViews) {
+function createAgentPages(ctx, publicViews, { home = null } = {}) {
     const views = publicViews;
     const twin = (page, path) => (page ? { html: renderPage({ ...page, viewer: { kind: 'anonymous' }, config: ctx.config, path }) } : null);
 
     async function renderPublicPage(path) {
-        if (path === '/') return twin(views.home(), path);
+        // / is the C4 front door a visitor gets (server/http/c4.js visitorHome), not the old marketing home.
+        if (path === '/') return twin((home && home()) || views.home(), path);
         if (path === '/start') return twin(views.start(), path);
         if (path === '/harnesses') return twin(views.harnesses(), path);
         if (path === '/improve') return twin(views.improve(), path);

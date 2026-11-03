@@ -259,10 +259,11 @@ async function createApp(opts = {}) {
     // The agent layer (openvibe-shared/agent-layer): /.well-known/agent.json and the Markdown twins of the public
     // pages. The pages themselves keep their own routes — a signed-in visitor's account bar and forms are theirs
     // — so only the manifest and twin requests reach this mount; the pages advertise the twin themselves.
+    let c4Routes = null;   // created below, after the chat app's routes (the twin of / reads its front door)
     const agentLayer = express();
     require('openvibe-shared/agent-layer').mount(agentLayer, {
         descriptor: require('./agent-descriptor'),
-        render: require('./agent-pages').createAgentPages(ctx, pageRoutes.publicViews).renderPublicPage,
+        render: require('./agent-pages').createAgentPages(ctx, pageRoutes.publicViews, { home: () => c4Routes && c4Routes.visitorHome() }).renderPublicPage,
     });
     app.use((req, res, next) => {
         const twin = req.path.endsWith('.md') || req.query.format === 'markdown' || String(req.headers.accept || '').includes('text/markdown');
@@ -273,7 +274,8 @@ async function createApp(opts = {}) {
     app.use(require('./http/chat').createChatRoutes(ctx));
     app.use(require('./http/git').createGitRoutes(ctx));   // after the chat app: it renders in ctx.chatShell
     // C4 workspace pages sit before the legacy marketing pages and share the existing owner-scoped task store.
-    app.use(require('./http/c4').createC4Routes(ctx));
+    c4Routes = require('./http/c4').createC4Routes(ctx);
+    app.use(c4Routes);
     app.use(pageRoutes);
     app.use(createRunRoutes({ config, store, sso, harnesses, run, tasks, sessions, keys, fetchImpl: fetchImpl || globalThis.fetch, log }));
     app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try <a href="/harnesses">the agents</a>, <a href="/improve">Improve OpenVibe</a>, or the developer platform at <a href="https://openvibe.services">openvibe.services</a>.</p>` }));
