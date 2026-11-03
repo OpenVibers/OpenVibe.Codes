@@ -47,8 +47,11 @@ const PRIVATE = ['/projects', '/staff', '/auth/', '/oauth/test-callback'];
             assert.match(r.headers.get('content-type'), /^text\/plain/);
             assert.match(r.headers.get('cache-control') || '', /public, max-age=\d+/);
             assert.ok(r.text.startsWith('# OpenVibe.Codes'), 'no title');
-            assert.ok(r.text.includes('(https://openvibe.codes/harnesses)'), 'no agents link');
-            assert.ok(r.text.includes('(https://openvibe.codes/improve)'), 'no Improve OpenVibe link');
+            // AGT-5: own pages are linked at their Markdown twins; Optional is the last section.
+            assert.ok(r.text.includes('(https://openvibe.codes/harnesses.md)'), 'no agents link');
+            assert.ok(r.text.includes('(https://openvibe.codes/improve.md)'), 'no Improve OpenVibe link');
+            assert.ok(r.text.includes('(https://openvibe.codes/index.md)') && r.text.includes('(https://openvibe.codes/api/v1/harnesses)'), 'the home at its twin, the API as it is');
+            assert.ok(r.text.includes('\n## Optional\n') && r.text.lastIndexOf('\n## ') === r.text.indexOf('\n## Optional\n'), 'Optional is last');
             assert.ok(r.text.includes('(https://openvibe.services)'), 'no pointer to the developer platform');
             assert.ok(r.text.includes('https://openvibe.codes/sitemap.xml'), 'sitemap not listed');
             assert.ok(r.text.includes('(https://openvibe.codes/llms-full.txt)'), 'llms-full.txt not listed');

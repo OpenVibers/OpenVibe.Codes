@@ -14,6 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const seo = require('openvibe-shared/seo');
+const { twinUrl } = require('openvibe-shared/agent-layer');
 const cache = require('openvibe-shared/cache-policy');
 const { asyncRouter } = require('./router');
 
@@ -90,12 +91,22 @@ function describePage(pathname, { governance = [] }) {
  * follows it gets nothing. So a section may carry notes: plain lines that describe such an
  * endpoint (POST /api/v1/route — ...) instead of linking it. Every real GET link stays a link.
  */
-function llmsTxt({ name, summary, details, sections = [] }) {
+// AGT-5: each of the site's own pages is linked at its Markdown twin (/start → /start.md, / → /index.md); a file, an
+// /api/ or /.well-known/ path and another site's link keep their URL, as openvibe-shared's seo.llmsTxt markdown mode
+// does. `optional` is llmstxt.org's "## Optional", last.
+function twinOf(url, base) {
+    let u;
+    try { u = new URL(url); } catch { return url; }
+    if (!base || u.origin !== new URL(base).origin || /^\/(api|\.well-known)(\/|$)/.test(u.pathname) || /\.[a-z0-9]{1,8}$/i.test(u.pathname.split('/').pop())) return url;
+    return twinUrl(url);
+}
+
+function llmsTxt({ name, summary, details, sections = [], optional = [], base = null }) {
     const out = [`# ${name}`, '', `> ${String(summary || '').replace(/\s+/g, ' ').trim()}`, ''];
     if (details) out.push(String(details).trim(), '');
-    for (const sec of sections) {
+    for (const sec of [...sections, ...(optional.length ? [{ title: 'Optional', links: optional }] : [])]) {
         if (!sec) continue;
-        const links = (sec.links || []).map((l) => '- [' + l.title + '](' + l.url + ')' + (l.note ? ': ' + String(l.note).replace(/\s+/g, ' ').trim() : ''));
+        const links = (sec.links || []).map((l) => '- [' + l.title + '](' + twinOf(l.url, base) + ')' + (l.note ? ': ' + String(l.note).replace(/\s+/g, ' ').trim() : ''));
         const notes = (sec.notes || []).map((n) => String(n).replace(/\s+/g, ' ').trim());
         if (!links.length && !notes.length) continue;
         out.push('## ' + sec.title, '');
@@ -122,6 +133,7 @@ function createDiscoveryRoutes(ctx) {
     r.get('/llms.txt', (_req, res) => {
         res.type('text/plain').set('Cache-Control', TEXT).send(llmsTxt({
             name: SITE_NAME,
+            base: site,
             summary: 'OpenVibe.Codes: the open coding-agent harness. openvibe-codes runs a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or your own OpenAI-compatible model, hands it to the next agent when one fails, and keeps every run; plus a public catalog and routing API, and the way to improve OpenVibe itself.',
             details: `Every page is server-rendered and readable without JavaScript. The harness is a command-line tool and a Node.js module that runs on your machine with your agents and keys (install: ${INSTALL_HINT}). Every agent's output becomes one event stream in Claude Code's stream-json shape. The catalog and the router are public: GET /api/v1/harnesses lists every harness with its models, and POST /api/v1/harnesses/route picks one for a task by capability first, then cost. A hosted runner comes next. The developer console that used to live here (projects, apps, keys, the API reference, OAuth and webhook tools, releases) is OpenVibe.Services at ${SERVICES_ORIGIN}.`,
             sections: [
@@ -130,7 +142,6 @@ function createDiscoveryRoutes(ctx) {
                     { title: 'Get started', url: abs('/start'), note: 'install, agents, commands, permission levels, hand-offs, events, from your own code' },
                     { title: 'The coding agents', url: abs('/harnesses'), note: 'every harness with its models, capabilities, prices and limits' },
                     { title: 'Improve OpenVibe', url: abs('/improve'), note: 'every repository and the path to a reviewed pull request' },
-                    { title: 'What shipped on OpenVibe.Codes', url: abs('/updates') },
                 ] },
                 { title: 'Community', links: [
                     { title: 'Community home', url: abs('/policy') },
@@ -139,15 +150,16 @@ function createDiscoveryRoutes(ctx) {
                 { title: 'Machine-readable', links: [
                     { title: 'The agent catalog (JSON)', url: abs('/api/v1/harnesses'), note: 'every harness with its agents (platform.harness-offer@1 rows)' },
                     { title: 'The agent manifest (JSON)', url: abs('/.well-known/agent.json'), note: 'what this site tells an agent about itself' },
-                    { title: 'Sitemap', url: abs('/sitemap.xml'), note: 'the public pages, each with a real lastmod' },
-                    { title: 'Full text for language models', url: abs('/llms-full.txt'), note: 'every public page, one line each' },
-                    { title: 'Release metadata (JSON)', url: abs('/release.json'), note: 'this service\'s current release, per ADR-016' },
                 ], notes: [
                     'POST /api/v1/harnesses/route — pick a harness for a task: send { task, requirements? } and get { selected, reasons, candidates }. It answers POST only, so there is no page here to fetch; the catalog and the router are described at /harnesses and /start.',
                 ] },
-                { title: 'Elsewhere', links: [
-                    { title: 'OpenVibe.Services', url: SERVICES_ORIGIN, note: 'the developer platform: projects, keys, grants and the API docs of every service' },
-                ] },
+            ],
+            optional: [
+                { title: 'What shipped on OpenVibe.Codes', url: abs('/updates') },
+                { title: 'Sitemap', url: abs('/sitemap.xml'), note: 'the public pages, each with a real lastmod' },
+                { title: 'Full text for language models', url: abs('/llms-full.txt'), note: 'every public page, one line each' },
+                { title: 'Release metadata (JSON)', url: abs('/release.json'), note: 'this service\'s current release, per ADR-016' },
+                { title: 'OpenVibe.Services', url: SERVICES_ORIGIN, note: 'the developer platform: projects, keys, grants and the API docs of every service' },
             ],
         }));
     });
