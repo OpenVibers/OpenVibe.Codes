@@ -120,7 +120,7 @@ async function createApp(opts = {}) {
     ctx.approvals = createApprovals({ store, config, log, notify: ctx.notify, userSettings: ctx.userSettings });
     ctx.conductor = createConductor({
         store, config, log, run, attempts, tasks, sessions, approvals: ctx.approvals, notify: ctx.notify,
-        fetchImpl: fetchImpl || globalThis.fetch,
+        fetchImpl: fetchImpl || globalThis.fetch, fleet, userSettings,
     });
     tasks.setConductor(ctx.conductor);
 

@@ -8,11 +8,17 @@
  *
  *   createUserSettings({ store })
  *     get(subject)                 → { default_agent, default_machine, notify_done, notify_needs, safety,
- *                                     steps, minutes, no_cloud, only_free }
+ *                                     steps, minutes, no_cloud, only_free, conductor_fallbacks,
+ *                                     conductor_switch_pct }
  *     save(subject, patch)         → the saved row, in the same shape
+ *
+ * The conductor's failover (migration 0023): the agents and models it falls back to, in order, and the percentage of a
+ * usage window at which it switches (server/domain/conductor-failover.js).
  *
  * Only a usr_ subject is accepted: a service token has no preferences of its own to keep.
  */
+const failover = require('./conductor-failover');
+
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const SAFETY = ['ask', 'project', 'full'];
 const AGENT = /^[a-z0-9-]{1,40}$/;
@@ -25,6 +31,8 @@ const DEFAULTS = Object.freeze({
     steps: null, minutes: null,
     // Placement A1: the person's rules, both off until they choose them.
     no_cloud: false, only_free: false,
+    // The conductor's failover: no fallback until the person picks one; it switches at 90% of a window.
+    conductor_fallbacks: [], conductor_switch_pct: failover.DEFAULT_SWITCH_PCT,
 });
 
 /** A nullable limit from a form or an API: '' / 'off' / 0 / null mean no limit; a negative or silly number is refused. */
@@ -39,7 +47,7 @@ function limit(v, field) {
 }
 
 function present(row) {
-    if (!row) return { ...DEFAULTS };
+    if (!row) return { ...DEFAULTS, conductor_fallbacks: [] };
     return {
         default_agent: row.default_agent || null,
         default_machine: row.default_machine || null,
@@ -50,6 +58,8 @@ function present(row) {
         minutes: row.minutes == null ? null : Number(row.minutes),
         no_cloud: row.no_cloud === true,
         only_free: row.only_free === true,
+        conductor_fallbacks: failover.storedFallbacks(row.conductor_fallbacks),
+        conductor_switch_pct: row.conductor_switch_pct == null ? failover.DEFAULT_SWITCH_PCT : Number(row.conductor_switch_pct),
     };
 }
 
@@ -96,15 +106,23 @@ function createUserSettings({ store }) {
         if (steps !== undefined) next.steps = steps;
         const minutes = limit(patch.minutes, 'minutes per task');
         if (minutes !== undefined) next.minutes = minutes;
+        // Settings → Conductor: the fallbacks in order (each an agent a conductor can run on, with an optional model)
+        // and the switch point. A form that did not send them keeps what was saved.
+        const fallbacks = failover.cleanFallbacks(patch.conductor_fallbacks);
+        if (fallbacks !== undefined) next.conductor_fallbacks = fallbacks;
+        const switchPct = failover.cleanSwitchPct(patch.conductor_switch_pct);
+        if (switchPct !== undefined) next.conductor_switch_pct = switchPct == null ? failover.DEFAULT_SWITCH_PCT : switchPct;
         await db.exec(
             `INSERT INTO codes_user_settings (subject, default_agent, default_machine, notify_done, notify_needs, safety,
-                 steps, minutes, no_cloud, only_free, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+                 steps, minutes, no_cloud, only_free, conductor_fallbacks, conductor_switch_pct, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, now())
              ON CONFLICT (subject) DO UPDATE SET default_agent = EXCLUDED.default_agent, default_machine = EXCLUDED.default_machine,
                  notify_done = EXCLUDED.notify_done, notify_needs = EXCLUDED.notify_needs, safety = EXCLUDED.safety,
                  steps = EXCLUDED.steps, minutes = EXCLUDED.minutes, no_cloud = EXCLUDED.no_cloud,
-                 only_free = EXCLUDED.only_free, updated_at = now()`,
-            [subject, next.default_agent, next.default_machine, next.notify_done, next.notify_needs, next.safety, next.steps, next.minutes, next.no_cloud, next.only_free],
+                 only_free = EXCLUDED.only_free, conductor_fallbacks = EXCLUDED.conductor_fallbacks,
+                 conductor_switch_pct = EXCLUDED.conductor_switch_pct, updated_at = now()`,
+            [subject, next.default_agent, next.default_machine, next.notify_done, next.notify_needs, next.safety, next.steps, next.minutes, next.no_cloud, next.only_free,
+                JSON.stringify(next.conductor_fallbacks || []), next.conductor_switch_pct],
         );
         return next;
     }

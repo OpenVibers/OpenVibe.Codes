@@ -170,7 +170,7 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such conductor of yours');
         const b = req.body && typeof req.body === 'object' ? req.body : {};
         try {
-            const out = await conductor.message(row, { text: b.text, attachments: b.attachments });
+            const out = await conductor.message(row, { text: b.text, attachments: b.attachments, token: (req.person && req.person.token) || null });
             return res.status(201).json({
                 message: conductor.presentMessage(out.message),
                 started: !!(out.started && out.started.job),

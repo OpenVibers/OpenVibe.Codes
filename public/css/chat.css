@@ -154,3 +154,12 @@ html[data-ov-motion=reduced] .ch-spark-list[aria-hidden],html[data-ov-motion=red
   .ch-mode b{font-size:14px}
   .ch-mode small{font-size:12px;line-height:1.35}
 }
+/* The conductor's usage in the side panel (the failover, 2026-11-03): a meter per agent, the one that takes the next turn. */
+.ch .ovt-panel-rows .ch-usage-meter{display:block;height:5px;margin-top:6px;border-radius:3px;background:var(--ch-hover);overflow:hidden}
+.ch .ch-usage-meter>span{display:block;height:100%;border-radius:3px;background:var(--ch-ok)}
+.ch .ch-usage-meter.is-near>span{background:var(--ch-warn)}
+.ch .ch-usage-meter.is-full>span{background:var(--ch-bad)}
+.ch .ch-usage-next{font-style:normal;font-weight:600;font-size:11px;color:var(--ch-accent);margin-left:4px}
+.ch .ch-usage-note{margin:8px 0 0;padding:8px 10px;border-radius:8px;background:var(--ch-hover);color:var(--ch-soft);font-size:12px;line-height:1.45}
+.ch .ch-usage-foot{margin:8px 0 0;color:var(--ch-muted);font-size:12px;line-height:1.45}
+.ch .ch-usage-foot a{color:var(--ch-accent)}

@@ -305,3 +305,16 @@
 .c4-demo-ok{padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;color:color-mix(in srgb,#22c55e 55%,var(--c4-ink,var(--text-primary,#eaf0f1)));background:color-mix(in srgb,#22c55e 14%,transparent)}
 .c4-composer-front{margin:8px 0 4px}
 .c4-composer-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
+/* The conductor's failover (2026-11-03): the fallback rows in Settings, the usage card, and a turn that switched agent. */
+.c4-fallbacks{display:grid;gap:10px}
+.c4-fallback{display:grid;grid-template-columns:28px minmax(0,1.3fr) minmax(0,1fr);gap:12px;align-items:end;padding:12px;border:1px solid var(--c4-line);border-radius:10px;background:var(--c4-ghost)}
+.c4-fallback-n{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;align-self:center;background:var(--c4-open-bg);color:var(--c4-open-ink);font-size:12px;font-weight:700}
+.c4-fallback:has(select option[value=""]:checked){background:transparent;border-style:dashed}
+.c4-fallback:has(select option[value=""]:checked) .c4-fallback-n{background:var(--c4-quiet-bg);color:var(--c4-muted)}
+.c4-chain-next{box-shadow:inset 3px 0 0 var(--c4-accent);padding-left:10px}
+.c4-usage-note{margin:12px 0 0;padding:10px 12px;border-radius:8px;background:var(--c4-open-bg);color:var(--c4-open-ink)}
+.c4-turn-tags{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.c4-turn-agent{min-height:24px;padding:2px 9px;font-size:11px}
+.c4-turn-switch{display:flex;align-items:flex-start;gap:8px;margin:0 0 10px;padding:9px 11px;border-radius:8px;background:var(--c4-open-bg);color:var(--c4-open-ink);font-size:12px;line-height:1.45}
+.c4-turn-switch svg{width:15px;height:15px;flex:none;margin-top:1px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+@media (max-width:640px){.c4-fallback{grid-template-columns:28px minmax(0,1fr)}.c4-fallback>label:last-child{grid-column:2}}
