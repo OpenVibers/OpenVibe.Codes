@@ -98,6 +98,13 @@ const codex = {
             : ['exec', '--json', '--skip-git-repo-check', '-C', t.cwd, '-s', sandbox];
         if (t.model) args.push('-m', t.model);
         if (t.effort) args.push('-c', `model_reasoning_effort="${effortFor('codex', t.effort)}"`);
+        // An MCP server this session may use (the conductor's Codes tools, when Codex takes a conductor's turn): its
+        // command and arguments as config overrides, TOML values. Nothing secret rides here: the launcher holds the token.
+        const mcp = t.options && t.options.mcpServer;
+        if (mcp && /^[a-z][a-z0-9_-]{0,30}$/.test(String(mcp.name || '')) && mcp.command) {
+            args.push('-c', `mcp_servers.${mcp.name}.command=${JSON.stringify(String(mcp.command))}`);
+            args.push('-c', `mcp_servers.${mcp.name}.args=${JSON.stringify((mcp.args || []).map(String))}`);
+        }
         args.push(t.prompt);
         const startedAt = Date.now();
         const parser = jsonLines(codex, (e, emit, st) => {
@@ -160,6 +167,8 @@ const opencode = {
         if (t.model) args.push('-m', t.model);
         if (t.resume) args.push('-s', t.resume);
         args.push('--', t.prompt);
+        // A config file for this run (the conductor's Codes MCP server), merged over the person's own by OpenCode.
+        const configFile = t.options && typeof t.options.configFile === 'string' ? t.options.configFile : null;
         const startedAt = Date.now();
         const parser = jsonLines(opencode, (e, emit, st) => {
             st.startedAt = startedAt;
@@ -191,7 +200,8 @@ const opencode = {
             emit(ev.result({ ok: !!final && !st.failed, text: final || st.failed || exitReason(info, 'OpenCode'), sessionId: st.sessionId, model: t.model, startedAt, turns: st.turns || 0, costUsd: u.cost,
                 usage: ev.usage({ input: u.input, output: u.output, cacheRead: u.read, cacheWrite: u.write }) }));
         });
-        return spawnAgent({ cmd: this.bin, args, cwd: t.cwd, env: ctx.env, timeoutMs: t.timeoutMs, signal: t.signal, parser });
+        const env = configFile ? { ...(ctx.env || {}), OPENCODE_CONFIG: configFile } : ctx.env;
+        return spawnAgent({ cmd: this.bin, args, cwd: t.cwd, env, timeoutMs: t.timeoutMs, signal: t.signal, parser });
     },
 };
 

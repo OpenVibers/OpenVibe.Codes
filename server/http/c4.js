@@ -26,6 +26,9 @@ const safeId = (s) => /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(s || ''));
 const money = (n) => Number.isFinite(Number(n)) ? `$${Number(n).toFixed(2)}` : '—';
 // The models a Claude Code plan login offers; the alias is what the CLI is given, so it survives a point release.
 const MODELS = [['opus', 'Opus 5.5 (default)'], ['sonnet', 'Sonnet 5.5'], ['haiku', 'Haiku 5.5']];
+const { CONDUCTOR_AGENTS, AGENT_NAMES: failoverNames } = require('../domain/conductor-failover');
+/** The agents a conductor may fall back to: every conductor agent but Claude Code, which is its own. */
+const CONDUCTOR_FALLBACKS = CONDUCTOR_AGENTS.filter((a) => a !== 'claude-code');
 const modelLabel = (m) => ({ opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', haiku: 'Haiku 5.5' }[m] || m || 'Opus 5.5');
 const age = (value) => {
     const numeric = Number(value);
@@ -42,6 +45,19 @@ const whenUtc = (value) => {
     const mins = Math.round((ms - Date.now()) / 60000);
     const soon = mins <= 0 ? 'now' : mins < 60 ? `in ${mins} min` : mins < 2880 ? `in ${Math.round(mins / 60)} h` : `in ${Math.round(mins / 1440)} d`;
     return text ? `frees ${soon} · ${text} UTC` : null;
+};
+/** One usage window as a meter: its name, how full it is, and when it frees. */
+const usageMeter = (w) => {
+    const pct = Math.max(0, Math.min(100, Number(w.pct) || 0));
+    const full = Number(w.pct) >= 95;
+    const free = whenUtc(w.resets_at);
+    const used = w.used != null && w.limit != null ? `${w.used} of ${w.limit}` : (w.pct != null ? `${Math.round(Number(w.pct))}%` : '');
+    return `<div class="c4-meter"><span class="c4-meter-name">${esc(w.name || 'window')}</span><span class="c4-meter-track" role="img" aria-label="${esc(`${w.name || 'window'}: ${Math.round(pct)}% used${full ? ', full' : ''}`)}"><span class="c4-meter-fill${full ? ' is-full' : ''}" style="width:${pct}%"></span></span><span class="c4-meter-note">${used ? `<b>${esc(used)}</b>` : ''}${used && free ? ' · ' : ''}${esc(free || (used ? '' : 'no reading'))}</span></div>`;
+};
+/** The conductor's chain as its page says it: each agent's usage state, in a word and a tone. */
+const CHAIN_STATE = {
+    ok: ['Has room', 'ok'], near: ['Nearly full', 'skip'], full: ['Full', 'bad'], login: ['Sign in', 'bad'],
+    absent: ['Not installed', 'skip'], unknown: ['Not reported', 'skip'],
 };
 const FLEET_STATE = {
     ok: ['Has room', 'ok'], low: ['Nearly full', 'skip'], login: ['Sign in', 'bad'], limited: ['Full', 'bad'],
@@ -280,7 +296,11 @@ ${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="
             : '';
         const answer = m.result && m.result.summary ? `<pre class="c4-turn-answer" tabindex="0">${esc(m.result.summary)}</pre>` : '';
         const error = m.error ? `<p class="c4-turn-error">${esc(m.error)}</p>` : '';
-        return `<li class="c4-turn c4-turn-${esc(m.state)}"><div class="c4-turn-head"><span class="c4-turn-who">${m.n === 1 ? 'Hand-over brief' : esc(`You · turn ${m.n}`)}</span>${pill(word, kind)}</div><div class="c4-turn-text">${esc(m.prompt)}</div>${files}${answer}${error}</li>`;
+        // Which agent answered: said on every turn once the conversation has more than one (the failover).
+        const ranOn = m.agent && (m.agent !== 'claude-code' || m.switch_note)
+            ? `<span class="c4-chip c4-turn-agent">${esc(m.agent_name || m.agent)}${m.model ? ` · ${esc(modelLabel(m.model))}` : ''}</span>` : '';
+        const switched = m.switch_note ? `<p class="c4-turn-switch">${icon('<path d="M4 8h13l-3-3M20 16H7l3 3"/>')}<span>${esc(m.switch_note)}</span></p>` : '';
+        return `<li class="c4-turn c4-turn-${esc(m.state)}">${switched}<div class="c4-turn-head"><span class="c4-turn-who">${m.n === 1 ? 'Hand-over brief' : esc(`You · turn ${m.n}`)}</span><span class="c4-turn-tags">${ranOn}${pill(word, kind)}</span></div><div class="c4-turn-text">${esc(m.prompt)}</div>${files}${answer}${error}</li>`;
     };
 
     /** One waiting approval: the command the person reads, and the two answers. */
@@ -301,11 +321,20 @@ ${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="
         const approvals = pending.length
             ? `<section class="c4-card c4-approvals" id="approvals"><div class="c4-card-head"><h2>Needs you</h2><span class="c4-muted">Your conductor is waiting</span></div>${pending.map((a) => approvalCard(a, `/tasks/${encodeURIComponent(row.id)}/approvals/${encodeURIComponent(a.id)}`)).join('')}</section>`
             : '';
+        // Usage (the failover): each agent of the chain, how full it is, and which one the next turn takes.
+        const usage = view.usage;
+        const chainRows = usage && usage.chain && usage.chain.length ? usage.chain.map((u, i) => {
+            const [label, tone] = CHAIN_STATE[u.state] || CHAIN_STATE.unknown;
+            const meter = u.pct != null ? usageMeter({ name: u.window, pct: u.pct, resets_at: u.resets_at }) : '';
+            const next = usage.next && usage.next.agent === u.agent && (usage.next.model || null) === (u.model || null);
+            return `<li class="c4-row c4-fleet-row${next ? ' c4-chain-next' : ''}"><span class="c4-row-dot${u.state === 'ok' ? ' c4-dot-ok' : ['full', 'login'].includes(u.state) ? ' c4-dot-bad' : ''}" aria-hidden="true"></span><span class="c4-row-label">${esc(u.name)}${u.model ? ` · ${esc(modelLabel(u.model))}` : ''}</span><span class="c4-row-note">${i === 0 ? 'its own agent' : `fallback ${i}`}${next ? ' · <b>takes the next turn</b>' : ''}</span>${pill(label, tone)}${meter ? `<div class="c4-fleet-windows">${meter}</div>` : ''}</li>`;
+        }).join('') : '';
+        const usageCard = chainRows ? `<section class="c4-card c4-conductor-usage" aria-labelledby="c4-usage-h"><div class="c4-card-head"><h2 id="c4-usage-h">Usage</h2><a href="/settings#conductor">${usage.fallbacks ? 'Fallbacks' : 'Add a fallback'}</a></div><ul class="c4-rows c4-fleet">${chainRows}</ul>${usage.note ? `<p class="c4-hint c4-usage-note">${esc(usage.note)}</p>` : ''}${usage.fallbacks ? `<p class="c4-hint">At ${esc(usage.switch_pct)}% of any window the next turn moves to the first fallback with room, and comes back once the window frees.</p>` : `<p class="c4-hint">No fallback yet. <a href="/settings#conductor">Pick one</a>, and when ${esc(usage.chain[0].name)} nears its limit your conductor carries on with it instead of stopping.</p>`}</section>` : '';
         const outcome = row.outcome === 'unfinished' || row.outcome === 'stopped'
             ? `<div class="c4-outcome"><span class="c4-obadge" aria-hidden="true">${icon('<path d="m18 6-12 12M6 6l12 12"/>')}</span><div class="c4-outcome-copy"><b>${row.outcome === 'stopped' ? 'Stopped' : 'The last turn did not finish'}</b><span>${esc(row.outcome_note || row.error || 'Write a message to carry on.')}</span></div></div>` : '';
         const transcript = `<section class="c4-card c4-transcript" data-c4-conductor-stream="${esc(`${api}/events?last_event_id=${lastSeq}`)}" data-task="${esc(row.id)}" data-started-at="${esc(row.started_at || row.created_at || '')}" data-c4-conductor="${live ? 'live' : 'idle'}"><div class="c4-card-head"><h2>${live ? 'This turn, live' : 'The last turn'}</h2><span class="c4-muted" data-live-label>${live ? 'Connecting…' : 'Nothing is running'}</span></div><pre class="c4-log" data-task-log aria-live="polite" tabindex="0">${esc(lastLines)}</pre></section>`;
         const composer = row.outcome === 'stopped' ? '' : `<section class="c4-card c4-conductor-composer"><form method="post" action="/tasks/${encodeURIComponent(row.id)}/messages" data-c4-conductor-form data-conductor-api="/api/v1/conductor/${encodeURIComponent(row.id)}/messages"><label for="c4-message">${live ? 'Say something: it is the next turn' : 'What next?'}</label><textarea id="c4-message" name="text" rows="3" placeholder="Tell your conductor what to do next, or ask what it is doing" required></textarea><div class="c4-conductor-actions"><label class="c4-file">Attach an image<input type="file" accept="image/*" multiple data-c4-images></label><button class="c4-button" type="submit">Send</button></div><p class="c4-hint" data-c4-message-status role="status">${live ? 'A message waits until the current turn ends; it is not lost.' : ''}</p></form></section>`;
-        const content = `${outcome}<section class="c4-card c4-conductor-head"><div class="c4-task-heading"><div class="c4-task-title-wrap"><h1>Conductor</h1></div><span class="c4-status c4-${esc(row.state)}">${esc(conductorState(row))}</span></div><div class="c4-chips" aria-label="Conductor details"><span class="c4-chip">${esc(row.folder || 'a folder')}</span><span class="c4-chip">${esc(modelLabel(row.model))}</span><span class="c4-chip">safety: ${esc(row.safety || 'ask')}</span><span class="c4-chip">${esc(machineLabel || 'your machine')}</span></div><p class="c4-hint">One Claude Code session on your own machine, with your own login. Each message is the next turn of the same conversation; its work is carried out through the Codes tools, on your other agents.</p></section>${approvals}<section class="c4-card c4-turns"><div class="c4-card-head"><h2>Turns</h2><span class="c4-muted">${(view.messages || []).length} so far</span></div>${turns ? `<ol class="c4-turn-list">${turns}</ol>` : '<div class="c4-emptyline">Its first turn is starting.</div>'}</section>${transcript}${composer}`;
+        const content = `${outcome}<section class="c4-card c4-conductor-head"><div class="c4-task-heading"><div class="c4-task-title-wrap"><h1>Conductor</h1></div><span class="c4-status c4-${esc(row.state)}">${esc(conductorState(row))}</span></div><div class="c4-chips" aria-label="Conductor details"><span class="c4-chip">${esc(row.folder || 'a folder')}</span><span class="c4-chip">${esc(modelLabel(row.model))}</span><span class="c4-chip">safety: ${esc(row.safety || 'ask')}</span><span class="c4-chip">${esc(machineLabel || 'your machine')}</span></div><p class="c4-hint">One Claude Code session on your own machine, with your own login. Each message is the next turn of the same conversation; its work is carried out through the Codes tools, on your other agents.</p></section>${approvals}${usageCard}<section class="c4-card c4-turns"><div class="c4-card-head"><h2>Turns</h2><span class="c4-muted">${(view.messages || []).length} so far</span></div>${turns ? `<ol class="c4-turn-list">${turns}</ol>` : '<div class="c4-emptyline">Its first turn is starting.</div>'}</section>${transcript}${composer}`;
         page(req, res, 'Conductor', wrap(content));
     }
 
@@ -528,7 +557,7 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
         const row = await db.maybe("SELECT * FROM run_tasks WHERE id = $1 AND subject = $2 AND kind = 'conductor'", [req.params.id, req.viewer.subject]);
         if (!row) return res.status(404).send('Not found');
         try {
-            await conductor.message(row, { text: (req.body || {}).text });
+            await conductor.message(row, { text: (req.body || {}).text, token: req.viewer.token || null });
             return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}`);
         } catch (e) {
             return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}?error=${encodeURIComponent(String((e && e.message) || 'the message could not be sent').slice(0, 180))}`);
@@ -584,13 +613,7 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
         }
         const rows = fleet ? await fleet.agents(req.viewer.subject, harnesses).catch(() => []) : [];
         const latest = fleet ? await fleet.latest(req.viewer.subject).catch(() => ({ at: null })) : { at: null };
-        const meter = (w) => {
-            const pct = Math.max(0, Math.min(100, Number(w.pct) || 0));
-            const full = Number(w.pct) >= 95;
-            const free = whenUtc(w.resets_at);
-            const used = w.used != null && w.limit != null ? `${w.used} of ${w.limit}` : (w.pct != null ? `${Math.round(Number(w.pct))}%` : '');
-            return `<div class="c4-meter"><span class="c4-meter-name">${esc(w.name || 'window')}</span><span class="c4-meter-track" role="img" aria-label="${esc(`${w.name || 'window'}: ${Math.round(pct)}% used${full ? ', full' : ''}`)}"><span class="c4-meter-fill${full ? ' is-full' : ''}" style="width:${pct}%"></span></span><span class="c4-meter-note">${used ? `<b>${esc(used)}</b>` : ''}${used && free ? ' · ' : ''}${esc(free || (used ? '' : 'no reading'))}</span></div>`;
-        };
+        const meter = usageMeter;
         const list = rows.map((row) => {
             const [label, kind] = FLEET_STATE[row.state] || FLEET_STATE.unknown;
             const where = (row.machines || []).map((m) => m.name || m.machine).filter(Boolean).slice(0, 3).join(', ');
@@ -742,6 +765,28 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
             if (value != null && !choices.some(([v]) => v === Number(value))) choices.push([Number(value), Number(value).toLocaleString('en-US')]);
             return `<select name="${name}">${choices.map(([v, label]) => `<option value="${v == null ? '' : v}"${(v == null ? value == null : Number(value) === v) ? ' selected' : ''}>${esc(label)}${v == null ? '' : ` ${unit}`}</option>`).join('')}</select>`;
         };
+        // Settings → Conductor (the failover): the agents a conductor can fall back to, each said with what the person's
+        // machines report about it (ready, how full, signed out), so a pick that cannot run is visible before it is made.
+        const fleetRows = viewer(req) && fleet ? await fleet.agents(req.viewer.subject, harnesses).catch(() => []) : [];
+        const fleetBy = new Map(fleetRows.map((r) => [r.agent, r]));
+        const readiness = (agent) => {
+            const r = fleetBy.get(agent);
+            if (!r) return 'not reported';
+            const [word] = FLEET_STATE[r.state] || FLEET_STATE.unknown;
+            return r.used ? `${word.toLowerCase()}, ${Math.round(r.used)}% used` : word.toLowerCase();
+        };
+        const fallbacks = (settings && settings.conductor_fallbacks) || [];
+        const fallbackRow = (i) => {
+            const f = fallbacks[i] || { agent: '', model: '' };
+            const options = CONDUCTOR_FALLBACKS.map((a) => `<option value="${a}"${f.agent === a ? ' selected' : ''} data-state="${esc((fleetBy.get(a) || {}).state || 'unknown')}">${esc(failoverNames[a])} — ${esc(readiness(a))}</option>`).join('');
+            return `<div class="c4-fallback"><span class="c4-fallback-n" aria-hidden="true">${i + 1}</span><label>Fallback ${i + 1} <select name="fallback_agent_${i + 1}"><option value="">None</option>${options}</select></label><label>Model <input name="fallback_model_${i + 1}" value="${esc(f.model || '')}" placeholder="its default" autocomplete="off" spellcheck="false" maxlength="100"></label></div>`;
+        };
+        const switchPct = (settings && settings.conductor_switch_pct) || 90;
+        const conductorSection = viewer(req) ? `<h3 class="c4-subhead" id="conductor">Conductor</h3>
+<p class="c4-hint">When your conductor's agent nears a usage limit (its 5-hour or weekly window), the next turn runs on the first fallback below that has room, and returns once the window frees. Each agent keeps its own session; the one taking over is told what happened while it was away.</p>
+<div class="c4-fallbacks">${[0, 1, 2].map(fallbackRow).join('')}</div>
+<div class="c4-form-grid"><label>Switch at <select name="conductor_switch_pct">${[70, 80, 85, 90, 95].map((v) => `<option value="${v}"${switchPct === v ? ' selected' : ''}>${v}% of a window</option>`).join('')}</select></label></div>
+<p class="c4-hint">Codex and OpenCode have no approval prompt: on "Ask first" they work with edits in the folder only. Your machine needs OpenVibe Node with Codes 0.7 or newer to switch.</p>` : '';
         const content = `${header('Settings', 'Your choices, remembered for your account.')}${viewer(req) ? `${flash(req)}<section class="c4-card"><form class="c4-form" method="post" action="/settings">
 <div class="c4-form-grid">
 <label>Default agent <select name="default_agent"><option value="">Auto</option>${agentOptions}</select></label>
@@ -765,6 +810,7 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
 </div>
 <h3 class="c4-subhead">Safety</h3>
 <div class="c4-safety" role="group" aria-label="Safety level">${SAFETY_OPTIONS.map(([value, title, desc]) => `<label class="c4-safety-card"><input type="radio" name="safety" value="${value}"${settings.safety === value ? ' checked' : ''}><span><b>${title}</b><small>${desc}</small></span></label>`).join('')}</div>
+${conductorSection}
 <button class="c4-button" type="submit">Save settings</button>
 </form></section>` : signIn(req)}`;
         page(req, res, 'Settings', wrap(content));
@@ -784,6 +830,11 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
                 ...(b.safety ? { safety: b.safety } : {}),
                 steps: b.steps === undefined ? undefined : b.steps,
                 minutes: b.minutes === undefined ? undefined : b.minutes,
+                // The conductor's fallbacks, in the order of the form's rows; an empty row is none.
+                ...(b.fallback_agent_1 !== undefined ? {
+                    conductor_fallbacks: [1, 2, 3].map((n) => ({ agent: b[`fallback_agent_${n}`] || '', model: b[`fallback_model_${n}`] || '' })).filter((f) => f.agent),
+                } : {}),
+                ...(b.conductor_switch_pct !== undefined ? { conductor_switch_pct: b.conductor_switch_pct } : {}),
             });
             return res.redirect(303, '/settings?ok=Settings%20saved');
         } catch (e) {

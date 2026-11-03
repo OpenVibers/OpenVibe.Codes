@@ -268,17 +268,22 @@ function createChatRoutes(ctx) {
     async function conductorThread(row, view) {
         const out = [];
         const names = agentNames();
-        const a = agentOf('claude-code', names);
         const live = LIVE.includes(row.state);
         const msgs = view.messages || [];
-        const who = { ...a, sub: row.model || '' };
+        let previous = null;
         for (const m of msgs) {
+            // The agent that answered this turn (the failover may have moved it), and a line where it changed.
+            const a = agentOf(m.agent || 'claude-code', names);
+            const who = { ...a, sub: m.model || (m.agent && m.agent !== 'claude-code' ? '' : row.model) || '' };
+            if (m.switch_note) out.push(thread.divider({ text: m.switch_note }));
+            else if (previous && m.agent && m.agent !== previous) out.push(thread.divider({ text: `${a.name} carries on` }));
+            if (m.agent) previous = m.agent;
             const files = (m.attachments || []).map((f, i) => ({ href: `/api/v1/tasks/${encodeURIComponent(row.id)}/messages/${encodeURIComponent(m.id)}/attachments/${i}`, name: f.name, image: /^image\//.test(String(f.mime || '')) }));
             const mine = { text: m.n === 1 ? (m.prompt || 'Pick up the plan') : m.prompt, caption: m.n === 1 ? 'Hand-over brief' : '', files };
             const id = `m${Number(m.n) || out.length + 1}`;
             if (m.state === 'running' || (live && m === msgs[msgs.length - 1] && m.state !== 'done')) {
                 const lines = await db.many('SELECT seq, at, kind, body FROM codes_session_lines WHERE task_id = $1 ORDER BY seq DESC LIMIT 300', [row.id]);
-                const r = agentReply(a, lines.reverse(), { live: true, attempt: { model: row.model } });
+                const r = agentReply(a, lines.reverse(), { live: true, attempt: { model: m.model || row.model } });
                 out.push(thread.turn({ id, open: true, state: 'running', you: mine, who: r.who, reply: r.reply }));
             } else if (m.result && m.result.summary) {
                 out.push(thread.turn({ id, you: mine, who, reply: thread.answer({ html: markdown(m.result.summary) }) }));
@@ -291,7 +296,7 @@ function createChatRoutes(ctx) {
         }
         // What waits for a yes, as a reply of its own at the end of the thread.
         const asks = (view.approvals || []).map((ap) => approvalCard(row, ap)).join('');
-        if (asks) out.push(thread.turn({ id: 'asks', who, reply: asks }));
+        if (asks) out.push(thread.turn({ id: 'asks', who: { ...agentOf('claude-code', names), sub: row.model || '' }, reply: asks }));
         return out;
     }
     const approvalCard = (row, ap) => thread.card({
@@ -376,7 +381,27 @@ function createChatRoutes(ctx) {
     }
 
     /** The panel: who worked on it, and where the work is. */
-    async function sideHtml(row) {
+    /**
+     * The conductor's usage (the failover): each agent of its chain, how full its fullest window is and when it frees,
+     * and which one takes the next turn. Fallbacks are chosen in Settings.
+     */
+    function usageSection(usage) {
+        if (!usage || !usage.chain || !usage.chain.length) return null;
+        const words = { ok: 'has room', near: 'nearly full', full: 'full', login: 'not signed in', absent: 'not installed', unknown: 'no reading yet' };
+        const rows = usage.chain.map((u, i) => {
+            const next = usage.next && usage.next.agent === u.agent && (usage.next.model || null) === (u.model || null);
+            const pct = u.pct == null ? null : Math.max(0, Math.min(100, Number(u.pct)));
+            const meter = pct == null ? '' : `<span class="ch-usage-meter${u.state === 'full' ? ' is-full' : u.state === 'near' ? ' is-near' : ''}" role="img" aria-label="${esc(`${u.window || 'window'}: ${pct}% used`)}"><span style="width:${pct}%"></span></span>`;
+            const sub = [i === 0 ? 'its own agent' : `fallback ${i}`, u.pct != null ? `${u.pct}% of ${u.window || 'a window'}` : words[u.state] || u.state, u.resets].filter(Boolean).join(' · ');
+            return { who: agentOf(u.agent, agentNames()), html: `<b>${esc(u.name)}${u.model ? ` · ${esc(u.model)}` : ''}${next ? ' <em class="ch-usage-next">next turn</em>' : ''}</b><small>${esc(sub)}</small>${meter}` };
+        });
+        const foot = usage.fallbacks
+            ? `<p class="ch-usage-foot">At ${esc(usage.switch_pct)}% of a window the next turn moves to the first fallback with room. <a href="/settings#conductor">Change</a></p>`
+            : `<p class="ch-usage-foot">No fallback yet: when ${esc(usage.chain[0].name)} runs out, the conductor waits. <a href="/settings#conductor">Add a fallback</a></p>`;
+        return { title: 'Usage', rows, html: `${usage.note ? `<p class="ch-usage-note">${esc(usage.note)}</p>` : ''}${foot}` };
+    }
+
+    async function sideHtml(row, view = null) {
         const names = agentNames();
         const attempts = tasks?.attempts ? await tasks.attempts.list(row.id) : [];
         const result = asObject(row.result) || {};
@@ -388,6 +413,7 @@ function createChatRoutes(ctx) {
         ].filter(Boolean);
         const people = attempts.map((a) => { const g = agentOf(a.agent, names); return { who: g, title: g.name, sub: [a.model, tasks.attempts.wordsOf && a.reason ? tasks.attempts.wordsOf(a.reason) : a.state].filter(Boolean).join(' · ') }; });
         return thread.panel({ id: 'ch-side', title: 'What it did', sections: [
+            view && view.usage ? usageSection(view.usage) : null,
             people.length ? { title: 'Agents', rows: people } : null,
             where.length ? { title: 'Where', rows: where } : null,
         ] });
@@ -555,10 +581,13 @@ function createChatRoutes(ctx) {
         if (row.kind === 'conductor') {
             const view = await conductor.view(row);
             const last = await db.maybe('SELECT max(seq) AS seq FROM codes_session_lines WHERE task_id = $1', [row.id]);
-            const model = String(row.model || 'opus');
-            const pickers = `<span class="ch-chip ch-chip-static" title="The conductor runs Claude Code on your machine">${avatar(agentOf('claude-code'))}${esc(model)}</span><label class="ch-pick ch-pick-file" title="Attach an image">${ico('attach')}<span class="ch-sr">Attach an image</span><input type="file" accept="image/*" multiple data-ch-images></label>`;
+            // The agent the next turn runs on: the conductor's own, or the fallback its usage moves it to.
+            const next = (view.usage && view.usage.next) || { agent: 'claude-code', model: row.model || 'opus' };
+            const nextAgent = agentOf(next.agent);
+            const model = String(next.model || (next.agent === 'claude-code' ? row.model || 'opus' : 'its default model'));
+            const pickers = `<span class="ch-chip ch-chip-static" title="${esc(`The next turn runs ${nextAgent.name} on your machine`)}">${avatar(nextAgent)}${esc(model)}</span><label class="ch-pick ch-pick-file" title="Attach an image">${ico('attach')}<span class="ch-sr">Attach an image</span><input type="file" accept="image/*" multiple data-ch-images></label>`;
             return frame(req, res, {
-                currentId: row.id, title: 'Conductor', heading: titleOf(row), state, panel: await sideHtml(row),
+                currentId: row.id, title: 'Conductor', heading: titleOf(row), state, panel: await sideHtml(row, view),
                 turns: [...errorTurns, ...await conductorThread(row, view)],
                 streamUrl: `/api/v1/tasks/${encodeURIComponent(row.id)}/events?last_event_id=${last && last.seq != null ? Number(last.seq) : 0}`,
                 composerHtml: row.outcome === 'stopped' ? '' : composer({ action: `/tasks/${encodeURIComponent(row.id)}/messages`, api: `/api/v1/conductor/${encodeURIComponent(row.id)}/messages`, placeholder: live ? 'Say something: it is the next turn' : 'What next?', pickers, note: live ? 'A message waits until the current turn ends; it is not lost.' : '' }),

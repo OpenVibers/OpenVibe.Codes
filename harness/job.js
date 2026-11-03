@@ -19,7 +19,9 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { collectProof } = require('../engine/proof');
 
-const JOB_PROTOCOL = '1.0.0';   // the job's contract with the Node (stdin, stdout lines, fd 3): unchanged by 1.1's lines
+const JOB_PROTOCOL = '1.0.0';
+/** The agents a conductor's turn may run on: the CLIs that resume a session and start the Codes MCP server. */
+const CONDUCTOR_AGENTS = ['claude-code', 'codex', 'opencode'];   // the job's contract with the Node (stdin, stdout lines, fd 3): unchanged by 1.1's lines
 const LINES = '1.1';            // 1.1: lines carry step ids, inputs, results, progress, helpers; the result keeps `log`
 const MAX_PROMPT = 16_000;
 const MAX_PATCH = 180_000;
@@ -156,8 +158,9 @@ function parseArgs(raw, env = process.env) {
     const kind = a.kind === 'bench' ? 'bench' : a.kind === 'conductor' ? 'conductor' : 'code';
     const prompt = typeof a.prompt === 'string' ? a.prompt.trim() : '';
     if (!prompt || prompt.length > MAX_PROMPT) throw new Error(`prompt must be 1-${MAX_PROMPT} characters`);
-    // A conductor's turn (Codes C9b): one Claude Code session in the owner's own folder, with the Codes MCP tools. No
-    // repository is cloned and nothing is pushed; the folder is the one the person chose, and it must exist.
+    // A conductor's turn (Codes C9b): one agent session in the owner's own folder, with the Codes MCP tools. No
+    // repository is cloned and nothing is pushed; the folder is the one the person chose, and it must exist. The agent
+    // is Claude Code, or the fallback the server chose when Claude Code is near its usage limit (Codex or OpenCode).
     if (kind === 'conductor') {
         const folder = String(a.folder || '').trim();
         if (!folder.startsWith('/') || folder.length > 4096 || /[\0-\x1f\x7f]/.test(folder)) throw new Error('folder must be an absolute path');
@@ -172,13 +175,17 @@ function parseArgs(raw, env = process.env) {
         const resumeIn = a.resume == null || a.resume === '' ? env.RESUME : a.resume;
         const resume = typeof resumeIn === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(resumeIn) ? resumeIn : null;
         const wanted = jobEnv(a);
+        const agent = CONDUCTOR_AGENTS.includes(a.agent) ? a.agent : 'claude-code';
+        // Claude Code asks the owner through its permission prompt tool; Codex and OpenCode have none, so "ask" and
+        // "project" run them with edits only (their own sandbox), and "full" with the whole computer.
+        const permission = agent !== 'claude-code' && safety === 'full' ? 'full' : 'edit';
         return {
-            kind, repo: null, ref: null, prompt, permission: 'edit', push: null,
+            kind, repo: null, ref: null, prompt, permission, push: null,
             folder, safety, mcp: a.mcp === true, codesUrl,
             taskId: typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? a.task_id : null,
             model: typeof a.model === 'string' && a.model.length <= 100 ? a.model : null,
             ...(effort ? { effort } : {}),
-            agent: 'claude-code',
+            agent,
             ...(files.length ? { attachments: files } : {}),
             ...(resume ? { resume } : {}),
             ...(Object.keys(wanted).length ? { env: wanted } : {}),
@@ -424,6 +431,31 @@ function conductorMcpConfig(file, job, env) {
     return file;
 }
 
+/**
+ * The Codes MCP server for an agent that takes no MCP config file (Codex, OpenCode): a small shell script in the job's
+ * own folder (0700) that sets the same three variables and starts `openvibe-codes mcp`. The token stays in that file,
+ * never on a command line (this machine's process list is readable). → the command and its arguments.
+ */
+function conductorMcpLauncher(file, job, env) {
+    const token = codesToken(env);
+    const bin = path.join(__dirname, '..', 'bin', 'openvibe-codes.js');
+    const q = (v) => `'${String(v).replace(/'/g, "'\\''")}'`;
+    const lines = ['#!/bin/sh'];
+    if (job.codesUrl) lines.push(`export OPENVIBE_CODES_URL=${q(job.codesUrl)}`);
+    if (job.taskId) lines.push(`export OPENVIBE_CONDUCTOR_TASK=${q(job.taskId)}`);
+    if (token) lines.push(`export OPENVIBE_TOKEN=${q(token)}`);
+    lines.push(`exec ${q(process.execPath)} ${q(bin)} mcp`);
+    fs.writeFileSync(file, `${lines.join('\n')}\n`, { mode: 0o700 });
+    return { name: 'codes', command: '/bin/sh', args: [file] };
+}
+
+/** OpenCode's own config file for one turn (OPENCODE_CONFIG, merged over the person's): the Codes MCP server. */
+function opencodeConfig(file, server) {
+    const config = { $schema: 'https://opencode.ai/config.json', mcp: { [server.name]: { type: 'local', command: [server.command, ...server.args], enabled: true } } };
+    fs.writeFileSync(file, JSON.stringify(config, null, 2), { mode: 0o600 });
+    return file;
+}
+
 /** The owner's attached images, written as files the turn can read: [{ path, name }] (the ones that arrived). */
 async function writeAttachments(job, { dir, env, fetchImpl, say }) {
     const out = [];
@@ -602,13 +634,22 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                 say({ t: 'step', text: `${images.length} image${images.length === 1 ? '' : 's'} attached` });
             }
             job = { ...job, prompt };
-            adapterOptions = {
-                // "ask" is Claude Code's own default mode, where every risky call goes to the permission prompt tool
-                // (the MCP tool that asks the owner through Codes' approvals inbox).
-                permissionMode: { ask: 'default', project: 'acceptEdits', full: 'bypassPermissions' }[job.safety] || 'default',
-                ...(job.mcp ? { mcpConfig: conductorMcpConfig(path.join(dir, 'mcp.json'), job, env), allowedTools: ['mcp__codes'] } : {}),
-                ...(job.mcp && job.safety === 'ask' ? { permissionPromptTool: 'mcp__codes__approve' } : {}),
-            };
+            if (job.agent === 'codex' || job.agent === 'opencode') {
+                // A fallback agent (the server's failover): the same Codes tools, started by a launcher script.
+                const server = job.mcp ? conductorMcpLauncher(path.join(dir, 'codes-mcp.sh'), job, env) : null;
+                adapterOptions = server
+                    ? (job.agent === 'codex' ? { mcpServer: server } : { configFile: opencodeConfig(path.join(dir, 'opencode.json'), server) })
+                    : {};
+                say({ t: 'step', text: `This turn runs on ${job.agent === 'codex' ? 'Codex' : 'OpenCode'}` });
+            } else {
+                adapterOptions = {
+                    // "ask" is Claude Code's own default mode, where every risky call goes to the permission prompt tool
+                    // (the MCP tool that asks the owner through Codes' approvals inbox).
+                    permissionMode: { ask: 'default', project: 'acceptEdits', full: 'bypassPermissions' }[job.safety] || 'default',
+                    ...(job.mcp ? { mcpConfig: conductorMcpConfig(path.join(dir, 'mcp.json'), job, env), allowedTools: ['mcp__codes'] } : {}),
+                    ...(job.mcp && job.safety === 'ask' ? { permissionPromptTool: 'mcp__codes__approve' } : {}),
+                };
+            }
         } else {
             fs.mkdirSync(work, { recursive: true });
             say({ t: 'step', text: 'Preparing an empty benchmark workspace' });
@@ -698,4 +739,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments };
+module.exports = { CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments };

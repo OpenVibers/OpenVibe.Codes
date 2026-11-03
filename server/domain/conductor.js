@@ -20,10 +20,18 @@
  *
  * The conductor uses the person's own Claude Code login on the machine (Node's plan_logins, opt-in and read-only, for
  * one job) and never a key of ours. It sets no steps or minutes budget; a turn's wall time is Run's job cap.
+ *
+ * Failover (owner 2026-11-03, conductor-failover.js): before each turn the conductor's agent and the fallbacks the
+ * person chose in Settings are read against their machine's usage windows; the turn runs on the first with room under
+ * the switch point, and goes back to the primary once its window frees. Each agent keeps its own session (the turn's
+ * row records the agent, the model and the session it ended with), and an agent that takes over is first told what
+ * happened in the conversation since it last took part.
  */
 
 const fs = require('fs');
 const path = require('path');
+const failover = require('./conductor-failover');
+const { windowFull } = require('../../engine/router');
 
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'expired']);
 const MESSAGE_STATES = ['queued', 'running', 'done', 'failed', 'stopped'];
@@ -36,6 +44,11 @@ const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 const MAX_NOTE = 4000;
 const MAX_FOLDER = 4096;
+/** The most of the conversation an agent taking over is told, so the turn stays inside a job's 16,000 characters. */
+const MAX_CATCH_UP = 9000;
+/** A fleet reading older than this is read again when the person writes (their token is at hand then). */
+const FLEET_FRESH_MS = 5 * 60_000;
+const PRIMARY_AGENT = 'claude-code';
 
 const iso = (v) => {
     if (!v) return null;
@@ -76,7 +89,24 @@ function cleanAttachments(list) {
     return out;
 }
 
-function createConductor({ store, config = {}, log = console, run, attempts, tasks, sessions, approvals = null, notify = null, fetchImpl = null }) {
+/** The agent and the session a turn's job reported (its result log's agent line; the job's own session field). */
+function ranOf(result) {
+    const d = asObject(result) || {};
+    const log = Array.isArray(d.log) ? d.log : [];
+    let agent = null; let session = null;
+    for (const line of log) {
+        if (!line || typeof line !== 'object' || line.t !== 'agent') continue;
+        if (!agent && line.agent) agent = String(line.agent).slice(0, 40);
+        if (!session && line.session) session = String(line.session).slice(0, 200);
+    }
+    if (!agent && Array.isArray(d.agents) && d.agents[0]) agent = String(d.agents[0]).slice(0, 40);
+    if (!session && typeof d.session === 'string' && d.session) session = d.session.slice(0, 200);
+    return { agent, session };
+}
+
+const agentOf = (m) => (m && m.agent) || PRIMARY_AGENT;
+
+function createConductor({ store, config = {}, log = console, run, attempts, tasks, sessions, approvals = null, notify = null, fetchImpl = null, fleet = null, userSettings = null }) {
     const db = store.db;
     const fetch = fetchImpl || globalThis.fetch;
     const baseUrl = String(config.baseUrl || '').replace(/\/+$/, '');
@@ -175,34 +205,137 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
         return made;
     }
 
-    /** A message the person writes. Starts the turn when the conductor is idle; otherwise it waits. */
-    async function message(task, { text, attachments = [] } = {}) {
+    /**
+     * A message the person writes. Starts the turn when the conductor is idle; otherwise it waits. With the person's
+     * token at hand, a fleet reading older than five minutes is read again first, so the turn's agent is chosen on
+     * today's usage.
+     */
+    async function message(task, { text, attachments = [], token = null } = {}) {
         const made = await enqueue(task, { text, attachments });
+        await refreshFleet(task.subject, token);
         const started = await startNext(task.id);
         return { message: made, started };
     }
 
-    /** The job input of one turn: the same folder, model and safety, and the session the attempt carries. */
-    function turnArgs(task, message, attempt) {
+    /**
+     * The job input of one turn: the same folder and safety; the agent, model and session of the turn's choice (`over`,
+     * from startNext), or the conductor's own agent and the session the attempt carries.
+     */
+    function turnArgs(task, message, attempt, over = null) {
         const files = Array.isArray(message.attachments) ? message.attachments : [];
+        const agent = (over && over.agent) || PRIMARY_AGENT;
+        const model = over && 'model' in over ? over.model : (task.model || 'opus');
+        const resume = over && 'resume' in over ? over.resume : (attempt && attempt.session) || null;
         return {
             kind: 'conductor',
             task_id: task.id,
             message_id: message.id,
             folder: task.folder,
-            prompt: message.prompt,
-            agent: 'claude-code',
-            model: task.model || 'opus',
+            prompt: (over && over.prompt) || message.prompt,
+            agent,
+            ...(model ? { model } : {}),
             safety: task.safety || 'ask',
             mcp: true,
             codes_url: baseUrl,
-            ...(attempt && attempt.session ? { resume: attempt.session } : {}),
+            ...(resume ? { resume } : {}),
             // The image's bytes stay in the database: the job fetches it with the person's token and writes it as a
             // file on the machine, so a turn's input stays far inside Run's limit.
             ...(files.length
                 ? { attachments: files.map((a, i) => ({ name: a.name, mime: a.mime, size: a.size, url: `${baseUrl}/api/v1/tasks/${encodeURIComponent(task.id)}/messages/${encodeURIComponent(message.id)}/attachments/${i}` })) }
                 : {}),
         };
+    }
+
+    /** Read the person's machines again when the stored reading is older than FLEET_FRESH_MS. Never throws. */
+    async function refreshFleet(subject, token) {
+        if (!fleet || !token || typeof fleet.refresh !== 'function') return;
+        try {
+            const { at } = await fleet.latest(subject);
+            const age = at ? Date.now() - Date.parse(at) : Infinity;
+            if (Number.isFinite(age) && age < FLEET_FRESH_MS) return;
+            await fleet.refresh(subject, token);
+        } catch (e) {
+            log.warn(`[Codes] conductor: the fleet of ${subject} could not be read: ${String(e && e.message).slice(0, 160)}`);
+        }
+    }
+
+    /** The conductor's chain: its own agent and model, then the person's fallbacks (none twice). */
+    async function chainFor(task) {
+        const primary = { agent: task.agent || PRIMARY_AGENT, model: task.model || 'opus' };
+        let settings = null;
+        if (userSettings) { try { settings = await userSettings.get(task.subject); } catch { settings = null; } }
+        const fallbacks = (settings && settings.conductor_fallbacks) || [];
+        const chain = [primary, ...fallbacks.filter((f) => !(f.agent === primary.agent && (f.model || null) === primary.model))];
+        return { chain, switchPct: (settings && settings.conductor_switch_pct) || failover.DEFAULT_SWITCH_PCT };
+    }
+
+    /**
+     * What the person's machines say about each agent: the machine the conductor is pinned to when it is (its folder and
+     * sessions are there, so only its own agents count), else the best across their machines. null with no reading.
+     */
+    async function fleetFor(task) {
+        if (!fleet) return null;
+        try {
+            if (task.pin) {
+                const { machines } = await fleet.latest(task.subject);
+                const here = (machines || []).find((m) => m.id === task.pin);
+                if (!here || !here.agents.length) return null;
+                const out = {};
+                for (const a of here.agents) {
+                    const windows = Array.isArray(a.windows) ? a.windows : [];
+                    out[a.agent] = { installed: a.installed, signed_in: a.signed_in, windows, room: a.installed && a.signed_in && !windows.some((w) => windowFull(w)) };
+                }
+                return out;
+            }
+            const by = await fleet.byHarness(task.subject);
+            return by && Object.keys(by).length ? by : null;
+        } catch (e) {
+            log.warn(`[Codes] conductor ${task.id}: the fleet could not be read: ${String(e && e.message).slice(0, 160)}`);
+            return null;
+        }
+    }
+
+    /** The choice for the next turn (conductor-failover.js choose), with the chain it was made from. */
+    async function choiceFor(task) {
+        const { chain, switchPct } = await chainFor(task);
+        const reading = await fleetFor(task);
+        return { ...failover.choose({ chain, fleet: reading, switchPct }), switchPct, chain };
+    }
+
+    /**
+     * What an agent taking over is told first: who it is carrying on from, and the conversation since it last took
+     * part (all of it, the hand-over brief first, when it never did) — each turn's message and answer, newest kept when
+     * it is long.
+     */
+    function catchUp(earlier, agent, fromAgent, note) {
+        const lastOwn = [...earlier].reverse().find((m) => agentOf(m) === agent && m.session);
+        const since = lastOwn ? earlier.filter((m) => Number(m.n) > Number(lastOwn.n)) : earlier;
+        if (!since.length) return '';
+        const brief = !lastOwn && since[0] && Number(since[0].n) === 1 ? since[0] : null;
+        const turns = since.filter((m) => m !== brief);
+        const clip = (v, n) => { const t = String(v || '').trim(); return t.length > n ? `${t.slice(0, n)}…` : t; };
+        const blocks = turns.map((m) => {
+            const r = asObject(m.result);
+            const answer = r && typeof r.summary === 'string' ? r.summary : (m.error ? `(the turn did not finish: ${m.error})` : '(no answer recorded)');
+            return `### Turn ${m.n} — ${failover.nameOf(agentOf(m))}\n\n**The owner:** ${clip(m.prompt, 1200)}\n\n**The answer:** ${clip(answer, 1500)}`;
+        });
+        const briefText = brief ? clip(brief.prompt, 4000) : '';
+        let budget = MAX_CATCH_UP - briefText.length;
+        const kept = [];
+        for (let i = blocks.length - 1; i >= 0; i--) {
+            if (blocks[i].length > budget) break;
+            kept.unshift(blocks[i]);
+            budget -= blocks[i].length;
+        }
+        const dropped = blocks.length - kept.length;
+        const head = `## You are taking over this conversation\n\nYou are the owner's conductor, carrying on from ${failover.nameOf(fromAgent)}${note ? ` (${note.replace(/\.$/, '')})` : ''}. Below is what happened ${lastOwn ? 'since you last took part' : 'so far'}; then the owner's new message. Carry on from there: the same plan, the same Codes tools.`;
+        return [
+            head,
+            briefText ? `## The hand-over brief this conversation started with\n\n${briefText}` : '',
+            dropped ? `(${dropped} earlier turn${dropped === 1 ? '' : 's'} left out for length.)` : '',
+            kept.length ? `## The turns\n\n${kept.join('\n\n')}` : '',
+            '---\n\n## The owner\'s new message\n',
+        ].filter(Boolean).join('\n\n');
     }
 
     /**
@@ -230,10 +363,35 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
         if (taken.error || taken.running || taken.idle || taken.stopped) return taken;
 
         const { task, message: turn, attempt } = taken;
+        // The agent this turn runs on (failover), the session it resumes, and — when it is not the agent of the last
+        // turn — what happened in the conversation while it was away.
+        let over = null;
+        try {
+            const choice = await choiceFor(task);
+            const pick = choice.pick || { agent: PRIMARY_AGENT, model: task.model || 'opus' };
+            const earlier = await db.many('SELECT * FROM codes_conductor_messages WHERE task_id = $1 AND n < $2 ORDER BY n ASC', [task.id, turn.n]);
+            const ran = earlier.filter((m) => m.started_at);
+            const previous = ran.length ? agentOf(ran[ran.length - 1]) : null;
+            const own = [...ran].reverse().find((m) => agentOf(m) === pick.agent && m.session);
+            let resume = own ? own.session : null;
+            if (!resume && pick.agent === PRIMARY_AGENT && !earlier.some((m) => m.agent)) resume = (attempt && attempt.session) || null;
+            let prompt = turn.prompt;
+            if (previous && previous !== pick.agent) {
+                const intro = catchUp(ran, pick.agent, previous, choice.note);
+                if (intro) prompt = `${intro}\n${turn.prompt}`.slice(0, MAX_MESSAGE);
+            }
+            over = { agent: pick.agent, model: pick.model, resume, prompt };
+            await db.exec('UPDATE codes_conductor_messages SET agent = $2, model = $3, switch_note = $4 WHERE id = $1',
+                [turn.id, pick.agent, pick.model || null, choice.note ? String(choice.note).slice(0, 1000) : null]);
+            if (choice.note) log.info && log.info(`[Codes] conductor ${task.id}: ${choice.note}`);
+        } catch (e) {
+            log.warn(`[Codes] conductor ${task.id}: the failover could not choose, the turn runs on its own agent: ${String(e && e.message).slice(0, 200)}`);
+            over = null;
+        }
         let job;
         try {
             job = await run.submit({
-                subject: task.subject, project: task.project_id, args: turnArgs(task, turn, attempt), key: turn.id,
+                subject: task.subject, project: task.project_id, args: turnArgs(task, turn, attempt, over), key: turn.id,
                 limits: { wall_ms: wallMs, cpu_ms: wallMs, mem_bytes: 4 * 1024 ** 3 }, ttlMs: Math.min(86_400_000, wallMs + 10 * 60_000),
                 // Pinned to the machine the person chose (Codes C9c): the turn resumes a session whose folder and
                 // memory are there, so Run must not place it anywhere else.
@@ -250,7 +408,7 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
             return { error: why };
         }
         await store.tx(async () => {
-            if (attempt) await attempts.bind(attempt.id, { job_id: job.id, state: 'queued', machine: task.machine, model: task.model });
+            if (attempt) await attempts.bind(attempt.id, { job_id: job.id, state: 'queued', machine: task.machine, model: (over && over.model) || task.model });
             await db.exec("UPDATE codes_conductor_messages SET job_id = $2 WHERE id = $1", [turn.id, job.id]);
             await db.exec(
                 `UPDATE run_tasks SET job_id = $2, state = $3, started_at = COALESCE($4::timestamptz, started_at), updated_at = $5 WHERE id = $1`,
@@ -314,10 +472,22 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
                 : null;
             if (turn && turn.state === 'running') {
                 const ok = task.state === 'succeeded';
+                // The session this turn ended with belongs to the agent that ran it: the next turn of that agent
+                // resumes it. A machine whose Codes runner is older runs Claude Code whatever was asked; the row then
+                // says so, and keeps the session under the agent that really ran.
+                const ran = ranOf(task.result);
+                const asked = turn.agent || PRIMARY_AGENT;
+                const agent = ran.agent && failover.CONDUCTOR_AGENTS.includes(ran.agent) ? ran.agent : asked;
+                const session = ran.session || (agent === PRIMARY_AGENT && !turn.agent ? (attempt && attempt.session) : null) || null;
+                let note = turn.switch_note || null;
+                if (agent !== asked) {
+                    note = `${note ? `${note} ` : ''}Your machine ran ${failover.nameOf(agent)} instead of ${failover.nameOf(asked)}: its Codes runner is older than the switch. Update OpenVibe Node on it to let the conductor switch agents.`.slice(0, 1000);
+                }
                 await db.exec(
-                    `UPDATE codes_conductor_messages SET state = $2, result = $3::jsonb, error = $4, session = $5, finished_at = $6::timestamptz WHERE id = $1`,
+                    `UPDATE codes_conductor_messages SET state = $2, result = $3::jsonb, error = $4, session = $5, finished_at = $6::timestamptz,
+                        agent = $7, switch_note = $8 WHERE id = $1`,
                     [turn.id, ok ? 'done' : 'failed', task.result == null ? null : JSON.stringify(task.result),
-                        ok ? null : String(task.error || 'the turn failed').slice(0, 1000), (attempt && attempt.session) || null, task.finished_at || store.iso()],
+                        ok ? null : String(task.error || 'the turn failed').slice(0, 1000), session, task.finished_at || store.iso(), agent, note],
                 );
             } else if (turn && turn.state !== 'done' && turn.state !== 'failed' && turn.state !== 'stopped') {
                 await db.exec("UPDATE codes_conductor_messages SET state = $2, finished_at = COALESCE(finished_at, $3::timestamptz) WHERE id = $1",
@@ -357,6 +527,7 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
             prompt: String(m.prompt || '').slice(0, 16000),
             attachments: files.map((a) => ({ name: a.name, mime: a.mime, size: a.size == null ? null : Number(a.size) })),
             job_id: m.job_id || null, session: m.session || null,
+            agent: agentOf(m), agent_name: failover.nameOf(agentOf(m)), model: m.model || null, switch_note: m.switch_note || null,
             result: asObject(m.result) ? { ok: asObject(m.result).ok === true, summary: typeof asObject(m.result).summary === 'string' ? asObject(m.result).summary.slice(0, 4000) : null } : null,
             error: m.error ? String(m.error).slice(0, 1000) : null,
             created_at: iso(m.created_at), started_at: iso(m.started_at), finished_at: iso(m.finished_at),
@@ -369,6 +540,19 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
         const attempt = await attemptOf(task.id);
         const messages = await db.many('SELECT * FROM codes_conductor_messages WHERE task_id = $1 ORDER BY n ASC', [task.id]);
         const pending = approvals ? await approvals.pending(task.id) : [];
+        // The usage the next turn will be chosen on: each agent of the chain, how full its fullest window is, when it
+        // frees, and which one the next turn would take.
+        let usage = null;
+        try {
+            const choice = await choiceFor(task);
+            usage = {
+                switch_pct: choice.switchPct,
+                next: choice.pick,
+                note: choice.note,
+                fallbacks: choice.chain.length - 1,
+                chain: choice.usage.map((u) => ({ ...u, resets: failover.resetsLabel(u.resets_at) })),
+            };
+        } catch { usage = null; }
         return {
             task: tasks.present(task),
             kind: 'conductor',
@@ -380,6 +564,7 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
             attempt: attempt ? attempts.present(attempt) : null,
             messages: messages.map(presentMessage),
             approvals: pending.map((a) => approvals.present(a)),
+            usage,
         };
     }
 
@@ -394,9 +579,9 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
     }
 
     return {
-        create, enqueue, message, startNext, onTurnEnd, stop, view, presentMessage, attachment, fragment, turnArgs, projectFor,
+        create, enqueue, message, startNext, onTurnEnd, stop, view, presentMessage, attachment, fragment, turnArgs, projectFor, choiceFor, refreshFleet,
         SAFETY, MESSAGE_STATES, MAX_MESSAGE, MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES,
     };
 }
 
-module.exports = { createConductor, validFolder, cleanAttachments, SAFETY, MODEL, NODE };
+module.exports = { createConductor, validFolder, cleanAttachments, ranOf, SAFETY, MODEL, NODE };
