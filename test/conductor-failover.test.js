@@ -200,7 +200,7 @@ const HOUR = 3600_000;
             assert.match(page.text, /class="ovt-divider"><span>.*Claude Code is at 93% of its week/, 'the switch is a line in the thread');
             const settings = await t.get('/settings', { as: ada });
             assert.match(settings.text, /id="conductor"/);
-            assert.match(settings.text, /<option value="codex" selected data-state="ok">Codex — has room, 30% used<\/option>/);
+            assert.match(settings.text, /<option value="codex" selected data-state="ok" data-badge="30% used"[^>]*>Codex<\/option>/, 'the fallback picker says what each agent is ready for');
             assert.match(settings.text, /name="fallback_model_1" value="gpt-5\.5"/);
         });
     } finally {

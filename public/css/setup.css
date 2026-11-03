@@ -1,0 +1,49 @@
+/* Codes' guided setup (/setup, 2026-11-03): the progress, the step chips, and each step's card. Loaded on /setup only. */
+.c4-setup{display:grid;gap:0}
+.c4-setup-head{display:grid;gap:12px;margin:0 0 16px}
+.c4-setup-head .c4-title{margin:0}
+.c4-setup-progress{display:flex;align-items:center;gap:12px}
+.c4-setup-bar{flex:1;max-width:420px;height:8px;border-radius:99px;background:var(--c4-quiet-bg);overflow:hidden}
+.c4-setup-bar>span{display:block;height:100%;border-radius:99px;background:var(--c4-accent);transition:width .4s cubic-bezier(.2,.8,.2,1)}
+.c4-setup-count{color:var(--c4-muted);font-size:13px;font-weight:600;white-space:nowrap}
+.c4-setup-nav{display:flex;gap:8px;margin:0;padding:2px 0 4px;list-style:none;overflow-x:auto;scrollbar-width:none}
+.c4-setup-nav::-webkit-scrollbar{display:none}
+.c4-setup-chip{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 14px 0 6px;border:1px solid var(--c4-line);border-radius:999px;background:var(--c4-surface);color:var(--c4-ink);font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
+.c4-setup-chip-n{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--c4-quiet-bg);color:var(--c4-muted);font-size:12px;font-weight:700}
+.c4-setup-chip-n svg,.c4-setup-n svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.c4-setup-chip.is-done .c4-setup-chip-n{background:var(--c4-ok-bg);color:var(--c4-ok-ink)}
+.c4-setup-chip.is-next{border-color:var(--c4-accent);box-shadow:0 0 0 1px var(--c4-accent)}
+.c4-setup-chip.is-next .c4-setup-chip-n{background:var(--c4-accent);color:var(--c4-on-accent)}
+.c4-setup-step{scroll-margin-top:84px}
+.c4-setup-step.is-next{border-color:var(--c4-accent);box-shadow:0 0 0 1px var(--c4-accent),0 8px 24px -14px var(--c4-accent)}
+.c4-setup-step-head{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:14px;align-items:start}
+.c4-setup-n{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:var(--c4-quiet-bg);color:var(--c4-muted);font-size:16px;font-weight:750}
+.c4-setup-step.is-next .c4-setup-n{background:var(--c4-accent);color:var(--c4-on-accent)}
+.c4-setup-step.is-done .c4-setup-n{background:var(--c4-ok-bg);color:var(--c4-ok-ink)}
+.c4-setup-step-title h2{margin:0;font-size:17px;letter-spacing:-.01em}
+.c4-setup-step-title p{margin:4px 0 0;color:var(--c4-muted);font-size:13px;line-height:1.45}
+.c4-setup-body{margin:14px 0 0 54px;display:grid;gap:12px;min-width:0}
+.c4-setup-body .c4-hint{margin:0}
+.c4-setup-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.c4-setup-how{margin:0;padding-left:20px;display:grid;gap:10px;font-size:13.5px;line-height:1.5}
+.c4-setup-how a{color:var(--c4-accent)}
+.c4-setup-cmd{display:grid;gap:4px;margin-top:6px;min-width:0}
+.c4-setup-cmd-label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--c4-muted)}
+.c4-setup-cmd code{display:block;padding:10px 12px;border-radius:9px;background:var(--c4-ghost);border:1px solid var(--c4-line);font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--c4-ink);overflow-x:auto;white-space:pre;user-select:all;-webkit-user-select:all}
+.c4-setup-cmd code:focus-visible{outline:2px solid var(--c4-accent);outline-offset:2px}
+.c4-setup-agent{scroll-margin-top:84px}
+.c4-setup-agent:target{background:var(--c4-open-bg);border-radius:10px}
+.c4-setup-agent-help{grid-column:1/-1;display:grid;gap:4px;padding:2px 0 4px 20px;min-width:0}
+.c4-setup-more summary{cursor:pointer;color:var(--c4-accent);font-size:13px;min-height:32px;display:flex;align-items:center}
+.c4-setup-ready{border-color:var(--c4-dot-ok);background:linear-gradient(135deg,var(--c4-ok-bg),var(--c4-surface) 60%)}
+.c4-setup-ready h2{margin:0 0 4px;font-size:19px}
+.c4-setup-ready p{margin:0 0 12px;color:var(--c4-muted)}
+.c4-setup-link{margin:0 0 14px}
+@media (max-width:640px){
+  .c4-setup-step-head{grid-template-columns:34px minmax(0,1fr);gap:12px}
+  .c4-setup-step-head>.c4-pill{grid-column:2;justify-self:start}
+  .c4-setup-n{width:34px;height:34px;font-size:14px}
+  .c4-setup-body{margin-left:0}
+  .c4-setup-agent-help{padding-left:0}
+}
+@media (prefers-reduced-motion:reduce){.c4-setup-bar>span{transition:none}}

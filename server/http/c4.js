@@ -29,6 +29,7 @@ const MODELS = [['opus', 'Opus 5.5 (default)'], ['sonnet', 'Sonnet 5.5'], ['haik
 const { CONDUCTOR_AGENTS, AGENT_NAMES: failoverNames } = require('../domain/conductor-failover');
 /** The agents a conductor may fall back to: every conductor agent but Claude Code, which is its own. */
 const CONDUCTOR_FALLBACKS = CONDUCTOR_AGENTS.filter((a) => a !== 'claude-code');
+const { readiness: agentReadiness, optionAttrs } = require('../domain/readiness');
 const modelLabel = (m) => ({ opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', haiku: 'Haiku 5.5' }[m] || m || 'Opus 5.5');
 const age = (value) => {
     const numeric = Number(value);
@@ -90,12 +91,14 @@ function createC4Routes(ctx) {
     const db = store.db;
     const form = express.urlencoded({ extended: false, limit: '16kb' });
     const page = (req, res, title, body, extra = {}) => {
+        // A page may add its own stylesheet (the guided setup's), so c4.css stays the size every page pays for.
+        const css = ['css/c4.css', ...(Array.isArray(extra.css) ? extra.css : [])];
         if (viewer(req) && ctx.chatShell && !extra.index) {
             const here = '/' + (String(req.path || '/').split('/')[1] || '');
-            return ctx.chatShell(req, res, { title: title || 'Codes', body: String(body), css: ['css/c4.css'], scripts: ['js/c4.js'], here });
+            return ctx.chatShell(req, res, { title: title || 'Codes', body: String(body), css, scripts: ['js/c4.js'], here });
         }
         const wantsScript = req.path === '/' || /^\/tasks\/tsk_/.test(req.path) || /^\/(agents|machines|conductor)/.test(req.path);
-        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, ...(title ? { title: `${title} · Codes` } : {}), css: ['css/c4.css'], scripts: wantsScript ? ['js/c4.js'] : [], body: raw(body), ...extra });
+        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, ...(title ? { title: `${title} · Codes` } : {}), scripts: wantsScript ? ['js/c4.js'] : [], body: raw(body), ...extra, css });
     };
     const viewer = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     /**
@@ -756,7 +759,10 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
         const settings = viewer(req) ? await userSettings.get(req.viewer.subject) : null;
         const mine = viewer(req) ? await machinesOf(req, res) : { machines: [] };
         const used = viewer(req) ? await lastUsedMachines(req) : [];
-        const agentOptions = (harnesses?.list?.() || []).map((a) => `<option value="${esc(a.id)}"${settings && settings.default_agent === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
+        // Each agent says what it is ready for (domain/readiness.js), drawn by Shared's select as a badge and a line.
+        const fleetRows = viewer(req) && fleet ? await fleet.agents(req.viewer.subject, harnesses).catch(() => []) : [];
+        const aware = agentReadiness(fleetRows);
+        const agentOptions = (harnesses?.list?.() || []).map((a) => `<option value="${esc(a.id)}"${settings && settings.default_agent === a.id ? ' selected' : ''}${optionAttrs(aware.get(a.id))}>${esc(a.name)}</option>`).join('');
         // The same order the Home picker shows: the machines their work ran on last come first.
         const machineOptions = orderMachines((mine.machines || []).filter((m) => m.state !== 'revoked'), used).map((m) => machineOption(m, settings)).join('');
         // Settings → Limits (C9a): steps and minutes per task, for every agent at once; No limit means none.
@@ -767,18 +773,10 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
         };
         // Settings → Conductor (the failover): the agents a conductor can fall back to, each said with what the person's
         // machines report about it (ready, how full, signed out), so a pick that cannot run is visible before it is made.
-        const fleetRows = viewer(req) && fleet ? await fleet.agents(req.viewer.subject, harnesses).catch(() => []) : [];
-        const fleetBy = new Map(fleetRows.map((r) => [r.agent, r]));
-        const readiness = (agent) => {
-            const r = fleetBy.get(agent);
-            if (!r) return 'not reported';
-            const [word] = FLEET_STATE[r.state] || FLEET_STATE.unknown;
-            return r.used ? `${word.toLowerCase()}, ${Math.round(r.used)}% used` : word.toLowerCase();
-        };
         const fallbacks = (settings && settings.conductor_fallbacks) || [];
         const fallbackRow = (i) => {
             const f = fallbacks[i] || { agent: '', model: '' };
-            const options = CONDUCTOR_FALLBACKS.map((a) => `<option value="${a}"${f.agent === a ? ' selected' : ''} data-state="${esc((fleetBy.get(a) || {}).state || 'unknown')}">${esc(failoverNames[a])} — ${esc(readiness(a))}</option>`).join('');
+            const options = CONDUCTOR_FALLBACKS.map((a) => `<option value="${a}"${f.agent === a ? ' selected' : ''}${optionAttrs(aware.get(a))}>${esc(failoverNames[a])}</option>`).join('');
             return `<div class="c4-fallback"><span class="c4-fallback-n" aria-hidden="true">${i + 1}</span><label>Fallback ${i + 1} <select name="fallback_agent_${i + 1}"><option value="">None</option>${options}</select></label><label>Model <input name="fallback_model_${i + 1}" value="${esc(f.model || '')}" placeholder="its default" autocomplete="off" spellcheck="false" maxlength="100"></label></div>`;
         };
         const switchPct = (settings && settings.conductor_switch_pct) || 90;
@@ -787,7 +785,7 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
 <div class="c4-fallbacks">${[0, 1, 2].map(fallbackRow).join('')}</div>
 <div class="c4-form-grid"><label>Switch at <select name="conductor_switch_pct">${[70, 80, 85, 90, 95].map((v) => `<option value="${v}"${switchPct === v ? ' selected' : ''}>${v}% of a window</option>`).join('')}</select></label></div>
 <p class="c4-hint">Codex and OpenCode have no approval prompt: on "Ask first" they work with edits in the folder only. Your machine needs OpenVibe Node with Codes 0.7 or newer to switch.</p>` : '';
-        const content = `${header('Settings', 'Your choices, remembered for your account.')}${viewer(req) ? `${flash(req)}<section class="c4-card"><form class="c4-form" method="post" action="/settings">
+        const content = `${header('Settings', 'Your choices, remembered for your account.')}${viewer(req) ? `${flash(req)}<p class="c4-hint c4-setup-link">New here, or something not working? <a href="/setup">The guided setup</a> checks your machine, agents and keys step by step.</p><section class="c4-card"><form class="c4-form" method="post" action="/settings">
 <div class="c4-form-grid">
 <label>Default agent <select name="default_agent"><option value="">Auto</option>${agentOptions}</select></label>
 <label>Default machine <select name="default_machine"><option value="">Auto</option>${machineOptions}</select></label>
@@ -845,6 +843,15 @@ ${conductorSection}
     // The Memory page (OpenVibe Memory M2b): the person's own notes, in Codes' own kit. The routes live in their own
     // module and borrow this one's kit (the page, the frame, the card, the pill, the flash and the same-origin check).
     r.use(require('./memory').createMemoryRoutes(ctx, { page, wrap, header, pill, flash, sameOrigin, viewer, form, signIn, note }));
+
+    // The guided setup (/setup): machine, agents, keys, accounts and choices, each step read live. Its home-page card
+    // reads the database only, through ctx.setupProgress (the chat app's home asks it).
+    const setupRoutes = require('./setup').createSetupRoutes(ctx, {
+        page: (req, res, title, body) => page(req, res, title, body, { css: ['css/setup.css'] }),
+        wrap, header, pill, flash, sameOrigin, viewer, form, signIn, note, machinesOf, usageMeter, SAFETY_OPTIONS, YOUR_AI, PROVIDER_NAMES,
+    });
+    r.use(setupRoutes);
+    ctx.setupProgress = setupRoutes.setupProgress;
 
     // The front door a visitor gets at /, as a page for the layout: the Markdown twin of / is this page
     // (server/agent-pages.js), so the twin says what a visitor reads (SEO-1; it was the old marketing home).

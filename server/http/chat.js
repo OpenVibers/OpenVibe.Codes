@@ -23,6 +23,7 @@ const { sessionLogOf } = require('../domain/run-tasks');
 const models = require('../data/models');
 const kit = require('openvibe-shared/kit');
 const thread = require('openvibe-shared/thread');
+const { readiness, optionAttrs } = require('../domain/readiness');
 const start = require('./start');
 
 const LIVE = ['queued', 'placed', 'running'];
@@ -129,7 +130,9 @@ const repoLabel = (repo) => { try { return new URL(String(repo)).pathname.split(
 
 function createChatRoutes(ctx) {
     const r = asyncRouter();
-    const { config, store, harnesses, tasks, conductor, approvals, userSettings, github, machines } = ctx;
+    const { config, store, harnesses, tasks, conductor, approvals, userSettings, github, machines, fleet } = ctx;
+    /** What each agent is ready for on the person's machines (the stored fleet: no call out), for the pickers. */
+    const readyFor = async (req) => (fleet && viewer(req) ? readiness(await fleet.agents(req.viewer.subject, harnesses).catch(() => [])) : new Map());
     const db = store.db;
     const form = express.urlencoded({ extended: false, limit: '32kb' });
     const viewer = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
@@ -341,19 +344,20 @@ function createChatRoutes(ctx) {
     }
 
     // ── The composer ─────────────────────────────────────────────────────────────────────────────────────────────
-    function whoPicker(selected, { label = 'Who works on it', auto = null, cls = '' } = {}) {
+    function whoPicker(selected, { label = 'Who works on it', auto = null, cls = '', ready = null } = {}) {
         const all = models.choices(harnesses);
         const groups = new Map();
         for (const c of all.slice(1)) { if (!groups.has(c.group)) groups.set(c.group, []); groups.get(c.group).push(c); }
-        const opt = (c) => `<option value="${esc(c.value)}"${selected === c.value ? ' selected' : ''}${c.note ? ` title="${esc(c.note)}"` : ''}>${esc(c.label)}</option>`;
+        // Each agent and model says what it is ready for on the person's machines (Shared's select draws it).
+        const opt = (c) => `<option value="${esc(c.value)}"${selected === c.value ? ' selected' : ''}${c.note ? ` title="${esc(c.note)}"` : ''}${ready ? optionAttrs(ready.get(String(c.value).split('|')[0])) : ''}>${esc(c.label)}</option>`;
         const first = auto ? `<option value="">${esc(auto)}</option>` : opt(all[0]);
-        return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="${esc(label)}"><span class="ch-sr">${esc(label)}</span>${ico('agents')}<select name="who" data-ch-who>${first}${[...groups].map(([g, list]) => list.length > 1 ? `<optgroup label="${esc(g)}">${list.map(opt).join('')}</optgroup>` : opt(list[0])).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+        return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="${esc(label)}"><span class="ch-sr">${esc(label)}</span>${ico('agents')}<select name="who" data-ch-who data-ov-select="bare" data-ov-title="${esc(label)}">${first}${[...groups].map(([g, list]) => list.length > 1 ? `<optgroup label="${esc(g)}">${list.map(opt).join('')}</optgroup>` : opt(list[0])).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
     // The effort in plain words (the shared ladder underneath; each agent gets the nearest level it accepts).
     const EFFORT = [['', 'Effort: auto'], ['low', 'Quick'], ['medium', 'Balanced'], ['high', 'Thorough'], ['max', 'Deepest']];
     const effortWord = (v) => (EFFORT.find(([k]) => k === v) || [null, v])[1];
     function effortPicker(selected = '', cls = '') {
-        return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="How hard it thinks"><span class="ch-sr">Effort</span>${ico('sub')}<select name="effort" data-ch-effort>${EFFORT.map(([v, l]) => `<option value="${v}"${selected === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+        return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="How hard it thinks"><span class="ch-sr">Effort</span>${ico('sub')}<select name="effort" data-ch-effort data-ov-select="bare" data-ov-title="Effort">${EFFORT.map(([v, l]) => `<option value="${v}"${selected === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
     /** The kit's composer with Codes' pickers in its tools, where the work runs under the bar, and its JSON route. */
     function composer({ action, api = '', placeholder, pickers = '', live = false, stopAction = '', note = '', id = null, where = '' }) {
@@ -472,11 +476,12 @@ function createChatRoutes(ctx) {
         const modes = `<fieldset class="ch-modes"><legend class="ch-sr">What are you making?</legend>${MODE_CARDS.map(([v, icon, title, line]) => `<label class="ch-mode"><input type="radio" name="mode" value="${v}" form="ch-start"${mode === v ? ' checked' : ''} data-ch-mode><span class="ch-mode-i">${ico(icon)}</span><b>${esc(title)}</b><small>${esc(line)}</small></label>`).join('')}</fieldset>`;
 
         // The pickers: each shows for the way it belongs to (CSS reads the checked card).
-        const kindPick = `<label class="ch-pick ch-for-new" title="What it is"><span class="ch-sr">What it is</span>${ico('web')}<select name="kind" data-ch-kind>${Object.entries(start.KINDS).map(([v, k]) => `<option value="${v}"${kind === v ? ' selected' : ''}>${esc(k.label)}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+        const kindPick = `<label class="ch-pick ch-for-new" title="What it is"><span class="ch-sr">What it is</span>${ico('web')}<select name="kind" data-ch-kind data-ov-select="bare" data-ov-title="What it is">${Object.entries(start.KINDS).map(([v, k]) => `<option value="${v}"${kind === v ? ' selected' : ''}>${esc(k.label)}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
         const groups = [...new Set(start.PROJECTS.map((p) => p.group))];
-        const projectPick = `<label class="ch-pick ch-for-openvibe" title="Which OpenVibe project"><span class="ch-sr">Which OpenVibe project</span>${ico('ov')}<select name="project" data-ch-project><option value="auto"${chosenProject === 'auto' ? ' selected' : ''}>Codes picks for you</option>${groups.map((g) => `<optgroup label="${esc(g)}">${start.PROJECTS.filter((p) => p.group === g).map((p) => `<option value="${esc(p.repository)}"${chosenProject === p.repository ? ' selected' : ''}${p.line ? ` title="${esc(p.line)}"` : ''}>${esc(p.name)}${p.domain ? ` · ${esc(p.domain)}` : ''}</option>`).join('')}</optgroup>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+        const projectPick = `<label class="ch-pick ch-for-openvibe" title="Which OpenVibe project"><span class="ch-sr">Which OpenVibe project</span>${ico('ov')}<select name="project" data-ch-project data-ov-select="bare" data-ov-title="Which OpenVibe project"><option value="auto"${chosenProject === 'auto' ? ' selected' : ''}>Codes picks for you</option>${groups.map((g) => `<optgroup label="${esc(g)}">${start.PROJECTS.filter((p) => p.group === g).map((p) => `<option value="${esc(p.repository)}"${chosenProject === p.repository ? ' selected' : ''}${p.line ? ` title="${esc(p.line)}"` : ''}>${esc(p.name)}${p.domain ? ` · ${esc(p.domain)}` : ''}</option>`).join('')}</optgroup>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
         const repoPick = `<label class="ch-pick ch-pick-repo ch-for-code" title="Repository"><span class="ch-sr">Repository: owner/name or any Git URL</span>${ico('repo')}<input name="repo" type="text" inputmode="url" spellcheck="false" autocapitalize="off" value="${esc(repo)}" placeholder="owner/name or any Git URL" list="ch-repos" autocomplete="off" data-ch-repo data-ch-repo-url="/api/v1/me/repos"><datalist id="ch-repos">${repos.map((x) => `<option value="${esc(x.url)}">${esc(x.full_name)}</option>`).join('')}</datalist></label>`;
-        const pickers = kindPick + projectPick + repoPick + whoPicker(settings.default_agent ? `${settings.default_agent}|` : '', { cls: 'ch-for-agents' }) + effortPicker('', 'ch-for-agents');
+        const ready = await readyFor(req);
+        const pickers = kindPick + projectPick + repoPick + whoPicker(settings.default_agent ? `${settings.default_agent}|` : '', { cls: 'ch-for-agents', ready }) + effortPicker('', 'ch-for-agents');
         // The repositories a person used last are a tap away (the box also searches every one they can reach).
         const newRepo = `<a class="ch-chip ch-chip-new" href="/git">${ico('new')}New on OpenVibe Git</a>`;
         const recent = `<div class="ch-recent ch-for-code" role="group" aria-label="Your repositories">${newRepo}${repos.length > 1 ? repos.map((x) => `<button class="ch-chip" type="button" data-ch-saved-repo="${esc(x.url)}">${ico('repo')}${esc(x.full_name)}</button>`).join('') : ''}</div>`;
@@ -491,7 +496,10 @@ function createChatRoutes(ctx) {
         const rail = (list) => `<ul class="ch-spark-list">${list.map((i) => card(i, false)).join('')}</ul><ul class="ch-spark-list" aria-hidden="true">${list.map((i) => card(i, true)).join('')}</ul>`;
         const ideas = `<section class="ch-spark" aria-label="Ideas to start from" data-ch-ideas data-ch-ideasets="${esc(JSON.stringify(sets))}"><div class="ch-spark-view"><div class="ch-spark-track" data-ch-ideas-track>${rail(sets[mode])}</div></div><template data-ch-idea-icons>${['web', 'game', 'app', 'ov', 'spark'].map((n) => ico(n).replace('<svg ', `<svg data-icon="${n}" `)).join('')}</template><button class="ch-icon-btn ch-spark-pause" type="button" data-ch-ideas-pause aria-pressed="false" aria-label="Pause the ideas" title="Pause the ideas">${ico('pause', 'ch-i-pause')}${ico('play', 'ch-i-play')}</button></section>`;
 
-        const hello = `<div class="ch-hello"><span class="ov-mark" data-size="56" aria-hidden="true"></span><h1>${name ? `What should we build, ${esc(name)}?` : 'What should we build?'}</h1><p>Say it the way you would to a friend. Pick what it is, and Codes sends it to the right place.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
+        // Not set up yet: one line to the guided setup, saying how far along the person is (database reads only).
+        const progress = ctx.setupProgress ? await ctx.setupProgress(req).catch(() => null) : null;
+        const nudge = progress ? `<a class="ch-setup-nudge" href="/setup"><span class="ch-setup-nudge-bar" aria-hidden="true"><span style="width:${Math.round((progress.done / progress.of) * 100)}%"></span></span><span><b>Finish setting up</b> · ${progress.done} of ${progress.of} done · next: ${esc(progress.next)}</span>${ico('chevron', 'ch-setup-nudge-go')}</a>` : '';
+        const hello = `<div class="ch-hello"><span class="ov-mark" data-size="56" aria-hidden="true"></span><h1>${name ? `What should we build, ${esc(name)}?` : 'What should we build?'}</h1><p>Say it the way you would to a friend. Pick what it is, and Codes sends it to the right place.</p>${nudge}${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
         return frame(req, res, {
             title: 'New chat', heading: 'New chat', start: true, empty: hello,
             composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'Describe the change, question or fix', pickers, where }) + ideas,
@@ -596,7 +604,7 @@ function createChatRoutes(ctx) {
         // The stream starts after the last line this page already shows.
         const seqRow = live ? await db.maybe('SELECT max(seq) AS seq FROM codes_session_lines WHERE task_id = $1', [row.id]) : null;
         const lastSeq = seqRow && seqRow.seq != null ? Number(seqRow.seq) : 0;
-        const pickers = whoPicker('', { label: 'Who carries on', auto: `Same agent (${agentOf(row.agent, agentNames()).name})` }) + effortPicker('');
+        const pickers = whoPicker('', { label: 'Who carries on', auto: `Same agent (${agentOf(row.agent, agentNames()).name})`, ready: await readyFor(req) }) + effortPicker('');
         return frame(req, res, {
             currentId: row.id, title: titleOf(row), heading: titleOf(row), state, panel: await sideHtml(row),
             turns: [...errorTurns, ...await taskThread(row)],
