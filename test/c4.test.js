@@ -32,6 +32,18 @@ const { boot, check, done } = require('./helpers/boot');
             assert.match(require('fs').readFileSync(require('path').join(__dirname, '..', 'server/http/c4.js'), 'utf8'), /if \(!signedIn\) return page\(req, res, null, wrap\(visitorHome\(\)\)/, 'the route sends a visitor to the front door');
         });
 
+        await check('the front door names its Markdown twin, and the twin is the front door (SEO-1)', async () => {
+            const home = await t.get('/');
+            assert.match(home.text, /<link rel="alternate" type="text\/markdown" href="https:\/\/openvibe\.codes\/index\.md">/, 'the head names the twin');
+            assert.match(String(home.headers.get('link') || ''), /<https:\/\/openvibe\.codes\/index\.md>; rel="alternate"; type="text\/markdown"/, 'so does the Link header');
+            const twin = await t.get('/index.md');
+            assert.strictEqual(twin.status, 200);
+            assert.match(String(twin.headers.get('content-type') || ''), /^text\/markdown/);
+            assert.ok(twin.text.includes('Every coding agent.') && twin.text.includes('Codex took over: Claude Code hit its plan limit'), 'the twin says what a visitor reads');
+            const mine = await t.get('/', { as: ada });
+            assert.ok(!/text\/markdown/.test(mine.text), 'a signed-in home names no twin');
+        });
+
         await check('task details are owner scoped and management pages honor sign-in', async () => {
             const settings = await t.get('/settings', { as: ada });
             assert.strictEqual(settings.status, 200);

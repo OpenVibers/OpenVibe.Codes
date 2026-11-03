@@ -379,7 +379,7 @@ ${signedIn ? `<section class="c4-card c4-conductor-cta"><div class="c4-card-head
 <section class="c4-card"><div class="c4-card-head"><h2>Recent tasks</h2><a href="/tasks">View all</a></div>${rows.slice(0, 5).map(rowHtml).join('') || '<div class="c4-emptyline">No tasks yet. <a href="/#c4-prompt">Start a task</a></div>'}</section>
 ${signedIn && !mine.ok && mine.problem ? note(`Your machines could not be read, so the machine picker has only Auto. ${esc(mine.problem.detail || '')}`, 'bad') : ''}
 ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h2><div class="c4-grid">${[['Any agent', 'Bring a key or plan. Auto picks a good fit and can hand over when one gets stuck.'], ['Your computer or ours', 'Pair your computer with one command. A hosted sandbox is coming soon.'], ['Proof you can inspect', 'See the changes, tests, screenshots and review before you approve.'], ['A cost you can follow', 'Track task costs and plan limits. Set caps that stop with a wrap-up.']].map(([a, b]) => `<article><h3>${a}</h3><p>${b}</p></article>`).join('')}</div></section>`}`;
-        if (!signedIn) return page(req, res, null, wrap(visitorHome()), { index: true, styles: [showcase.STYLESHEET], jsonLd: homeJsonLd(config) });
+        if (!signedIn) return page(req, res, null, wrap(visitorHome()), { index: true, agent: true, styles: [showcase.STYLESHEET], jsonLd: homeJsonLd(config) });
         page(req, res, null, wrap(content), {});
     });
 
@@ -795,6 +795,9 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
     // module and borrow this one's kit (the page, the frame, the card, the pill, the flash and the same-origin check).
     r.use(require('./memory').createMemoryRoutes(ctx, { page, wrap, header, pill, flash, sameOrigin, viewer, form, signIn, note }));
 
+    // The front door a visitor gets at /, as a page for the layout: the Markdown twin of / is this page
+    // (server/agent-pages.js), so the twin says what a visitor reads (SEO-1; it was the old marketing home).
+    r.visitorHome = () => ({ css: ['css/c4.css'], scripts: ['js/c4.js'], body: raw(wrap(visitorHome())), index: true, agent: true, styles: [showcase.STYLESHEET], jsonLd: homeJsonLd(config) });
     return r;
 }
 
