@@ -135,7 +135,7 @@ const { stepKind } = require('../server/http/chat');
 
         await check('an OpenVibe site picked from the words: one project, several, or a question when none is named', async () => {
             const home = await t.get('/', { as: ada });
-            assert.match(home.text, /<select name="project" data-ch-project><option value="auto" selected>Codes picks for you<\/option>/, 'the default is to work it out');
+            assert.match(home.text, /<select name="project" data-ch-project[^>]*><option value="auto" selected>Codes picks for you<\/option>/, 'the default is to work it out');
             assert.match(home.text, /data-ch-picked data-ch-match-url="\/chat\/match"/);
             const m = await t.get(`/chat/match?text=${encodeURIComponent('Make the navbar smaller')}`, { as: ada });
             assert.deepStrictEqual(JSON.parse(m.text).projects.map((p) => p.name), ['Shared']);
