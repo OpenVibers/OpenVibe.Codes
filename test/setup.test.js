@@ -38,6 +38,7 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
             assert.match(res.text, /curl -fsSL https:\/\/openvibe\.bot\/install \| sh -s -- --worker/);
             assert.match(res.text, /npm install -g @openai\/codex/, 'an agent that is not there says how to install it');
             assert.match(res.text, /href="\/css\/setup\.css|css\/setup\.css/, 'the page brings its own stylesheet');
+            assert.match(res.text, /js\/setup\.js/, 'and its own script (the Copy buttons), which no other page pays for');
             assert.match(res.text, /<code tabindex="0">curl -fsSL[^<]*<\/code><button type="button" class="c4-setup-copy" data-c4-copy>Copy<\/button>/, 'a command has its Copy button');
             // A phone never gets a page wider than its screen (2026-11-03: the installer's one long line widened the
             // whole grid to 595 px at 390): the page's columns may shrink, and a command wraps.
