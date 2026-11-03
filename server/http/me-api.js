@@ -123,6 +123,8 @@ function createMeApi({ config, store, sso, run, harnesses, actorLimits, tasks = 
 
     r.post('/me/tasks/:id/cancel', actorLimits.budget('codes.task.start'), async (req, res) => {
         if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to cancel your tasks');
+        // As starting a task: a cross-site post from a signed-in browser cannot cancel one (REVIEW-0, 11-03).
+        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site posts are refused');
         let row = await own(req, req.params.id);
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours');
         if (row.job_id && !TERMINAL.has(row.state)) {
