@@ -33,7 +33,8 @@ function createSetupRoutes(ctx, kit) {
     const db = store.db;
     const r = asyncRouter();
 
-    const command = (text, label) => `<div class="c4-setup-cmd"><span class="c4-setup-cmd-label">${esc(label)}</span><code tabindex="0">${esc(text)}</code></div>`;
+    // A command to type on the machine: it wraps on a phone (never a page wider than the screen), and Copy copies it.
+    const command = (text, label) => `<div class="c4-setup-cmd"><span class="c4-setup-cmd-label">${esc(label)}</span><div class="c4-setup-cmd-box"><code tabindex="0">${esc(text)}</code><button type="button" class="c4-setup-copy" data-c4-copy>Copy</button></div></div>`;
 
     /** Everything the page says, read once per view. */
     async function readAll(req, res) {

@@ -38,6 +38,12 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
             assert.match(res.text, /curl -fsSL https:\/\/openvibe\.bot\/install \| sh -s -- --worker/);
             assert.match(res.text, /npm install -g @openai\/codex/, 'an agent that is not there says how to install it');
             assert.match(res.text, /href="\/css\/setup\.css|css\/setup\.css/, 'the page brings its own stylesheet');
+            assert.match(res.text, /<code tabindex="0">curl -fsSL[^<]*<\/code><button type="button" class="c4-setup-copy" data-c4-copy>Copy<\/button>/, 'a command has its Copy button');
+            // A phone never gets a page wider than its screen (2026-11-03: the installer's one long line widened the
+            // whole grid to 595 px at 390): the page's columns may shrink, and a command wraps.
+            const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'css', 'setup.css'), 'utf8');
+            for (const rule of ['.c4-setup{display:grid;grid-template-columns:minmax(0,1fr)', '.c4-setup-head{display:grid;grid-template-columns:minmax(0,1fr)', '.c4-setup-body{margin:14px 0 0 54px;display:grid;grid-template-columns:minmax(0,1fr)']) assert.ok(css.includes(rule), rule);
+            assert.match(css, /\.c4-setup-cmd code\{[^}]*white-space:pre-wrap;overflow-wrap:anywhere/);
             const home = await t.get('/', { as: ada });
             assert.match(home.text, /class="ch-setup-nudge" href="\/setup"/);
             assert.match(home.text, /0 of 3 done · next: Your machine/);
