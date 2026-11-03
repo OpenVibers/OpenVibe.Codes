@@ -93,12 +93,13 @@ function createC4Routes(ctx) {
     const page = (req, res, title, body, extra = {}) => {
         // A page may add its own stylesheet (the guided setup's), so c4.css stays the size every page pays for.
         const css = ['css/c4.css', ...(Array.isArray(extra.css) ? extra.css : [])];
+        const own = Array.isArray(extra.scripts) ? extra.scripts : [];
         if (viewer(req) && ctx.chatShell && !extra.index) {
             const here = '/' + (String(req.path || '/').split('/')[1] || '');
-            return ctx.chatShell(req, res, { title: title || 'Codes', body: String(body), css, scripts: ['js/c4.js'], here });
+            return ctx.chatShell(req, res, { title: title || 'Codes', body: String(body), css, scripts: ['js/c4.js', ...own], here });
         }
         const wantsScript = req.path === '/' || /^\/tasks\/tsk_/.test(req.path) || /^\/(agents|machines|conductor)/.test(req.path);
-        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, ...(title ? { title: `${title} · Codes` } : {}), scripts: wantsScript ? ['js/c4.js'] : [], body: raw(body), ...extra, css });
+        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, ...(title ? { title: `${title} · Codes` } : {}), body: raw(body), ...extra, css, scripts: [...(wantsScript ? ['js/c4.js'] : []), ...own] });
     };
     const viewer = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     /**
@@ -847,7 +848,7 @@ ${conductorSection}
     // The guided setup (/setup): machine, agents, keys, accounts and choices, each step read live. Its home-page card
     // reads the database only, through ctx.setupProgress (the chat app's home asks it).
     const setupRoutes = require('./setup').createSetupRoutes(ctx, {
-        page: (req, res, title, body) => page(req, res, title, body, { css: ['css/setup.css'] }),
+        page: (req, res, title, body) => page(req, res, title, body, { css: ['css/setup.css'], scripts: ['js/setup.js'] }),
         wrap, header, pill, flash, sameOrigin, viewer, form, signIn, note, machinesOf, usageMeter, SAFETY_OPTIONS, YOUR_AI, PROVIDER_NAMES,
     });
     r.use(setupRoutes);
