@@ -71,6 +71,10 @@ const { boot, check, done } = require('./helpers/boot');
         await check('cancel reaches Run and returns the final state', async () => {
             const list = await call('GET', '/tasks', { as: ada });
             const id = list.json().tasks[0].id;
+            // REVIEW-0 (11-03): a cross-site post cannot cancel it, as it cannot start one.
+            const cross = await call('POST', `/tasks/${id}/cancel`, { as: ada, origin: 'https://evil.example' });
+            assert.strictEqual(cross.status, 403);
+            assert.ok(!calls.some((x) => x[0] === 'cancel'), 'nothing reached Run');
             const c = await call('POST', `/tasks/${id}/cancel`, { as: ada });
             assert.strictEqual(c.status, 200);
             assert.strictEqual(c.json().state, 'cancelled');
