@@ -41,7 +41,7 @@ async function boot(opts = {}) {
     const { createStore } = require('../../server/db');
     // One database per boot (PGlite, or CODES_TEST_STORE=pg: the containers), dropped when the boot closes.
     const testdb = await require('./db').testDb();
-    const built = await createApp({ config, store: createStore(testdb.db), log, limitsNow: opts.limitsNow, actorLimits: opts.actorLimits === true, ...(opts.run ? { run: opts.run } : {}), ...(opts.benchAttemptEnded ? { benchAttemptEnded: opts.benchAttemptEnded } : {}), ...(opts.accountSend ? { accountSend: opts.accountSend } : {}), ...(opts.connections ? { connections: opts.connections } : {}), ...(opts.notify ? { notify: opts.notify } : {}), ...(opts.balance ? { balance: opts.balance } : {}) });
+    const built = await createApp({ config, env, store: createStore(testdb.db), log, limitsNow: opts.limitsNow, actorLimits: opts.actorLimits === true, ...(opts.run ? { run: opts.run } : {}), ...(opts.benchAttemptEnded ? { benchAttemptEnded: opts.benchAttemptEnded } : {}), ...(opts.accountSend ? { accountSend: opts.accountSend } : {}), ...(opts.connections ? { connections: opts.connections } : {}), ...(opts.notify ? { notify: opts.notify } : {}), ...(opts.balance ? { balance: opts.balance } : {}) });
     await built.ctx.keys.ensure();
     const server = await new Promise((resolve) => { const s = http.createServer(built.app); s.listen(0, '127.0.0.1', () => resolve(s)); });
     const base = `http://127.0.0.1:${server.address().port}`;
@@ -52,6 +52,7 @@ async function boot(opts = {}) {
         const headers = { ...(o.headers || {}) };
         if (o.as) headers.cookie = [signIn(o.as), headers.cookie].filter(Boolean).join('; ');
         if (o.cookie) headers.cookie = o.cookie;
+        if (o.bearer) headers.authorization = `Bearer ${o.bearer}`;
         let body = o.body;
         if (o.json !== undefined) { body = JSON.stringify(o.json); headers['content-type'] = 'application/json'; }
         if (o.form) {

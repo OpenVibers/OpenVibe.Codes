@@ -26,13 +26,14 @@ function modelsUrl(base) {
 
 function createAiCatalog({ config = {}, fetchImpl = globalThis.fetch, now = Date.now } = {}) {
     const setting = config.aiCatalog || {};
-    const enabled = setting.enabled === true;
+    // D11 owner settings: the switch may change live; the token is created whenever Codes has a client secret.
+    const enabledNow = () => setting.enabled === true;
     const base = String((config.ai && config.ai.url) || 'https://ai.openvibe.services').replace(/\/+$/, '');
     const url = modelsUrl(base);
     const ttlMs = setting.ttlMs == null ? DEFAULT_TTL_MS : Math.max(0, Number(setting.ttlMs) || 0);
     // Codes' own Network token for OpenVibe.AI: the same kind the harness fetches, from the service's client
     // credentials. Without a client secret there is no catalog, and nothing else changes.
-    const tokens = enabled && config.oauth && config.oauth.clientSecret
+    const tokens = config.oauth && config.oauth.clientSecret
         ? createServiceTokenClient({
             tokenUrl: `${config.networkInternalUrl || 'http://127.0.0.1:4000'}/oauth/token`,
             clientId: config.oauth.clientId,
@@ -62,7 +63,7 @@ function createAiCatalog({ config = {}, fetchImpl = globalThis.fetch, now = Date
 
     /** The parsed catalog, cached about five minutes; null while the flag is off or AI does not answer with one. */
     async function read() {
-        if (!enabled || !tokens) return null;
+        if (!enabledNow() || !tokens) return null;
         if (cached && cached.until > now()) return cached.catalog;
         if (!inflight) {
             inflight = load().then((catalog) => {
@@ -78,7 +79,7 @@ function createAiCatalog({ config = {}, fetchImpl = globalThis.fetch, now = Date
         return catalogChoices(await read());
     }
 
-    return { enabled, url, read, choices };
+    return { get enabled() { return enabledNow(); }, url, read, choices };
 }
 
 module.exports = { createAiCatalog, modelsUrl, DEFAULT_TTL_MS };
