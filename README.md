@@ -129,10 +129,15 @@ No path in Codes sends or accepts a shared loopback key (tested by grep and at r
 - [test/start-page.test.js](test/start-page.test.js) — `/start` names every adapter and its needs, and the command line prints the same version.
 - [test/discovery.test.js](test/discovery.test.js) — robots.txt, sitemap.xml and llms.txt are served with real public entries and a lastmod from the site's own data.
 - [test/perf-budget.test.js](test/perf-budget.test.js) — the home page's size budgets, measured on the server as it runs.
+- [test/ai-catalog.test.js](test/ai-catalog.test.js) — AI's catalog parsed exactly (aliases before exact ids, nano-USD prices), and today's picker while either catalog flag is off.
 
 ## Configuration
 
 See [.env.example](.env.example). Required in production: `OV_OAUTH_CLIENT_SECRET`, `BASE_URL`, `DATABASE_URL` (and `DATABASE_DIRECT_URL` for the boot migrations, run as the owner). Optional: `VALKEY_URL`, `CODES_LIMITS_MINUTE` / `CODES_LIMITS_HOUR`.
+
+### OpenVibe.AI's model catalog
+
+Behind `CODES_AI_CATALOG` (off by default), the model pickers read OpenVibe.AI's `GET /v1/models` with Codes' own Network token and cache the answer five minutes ([server/domain/ai-catalog.js](server/domain/ai-catalog.js)). While AI's own `AI_MODEL_CATALOG` is on, the OpenVibe.AI choices are the dynamic aliases (`openvibe/auto`, `economy`, `balanced`, `fast`, `private`) and then its exact ids (`<org>/<model>[:<quant>]@<revision>`), each with its retail output price per million tokens and its availability on the `<option>`. The chosen id is sent unchanged as `model`; an exact id AI refuses (`ai.model_not_found`, `ai.model_unavailable`) is shown as that error, never swapped for another model. With either flag off, the pickers are exactly as before. A chosen model's answer carries AI's `x_openvibe` disclosure; `resolved_model` is recorded as the attempt's model and shown where Codes already shows it.
 
 ### Per-actor limits
 

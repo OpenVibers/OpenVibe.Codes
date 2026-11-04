@@ -26,7 +26,7 @@ async function mockApi() {
             requests.push({ auth: req.headers.authorization || null, body: parsed });
             const step = script.shift();
             if (!step) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'done' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } })); return; }
-            if (step.status) { res.writeHead(step.status, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: step.error } })); return; }
+            if (step.status) { res.writeHead(step.status, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: step.error, ...(step.code ? { code: step.code } : {}) } })); return; }
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: step.content || '', ...(step.calls ? { tool_calls: step.calls.map((c, i) => ({ id: `call_${requests.length}_${i}`, type: 'function', function: { name: c[0], arguments: JSON.stringify(c[1]) } })) } : {}) } }], usage: { prompt_tokens: 1000, completion_tokens: 100, prompt_cache_hit_tokens: 400 }, ...(step.x ? { x_openvibe: step.x } : {}) }));
         });
@@ -114,6 +114,42 @@ const toolResults = (events) => events.filter((e) => e.type === 'user').flatMap(
             assert.strictEqual(done.is_error, false, done.result);
             assert.deepStrictEqual(api.requests[before].body.x_openvibe, { provider: { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat', secret: 'deepseek-key' } });
         } finally { await new Promise((r) => network.close(r)); }
+    });
+
+    await check('OpenVibe.AI: an exact id is sent unchanged, its disclosure is recorded, and a refusal is that error', async () => {
+        const exactEnv = { ...env, OPENVIBE_AI_URL: api.url, OPENVIBE_AI_TOKEN: 'ov-task-token' };
+        const exact = createHarness({ env: exactEnv, store: createStore({ env: exactEnv }) });
+        api.set([{
+            content: 'It ran.',
+            x: { run_id: 'run_9', cost_usd: 0.0012, resolved_model: 'acme/m1:q4_k_m@rev1', revision: 'rev1', provider_access: 'OWN_DEPLOYMENT', rate_version: 'rr-1', policy: 'exact', fallback_reason: null },
+        }]);
+        const events = await collect(exact.run({ prompt: 'run exactly', agent: 'openvibe-ai', model: 'acme/m1:q4_k_m@rev1', cwd: work, permission: 'read', handoff: false }));
+        const r = events.find((e) => e.type === 'result');
+        assert.strictEqual(r.is_error, false, r.result);
+        assert.strictEqual(api.requests[0].body.model, 'acme/m1:q4_k_m@rev1', 'the exact id is sent unchanged');
+        assert.strictEqual(r.model, 'acme/m1:q4_k_m@rev1', 'the resolved model is what the run records');
+        assert.strictEqual(r.resolved_model, 'acme/m1:q4_k_m@rev1');
+        assert.strictEqual(r.disclosure.provider_access, 'OWN_DEPLOYMENT');
+        assert.strictEqual(r.total_cost_usd, 0.0012);
+        assert.strictEqual(events.find((e) => e.type === 'system' && e.subtype === 'init').model, 'acme/m1:q4_k_m@rev1', 'the session starts on the model that answered');
+
+        // An alias is sent as the alias; the disclosure says which exact model it resolved to, and that is recorded.
+        api.set([{ content: 'Alias ran.', x: { run_id: 'run_10', cost_usd: 0.001, resolved_model: 'acme/m3@rev3', policy: 'auto' } }]);
+        const aliased = await collect(exact.run({ prompt: 'run the alias', agent: 'openvibe-ai', model: 'openvibe/auto', cwd: work, permission: 'read', handoff: false }));
+        assert.strictEqual(api.requests[0].body.model, 'openvibe/auto', 'the alias is sent unchanged');
+        assert.strictEqual(aliased.find((e) => e.type === 'result').model, 'acme/m3@rev3', 'the resolved exact id is recorded');
+
+        api.set([{ status: 404, code: 'ai.model_not_found', error: 'no artifact acme/nope@rev0' }]);
+        const missing = await collect(exact.run({ prompt: 'run a missing model', agent: 'openvibe-ai', model: 'acme/nope@rev0', cwd: work, permission: 'read', handoff: false }));
+        const missingResult = missing.find((e) => e.type === 'result');
+        assert.strictEqual(api.requests.length, 1, 'one request: never retried with another model');
+        assert.match(missingResult.result, /ai\.model_not_found/);
+        assert.match(missingResult.result, /acme\/nope@rev0/);
+
+        api.set([{ status: 400, code: 'ai.model_unavailable', error: 'the artifact has no active deployment' }]);
+        const unavailable = await collect(exact.run({ prompt: 'run an unavailable model', agent: 'openvibe-ai', model: 'acme/m2@rev2', cwd: work, permission: 'read', handoff: false }));
+        assert.match(unavailable.find((e) => e.type === 'result').result, /ai\.model_unavailable/);
+        assert.strictEqual(api.requests.length, 1, 'the unavailable model was not swapped for another');
     });
 
     await check('read permission offers no writing tool, and a forced write is refused', async () => {

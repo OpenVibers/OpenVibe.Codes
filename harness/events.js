@@ -54,12 +54,12 @@ function usage({ input = 0, output = 0, cacheRead = 0, cacheWrite = 0 } = {}) {
     return { input_tokens: n(input), output_tokens: n(output), cache_read_input_tokens: n(cacheRead), cache_creation_input_tokens: n(cacheWrite) };
 }
 
-/** The one result line an agent run ends with. */
-function result({ ok, text: final, sessionId, model, startedAt, turns = 0, costUsd = 0, usage: u = usage() }) {
+/** The one result line an agent run ends with. `extra` carries the API's own facts (resolved_model, disclosure). */
+function result({ ok, text: final, sessionId, model, startedAt, turns = 0, costUsd = 0, usage: u = usage(), ...extra }) {
     return {
         type: 'result', subtype: ok ? 'success' : 'error', is_error: !ok, result: scrub(final || ''),
         session_id: sessionId || null, model: model || null, duration_ms: startedAt ? Date.now() - startedAt : 0,
-        num_turns: turns, total_cost_usd: Math.round((Number(costUsd) || 0) * 1e5) / 1e5, usage: u,
+        num_turns: turns, total_cost_usd: Math.round((Number(costUsd) || 0) * 1e5) / 1e5, usage: u, ...extra,
     };
 }
 

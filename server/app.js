@@ -35,6 +35,7 @@ const { createConductorApi } = require('./http/conductor-api');
 const { createRunClient } = require('./domain/run-client');
 const { createRunTasks } = require('./domain/run-tasks');
 const { createConnections } = require('./domain/connections');
+const { createAiCatalog } = require('./domain/ai-catalog');
 const { createRunTokens } = require('./domain/run-tokens');
 const { createAttempts } = require('./domain/attempts');
 const { createBenchPublisher } = require('./domain/bench-publisher');
@@ -88,6 +89,9 @@ async function createApp(opts = {}) {
     // A person's own connections (Codes C3): their provider keys live in OpenVibe.AI, and their harnesses run with a
     // short-lived run token that names them.
     const connections = opts.connections || createConnections({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    // OpenVibe.AI's real model catalog (AI Exchange P9), when CODES_AI_CATALOG is on: the pickers read it, and
+    // nothing else depends on it.
+    const aiCatalog = createAiCatalog({ config, fetchImpl: fetchImpl || globalThis.fetch, now: store.now });
     const runTokens = createRunTokens({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The task's attempts (stage C2): every Run job is one attempt, and the engine decides what happens next.
     const attempts = createAttempts({ store, config, log, harnesses });
@@ -103,7 +107,7 @@ async function createApp(opts = {}) {
     const benchPriors = opts.benchPriors || createBenchPriors({ config, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log, ttlMs: config.bench.priorsTtlMs });
     const placementContext = createPlacementContext({ store, config, userSettings, outcomes: placementOutcomes, priors: benchPriors, harnesses, now: store.now });
     const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
-    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext };
+    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext };
     ctx.forgejo = createForgejoClient({ config, log });
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
