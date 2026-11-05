@@ -10,6 +10,7 @@
 require('dotenv').config();
 const trim = (s) => String(s || '').replace(/\/+$/, '');
 const int = (v, def) => (Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : def);
+const bool = (v) => ['1', 'true', 'yes', 'on'].includes(String(v == null ? '' : v).trim().toLowerCase());
 
 function load(env = process.env) {
     const nodeEnv = env.NODE_ENV || 'development';
@@ -81,6 +82,13 @@ function load(env = process.env) {
             // The scopes Codes asks Network for: it stores a person's key with the first and runs a test request
             // (and the harnesses' requests) with the second.
             scope: 'ai.credential.manage ai.run.create',
+        },
+        // AI Exchange P9: OpenVibe.AI's real model catalog (GET /v1/models) in the pickers. Off by default; with the
+        // flag on, AI's own AI_MODEL_CATALOG still decides whether it answers more than the legacy `openvibe` model,
+        // and Codes keeps today's picker until it does. The answer is cached for about five minutes.
+        aiCatalog: {
+            enabled: bool(env.CODES_AI_CATALOG),
+            ttlMs: Math.max(0, int(env.CODES_AI_CATALOG_TTL_MS, 5 * 60_000)),
         },
         // A run token (Codes C3): the short-lived Network token an attempt's harness carries, so that AI knows whose
         // key and whose budget the run is. Two hours is the longest a coding attempt may run.

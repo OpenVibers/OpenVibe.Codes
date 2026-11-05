@@ -130,7 +130,7 @@ function readVerdict(text) {
  * @param {string} [what.patch] the diff
  * @param {string} [what.summary] what the change was for
  * @param {function} [what.fetchImpl] fetch, for a test
- * @returns {Promise<{ family: string, verdict: string, summary: string }>} the verdict
+ * @returns {Promise<{ family: string, model: string, verdict: string, summary: string, resolved_model?: string, disclosure?: object }>} the verdict
  */
 async function reviewWithAi({
     baseUrl = 'https://ai.openvibe.services/v1',
@@ -150,19 +150,40 @@ async function reviewWithAi({
     let res = await fetchImpl(`${root}/chat/completions`, {
         method: 'POST', headers, body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] }),
     });
-    if (res && res.status === 404) {
-        // A provider that speaks the messages dialect instead.
+    let doc = res ? await res.json().catch(() => null) : null;
+    const codeOf = (body) => (body && body.error && typeof body.error === 'object' ? body.error.code : null) || (body && body.code) || null;
+    // A 404 for a model AI refused is final; only a provider that does not speak chat completions gets the other
+    // dialect, and it is asked for the same model.
+    if (res && res.status === 404 && !/^ai\.model_/.test(String(codeOf(doc) || ''))) {
         res = await fetchImpl(`${root}/messages`, {
             method: 'POST', headers, body: JSON.stringify({ model, max_tokens: 1200, messages: [{ role: 'user', content: prompt }] }),
         });
+        doc = await res.json().catch(() => null);
     }
-    if (!res || !res.ok) throw new Error(`OpenVibe.AI refused the review (HTTP ${res && res.status})`);
-    const body = await res.json().catch(() => null);
+    if (!res || !res.ok) {
+        const err = (doc && doc.error && typeof doc.error === 'object') ? doc.error : null;
+        const code = String((err && err.code) || (doc && doc.code) || '') || null;
+        const detail = String((err && (err.message || err.detail)) || (doc && (doc.detail || doc.title)) || '').slice(0, 300);
+        throw new Error(`OpenVibe.AI refused the review (HTTP ${res && res.status}${code ? `, ${code}` : ''})${detail ? `: ${detail}` : ''}`);
+    }
+    const body = doc;
     const text = body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content
         ? body.choices[0].message.content
         : (body && body.content && Array.isArray(body.content) ? body.content.map((c) => c && c.text).filter(Boolean).join(' ') : '');
     const verdict = readVerdict(text);
-    return { family: family || familyOf(model), model, verdict: verdict.verdict, summary: verdict.summary };
+    // The route disclosure (D3'): the model that actually ran, the deployment and the cost, inside x_openvibe.
+    const x = body && body.x_openvibe && typeof body.x_openvibe === 'object' ? body.x_openvibe : null;
+    const resolved = x && x.resolved_model ? String(x.resolved_model) : (body && body.model ? String(body.model) : model);
+    return {
+        family: familyOf(resolved) || family || familyOf(model) || null,
+        model: resolved,
+        requested_model: model,
+        ...(x && x.resolved_model ? { resolved_model: String(x.resolved_model) } : {}),
+        ...(x ? { disclosure: x } : {}),
+        ...(x && Number.isFinite(+x.cost_usd) ? { cost_usd: +x.cost_usd } : {}),
+        verdict: verdict.verdict,
+        summary: verdict.summary,
+    };
 }
 
 module.exports = {

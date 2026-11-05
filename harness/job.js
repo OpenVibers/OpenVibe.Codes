@@ -310,7 +310,7 @@ function shotWithBytes(shot, budget) {
 function compact(e, ctx) {
     const cut = (s) => cutTo(s, MAX_TEXT);
     const parent = e.parent_tool_use_id ? { parent: String(e.parent_tool_use_id) } : {};
-    if (e.type === 'system' && e.subtype === 'init') return { t: 'agent', agent: e.agent, model: e.model || null, session: e.session_id || null };
+    if (e.type === 'system' && e.subtype === 'init') return { t: 'agent', agent: e.agent, model: e.model || null, session: e.session_id || null, ...(e.resolved_model ? { resolved_model: String(e.resolved_model).slice(0, 300) } : {}) };
     if (e.type === 'system' && e.subtype === 'handoff') return { t: 'handoff', from: e.from, ...(e.to ? { to: e.to } : {}), reason: cut(e.reason) };
     if (e.type === 'system' && (e.subtype === 'error' || e.subtype === 'warning')) return { t: 'note', level: e.subtype, text: cut(e.text) };
     if (e.type === 'system' && e.subtype === 'tool_progress') return { t: 'tool_progress', id: String(e.tool_use_id || ''), chunk: clean(cutTo(e.text, MAX_OUTPUT)) };
@@ -337,7 +337,12 @@ function compact(e, ctx) {
             });
     }
     if (e.type === 'result') {
-        return { t: 'done', ok: !e.is_error, text: cut(e.result), duration_ms: e.duration_ms || 0, cost_usd: e.total_cost_usd || 0, turns: e.num_turns || 0 };
+        return {
+            t: 'done', ok: !e.is_error, text: cut(e.result), duration_ms: e.duration_ms || 0, cost_usd: e.total_cost_usd || 0, turns: e.num_turns || 0,
+            ...(e.model ? { model: String(e.model).slice(0, 300) } : {}),
+            ...(e.resolved_model ? { resolved_model: String(e.resolved_model).slice(0, 300) } : {}),
+            ...(e.disclosure && typeof e.disclosure === 'object' ? { disclosure: e.disclosure } : {}),
+        };
     }
     return null;
 }
@@ -680,6 +685,10 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         result.summary = answer.slice(0, 4000);
         if (job.kind === 'bench') result.output = answer.slice(0, 200000);
         result.cost_usd = last && last.total_cost_usd ? last.total_cost_usd : 0;
+        // OpenVibe.AI's own disclosure: the model that actually ran, inside x_openvibe. Kept where Codes keeps a
+        // run's result, so the attempt records the resolved model, not only the one that was asked for.
+        if (last && last.resolved_model) result.resolved_model = String(last.resolved_model).slice(0, 300);
+        if (last && last.disclosure && typeof last.disclosure === 'object') result.disclosure = last.disclosure;
         const usage = last && last.usage && typeof last.usage === 'object' ? last.usage : {};
         result.tokens = Number(last && (last.total_tokens || last.tokens)) || (Number(usage.input_tokens) || 0) + (Number(usage.output_tokens) || 0);
         // The session the next message resumes: a conductor's turn ends, its conversation does not.
@@ -697,9 +706,9 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                     files: result.files.map((f) => f.path),
                     adapters: proof,
                     author: { agent: job.agent, model: job.model },
-                    emit: (item) => say({ t: 'proof', kind: item.kind, label: item.label, ok: item.ok, skipped: !!item.skipped, summary: item.summary, family: item.family || null }),
+                    emit: (item) => say({ t: 'proof', kind: item.kind, label: item.label, ok: item.ok, skipped: !!item.skipped, summary: item.summary, family: item.family || null, model: item.model || null }),
                 });
-                result.proof = { items: collected.items.map((i) => ({ kind: i.kind, label: i.label, ok: i.ok, skipped: !!i.skipped, summary: i.summary, family: i.family || null, detail: i.shots ? { shots: i.shots.map((s) => shotWithBytes(s, pictures)) } : (i.kind === 'diff' ? { files: i.files, stats: i.stats } : null) })), outcome: collected.outcome };
+                result.proof = { items: collected.items.map((i) => ({ kind: i.kind, label: i.label, ok: i.ok, skipped: !!i.skipped, summary: i.summary, family: i.family || null, model: i.model || null, requested_model: i.requested_model || null, detail: i.shots ? { shots: i.shots.map((s) => shotWithBytes(s, pictures)) } : (i.kind === 'diff' ? { files: i.files, stats: i.stats } : null) })), outcome: collected.outcome };
             } catch (e) {
                 say({ t: 'note', level: 'warning', text: `The proof could not be collected: ${scrub(e.message)}` });
                 result.proof = { items: [], outcome: null };

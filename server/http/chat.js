@@ -130,9 +130,17 @@ const repoLabel = (repo) => { try { return new URL(String(repo)).pathname.split(
 
 function createChatRoutes(ctx) {
     const r = asyncRouter();
-    const { config, store, harnesses, tasks, conductor, approvals, userSettings, github, machines, fleet } = ctx;
+    const { config, store, harnesses, tasks, conductor, approvals, userSettings, github, machines, fleet, aiCatalog } = ctx;
     /** What each agent is ready for on the person's machines (the stored fleet: no call out), for the pickers. */
     const readyFor = async (req) => (fleet && viewer(req) ? readiness(await fleet.agents(req.viewer.subject, harnesses).catch(() => [])) : new Map());
+    /** OpenVibe.AI's catalog for the pickers, or [] (flag off, AI down, or the legacy single model): never an error,
+     *  and never more than 1.5 s of a page (the read keeps going and the next page has it cached). */
+    const aiModels = async () => {
+        if (!aiCatalog) return [];
+        let timer;
+        const late = new Promise((resolve) => { timer = setTimeout(resolve, 1500, []); if (timer.unref) timer.unref(); });
+        try { return await Promise.race([aiCatalog.choices().catch(() => []), late]); } finally { clearTimeout(timer); }
+    };
     const db = store.db;
     const form = express.urlencoded({ extended: false, limit: '32kb' });
     const viewer = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
@@ -344,12 +352,26 @@ function createChatRoutes(ctx) {
     }
 
     // ── The composer ─────────────────────────────────────────────────────────────────────────────────────────────
-    function whoPicker(selected, { label = 'Who works on it', auto = null, cls = '', ready = null } = {}) {
-        const all = models.choices(harnesses);
+    function whoPicker(selected, { label = 'Who works on it', auto = null, cls = '', ready = null, catalog = null } = {}) {
+        const all = models.choices(harnesses, catalog);
         const groups = new Map();
         for (const c of all.slice(1)) { if (!groups.has(c.group)) groups.set(c.group, []); groups.get(c.group).push(c); }
-        // Each agent and model says what it is ready for on the person's machines (Shared's select draws it).
-        const opt = (c) => `<option value="${esc(c.value)}"${selected === c.value ? ' selected' : ''}${c.note ? ` title="${esc(c.note)}"` : ''}${ready ? optionAttrs(ready.get(String(c.value).split('|')[0])) : ''}>${esc(c.label)}</option>`;
+        // A saved default agent ("openvibe-ai|") keeps its selection while its models come from AI's catalog: the
+        // picker shows that agent's own default (legacy `openvibe`, else its first catalog entry) instead of falling
+        // back to Auto.
+        let chosen = selected;
+        if (selected && selected.endsWith('|') && !all.some((c) => c.value === selected)) {
+            const agent = selected.slice(0, -1);
+            const preferred = all.find((c) => c.value === `${agent}|openvibe`) || all.find((c) => String(c.value).startsWith(`${agent}|`));
+            if (preferred) chosen = preferred.value;
+        }
+        // Each agent and model says what it is ready for on the person's machines (Shared's select draws it); an
+        // OpenVibe.AI model says its own retail price and availability instead (AI Exchange P9).
+        const opt = (c) => {
+            const own = c.detail != null || c.state != null || c.badge != null;
+            const attrs = own ? optionAttrs({ desc: c.detail, state: c.state, badge: c.badge }) : (ready ? optionAttrs(ready.get(String(c.value).split('|')[0])) : '');
+            return `<option value="${esc(c.value)}"${chosen === c.value ? ' selected' : ''}${c.note ? ` title="${esc(c.note)}"` : ''}${attrs}>${esc(c.label)}</option>`;
+        };
         const first = auto ? `<option value="">${esc(auto)}</option>` : opt(all[0]);
         return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="${esc(label)}"><span class="ch-sr">${esc(label)}</span>${ico('agents')}<select name="who" data-ch-who data-ov-select="bare" data-ov-title="${esc(label)}">${first}${[...groups].map(([g, list]) => list.length > 1 ? `<optgroup label="${esc(g)}">${list.map(opt).join('')}</optgroup>` : opt(list[0])).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
@@ -481,7 +503,8 @@ function createChatRoutes(ctx) {
         const projectPick = `<label class="ch-pick ch-for-openvibe" title="Which OpenVibe project"><span class="ch-sr">Which OpenVibe project</span>${ico('ov')}<select name="project" data-ch-project data-ov-select="bare" data-ov-title="Which OpenVibe project"><option value="auto"${chosenProject === 'auto' ? ' selected' : ''}>Codes picks for you</option>${groups.map((g) => `<optgroup label="${esc(g)}">${start.PROJECTS.filter((p) => p.group === g).map((p) => `<option value="${esc(p.repository)}"${chosenProject === p.repository ? ' selected' : ''}${p.line ? ` title="${esc(p.line)}"` : ''}>${esc(p.name)}${p.domain ? ` · ${esc(p.domain)}` : ''}</option>`).join('')}</optgroup>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
         const repoPick = `<label class="ch-pick ch-pick-repo ch-for-code" title="Repository"><span class="ch-sr">Repository: owner/name or any Git URL</span>${ico('repo')}<input name="repo" type="text" inputmode="url" spellcheck="false" autocapitalize="off" value="${esc(repo)}" placeholder="owner/name or any Git URL" list="ch-repos" autocomplete="off" data-ch-repo data-ch-repo-url="/api/v1/me/repos"><datalist id="ch-repos">${repos.map((x) => `<option value="${esc(x.url)}">${esc(x.full_name)}</option>`).join('')}</datalist></label>`;
         const ready = await readyFor(req);
-        const pickers = kindPick + projectPick + repoPick + whoPicker(settings.default_agent ? `${settings.default_agent}|` : '', { cls: 'ch-for-agents', ready }) + effortPicker('', 'ch-for-agents');
+        const catalog = await aiModels();
+        const pickers = kindPick + projectPick + repoPick + whoPicker(settings.default_agent ? `${settings.default_agent}|` : '', { cls: 'ch-for-agents', ready, catalog }) + effortPicker('', 'ch-for-agents');
         // The repositories a person used last are a tap away (the box also searches every one they can reach).
         const newRepo = `<a class="ch-chip ch-chip-new" href="/git">${ico('new')}New on OpenVibe Git</a>`;
         const recent = `<div class="ch-recent ch-for-code" role="group" aria-label="Your repositories">${newRepo}${repos.length > 1 ? repos.map((x) => `<button class="ch-chip" type="button" data-ch-saved-repo="${esc(x.url)}">${ico('repo')}${esc(x.full_name)}</button>`).join('') : ''}</div>`;
@@ -546,7 +569,7 @@ function createChatRoutes(ctx) {
             repoUrl = start.normalizeRepo(b.repo);
             if (!repoUrl) return back(String(b.repo || '').trim() ? 'That is not a Git address Codes can clone: use https://…, git@host:owner/name or owner/name, with no password in it.' : 'Pick a repository (owner/name or any Git URL), choose an OpenVibe site, or start something new.');
         }
-        const who = models.parse(b.who !== undefined ? b.who : (b.agent ? `${String(b.agent).trim()}|` : ''), harnesses);
+        const who = models.parse(b.who !== undefined ? b.who : (b.agent ? `${String(b.agent).trim()}|` : ''), harnesses, { aiCatalog: !!(config.aiCatalog && config.aiCatalog.enabled) });
         if (!who) return back('Choose who works on it from the list.');
         const agent = who.agent || '';
         let args;
@@ -604,7 +627,7 @@ function createChatRoutes(ctx) {
         // The stream starts after the last line this page already shows.
         const seqRow = live ? await db.maybe('SELECT max(seq) AS seq FROM codes_session_lines WHERE task_id = $1', [row.id]) : null;
         const lastSeq = seqRow && seqRow.seq != null ? Number(seqRow.seq) : 0;
-        const pickers = whoPicker('', { label: 'Who carries on', auto: `Same agent (${agentOf(row.agent, agentNames()).name})`, ready: await readyFor(req) }) + effortPicker('');
+        const pickers = whoPicker('', { label: 'Who carries on', auto: `Same agent (${agentOf(row.agent, agentNames()).name})`, ready: await readyFor(req), catalog: await aiModels() }) + effortPicker('');
         return frame(req, res, {
             currentId: row.id, title: titleOf(row), heading: titleOf(row), state, panel: await sideHtml(row),
             turns: [...errorTurns, ...await taskThread(row)],
@@ -625,7 +648,7 @@ function createChatRoutes(ctx) {
         const row = await db.maybe("SELECT * FROM run_tasks WHERE id = $1 AND subject = $2 AND kind <> 'conductor'", [req.params.id, req.viewer.subject]);
         if (!row) return res.status(404).send('Not found');
         const b = req.body || {};
-        const who = models.parse(b.who !== undefined ? b.who : (b.agent ? `${String(b.agent).trim()}|` : ''), harnesses);
+        const who = models.parse(b.who !== undefined ? b.who : (b.agent ? `${String(b.agent).trim()}|` : ''), harnesses, { aiCatalog: !!(config.aiCatalog && config.aiCatalog.enabled) });
         if (!who) return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}?error=${encodeURIComponent('Choose who carries on from the list.')}`);
         // The same agent with another model carries on; another agent takes over.
         const agent = who.agent && who.agent !== row.agent ? who.agent : null;

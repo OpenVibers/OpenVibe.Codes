@@ -171,6 +171,20 @@ function extraHeaders(env) {
 }
 
 /**
+ * The API's refusal in the person's words. An exact id AI refused keeps its own code (ai.model_not_found,
+ * ai.model_unavailable): the reason a chosen model did not run is shown as that, never as a different model's answer.
+ */
+function refusalOf(name, status, body, model) {
+    const err = body && typeof body.error === 'object' && body.error ? body.error : null;
+    const code = String((err && err.code) || (body && body.code) || '') || null;
+    const detail = String((err && (err.message || err.detail)) || (body && (body.detail || body.title)) || (typeof (body && body.error) === 'string' ? body.error : '') || '').slice(0, 300);
+    if (code === 'ai.model_not_found' || code === 'ai.model_unavailable') {
+        return `${name} refused the model ${model}: HTTP ${status} ${code}${detail ? `: ${detail}` : ''}`;
+    }
+    return `${name} answered HTTP ${status}${code ? ` (${code})` : ''}${detail ? `: ${detail}` : ''}`;
+}
+
+/**
  * apiAgent({ id, name, baseUrl, keyEnv, model, priceIn, priceOut, token }) → an adapter.
  * extra(env) → fields added to every request body (OpenVibe.AI's x_openvibe.provider: the project's own provider).
  * token(env, fetch) → a bearer, asked before every request (OpenVibe.AI takes a five-minute Network token, refreshed by
@@ -207,6 +221,9 @@ function apiAgent(spec) {
                 let lastText = '';
                 let turns = 0;
                 let failure = null;
+                // The model AI says ran, and its route disclosure (x_openvibe), recorded on the run's result.
+                let resolvedModel = null;
+                let disclosure = null;
                 try {
                     while (turns < maxTurns && !cancelled) {
                         turns++;
@@ -218,25 +235,32 @@ function apiAgent(spec) {
                             signal: controller.signal,
                         });
                         const body = await res.json().catch(() => null);
+                        const x = body && body.x_openvibe && typeof body.x_openvibe === 'object' ? body.x_openvibe : null;
+                        if (x) {
+                            if (x.resolved_model) resolvedModel = String(x.resolved_model);
+                            disclosure = { ...(disclosure || {}), ...x };
+                        }
                         if (!res.ok || !body || !Array.isArray(body.choices) || !body.choices[0]) {
-                            failure = `${spec.name} answered HTTP ${res.status}${body && body.error ? `: ${String(body.error.message || body.error).slice(0, 300)}` : ''}`;
+                            // An exact id AI refused (ai.model_not_found / ai.model_unavailable) is its own answer:
+                            // it is reported as it is, and this loop never asks for a different model instead.
+                            failure = refusalOf(spec.name, res.status, body, model);
                             yield ev.error(failure);
                             break;
                         }
                         const usage = body.usage || {};
-                        if (body.x_openvibe && Number.isFinite(+body.x_openvibe.cost_usd)) { reported.usd += +body.x_openvibe.cost_usd; reported.any = true; }
+                        if (x && Number.isFinite(+x.cost_usd)) { reported.usd += +x.cost_usd; reported.any = true; }
                         u.input += +usage.prompt_tokens || 0; u.output += +usage.completion_tokens || 0;
                         u.cacheRead += +(usage.prompt_cache_hit_tokens || (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens)) || 0;
                         const msg = body.choices[0].message || {};
                         messages.push({ role: 'assistant', content: msg.content || '', ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}) });
-                        if (String(msg.content || '').trim()) { lastText = msg.content; yield ev.text(msg.content, model); }
+                        if (String(msg.content || '').trim()) { lastText = msg.content; yield ev.text(msg.content, resolvedModel || model); }
                         const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
                         if (!calls.length) break;
                         for (const call of calls) {
                             const name = call.function && call.function.name;
                             let args = {};
                             try { args = JSON.parse((call.function && call.function.arguments) || '{}'); } catch { /* answered as an error below */ }
-                            yield ev.toolUse(call.id, SHOWN_AS[name] || name, shownInput(name, args), model);
+                            yield ev.toolUse(call.id, SHOWN_AS[name] || name, shownInput(name, args), resolvedModel || model);
                             let out;
                             const def = TOOL_DEFS[name];
                             if (!def) out = [`unknown tool ${name}`, true];
@@ -265,9 +289,11 @@ function apiAgent(spec) {
                     failure = cancelled ? `${spec.name} was stopped` : `${spec.name} could not be reached: ${err.message}`;
                     yield ev.error(failure);
                 }
-                if (ctx.sessions) ctx.sessions.save(sessionId, { agent: spec.id, model, messages: messages.slice(-200) });
+                if (ctx.sessions) ctx.sessions.save(sessionId, { agent: spec.id, model: resolvedModel || model, messages: messages.slice(-200) });
                 const cost = reported.any ? reported.usd : (u.input * (spec.priceIn || 0) + u.output * (spec.priceOut || 0)) / 1000;
-                yield ev.result({ ok: !failure && !cancelled, text: failure || lastText, sessionId, model, startedAt, turns, costUsd: cost,
+                yield ev.result({ ok: !failure && !cancelled, text: failure || lastText, sessionId, model: resolvedModel || model, startedAt, turns, costUsd: cost,
+                    ...(resolvedModel ? { resolved_model: resolvedModel } : {}),
+                    ...(disclosure ? { disclosure } : {}),
                     usage: ev.usage({ input: u.input - u.cacheRead, output: u.output, cacheRead: u.cacheRead }) });
             }());
             iterator.cancel = () => { cancelled = true; controller.abort(); };
@@ -277,4 +303,4 @@ function apiAgent(spec) {
     return adapter;
 }
 
-module.exports = { apiAgent, extraHeaders, runTool, inside, TOOL_DEFS, SYSTEM };
+module.exports = { apiAgent, refusalOf, extraHeaders, runTool, inside, TOOL_DEFS, SYSTEM };

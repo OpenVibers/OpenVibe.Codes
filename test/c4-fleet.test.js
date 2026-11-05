@@ -10,7 +10,17 @@ const { boot, check, done } = require('./helpers/boot');
 (async () => {
     const t = await boot();
     const ada = t.network.addUser('ada');
-    const RESET = '2026-11-04T00:00:00Z';
+    // The reset has to be ahead of now: a window with a reset already past has freed and is not full. A fixed date
+    // made this test depend on the clock (red every day after it); the next Wednesday 00:00 UTC keeps the words the
+    // page says ("· Wed 00:00 UTC") and the premise (96%, full) both true.
+    const nextWednesdayUtc = () => {
+        const d = new Date();
+        d.setUTCHours(0, 0, 0, 0);
+        const days = ((3 - d.getUTCDay() + 7) % 7) || 7;   // 3 is Wednesday; never today, whose reset may be past
+        d.setUTCDate(d.getUTCDate() + days);
+        return d.toISOString();
+    };
+    const RESET = nextWednesdayUtc();
     // The machine, as OpenVibe.Bot answers it: the page reads Bot and keeps the latest reading per machine.
     t.bot.addMachine({
         id: 'dev_ada_laptop', node_id: 'nod_ada', name: 'ada-laptop', online: true, fleet_at: new Date().toISOString(),

@@ -35,6 +35,7 @@ const { createConductorApi } = require('./http/conductor-api');
 const { createRunClient } = require('./domain/run-client');
 const { createRunTasks } = require('./domain/run-tasks');
 const { createConnections } = require('./domain/connections');
+const { createAiCatalog } = require('./domain/ai-catalog');
 const { createRunTokens } = require('./domain/run-tokens');
 const { createAttempts } = require('./domain/attempts');
 const { createBenchPublisher } = require('./domain/bench-publisher');
@@ -50,6 +51,7 @@ const { createMovedRoutes } = require('./http/moved');
 const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
 const { createForgejoClient } = require('./domain/forgejo');
+const createAiCatalogConfig = require('./ai-catalog-config').create;
 const { createMachines } = require('./domain/machines');
 const { createMemory } = require('./domain/memory');
 const { createFleet } = require('./domain/fleet');
@@ -78,6 +80,9 @@ async function createApp(opts = {}) {
     const store = opts.store || await openStore(config, { now: opts.now, log });
 
     const keys = createKeyStore({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    // D11 owner settings (codes.ai): the catalog switch reads through the store, env pins winning.
+    const aiCatalogConfig = await createAiCatalogConfig({ db: store.db, keys, config, env: opts.env || process.env, log });
+    Object.defineProperty(config.aiCatalog, 'enabled', { enumerable: true, configurable: true, get: () => aiCatalogConfig.get('catalog') });
     const sso = createSso({ config, keys, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log });
     // The harness catalog (server/data/harness-offers.json), read once: a bad seed row fails boot.
     const harnesses = createHarnesses();
@@ -88,6 +93,9 @@ async function createApp(opts = {}) {
     // A person's own connections (Codes C3): their provider keys live in OpenVibe.AI, and their harnesses run with a
     // short-lived run token that names them.
     const connections = opts.connections || createConnections({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    // OpenVibe.AI's real model catalog (AI Exchange P9), when CODES_AI_CATALOG is on: the pickers read it, and
+    // nothing else depends on it.
+    const aiCatalog = createAiCatalog({ config, fetchImpl: fetchImpl || globalThis.fetch, now: store.now });
     const runTokens = createRunTokens({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The task's attempts (stage C2): every Run job is one attempt, and the engine decides what happens next.
     const attempts = createAttempts({ store, config, log, harnesses });
@@ -103,7 +111,7 @@ async function createApp(opts = {}) {
     const benchPriors = opts.benchPriors || createBenchPriors({ config, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log, ttlMs: config.bench.priorsTtlMs });
     const placementContext = createPlacementContext({ store, config, userSettings, outcomes: placementOutcomes, priors: benchPriors, harnesses, now: store.now });
     const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
-    const ctx = { config, store, keys, sso, harnesses, log, sessions, outbox, run, tasks, connections, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext };
+    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext };
     ctx.forgejo = createForgejoClient({ config, log });
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -125,6 +133,7 @@ async function createApp(opts = {}) {
     tasks.setConductor(ctx.conductor);
 
     const app = express();
+    aiCatalogConfig.mount(app);
     // GET /openapi.json (SEO-3): this service's public API as OpenAPI 3.1, generated from the contracts
     // (openvibe-contracts); the operations they mark internal-only are left out.
     app.get('/openapi.json', (_req, res) => {

@@ -22,7 +22,7 @@ const { check, done } = require('./helpers/boot');
         assert.strictEqual(manifest.exposure.state, 'live');
         // Contracts 0.229.0: a first-party service starts, reads and cancels a person's coding task (http/tasks-api.js)
         // and reads their Action Center items (http/actions-api.js).
-        assert.deepStrictEqual(manifest.capabilities, ['codes.task.start', 'codes.task.read', 'codes.task.cancel', 'codes.actions.read']);
+        assert.deepStrictEqual(manifest.capabilities, ['codes.task.start', 'codes.task.read', 'codes.task.cancel', 'codes.actions.read', 'codes.config.manage']);
         for (const id of manifest.capabilities) assert.strictEqual(contracts.capabilities.get(id).status, 'active', id);
         const range = manifest.contractRanges['openvibe-contracts'];
         assert.ok(require('openvibe-sdk/core').satisfiesRange(require('openvibe-contracts/package.json').version, range));

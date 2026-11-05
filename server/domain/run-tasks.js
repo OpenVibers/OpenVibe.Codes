@@ -126,15 +126,17 @@ function reasonOf(state, text) {
 function usageOf(result) {
     const d = asObject(result) || {};
     const log = Array.isArray(d.log) ? d.log : [];
-    let tokens = 0; let steps = 0; let session = null; let model = null;
+    let tokens = 0; let steps = 0; let session = null; let model = d.resolved_model ? String(d.resolved_model) : null;
     for (const line of log) {
         if (!line || typeof line !== 'object') continue;
         if (line.t === 'usage') tokens += (Number(line.input_tokens) || 0) + (Number(line.output_tokens) || 0);
         else if (line.t === 'tool') steps++;
         else if (line.t === 'agent') {
             if (!session && line.session) session = String(line.session);
-            if (!model && line.model) model = String(line.model);
-        }
+            // OpenVibe.AI's x_openvibe.resolved_model is the model that really ran; it wins over the one asked for.
+            if (line.resolved_model) model = String(line.resolved_model);
+            else if (!model && line.model) model = String(line.model);
+        } else if (line.t === 'done' && line.resolved_model) model = String(line.resolved_model);
     }
     return {
         cost_usd: typeof d.cost_usd === 'number' && Number.isFinite(d.cost_usd) ? d.cost_usd : null,

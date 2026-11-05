@@ -64,6 +64,21 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
             assert.strictEqual(verdict.family, 'deepseek');
         });
 
+        await check('the review records the resolved model and cost from the API\'s disclosure', async () => {
+            const fetchImpl = async () => ({
+                status: 200, ok: true,
+                json: async () => ({
+                    choices: [{ message: { content: '{"verdict":"approved","summary":"It holds."}' } }],
+                    x_openvibe: { resolved_model: 'deepseek/chat@rev2', provider_access: 'OWN_DEPLOYMENT', cost_usd: 0.0042 },
+                }),
+            });
+            const verdict = await reviewWithAi({ token: 'test-token', model: 'deepseek-chat', patch: '+x', fetchImpl });
+            assert.deepStrictEqual([verdict.model, verdict.resolved_model, verdict.requested_model], ['deepseek/chat@rev2', 'deepseek/chat@rev2', 'deepseek-chat']);
+            assert.strictEqual(verdict.disclosure.provider_access, 'OWN_DEPLOYMENT');
+            assert.strictEqual(verdict.cost_usd, 0.0042);
+            assert.strictEqual(verdict.family, 'deepseek');
+        });
+
         await check('a provider that speaks the messages dialect is tried when chat completions is not there', async () => {
             const calls = [];
             const fetchImpl = async (url) => {
@@ -84,6 +99,16 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
         await check('a refused review is an error, not a verdict', async () => {
             const fetchImpl = async () => ({ status: 429, ok: false, json: async () => ({}) });
             await assert.rejects(() => reviewWithAi({ token: 't', model: 'deepseek-chat', patch: '+x', fetchImpl }), /refused the review \(HTTP 429\)/);
+        });
+
+        await check('a refused exact id is that error, and the other dialect is not asked for it', async () => {
+            const calls = [];
+            const fetchImpl = async (url) => {
+                calls.push(url);
+                return { status: 404, ok: false, json: async () => ({ error: { message: 'no artifact acme/nope@rev0', code: 'ai.model_not_found' } }) };
+            };
+            await assert.rejects(() => reviewWithAi({ token: 't', model: 'acme/nope@rev0', patch: '+x', fetchImpl }), /ai\.model_not_found/);
+            assert.strictEqual(calls.length, 1, 'no second request: the same refused model is not retried');
         });
 
         console.log('review: a model of another family, one call to OpenVibe.AI, and a verdict read from what it says');
