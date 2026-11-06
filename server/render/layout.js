@@ -143,7 +143,8 @@ ${(o.css || []).map((rel) => `<link rel="stylesheet" href="${esc(asset(rel))}">`
 ${(o.styles || []).map((name) => `<link rel="stylesheet" href="${esc(ovServe.url(name))}">`).join('\n')}
 ${render(scripts)}
 <meta name="ov-boost" content="codes@${esc(RELEASE)}">
-<script src="${ovServe.url('boost.js')}" data-main="#main" defer></script>`,
+<script src="${ovServe.url('boost.js')}" data-main="#main" defer></script>
+${o.head || ''}`,
         body: `<a class="skip" href="#main">Skip to content</a>
 <div id="navbar-mount"></div>
 <noscript><div class="account-bar" role="navigation" aria-label="Account">${render(account)}</div></noscript>

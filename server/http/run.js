@@ -81,16 +81,10 @@ function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globa
         const signInUrl = `/auth/login?next=${encodeURIComponent(req.originalUrl)}`;
         return page(req, res, {
             title: 'Shared with specific people', index: false, head: shareHead,
+            // The gate draws itself from this markup (openvibe-shared 4.123.0's [data-ov-share-gate]): no inline
+            // script, so a strict CSP needs nothing, and every value is escaped like any other attribute.
             body: html`<h1>This task is shared with specific people</h1>
-<p>Sign in with the OpenVibe account it was shared with, or ask its owner for access.</p>
-<div id="share-gate"></div>
-<script>
-window.addEventListener('DOMContentLoaded', function () {
-  var el = document.getElementById('share-gate');
-  if (el && window.OVShare) OVShare.gate(el, { kind: 'task', id: ${raw(JSON.stringify(String(id)))},
-    signedInAs: ${raw(JSON.stringify(signedInAs))}, signInUrl: ${raw(JSON.stringify(signInUrl))} });
-});
-</script>`,
+<div id="share-gate" data-ov-share-gate data-kind="task" data-id="${String(id)}" data-signed-in-as="${signedInAs}" data-sign-in-url="${signInUrl}">This is shared with specific people. Sign in with the OpenVibe account it was shared with, or ask its owner for access.</div>`,
         }, 404);
     };
     // A task reads Run only as the 10-minute fallback; its state now arrives from run.job.* events.
