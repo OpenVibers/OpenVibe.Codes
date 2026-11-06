@@ -37,7 +37,7 @@ const STREAM = (o = {}) => ({
             req.on('end', () => {
                 calls.push({ method: req.method, path: url.pathname, body: body ? JSON.parse(body) : null });
                 if (live.fail) return json(500, { error: 'Live is unwell', code: 'boom' });
-                if (url.pathname === '/api/streams/agent' && req.method === 'GET') {
+                if (url.pathname === '/api/streams/agent/mine' && req.method === 'GET') {
                     const onlyLive = url.searchParams.get('live') === '1';
                     return json(200, { streams: live.streams.filter((s) => !onlyLive || s.state === 'live') });
                 }

@@ -54,7 +54,7 @@ function createAgentView({ config, sso, actorLimits, fetchImpl = (...a) => fetch
     async function streamOf(token) {
         let res;
         try {
-            res = await live(token, '/api/streams/agent');
+            res = await live(token, '/api/streams/agent/mine');
         } catch (e) {
             throw Object.assign(new Error(`OpenVibe.Live did not answer: ${e.message}`), { status: 502, code: 'agent_view.unavailable' });
         }
