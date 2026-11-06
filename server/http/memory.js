@@ -4,10 +4,13 @@
  * The Memory page (OpenVibe Memory M2b): what the person's own assistants know about them.
  *
  * The notes live in OpenVibe.AI's memory store, sealed there and opened only by the person's own token. This
- * page never holds a note: it forwards the person's token to the store (server/domain/memory.js), renders what
- * comes back and forgets it. The token is never written into the page, and no note text is ever logged.
+ * page never stores a note: it forwards the person's token to the store (server/domain/memory.js), renders what
+ * comes back and forgets it. An import preview passes through the same way, only long enough to show the
+ * candidates. The token is never written into the page, and no note text is ever logged.
  *
- *   GET  /memory             the page: the sources, then one tab (notes, disagree, suggested, profile, reads)
+ *   GET  /memory             the page: the sources, then one tab (notes, disagree, suggested, profile, reads, import)
+ *   POST /memory/import/preview  an export zip or pasted memory list, parsed by the store into a preview
+ *   POST /memory/import/:id/commit  the candidates the person ticked, and the draft is gone
  *   GET  /memory/remove      what one source's removal would take away, and the one form that does it
  *   POST /memory/remove      everything from one source, gone (the store's own delete)
  *   POST /memory/items/:id/edit      the note's text and kind
@@ -23,6 +26,7 @@
  * only script on the site is the one the other workspace pages already load.
  */
 
+const express = require('express');
 const { asyncRouter } = require('./router');
 const { esc } = require('../render/html');
 
@@ -32,6 +36,7 @@ const SOURCE_NAMES = {
     copilot: 'GitHub Copilot', windsurf: 'Windsurf', cline: 'Cline', roo: 'Roo Code', kiro: 'Kiro',
     continue: 'Continue', aider: 'Aider', 'command-code': 'Command Code', opencode: 'OpenCode',
     actor: 'Actor', vibe: 'Vibe', know: 'Know', person: 'You', codes: 'Codes', codex: 'Codex',
+    chatgpt: 'ChatGPT', 'claude-ai': 'Claude', 'gemini-apps': 'Gemini', paste: 'Pasted memory',
 };
 const sourceName = (id) => SOURCE_NAMES[String(id || '')] || String(id || '').replace(/[-_]+/g, ' ');
 
@@ -70,7 +75,7 @@ const agoOf = (value) => {
 
 const MEMORY_TABS = [
     ['notes', 'Notes'], ['disagree', 'Disagree'], ['suggested', 'Suggested'],
-    ['profile', 'Profile'], ['reads', 'Who read it'],
+    ['profile', 'Profile'], ['reads', 'Who read it'], ['import', 'Import'],
 ];
 
 /** What the store's refusals say to a person. The words are ours: no note text ever reaches a flash. */
@@ -83,6 +88,11 @@ const PROBLEMS = {
     'memory.unreadable': 'That note could not be read.',
     'memory.unavailable': 'Your memory is not available right now.',
     'memory.signed_out': 'Sign in again to see your memory.',
+    'import.bad_zip': 'That file is not a zip archive we can read.',
+    'import.invalid': 'That file is not an export this page reads.',
+    'import.expired': 'That preview has expired. Drop the export again.',
+    'import.not_found': 'That preview is no longer here.',
+    'input.too_large': 'That upload is too large. Export only the assistant’s data.',
 };
 const problemWord = (e) => PROBLEMS[String((e && e.code) || '')] || 'Your memory could not be changed. Try again in a moment.';
 
@@ -96,6 +106,17 @@ function createMemoryRoutes(ctx, kit) {
     const { page, wrap, header, pill, flash, sameOrigin, viewer, form, signIn } = kit;
     const { sso, memory } = ctx;
     const router = asyncRouter();
+    // An export is raw bytes (one multipart form from the page, or a zip in a test); the store parses it, not Codes.
+    const importBody = express.raw({
+        type: ['multipart/form-data', 'application/zip', 'application/x-zip-compressed', 'application/octet-stream'],
+        limit: '25mb',
+    });
+    const importUpload = (req, res, next) => importBody(req, res, (err) => {
+        if (!err) return next();
+        return back(req, res, 'import', '', err.type === 'entity.too.large'
+            ? 'That upload is larger than 25 MB. Export only the assistant’s data, or paste the extraction answer.'
+            : 'That upload could not be read.');
+    });
 
     /** The person's own token, used for one call to the store. It never leaves this process. */
     async function withToken(req, res, call) {
@@ -158,11 +179,105 @@ function createMemoryRoutes(ctx, kit) {
         else if (tab === 'suggested') panel = suggestedPanel(byStatus.suggested);
         else if (tab === 'profile') panel = await profilePanel(req, res, scopes, byStatus.active);
         else if (tab === 'reads') panel = await readsPanel(req, res);
+        else if (tab === 'import') {
+            let walkthroughs = null;
+            let prompt = '';
+            try {
+                const out = await withToken(req, res, (token) => memory.providers(token));
+                walkthroughs = out.providers;
+                prompt = out.prompt;
+            } catch (e) {
+                if (!problem) problem = e;
+            }
+            panel = importPanel(walkthroughs, prompt);
+        }
 
         const content = head + flash(req)
             + (problem ? note('Your memory could not be read right now. ' + problemWord(problem), 'bad') : '')
             + sourcesPanel(sources) + tabs + panel;
         return page(req, res, title, wrap(content));
+    }
+
+    /** The Import tab: one walkthrough per cloud assistant, then one paste card that works anywhere. */
+    function importPanel(providers, prompt) {
+        const privacy = '<p class="c4-hint">We remove passwords, keys and tokens before anything is shown. '
+            + 'What you see are candidates, not saved notes: nothing is kept until you tick it and press Keep selected. '
+            + 'A preview lasts two hours.</p>';
+        if (!Array.isArray(providers) || !providers.length) {
+            return '<section class="c4-card"><h2>Bring in an export</h2>'
+                + '<p class="c4-hint">The import is not available right now. Try again in a moment.</p></section>';
+        }
+        const card = (p) => '<article class="c4-card">'
+            + '<div class="c4-card-head"><h2>' + esc(p.name) + '</h2>'
+            + '<a class="c4-quiet-link" href="' + esc(p.url) + '" target="_blank" rel="noopener">Open ' + esc(p.name) + '</a></div>'
+            + '<p class="c4-hint">' + esc(p.what) + '</p>'
+            + '<ol class="c4-steps">' + (p.steps || []).map((step) => '<li>' + esc(step) + '</li>').join('') + '</ol>'
+            + '<p class="c4-hint"><strong>What arrives:</strong> ' + esc(p.arrives) + '<br><strong>How long:</strong> ' + esc(p.time) + '</p>'
+            + '<form class="c4-form" method="post" action="/memory/import/preview" enctype="multipart/form-data">'
+            + '<input type="hidden" name="provider" value="' + esc(p.id) + '">'
+            + '<label class="c4-file">Your export .zip <input type="file" name="file" accept=".zip,application/zip,application/x-zip-compressed" required></label>'
+            + '<button class="c4-button" type="submit">Preview ' + esc(p.name) + '</button>'
+            + '</form></article>';
+        const paste = '<section class="c4-card"><div class="c4-card-head"><h2>Any assistant: ask what it remembers</h2>'
+            + '<span class="c4-muted">works for Grok, Copilot, Perplexity too</span></div>'
+            + '<p class="c4-hint">Open a new chat in the assistant, paste the prompt, then paste its answer here. '
+            + 'This is the same method Claude’s own memory import uses.</p>'
+            + '<details class="c4-more"><summary>Show the prompt to paste</summary>'
+            + '<div class="c4-more-body"><pre class="c4-code">' + esc(prompt) + '</pre></div></details>'
+            + '<form class="c4-form" method="post" action="/memory/import/preview" enctype="multipart/form-data">'
+            + '<label>Which assistant answered?<select name="provider">'
+            + '<option value="chatgpt">ChatGPT</option><option value="claude-ai">Claude</option>'
+            + '<option value="gemini-apps">Gemini</option><option value="other">Another assistant</option>'
+            + '</select></label>'
+            + '<label>Its answer<textarea name="text" rows="8" required placeholder="Paste the bullet list here"></textarea></label>'
+            + '<button class="c4-button" type="submit">Preview the answer</button>'
+            + '</form></section>';
+        return '<p class="c4-hint">Bring in what ChatGPT, Claude or Gemini already remember about you. '
+            + 'Each export is parsed by your memory store, not on your computer, and never stored as a chat.</p>'
+            + privacy
+            + '<div class="c4-grid c4-import-sources">' + providers.map(card).join('') + '</div>'
+            + paste;
+    }
+
+    /** The preview: every candidate with its own tick. The form carries only the draft id and the ticked keys. */
+    function previewPage(req, res, out) {
+        const draft = (out && out.import) || {};
+        const title = 'Import preview';
+        const head = header(title, 'Nothing is saved until you press Keep selected.');
+        const from = sourceName(draft.provider || '');
+        const summary = draft.summary || {};
+        const items = Array.isArray(draft.items) ? draft.items : [];
+        if (!items.length) {
+            return page(req, res, title, wrap(head + flash(req)
+                + '<section class="c4-card"><h2>No notes found</h2>'
+                + '<p class="c4-hint">' + esc(summary.note || 'That export did not contain anything that looked like a memory.')
+                + ' The extraction prompt finds more than a chat export does.</p>'
+                + '<p><a class="c4-button" href="/memory?tab=import">Try the extraction prompt</a></p></section>'));
+        }
+        const when = (value) => { const day = dayOf(value); return day ? ' · ' + day : ''; };
+        const rows = items.map((item, i) => {
+            const heading = item.source_ref && item.source_ref.heading ? ' · “' + String(item.source_ref.heading) + '”' : '';
+            return '<label class="c4-check" for="keep-' + i + '">'
+                + '<input type="checkbox" id="keep-' + i + '" name="keep" value="' + esc(item.key) + '" checked>'
+                + '<span>' + esc(item.text)
+                + '<small>' + esc(kindName(item.kind)) + ' · ' + esc(sourceName(item.source)) + esc(heading) + esc(when(item.seen_at)) + '</small>'
+                + '</span></label>';
+        }).join('');
+        const secrets = Number(summary.secrets_removed) || 0;
+        const more = Number(summary.skipped) || 0;
+        const counts = items.length + (items.length === 1 ? ' possible note' : ' possible notes')
+            + (from ? ' from ' + from : '')
+            + (secrets ? ' · ' + secrets + ' secret' + (secrets === 1 ? ' was' : 's were') + ' removed before we showed them' : '')
+            + (more ? ' · ' + more + ' older ones stay in your file' : '') + '.';
+        const form = '<form class="c4-form" method="post" action="/memory/import/' + encodeURIComponent(draft.id) + '/commit">'
+            + '<p class="c4-hint">' + esc(counts) + (summary.note ? ' ' + esc(summary.note) : '') + '</p>'
+            + '<div class="c4-checks">' + rows + '</div>'
+            + '<div class="c4-actions"><button class="c4-button" type="submit">Keep selected</button>'
+            + '<button class="c4-opill c4-opill-quiet" type="submit" name="action" value="discard" formnovalidate>Discard all</button></div>'
+            + '<p class="c4-hint"><a href="/memory?tab=import">Back to the walkthroughs</a>. The ticked notes go into your memory, '
+            + 'never back to the assistant.</p></form>';
+        res.set('Cache-Control', 'no-store');
+        return page(req, res, title, wrap(head + flash(req) + '<section class="c4-card">' + form + '</section>'));
     }
 
     /** The sources card: where the notes came from, how many there are and when they were last seen. */
@@ -368,6 +483,38 @@ function createMemoryRoutes(ctx, kit) {
 
     router.get('/memory', async (req, res) => memoryPage(req, res));
     router.get('/memory/remove', async (req, res) => removePage(req, res));
+
+    // Memory M3: the export is forwarded untouched to the store, which parses, redacts and holds a sealed draft.
+    // The answer is shown once; nothing is kept until the person ticks and submits the preview form.
+    router.post('/memory/import/preview', importUpload, async (req, res) => {
+        if (refuse(req, res)) return;
+        if (!Buffer.isBuffer(req.body) || !req.body.length) return back(req, res, 'import', '', 'Choose an export file or paste an answer first.');
+        try {
+            const out = await withToken(req, res, (token) => memory.preview(token, { body: req.body, contentType: req.get('content-type') || '' }));
+            return previewPage(req, res, out);
+        } catch (e) {
+            return back(req, res, 'import', '', problemWord(e));
+        }
+    });
+
+    router.post('/memory/import/:id/commit', form, async (req, res) => {
+        if (refuse(req, res)) return;
+        const id = String(req.params.id || '');
+        if (!/^mimp_[0-9A-HJKMNP-TV-Z]{26}$/.test(id)) return back(req, res, 'import', '', 'That preview is no longer here.');
+        const body = req.body || {};
+        try {
+            if (String(body.action || '') === 'discard') {
+                await withToken(req, res, (token) => memory.discard(token, id));
+                return back(req, res, 'import', 'Nothing was kept.');
+            }
+            const keep = body.keep == null ? [] : Array.isArray(body.keep) ? body.keep : [body.keep];
+            const out = await withToken(req, res, (token) => memory.commit(token, id, keep));
+            return back(req, res, 'import', 'Kept ' + out.kept + (out.kept === 1 ? ' note' : ' notes')
+                + (out.left_out ? '; ' + out.left_out + ' left out.' : '.'));
+        } catch (e) {
+            return back(req, res, 'import', '', problemWord(e));
+        }
+    });
 
     router.post('/memory/remove', form, async (req, res) => {
         if (refuse(req, res)) return res;

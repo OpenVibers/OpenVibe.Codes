@@ -16,6 +16,10 @@
  *   reads(token, limit)                 who read the person's memory (never the text)
  *   split(token, id)                    undo a merge
  *   settle(token, id, keep)             settle a conflict: one stays, the other goes
+ *   providers(token)                    the cloud walkthroughs and the extraction prompt (M3)
+ *   preview(token, { body, contentType }) parse an export into redacted candidates; nothing is kept
+ *   commit(token, id, keep)             keep the ticked candidates, and drop the draft
+ *   discard(token, id)                  throw the draft away
  *
  * Every call carries the person's own Bearer token. A refusal from AI arrives as an error with its problem
  * code (memory.not_found, input.invalid, …) and its detail — never a note's text.
@@ -49,6 +53,35 @@ function createMemory({ config, fetchImpl = globalThis.fetch, log = console } = 
             const code = String((doc && doc.code) || 'memory.unavailable');
             const detail = String((doc && (doc.detail || doc.title || doc.error_description)) || 'the memory store refused the change').slice(0, 200);
             log.warn(`[Codes] the memory store refused a request: ${res.status} ${code}`);
+            throw Object.assign(new Error(detail), { status: res.status, code });
+        }
+        return doc || {};
+    }
+
+    /** A raw body (an export zip or one multipart form) straight to the store; it parses it, never Codes. */
+    async function upload(token, path, body, contentType) {
+        if (!token) throw Object.assign(new Error('Not signed in'), { status: 401, code: 'memory.signed_out' });
+        let res;
+        try {
+            res = await fetchImpl(`${base}${path}`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`, Accept: 'application/json',
+                    'Content-Type': contentType || 'application/octet-stream',
+                },
+                body,
+                // Parsing a large export is slower than one item; still bounded, so a stuck store frees the page.
+                signal: AbortSignal.timeout(60000),
+            });
+        } catch (e) {
+            log.warn(`[Codes] the memory store did not answer the import: ${String(e && e.message).slice(0, 120)}`);
+            throw Object.assign(new Error('The memory store did not answer'), { status: 503, code: 'memory.unavailable' });
+        }
+        const doc = await res.json().catch(() => null);
+        if (!res.ok) {
+            const code = String((doc && doc.code) || 'memory.unavailable');
+            const detail = String((doc && (doc.detail || doc.title || doc.error_description)) || 'the memory store refused the import').slice(0, 200);
+            log.warn(`[Codes] the memory store refused an import: ${res.status} ${code}`);
             throw Object.assign(new Error(detail), { status: res.status, code });
         }
         return doc || {};
@@ -108,7 +141,37 @@ function createMemory({ config, fetchImpl = globalThis.fetch, log = console } = 
         return { kept: doc.kept || null, archived: doc.archived || null };
     }
 
-    return { items, patch, remove, removeBySource, profile, reads, split, settle };
+    /* ── Memory M3: the guided cloud import ──────────────────────────────────────────────────────────────── */
+
+    /** The walkthroughs and the extraction prompt. No note ever comes back from this call. */
+    async function providers(token) {
+        const doc = await call(token, 'GET', `${MEMORY_PATH}/import/providers`);
+        return { providers: Array.isArray(doc.providers) ? doc.providers : [], prompt: String(doc.prompt || '') };
+    }
+
+    /**
+     * Parse one export without keeping it. The body goes to the store untouched (a zip or one multipart form);
+     * the answer is the sealed draft's id and its redacted candidates, which the page shows for a choice.
+     */
+    async function preview(token, { body, contentType } = {}) {
+        if (body == null) throw Object.assign(new Error('Choose an export file or paste an answer'), { status: 422, code: 'import.invalid' });
+        const doc = await upload(token, `${MEMORY_PATH}/import/preview`, body, contentType);
+        return { import: doc.import || null };
+    }
+
+    /** Keep the ticked candidates, and let the rest go with the draft. */
+    async function commit(token, id, keep) {
+        const doc = await call(token, 'POST', `${MEMORY_PATH}/import/${encodeURIComponent(id)}/commit`, { keep: Array.isArray(keep) ? keep : [] });
+        return { kept: Number(doc.kept) || 0, created: Number(doc.created) || 0, deduped: Number(doc.deduped) || 0, left_out: Number(doc.left_out) || 0 };
+    }
+
+    /** Throw a preview away without keeping anything. */
+    async function discard(token, id) {
+        const doc = await call(token, 'DELETE', `${MEMORY_PATH}/import/${encodeURIComponent(id)}`);
+        return { discarded: Number(doc.discarded) || 0 };
+    }
+
+    return { items, patch, remove, removeBySource, profile, reads, split, settle, providers, preview, commit, discard };
 }
 
 module.exports = { createMemory, MEMORY_PATH };

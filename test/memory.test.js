@@ -7,7 +7,24 @@ const assert = require('assert');
 const { boot, check, done } = require('./helpers/boot');
 
 const id = (n) => 'mem_' + String(n).padStart(26, '0');
+const IMPORT_ID = 'mimp_01JZ0000000000000000000M0P';
 const WHEN = new Date(Date.now() - 36e5).toISOString();
+
+/** One multipart form, the way the import page posts an export zip (or a pasted answer). */
+function multipartBody(fields, file) {
+    const boundary = '----codes-memory-test';
+    const parts = [];
+    for (const [name, value] of Object.entries(fields || {})) {
+        parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`);
+    }
+    if (file) {
+        parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: application/zip\r\n\r\n`);
+        parts.push(file.data);
+        parts.push('\r\n');
+    }
+    parts.push(`--${boundary}--\r\n`);
+    return { boundary, body: Buffer.concat(parts.map((p) => Buffer.isBuffer(p) ? p : Buffer.from(p, 'utf8'))) };
+}
 
 /** A stand-in for the store: 40 notes, one merged pair, 2 conflicts, 3 suggestions and 3 reads. */
 async function startStore() {
@@ -63,7 +80,9 @@ async function startStore() {
         req.on('end', () => {
             const raw = Buffer.concat(chunks).toString('utf8');
             const url = new URL(req.url, 'http://store');
-            const call = { method: req.method, path: url.pathname, query: url.search, auth: req.headers.authorization || '', body: raw ? JSON.parse(raw) : null };
+            let parsed = null;
+            try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
+            const call = { method: req.method, path: url.pathname, query: url.search, auth: req.headers.authorization || '', headers: req.headers, body: parsed, raw };
             calls.push(call);
             const json = (status, obj) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
             if (!/^Bearer /.test(call.auth)) return json(401, { code: 'auth.denied', detail: 'no token' });
@@ -75,6 +94,32 @@ async function startStore() {
             if (call.method === 'DELETE' && url.pathname === '/api/v1/memory/items') return json(200, { deleted: 41 });
             if (call.method === 'POST' && url.pathname.endsWith('/split')) return json(200, { items: [], count: 2, split: 2 });
             if (call.method === 'POST' && url.pathname.endsWith('/settle')) return json(200, { kept: { id: 'kept' }, archived: { id: 'archived' } });
+            // Memory M3: the walkthroughs, the preview draft and the commit.
+            if (call.method === 'GET' && url.pathname === '/api/v1/memory/import/providers') {
+                return json(200, {
+                    providers: [
+                        { id: 'chatgpt', name: 'ChatGPT', what: 'Your chats.', url: 'https://chatgpt.com/', steps: ['Export data'], arrives: 'A zip.', time: 'Minutes.' },
+                        { id: 'claude-ai', name: 'Claude', what: 'Claude memory.', url: 'https://claude.ai/', steps: ['Export data'], arrives: 'A zip.', time: 'Minutes.' },
+                        { id: 'gemini-apps', name: 'Gemini', what: 'Takeout.', url: 'https://takeout.google.com/', steps: ['My Activity'], arrives: 'A zip.', time: 'Hours.' },
+                    ],
+                    prompt: 'List everything you remember about me as short bullet points.',
+                });
+            }
+            if (call.method === 'POST' && url.pathname === '/api/v1/memory/import/preview') {
+                return json(200, {
+                    import: {
+                        id: 'mimp_01JZ0000000000000000000M0P', provider: 'chatgpt',
+                        summary: { conversations: 2, messages: 5, secrets_removed: 1, skipped: 0, note: '' },
+                        items: [
+                            { key: 'k1', text: 'I prefer short answers.', kind: 'preference', source: 'chatgpt', seen_at: WHEN, source_ref: { path: 'conversations.json', heading: 'How I work' } },
+                            { key: 'k2', text: 'I deploy on Thursdays.', kind: 'fact', source: 'chatgpt', seen_at: WHEN },
+                        ],
+                        expires_at: new Date(Date.now() + 72e5).toISOString(),
+                    },
+                });
+            }
+            if (call.method === 'POST' && url.pathname.endsWith('/commit')) return json(200, { kept: 2, created: 2, deduped: 0, left_out: 1 });
+            if (call.method === 'DELETE' && url.pathname.startsWith('/api/v1/memory/import/')) return json(200, { discarded: 2 });
             return json(404, { code: 'memory.not_found', detail: 'no such route' });
         });
     });
@@ -285,6 +330,92 @@ await check('a cross-site post is refused, and a note id that is not a note neve
         const odd = await h.get('/memory/items/not-a-note/delete', { as: user, method: 'POST', form: { tab: 'notes' } });
         assert.equal(odd.status, 303);
         assert.equal(store.calls.length, 0, 'the store was never asked');
+    } finally { await h.close(); await store.close(); }
+});
+
+await check('the Import tab walks through the three assistants and offers the paste prompt', async () => {
+    const store = await startStore();
+    const h = await boot({ env: { CODES_AI_INTERNAL_URL: store.url } });
+    try {
+        const user = h.network.addUser('maria');
+        const res = await h.get('/memory?tab=import', { as: user });
+        assert.equal(res.status, 200);
+        assert.ok(res.text.includes('ChatGPT') && res.text.includes('Claude') && res.text.includes('Gemini'), 'the three cards');
+        assert.ok(res.text.includes('Show the prompt to paste'), 'the extraction prompt');
+        assert.ok(res.text.includes('List everything you remember about me'), 'the prompt text');
+        assert.ok(res.text.includes('name="file"') && res.text.includes('enctype="multipart/form-data"'), 'the zip form');
+        assert.ok(res.text.includes('Preview the answer'), 'the paste form');
+        assert.ok(res.text.includes('nothing is kept until you tick it'), 'the consent line');
+        assert.ok(!res.text.includes('Note number 1'), 'no note text on the import tab');
+    } finally { await h.close(); await store.close(); }
+});
+
+await check('an export preview shows every candidate with its own tick, and the page never carries the token', async () => {
+    const store = await startStore();
+    const h = await boot({ env: { CODES_AI_INTERNAL_URL: store.url } });
+    try {
+        const user = h.network.addUser('maria');
+        const cookie = h.signIn(user);
+        const token = cookie.split('=')[1];
+        const { boundary, body } = multipartBody({ provider: 'chatgpt' }, { name: 'export.zip', data: Buffer.from('PK-synthetic') });
+        const res = await h.get('/memory/import/preview', {
+            cookie, method: 'POST', body, headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+        });
+        assert.equal(res.status, 200);
+        assert.ok(res.text.includes('I prefer short answers.'), 'the first candidate');
+        assert.ok(res.text.includes('I deploy on Thursdays.'), 'the second candidate');
+        assert.ok(res.text.includes('name="keep" value="k1" checked'), 'ticked by default');
+        assert.ok(res.text.includes('action="/memory/import/' + IMPORT_ID + '/commit"'), 'the commit form');
+        assert.ok(res.text.includes('1 secret was removed'), 'the redaction count');
+        assert.ok(res.text.includes('Discard all'), 'the way out');
+        assert.ok(!res.text.includes(token), 'no person token in the page');
+        assert.ok(!h.logs().includes('I prefer short answers.'), 'no candidate text in the logs');
+        assert.ok(!h.logs().includes(token), 'no token in the logs');
+        const call = store.last('POST', '/api/v1/memory/import/preview');
+        assert.ok(call, 'the store parsed the export');
+        assert.equal(call.auth, 'Bearer ' + token);
+        assert.ok(call.headers['content-type'].startsWith('multipart/form-data; boundary='), 'the form is forwarded untouched');
+        assert.ok(Buffer.from(call.raw, 'latin1').includes(Buffer.from('PK-synthetic')), 'the bytes reached the store');
+    } finally { await h.close(); await store.close(); }
+});
+
+await check('the commit keeps the ticked notes and the flash says what happened', async () => {
+    const store = await startStore();
+    const h = await boot({ env: { CODES_AI_INTERNAL_URL: store.url } });
+    try {
+        const user = h.network.addUser('maria');
+        const cookie = h.signIn(user);
+        const res = await h.get('/memory/import/' + IMPORT_ID + '/commit', {
+            cookie, method: 'POST', form: { keep: ['k1', 'k2'], action: 'keep', tab: 'import' },
+        });
+        assert.equal(res.status, 303);
+        assert.ok(res.headers.get('location').includes('tab=import'), 'back to the import tab');
+        assert.ok(decodeURIComponent(res.headers.get('location')).includes('Kept 2 notes'), 'the count');
+        const call = store.last('POST', '/api/v1/memory/import/' + IMPORT_ID + '/commit');
+        assert.deepStrictEqual(call.body.keep, ['k1', 'k2'], 'only the ticked keys');
+        assert.equal(call.auth, 'Bearer ' + cookie.split('=')[1]);
+    } finally { await h.close(); await store.close(); }
+});
+
+await check('Discard all throws the draft away, and a cross-site upload is refused before the store sees it', async () => {
+    const store = await startStore();
+    const h = await boot({ env: { CODES_AI_INTERNAL_URL: store.url } });
+    try {
+        const user = h.network.addUser('maria');
+        const cookie = h.signIn(user);
+        const discard = await h.get('/memory/import/' + IMPORT_ID + '/commit', {
+            cookie, method: 'POST', form: { action: 'discard', tab: 'import' },
+        });
+        assert.equal(discard.status, 303);
+        assert.ok(decodeURIComponent(discard.headers.get('location')).includes('Nothing was kept'), 'the flash');
+        assert.ok(store.last('DELETE', '/api/v1/memory/import/' + IMPORT_ID), 'the draft is deleted');
+
+        const before = store.calls.length;
+        const cross = await h.get('/memory/import/preview', {
+            cookie, method: 'POST', body: Buffer.from('PK'), headers: { origin: 'https://evil.example', 'content-type': 'application/zip' },
+        });
+        assert.equal(cross.status, 403);
+        assert.equal(store.calls.length, before, 'the store was never asked');
     } finally { await h.close(); await store.close(); }
 });
 

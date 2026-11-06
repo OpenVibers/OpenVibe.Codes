@@ -56,7 +56,12 @@ async function boot(opts = {}) {
         let body = o.body;
         if (o.json !== undefined) { body = JSON.stringify(o.json); headers['content-type'] = 'application/json'; }
         if (o.form) {
-            body = new URLSearchParams({ ...o.form }).toString();
+            // A repeated field (the import's per-note ticks) is an array in the test, and repeated keys on the wire.
+            const params = new URLSearchParams();
+            for (const [key, value] of Object.entries(o.form)) {
+                for (const one of Array.isArray(value) ? value : [value]) params.append(key, String(one));
+            }
+            body = params.toString();
             headers['content-type'] = 'application/x-www-form-urlencoded';
         }
         const res = await fetch(base + p, { method: o.method || (body ? 'POST' : 'GET'), headers, body, redirect: 'manual' });
