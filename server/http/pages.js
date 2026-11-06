@@ -387,6 +387,7 @@ ${forgejoError ? html`<p class="run-notice run-notice-error" role="alert">OpenVi
             crumbs: [{ label: 'Improve OpenVibe', href: '/improve' }, { label: meta.name }],
             styles: ['kit.css', 'kit-data.css'], sharedScripts: ['kit-web.js'],
             body: html`${raw(kit.head({ title: meta.name, sub: tagline(meta), sticky: false }))}
+<p>${raw(kit.share({ title: `Improve ${meta.name}`, url: `${config.baseUrl}/improve/${owner}/${name}`, text: `Contribute to ${meta.name}: describe a change and run it on your machine through OpenVibe.Codes.`, small: true }))}</p>
 ${raw(improveSteps(1))}
 ${form}
 ${raw(kit.fold({ title: 'How the run works', body: '<ol class="steps"><li>The harness clones the repository onto <strong>your machine</strong> and checks out the default branch.</li><li>The agent makes the change you described and runs the tests.</li><li>If you asked it to push, it commits to a new branch and opens a pull request on OpenVibe Git.</li><li>You review the result, then the maintainers review the pull request.</li></ol>' }))}
