@@ -47,6 +47,9 @@ const { boot, check, done } = require('./helpers/boot');
             assert.ok(r.text.includes('Step 2 of 4') && r.text.includes('href="/improve"'), 'step 2, with step 1 linking back');
             assert.ok(r.text.includes('Clone it yourself') && r.text.includes('git clone '), 'the clone command, folded');
             assert.ok(r.text.indexOf('name="prompt"') < r.text.indexOf('How the run works'), 'the form comes before the explanation');
+            assert.strictEqual((r.text.match(/data-ov-share-sheet/g) || []).length, 1, 'one Share button');
+            assert.ok(r.text.includes('data-url="https://openvibe.codes/improve/OpenVibers/OpenVibe.Codes"'), 'the repository page address');
+            assert.ok(r.text.includes('data-title="Improve OpenVibe.Codes"'), 'its title');
         });
 
         await check('a repository page shows the guided path and asks guests to sign in', async () => {
