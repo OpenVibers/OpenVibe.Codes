@@ -78,8 +78,7 @@ meter.headroom { width: 8rem; max-width: 100%; vertical-align: middle; }
 /* The home page's showcase sections (openvibe-shared/showcase.css) sit inside .page, which has its own gutter. */
 .page .sc-hero, .page .sc-sec, .page .sc-cta { padding-left: 0; padding-right: 0; }
 .page .sc-ic .ov-icon { --ovi-size: 28px !important; }
-/* The home's "shipped" block sits in main.page, which the home's full-width sections leave unpadded: it keeps the page gutter. */
-.page > .ov-shipped-home { box-sizing: border-box; max-width: 1040px; margin: 32px auto 0; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.page>.ov-shipped-home{box-sizing:border-box;max-width:1040px;margin:32px auto 0;padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px))}
 .codes-hero-code { margin: 0; padding: 16px; border-radius: 14px; border: 1px solid var(--border, #1f2d47); background: var(--bg-primary, #0a0f1c); font-size: 13px; line-height: 1.6; overflow: auto; }
 
 
