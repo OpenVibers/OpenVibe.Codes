@@ -845,6 +845,9 @@ ${conductorSection}
     // module and borrow this one's kit (the page, the frame, the card, the pill, the flash and the same-origin check).
     r.use(require('./memory').createMemoryRoutes(ctx, { page, wrap, header, pill, flash, sameOrigin, viewer, form, signIn, note }));
 
+    // The Knowledge page (Know K5): the lessons and facts the person's own runs taught, with the run each came from.
+    r.use(require('./knowledge').createKnowledgeRoutes(ctx, { page, wrap, header, pill, flash, sameOrigin, viewer, form, signIn, note }));
+
     // The guided setup (/setup): machine, agents, keys, accounts and choices, each step read live. Its home-page card
     // reads the database only, through ctx.setupProgress (the chat app's home asks it).
     const setupRoutes = require('./setup').createSetupRoutes(ctx, {

@@ -192,6 +192,7 @@ function createChatRoutes(ctx) {
                 place('Machines', '/machines', 'machines'),
                 place('OpenVibe Git', '/git', 'repo'),
                 place('Memory', '/memory', 'memory'),
+                place('Knowledge', '/knowledge', 'proof'),
                 place('Usage', '/usage', 'usage'),
                 ...(waitingIds.size ? [{ href: '/approvals', label: 'Approvals', icon: 'hand', here: here === '/approvals', count: waitingIds.size }] : []),
                 place('Settings', '/settings', 'settings'),

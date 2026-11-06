@@ -38,6 +38,8 @@ const BUDGETS = {
     // The Home picker's repository search asks GitHub, which allows an address few searches a minute. The person's
     // own repositories come first and cost nothing; this bounds what they may spend on the rest.
     'codes.repo.search': { minute: 6, hour: 60 },
+    // An agent adds what it learned through the ov-know MCP; a run may add a handful, not a flood.
+    'codes.knowledge.write': { minute: 30, hour: 600 },
 };
 
 /**

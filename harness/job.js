@@ -227,6 +227,9 @@ function parseArgs(raw, env = process.env) {
         agent: typeof a.agent === 'string' && /^[a-z0-9-]{1,40}$/.test(a.agent) ? a.agent : null,
         model: typeof a.model === 'string' && a.model.length <= 100 ? a.model : null,
         ...(effort ? { effort } : {}),
+        // Know K5: the lessons and facts earlier runs learned, from the server's own store and already a short block.
+        // It is prepended to the prompt in runJob, so every harness (CLI or API) gets it the same way.
+        ...(typeof a.knowledge === 'string' && a.knowledge.trim() ? { knowledge: a.knowledge.trim().slice(0, 4000) } : {}),
         // The conversation's work so far (Codes L31 CH4): applied to the clone before the agent starts.
         ...(typeof a.base_patch === 'string' && a.base_patch.trim() && a.base_patch.length <= MAX_PATCH ? { base_patch: a.base_patch } : {}),
     };
@@ -576,6 +579,21 @@ async function pushBranch(dir, job, { env, fetchImpl, base }) {
 }
 
 /**
+ * The prompt the agent gets: the knowledge block the server recalled (when there is one), the person's brief, and — for
+ * a code task — the one line that lets the next run learn from this one. Every adapter takes the prompt as its brief,
+ * so this is the same for a CLI harness and an API model.
+ */
+function agentPrompt(job) {
+    const parts = [];
+    if (job.knowledge) parts.push(job.knowledge);
+    parts.push(job.prompt);
+    if (job.kind === 'code') {
+        parts.push('---\n## Before you finish (OpenVibe.Codes Knowledge)\n\nEnd with a `Learned:` block of at most three lines: one fact the next agent on this repository should know, each with the file, command or URL that shows it. Leave it out when nothing was new.');
+    }
+    return parts.join('\n\n');
+}
+
+/**
  * Run one job. `harness` is createHarness(); `emit(line)` prints a line; `writeResult(doc)` hands the result over.
  * → the result document.
  */
@@ -660,7 +678,7 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             say({ t: 'step', text: 'Preparing an empty benchmark workspace' });
         }
         const run = harness.run({
-            prompt: job.prompt, task: 'edit', agent: job.agent, model: job.model, effort: job.effort || null, cwd: work,
+            prompt: agentPrompt(job), task: 'edit', agent: job.agent, model: job.model, effort: job.effort || null, cwd: work,
             permission: job.permission, handoff: !job.agent, maxAttempts: job.kind === 'conductor' ? 1 : 3,
             // A job on the person's Node runs in its sandbox (own namespaces, a read-only root, no home folder, only
             // what the job was given); the Node sets OPENVIBE_JOB_ID there. Only inside it may an agent with no
@@ -748,4 +766,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments };
+module.exports = { CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments, agentPrompt };

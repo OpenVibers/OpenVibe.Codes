@@ -45,6 +45,9 @@ const TABLES = [
     { table: 'codes_outbox', subject: 'subject', file: 'events-sent.json', order: 'created_at', columns: ['event_id', 'topic', 'created_at', 'published_at'] },
     // The OpenVibe Git link: which forge account, and since when. The sealed tokens never leave; erased with the rest.
     { table: 'codes_forge_links', subject: 'subject', file: 'openvibe-git-link.json', order: 'created_at', columns: ['forge_user', 'expires_at', 'created_at', 'updated_at'] },
+    // Know K5: the lessons and facts the person's runs taught. Theirs to take and to erase; a row already shared
+    // with a team leaves with its owner's account (the team's other rows stay).
+    { table: 'codes_knowledge', subject: 'subject', file: 'knowledge.json', order: 'created_at', columns: ['id', 'kind', 'text', 'repo', 'paths', 'visibility', 'team_id', 'pinned', 'redacted', 'seen', 'source_task', 'source_agent', 'created_at', 'updated_at', 'last_seen_at'] },
 ];
 
 // The rows that hang under a person's tasks: exported under the task, erased before it.

@@ -19,8 +19,9 @@ const MOVED_PREFIXES = ['/docs', '/projects', '/releases', '/apps', '/oauth', '/
 const MOVED_EXACT = ['/policy/rfc', '/policy/compatibility', '/policy/licensing', '/policy/transparency'];
 // The console's API: everything under /api/v1 but the agent catalog, the coding tasks (codes.task.*), the person's
 // own API (/me), the Action Center read (codes.actions.read), a person's own connections (Codes C3), the conductor
-// with its approvals inbox (Codes C9b) and the fleet their machines report (Codes C9c).
-const API_STAYS = /^\/api\/v1\/(harnesses|tasks|actions|me|connections|conductor|approvals|fleet)(\/|$)/;
+// with its approvals inbox (Codes C9b), the fleet their machines report (Codes C9c) and the workspace knowledge
+// their own agents read and add (Know K5).
+const API_STAYS = /^\/api\/v1\/(harnesses|tasks|actions|me|connections|conductor|approvals|fleet|knowledge)(\/|$)/;
 
 const under = (p, prefix) => p === prefix || p.startsWith(`${prefix}/`);
 
