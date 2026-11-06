@@ -180,7 +180,7 @@ function fakeHarness() {
             assert.ok(page.text.includes('Add a lesson or a fact'), 'the add form');
             assert.ok(page.text.includes('Pin'), 'pin');
             assert.ok(page.text.includes('>Edit<'), 'edit');
-            assert.ok(page.text.includes('>Delete<'), 'delete');
+            assert.ok(page.text.includes('>Delete<') && page.text.includes('>Delete it<'), 'delete');
             assert.ok(page.text.includes('Share'), 'share');
             assert.ok(page.text.includes('The team'), 'the person’s team is offered');
         });

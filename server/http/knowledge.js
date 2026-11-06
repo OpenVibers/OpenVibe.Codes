@@ -97,10 +97,11 @@ ${teams.length ? `<label>Share with <select name="team_id"><option value="">Just
 
     function rowHtml(row, { mine, teams, tab }) {
         const team = row.team_id ? teams.find((t) => t.id === row.team_id) : null;
-        const where = row.repo ? `<span class="kn-repo">${esc(row.repo)}</span>` : '';
+        // The repository is where a lesson applies, said with the source line rather than floating in the head.
+        const where = row.repo ? ` · <span class="kn-repo">${esc(String(row.repo).replace(/^(?:https?:\/\/)?(?:www\.)?github\.com\//i, ''))}</span>` : '';
         const source = row.source_task
-            ? `<p class="kn-source">From <a href="/tasks/${esc(row.source_task)}">the run that learned it</a>${row.source_agent ? ` · ${esc(row.source_agent)}` : ''}</p>`
-            : '<p class="kn-source">Added by you</p>';
+            ? `<p class="kn-source">From <a href="/tasks/${esc(row.source_task)}">the run that learned it</a>${row.source_agent ? ` · ${esc(row.source_agent)}` : ''}${where}</p>`
+            : `<p class="kn-source">Added by you${where}</p>`;
         const shared = row.visibility === 'team'
             ? pill(`Shared${team ? ` with ${team.name}` : ''}`, 'ok')
             : pill('Private');
@@ -110,16 +111,16 @@ ${teams.length ? `<label>Share with <select name="team_id"><option value="">Just
 <form class="c4-form" method="post" action="/knowledge/${esc(row.id)}/edit">
 <input type="hidden" name="tab" value="${esc(tab)}">
 <label>Text<textarea name="text" rows="3" maxlength="2000" required>${esc(row.text)}</textarea></label>
-<label>Kind<select name="kind"><option value="lesson"${row.kind === 'lesson' ? ' selected' : ''}>lesson</option><option value="fact"${row.kind === 'fact' ? ' selected' : ''}>fact</option></select></label>
+<label>Kind<select name="kind"><option value="lesson"${row.kind === 'lesson' ? ' selected' : ''}>Lesson</option><option value="fact"${row.kind === 'fact' ? ' selected' : ''}>Fact</option></select></label>
 <button class="c4-button" type="submit">Save</button>
 </form></div></details>
 ${row.visibility === 'team' ? `<form method="post" action="/knowledge/${esc(row.id)}/unshare"><input type="hidden" name="tab" value="${esc(tab)}"><button class="c4-button c4-button-light" type="submit">Make private</button></form>`
         : (teams.length ? `<details class="c4-more"><summary>Share</summary><div class="c4-more-body"><form class="c4-form" method="post" action="/knowledge/${esc(row.id)}/share"><input type="hidden" name="tab" value="${esc(tab)}"><label>Team<select name="team_id">${teams.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}</select></label><button class="c4-button" type="submit">Share with this team</button></form></div></details>`
             : '<span class="c4-hint">No team to share with yet.</span>')}
-<form method="post" action="/knowledge/${esc(row.id)}/delete"><input type="hidden" name="tab" value="${esc(tab)}"><button class="c4-button c4-button-danger" type="submit">Delete</button></form>
+<details class="c4-more kn-delete"><summary>Delete</summary><div class="c4-more-body"><p class="kn-confirm">Delete this ${row.kind === 'fact' ? 'fact' : 'lesson'}? Runs stop recalling it, and it cannot be brought back.</p><form method="post" action="/knowledge/${esc(row.id)}/delete"><input type="hidden" name="tab" value="${esc(tab)}"><button class="c4-button c4-button-danger" type="submit">Delete it</button></form></div></details>
 </div>` : `<p class="kn-team-note">${row.visibility === 'team' ? 'Shared with your team.' : ''} Only ${mine ? 'you' : 'its owner'} can edit it.</p>`;
         return `<article class="c4-card kn-row${row.pinned ? ' is-pinned' : ''}">
-<div class="kn-row-head">${pill(row.kind)}${row.pinned ? pill('Pinned', 'pinned') : ''}${shared}${where}</div>
+<div class="kn-row-head">${pill(row.kind === 'fact' ? 'Fact' : 'Lesson')}${row.pinned ? pill('Pinned', 'pinned') : ''}${shared}</div>
 <p class="kn-text">${esc(row.text)}</p>
 <p class="kn-meta">${esc(dayOf(row.last_seen_at))}${row.seen > 1 ? ` · seen ${row.seen} times` : ''}${row.redacted ? ' · secrets removed' : ''}</p>
 ${source}${actions}
