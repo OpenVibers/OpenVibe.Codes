@@ -40,6 +40,8 @@ const BUDGETS = {
     'codes.repo.search': { minute: 6, hour: 60 },
     // An agent adds what it learned through the ov-know MCP; a run may add a handful, not a flood.
     'codes.knowledge.write': { minute: 30, hour: 600 },
+    // The Dock's agent view controls (K-D3): Curtain now and End. The owner presses them now and then, never in a burst.
+    'codes.agent_view.control': { minute: 20, hour: 120 },
 };
 
 /**

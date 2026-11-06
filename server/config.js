@@ -58,6 +58,9 @@ function load(env = process.env) {
             clientSecret: env.CODES_FORGE_CLIENT_SECRET || '',
             sealKey: env.CODES_SEAL_KEY || '',
         },
+        // OpenVibe.Live (Agent Streams S1, Dock K-D3): the person's own agent streams, read and steered with their own
+        // token for the Dock's agent view (server/http/agent-view.js). Codes holds no token of its own here.
+        live: { url: trim(env.CODES_LIVE_URL || 'https://openvibe.live') },
         // The audience of the Network service tokens a first-party service calls /api/v1/tasks with (codes.task.*).
         serviceAudience: env.CODES_AUDIENCE || 'openvibe.codes',
         oauth: {
