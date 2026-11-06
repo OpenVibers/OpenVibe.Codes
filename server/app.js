@@ -47,6 +47,7 @@ const { createOutbox, createPublisher } = require('./events/outbox');
 const { createEventsConsumer } = require('./events-consumer');
 const { createApi } = require('./http/api');
 const { createMeApi } = require('./http/me-api');
+const { createAgentView } = require('./http/agent-view');
 const { createKnowledgeApi } = require('./http/knowledge-api');
 const { createMovedRoutes } = require('./http/moved');
 const { createCodesReadiness } = require('./observability');
@@ -256,6 +257,8 @@ async function createApp(opts = {}) {
     app.use('/api/v1', createApi(ctx));
     app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, fleet: ctx.fleet, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, github: ctx.github, actorLimits: ctx.actorLimits, log }));
+    // The Dock's agent view (Dock K-D3, Agent Streams S1): the person's own desk stream with a view ticket minted here.
+    app.use('/api/v1', createAgentView({ config, sso, actorLimits: ctx.actorLimits, log }));
     // Know K5: the person's own agents read and add workspace knowledge with their token (the ov-know MCP server).
     app.use('/api/v1', createKnowledgeApi({ config, store, knowledge: ctx.knowledge, actorLimits: ctx.actorLimits, log }));
     // A person's connections: their own provider keys (stored in OpenVibe.AI, never here) and their machines' plans.
