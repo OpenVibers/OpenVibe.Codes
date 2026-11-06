@@ -61,6 +61,7 @@ const INTERNAL = [`http://127.0.0.1:3000${PROBE}`, `http://2130706433${PROBE}`, 
             'server/domain/fleet.js': 'OpenVibe.Bot (CODES_BOT_INTERNAL_URL, configured) /api/v1/machines with the person\'s own session token: their machines and the fleet their Nodes reported; the path is fixed, never a URL from a person',
             'server/domain/ship.js': 'the service\'s own GET <publicOrigin>/release.json and api.github.com\'s compare, both at fixed paths: the origin is the contracts\' service manifest, never a URL from a person; the shas are checked hex',
             'server/events-consumer.js': 'OpenVibe.Events subscriptions (EVENTS_URL, configured) at boot; no URL from a person',
+            'server/report.js': 'OpenVibe.Report (OV_REPORT_INTERNAL_URL, configured) for the report of a finished task, and the Network token endpoint (OV_NETWORK_INTERNAL_URL, configured) for the Codes service token; the paths are fixed, no URL from a person',
             'server/events/outbox.js': 'OpenVibe.Events publish (EVENTS_URL, configured) of fixed codes.task.* payloads; no URL from a person',
         };
         const root = path.join(__dirname, '..');

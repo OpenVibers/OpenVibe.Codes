@@ -147,7 +147,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -155,6 +155,8 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     const taskOutbox = outbox || require('../events/outbox').createOutbox({ store, log });
     // The proof of a finished task (stage C8): the tests, the pages, the diff and the second model's opinion.
     const taskProof = proof || require('./proof').createProof({ store, config, log });
+    // The session report of a finished task (Agent Streams S3): Codes writes it to OpenVibe.Report when the task ends.
+    const reportClient = report || require('../report').createReportClient({ config, log });
     const attemptStore = attempts || require('./attempts').createAttempts({ store, config, log });
     /**
      * The conductor's turns (server/domain/conductor.js). Wired by the app after both exist, because the conductor
@@ -737,11 +739,30 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                 [row.id, outcome.state, outcome.note, store.now()]);
             await notifyOutcome(saved);
             await recordPlacementOutcome(saved);
+            // Agent Streams S3: the finished task's report, from its proof. A report that cannot be written never
+            // changes the task: the task is done either way.
+            try { await writeSessionReport(saved, collected, ending); } catch (e) {
+                log.warn('[Codes] the session report of task ' + row.id + ' failed: ' + String((e && e.message) || e).slice(0, 200));
+            }
             return saved;
         }
         if (!plan.kind) return row;
         const done = await startFollowUp(row, plan, ending);
         return done.row || row;
+    }
+
+    /**
+     * Agent Streams S3: the session report of a finished task, from its proof.
+     *
+     * The proof is what the task's own machine collected: the tests that ran, the pages that were shot, the diff and
+     * the second model's opinion. The report is that proof in plain words: what was asked, what came out, what it
+     * cost and how it ended. The raw transcript is never in it, and Report's house redactor runs over every text field
+     * before anything is stored.
+     */
+    async function writeSessionReport(row, proofItems, ending) {
+        const payload = require('../session-report').buildSessionReport({ row, proofItems, ending });
+        if (!payload) return null;
+        return reportClient.send(payload);
     }
 
     /**

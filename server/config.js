@@ -45,6 +45,8 @@ function load(env = process.env) {
         // OpenVibe.Network: SSO (OAuth2 authorization server with PKCE) and its JWKS.
         networkUrl,
         networkInternalUrl: trim(env.OV_NETWORK_INTERNAL_URL || 'http://127.0.0.1:4000'),
+        // OpenVibe.Report (the session report of a finished task, Agent Streams S3).
+        reportInternalUrl: trim(env.OV_REPORT_INTERNAL_URL || 'http://127.0.0.1:5080'),
         networkIssuer: trim(env.OV_NETWORK_ISSUER || networkUrl),
         // OpenVibe Git (Forgejo, deploy/forgejo): its loopback address for the home page's repository list (public
         // repositories only, no token), and the public address people use.
