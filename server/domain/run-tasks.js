@@ -760,62 +760,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
      * before anything is stored.
      */
     async function writeSessionReport(row, proofItems, ending) {
-        const owner = String((row && row.subject) || '');
-        if (!owner.startsWith('usr_')) return null;
-        const items = (Array.isArray(proofItems) ? proofItems : []).map((i) => (i && i.data && typeof i.data === 'object' ? { ...i.data, kind: i.data.kind || i.kind } : (i || {})));
-        const kindOf = (k) => items.find((i) => i.kind === k) || null;
-        const testsItem = kindOf('tests');
-        const reviewItem = kindOf('review');
-        const shotsItem = kindOf('screenshots');
-        const diffItem = kindOf('diff');
-        const count = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-        const tests = testsItem ? { passed: count(testsItem.passed), failed: count(testsItem.failed) } : null;
-        const screenshots = shotsItem
-            ? [].concat(shotsItem.media_ids || shotsItem.screenshots || shotsItem.ids || []).map(String).filter(Boolean).slice(0, 20)
-            : [];
-        const review = reviewItem
-            ? { verdict: String(reviewItem.verdict || reviewItem.summary || 'Reviewed').slice(0, 40), notes: reviewItem.notes || reviewItem.note || null }
-            : null;
-        const outputs = diffItem
-            ? [{
-                kind: diffItem.kind === 'pr' ? 'pr' : 'file',
-                url: diffItem.url || null,
-                title: String(diffItem.title || diffItem.summary || 'The change').slice(0, 200),
-                state: diffItem.state || null,
-            }]
-            : [];
-        const timeline = items.map((i) => ({
-            at: i.at || row.finished_at || null,
-            title: String(i.title || i.kind || 'a step').slice(0, 120),
-            status: i.status === 'failed' ? 'failed' : 'passed',
-            detail: i.detail || i.summary || null,
-            tests: i.kind === 'tests' ? { passed: count(i.passed), failed: count(i.failed) } : null,
-        }));
-        const started = row.started_at ? Date.parse(String(row.started_at)) : null;
-        const ended = row.finished_at ? Date.parse(String(row.finished_at)) : null;
-        const worked = started && ended && Number.isFinite(started) && Number.isFinite(ended)
-            ? Math.max(0, Math.round((ended - started) / 1000))
-            : 0;
-        const outcome = row.outcome === 'done' ? 'done' : (row.outcome === 'stopped' ? 'stopped' : 'failed');
-        const title = String(row.title || (String(row.prompt || '').split('\n')[0]) || 'A task').slice(0, 200);
-        return reportClient.send({
-            owner,
-            source: 'codes',
-            task: { title, ref: row.id, url: 'https://openvibe.codes/t/' + encodeURIComponent(row.id) },
-            started_at: row.started_at || null,
-            ended_at: row.finished_at || null,
-            worked_seconds: worked,
-            outcome,
-            stopped_because: outcome === 'done' ? null : (row.outcome_note || null),
-            summary: String(row.outcome_note || title).slice(0, 600),
-            timeline,
-            outputs,
-            proof: { tests, screenshots, review },
-            cost_usd: ending && ending.cost_usd != null ? Number(ending.cost_usd) : null,
-            models: ending && ending.model ? [String(ending.model)] : [],
-            highlights: [],
-            visibility: 'private',
-        });
+        const payload = require('../session-report').buildSessionReport({ row, proofItems, ending });
+        if (!payload) return null;
+        return reportClient.send(payload);
     }
 
     /**
