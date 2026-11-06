@@ -37,7 +37,7 @@ function repoName(url) {
     return html`<small class="run-host">${host}/</small>${path.map((part, i) => html`${i ? raw('/<wbr>') : ''}${part}`)}`;
 }
 
-function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globalThis.fetch, log = console, tasks = null, sessions = null, keys = null }) {
+function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globalThis.fetch, log = console, tasks = null, sessions = null, keys = null, sharing = null }) {
     const r = asyncRouter();
     const db = store.db;
     const form = express.urlencoded({ extended: false, limit: '32kb' });
@@ -65,10 +65,55 @@ function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globa
         const row = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [id]);
         return row && row.subject === req.viewer.subject ? row : null;
     };
+    /** A task by its id, owner not applied: the sharing check decides who may read it. */
+    const anyTask = async (id) => (/^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(id))
+        ? await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [id]) : null);
+    /** May this reader open the task? Only me is its owner; the other audiences are the sharing system's. */
+    const mayView = async (req, id) => {
+        if (!sharing) return false;
+        try { return await sharing.canView(req.viewer, String(id)); } catch { return false; }
+    };
+    const shareHead = `<link rel="stylesheet" href="${require('openvibe-shared/serve').url('ov-share.css')}"><script src="${require('openvibe-shared/serve').url('ov-share.js')}" defer></script>`;
+    const shareButton = (row) => html`<button type="button" class="run-btn" data-ov-share-sheet data-kind="task" data-id="${row.id}" data-title="${String(row.prompt || 'A task').split('\n')[0].slice(0, 90)}">Share</button>`;
+    /** Specific people, and this reader is not on the list: the audience, never the task's text. */
+    const gatePage = (req, res, id) => {
+        const signedInAs = signedIn(req) ? (req.viewer.username || '') : '';
+        const signInUrl = `/auth/login?next=${encodeURIComponent(req.originalUrl)}`;
+        return page(req, res, {
+            title: 'Shared with specific people', index: false, head: shareHead,
+            body: html`<h1>This task is shared with specific people</h1>
+<p>Sign in with the OpenVibe account it was shared with, or ask its owner for access.</p>
+<div id="share-gate"></div>
+<script>
+window.addEventListener('DOMContentLoaded', function () {
+  var el = document.getElementById('share-gate');
+  if (el && window.OVShare) OVShare.gate(el, { kind: 'task', id: ${raw(JSON.stringify(String(id)))},
+    signedInAs: ${raw(JSON.stringify(signedInAs))}, signInUrl: ${raw(JSON.stringify(signInUrl))} });
+});
+</script>`,
+        }, 404);
+    };
     // A task reads Run only as the 10-minute fallback; its state now arrives from run.job.* events.
     const taskStore = tasks || createRunTasks({ store, run, config, log });
     const sessionStore = sessions || createSessionLines({ store, config, log, media: require('../media').createMedia({ config, log }) });
     const { who, refresh } = taskStore;
+
+    const AUDIENCE_TEXT = { private: 'Only me', people: 'Specific people', link: 'Anyone with the link', public: 'Everyone' };
+    /**
+     * "New tasks: Only me", with "Apply to all my existing tasks" (design rule 1 and 2). The Share sheet on a task
+     * changes just that one; this is only what the next one starts as.
+     */
+    async function defaultsHtml(subject) {
+        const current = await sharing.defaultOf(subject).catch(() => 'private');
+        const options = ['private', 'people', 'link', 'public']
+            .map((a) => html`<option value="${a}"${a === current ? raw(' selected') : ''}>${AUDIENCE_TEXT[a]}</option>`);
+        return html`<form class="run-card run-share-defaults" method="post" action="/run/defaults">
+<label class="run-field"><span>New tasks</span><select name="audience">${options}</select></label>
+<label class="run-check"><input type="checkbox" name="apply_all" value="1"> Apply to all my existing tasks</label>
+<button class="run-btn" type="submit">Save</button>
+<p class="muted">Only me unless you choose otherwise. A task's Share button changes just that task.</p>
+</form>`;
+    }
 
     function formHtml({ projects, values = {}, error = null }) {
         const agents = harnesses.list();
@@ -108,8 +153,10 @@ ${error ? html`<p class="run-notice run-notice-error" role="alert">${error}</p>`
             projectsOf(req, res),
             db.many('SELECT id, repo, prompt, state, created_at FROM run_tasks WHERE subject = $1 ORDER BY created_at DESC LIMIT 20', [req.viewer.subject]),
         ]);
+        const defaults = sharing ? await defaultsHtml(req.viewer.subject) : '';
         const body = html`<h1>Run on your machine</h1>
 <p class="lead">The task runs on a machine you added on <a href="${MACHINES_URL}">openvibe.bot/machines</a>, in its job sandbox, with the agents and keys installed there. Nobody else's machine ever gets it.</p>
+${defaults}
 ${projects.length ? formHtml({ projects, values, error }) : html`<form class="run-card" method="post" action="/run/project">
 ${error ? html`<p class="run-notice run-notice-error" role="alert">${error}</p>` : ''}
 <h2>One thing first: a project</h2><p class="muted">Runs belong to a project on OpenVibe (that is where their usage is counted). You have none you can run jobs in yet.</p>
@@ -123,6 +170,17 @@ ${tasksHtml(recent)}`;
     }
 
     r.get('/run', (req, res) => runPage(req, res, { values: { prompt: String(req.query.prompt || '').slice(0, 16000), repo: String(req.query.repo || '').slice(0, 2000), agent: String(req.query.agent || '').slice(0, 100) } }));
+
+    r.post('/run/defaults', form, async (req, res) => {
+        if (!signedIn(req)) return res.redirect(303, '/auth/login?next=%2Frun');
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
+        if (!sharing) return res.redirect(303, '/run');
+        const body = req.body || {};
+        const audience = ['private', 'people', 'link', 'public'].includes(body.audience) ? body.audience : 'private';
+        await sharing.setDefault(req.viewer.subject, audience, { applyAll: String(body.apply_all || '') === '1' })
+            .catch((e) => log.warn('[Codes] the task default was not saved:', e.message));
+        return res.redirect(303, '/run');
+    });
 
     r.post('/run/project', form, async (req, res) => {
         if (!signedIn(req)) return res.redirect(303, '/auth/login?next=%2Frun');
@@ -235,25 +293,39 @@ ${i.summary ? html`<p class="run-proof-summary" data-proof-summary>${i.summary}<
 </section>`;
     }
 
+    /**
+     * A task is its owner's. Someone it was shared with reads the same page without Cancel; anybody else gets the
+     * gate for Specific people, or "not found" when it is Only me (the task is never named to them).
+     */
     r.get('/run/tasks/:id', async (req, res) => {
-        if (!signedIn(req)) return res.redirect(302, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
-        let row = await own(req, req.params.id);
-        if (!row) return page(req, res, { title: 'Not found', body: html`<h1>Not found</h1><p>No such task of yours. <a href="/run">Your tasks</a></p>` }, 404);
-        row = await refresh(row);
+        const base = await anyTask(req.params.id);
+        if (!base) return page(req, res, { title: 'Not found', body: html`<h1>Not found</h1><p>No such task. <a href="/run">Your tasks</a></p>` }, 404);
+        const mine = signedIn(req) && base.subject === req.viewer.subject;
+        if (!mine) {
+            const allowed = await mayView(req, base.id);
+            if (!allowed) {
+                const audience = sharing ? await sharing.audienceOf(base.id).catch(() => null) : null;
+                if (audience === 'people') return gatePage(req, res, base.id);
+                return page(req, res, { title: 'Not found', index: false, body: html`<h1>Not found</h1><p>No such task. <a href="/run">Run on your machine</a></p>` }, 404);
+            }
+        }
+        let row = base;
+        if (mine) row = await refresh(row);
         const live = !TERMINAL.has(row.state);
         // The agents' session (openvibe-shared/agent-session.js, js/run.js mounts it): live from the job's stream, and
         // after the end from codes_session_lines; a task from before this change falls back to the result's old log.
         const lines = live ? null : await sessionStore.linesForRow(row);
         const title = String(row.prompt || '').split('\n')[0].slice(0, 90);
         const session = lines && lines.length ? html`<section class="run-session" data-session data-title="${title}" data-state="${row.state}"><h2>The session</h2><div data-session-view></div><script type="application/json" data-session-log>${raw(JSON.stringify(lines).replace(/</g, '\\u003c'))}</script></section>` : '';
-        const body = html`<p class="crumbs"><a href="/run">Run on your machine</a></p>
+        const body = html`${shareHead ? raw(shareHead) : ''}<p class="crumbs"><a href="/run">Run on your machine</a></p>
 <h1 class="run-repo">${repoName(row.repo)}${row.ref ? html` <small>${row.ref}</small>` : ''}</h1>
 <p><span class="run-pill run-pill-${row.state}" data-state>${STATE_LABEL[row.state] || row.state}</span>${row.agent ? html` <span class="run-pill">${row.agent}</span>` : ''}</p>
+${mine ? shareButton(row) : html`<p class="muted">This task was shared with you. Only its owner can change it.</p>`}
 <pre tabindex="0" class="run-prompt">${row.prompt}</pre>
 ${await timelineHtml(row)}
 ${await proofHtml(row)}
 ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events" data-title="${title}" aria-live="polite"><h2>Live</h2><ol class="run-log" data-log></ol></section>
-<form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : html`${session}${resultHtml(row, { session: !!(lines && lines.length) })}`}`;
+${mine ? html`<form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : ''}` : html`${session}${resultHtml(row, { session: !!(lines && lines.length) })}`}`;
         return page(req, res, { title: 'Task', body, sharedScripts: ['agent-session.js'] });
     });
 
@@ -283,8 +355,8 @@ ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events
     }
 
     r.get('/run/tasks/:id/events', async (req, res) => {
-        if (!signedIn(req)) return res.status(401).end();
-        const row = await own(req, req.params.id);
+        const row = signedIn(req) ? (await own(req, req.params.id) || ((await mayView(req, req.params.id)) ? await anyTask(req.params.id) : null))
+            : ((await mayView(req, req.params.id)) ? await anyTask(req.params.id) : null);
         if (!row || !row.job_id) return res.status(404).end();
         let url;
         try { url = await run.streamUrl(row.job_id, who(row)); } catch (e) { return res.status(e.status === 404 ? 404 : 503).end(); }
@@ -324,10 +396,13 @@ ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events
         let row = null;
         if (signedIn(req)) {
             row = await own(req, req.params.id);
+            // Somebody the task was shared with reads the same replay: canView is the grant.
+            if (!row && await mayView(req, req.params.id)) row = await anyTask(req.params.id);
         } else {
             const out = await serviceOwn(req, req.params.id);
-            if (!out.row) return http.sendProblem(res, out.status, out.code, { detail: out.detail, ctx: req.ov });
-            row = out.row;
+            if (out.row) row = out.row;
+            else if (await mayView(req, req.params.id)) row = await anyTask(req.params.id);
+            else return http.sendProblem(res, out.status, out.code, { detail: out.detail, ctx: req.ov });
         }
         if (!row) return http.sendProblem(res, 404, 'codes.task_not_found', { detail: 'no such task of yours', ctx: req.ov });
         const raw = String(req.query.after == null ? '0' : req.query.after);

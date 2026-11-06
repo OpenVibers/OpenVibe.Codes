@@ -39,7 +39,7 @@ const { expandMatrix } = require('../domain/bench');
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 
-function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, fleet = null, log = console }) {
+function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, fleet = null, sharing = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
@@ -77,6 +77,20 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         return db.maybe('SELECT * FROM run_tasks WHERE id = $1 AND subject = $2 AND via = $3', [req.params.id, req.principal.subject, req.principal.via]);
     };
     const byKey = (p, key) => db.maybe('SELECT * FROM run_tasks WHERE subject = $1 AND via IS NOT DISTINCT FROM $2 AND idempotency_key = $3', [p.subject, p.via, key]);
+
+    /**
+     * A read of a task: the caller's own (as before), or one shared with them (design 2026-11-06, canView). A service
+     * token stays scoped to the tasks it started for the person; sharing is between people.
+     */
+    const viewable = async (req) => {
+        const own = await mine(req);
+        if (own) return own;
+        if (!sharing || !req.principal.owner || !TASK.test(String(req.params.id))) return null;
+        const any = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [req.params.id]);
+        if (!any) return null;
+        const allowed = await sharing.canView({ subject: req.principal.subject }, any.id).catch(() => false);
+        return allowed ? any : null;
+    };
 
     /** The owner (signed in, or their own access token as a Bearer), or a service token with the capability acting
      *  for the person in X-OV-Subject. */
@@ -306,14 +320,14 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
     });
 
     r.get('/tasks/:id', guardAny('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
-        const row = await mine(req);
+        const row = await viewable(req);
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
         return res.json(await timeline(await taskStore.refresh(row)));
     });
 
     /** The task's event stream: the session's lines in order, resumable with Last-Event-ID, plus the attempts. */
     r.get('/tasks/:id/events', guardAny('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
-        const row = await mine(req);
+        const row = await viewable(req);
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
         return await taskEvents.stream(req, res, row);
     });
