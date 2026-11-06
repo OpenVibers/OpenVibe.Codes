@@ -47,6 +47,7 @@ const { createOutbox, createPublisher } = require('./events/outbox');
 const { createEventsConsumer } = require('./events-consumer');
 const { createApi } = require('./http/api');
 const { createMeApi } = require('./http/me-api');
+const { createKnowledgeApi } = require('./http/knowledge-api');
 const { createMovedRoutes } = require('./http/moved');
 const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
@@ -54,6 +55,7 @@ const { createForgejoClient } = require('./domain/forgejo');
 const createAiCatalogConfig = require('./ai-catalog-config').create;
 const { createMachines } = require('./domain/machines');
 const { createMemory } = require('./domain/memory');
+const { createKnowledge } = require('./domain/knowledge');
 const { createFleet } = require('./domain/fleet');
 const { createNotices } = require('./domain/notices');
 const { createUserSettings } = require('./domain/user-settings');
@@ -110,8 +112,10 @@ async function createApp(opts = {}) {
     const placementOutcomes = opts.placementOutcomes || createPlacementOutcomes({ store, now: store.now, log });
     const benchPriors = opts.benchPriors || createBenchPriors({ config, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log, ttlMs: config.bench.priorsTtlMs });
     const placementContext = createPlacementContext({ store, config, userSettings, outcomes: placementOutcomes, priors: benchPriors, harnesses, now: store.now });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
-    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext };
+    // Know K5: the lessons and facts a person's runs teach, private by default and shareable with a team.
+    const knowledge = createKnowledge({ store, config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
+    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge };
     ctx.forgejo = createForgejoClient({ config, log });
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -252,6 +256,8 @@ async function createApp(opts = {}) {
     app.use('/api/v1', createApi(ctx));
     app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, fleet: ctx.fleet, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, github: ctx.github, actorLimits: ctx.actorLimits, log }));
+    // Know K5: the person's own agents read and add workspace knowledge with their token (the ov-know MCP server).
+    app.use('/api/v1', createKnowledgeApi({ config, store, knowledge: ctx.knowledge, actorLimits: ctx.actorLimits, log }));
     // A person's connections: their own provider keys (stored in OpenVibe.AI, never here) and their machines' plans.
     app.use('/api/v1', createConnectionsApi({ config, store, connections, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createActionsApi({ config, store, keys, run, tasks, actorLimits: ctx.actorLimits, log }));

@@ -147,7 +147,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -543,6 +543,18 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             else refusal = attemptStore.whyNoAgent(f);
         }
         const runArgs = { ...args, agent, model };
+        // Know K5: the lessons and facts earlier runs learned, in the prompt this run's harness gets. A store that
+        // cannot be read is skipped, never an error: a run must not fail because the memory is unavailable. The
+        // project the run belongs to also scopes the team rows it may read.
+        if (knowledge && runArgs.repo && runArgs.repo !== 'bench://') {
+            try {
+                const recalled = await knowledge.recall({ subject, projectId: project, repo: runArgs.repo, prompt: runArgs.prompt });
+                const text = knowledge.block(recalled.rows);
+                if (text) runArgs.knowledge = text;
+            } catch (e) {
+                log.warn(`[Codes] task ${id}: knowledge could not be recalled: ${String((e && e.message) || e).slice(0, 200)}`);
+            }
+        }
         const actorRefValue = actorRef && typeof actorRef === 'object' && !Array.isArray(actorRef) ? JSON.stringify(actorRef) : null;
         // Placement A1: the task's kind, its harness, and why the placer put it there. The person's rules, Bench priors
         // and learned counts are read once here; the placement itself is pure. A task whose task kind is review is
@@ -707,6 +719,14 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const attempts = await attemptStore.list(row.id);
         const ending = attempts[attempts.length - 1];
         if (!ending || !ENDED.has(ending.state)) return row;
+        // Know K5: what this attempt taught (its Learned: lines, a failure, the command that failed, the commands the
+        // repository uses) is stored before the next attempt is planned, so the next run can recall it. The capture is
+        // idempotent per (subject, kind, text), so a redelivered ending adds no second row.
+        if (knowledge) {
+            try { await knowledge.captureTask(row); } catch (e) {
+                log.warn(`[Codes] task ${row.id}: knowledge could not be captured: ${String((e && e.message) || e).slice(0, 200)}`);
+            }
+        }
         // The proof this attempt's machine collected: the items are kept, and each one is an event on the stream.
         const collected = await recordProof(row, ending);
         const plan = await attemptStore.decide({ task: row, attempts, ending, result: row.result, fleet: await fleetFor(row.subject) });

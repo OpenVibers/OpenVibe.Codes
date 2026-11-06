@@ -58,6 +58,8 @@ async function startNetworkStub() {
         await db.exec("INSERT INTO codes_notices (task_id, kind) VALUES ($1, 'done')", [taskId]);
         await db.exec(`INSERT INTO codes_machine_fleet (subject, machine, name, agent, installed, signed_in, windows, online, reported_at)
             VALUES ($1, 'dev_laptop', 'laptop', 'codex', true, true, '[]'::jsonb, true, now())`, [subject]);
+        await db.exec(`INSERT INTO codes_knowledge (id, subject, kind, text, repo, dedupe_key, created_at, updated_at, last_seen_at)
+            VALUES ($1, $2, 'lesson', $3, 'github.com/a/b', $4, 1, 1, 1)`, [`kn_${ids.ulid()}`, subject, `${subject} learned this (README.md)`, ids.ulid()]);
     }
     const deliver = async (event, { secret = SECRET } = {}) => {
         const body = JSON.stringify({ event, seq: 1 });
@@ -111,6 +113,10 @@ async function startNetworkStub() {
             assert.ok(fleet, 'fleet.json is in the export');
             assert.strictEqual(fleet.content.length, 1, 'Ada’s fleet only');
             assert.strictEqual(fleet.content[0].agent, 'codex');
+            const kn = part.body.files.find((x) => x.name === 'knowledge.json');
+            assert.ok(kn, 'knowledge.json is in the export');
+            assert.strictEqual(kn.content.length, 1, 'Ada’s knowledge only');
+            assert.match(kn.content[0].text, /learned this \(README\.md\)/);
         });
 
         await check('a deletion erases them, keeps everyone else’s, and confirms once', async () => {
@@ -127,6 +133,7 @@ async function startNetworkStub() {
                 ['codes_attempts', 'task_id', [boTask]], ['codes_task_proof', 'task_id', [boTask]], ['codes_events_inbox', 'task_id', [boTask]],
                 ['codes_notices', 'task_id', [boTask]], ['codes_machine_fleet', 'subject', [bo]],
                 ['codes_run_tokens', 'subject', [bo]], ['codes_user_settings', 'subject', [bo]], ['codes_outbox', 'subject', [bo]],
+                ['codes_knowledge', 'subject', [bo]],
             ]) {
                 const left = (await db.many(`SELECT ${key} FROM ${table}`)).map((r) => r[key]);
                 assert.deepStrictEqual(left, who, `${table}: only Bo’s row is left`);

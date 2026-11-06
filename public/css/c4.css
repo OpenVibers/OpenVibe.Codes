@@ -318,3 +318,49 @@
 .c4-turn-switch{display:flex;align-items:flex-start;gap:8px;margin:0 0 10px;padding:9px 11px;border-radius:8px;background:var(--c4-open-bg);color:var(--c4-open-ink);font-size:12px;line-height:1.45}
 .c4-turn-switch svg{width:15px;height:15px;flex:none;margin-top:1px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 @media (max-width:640px){.c4-fallback{grid-template-columns:28px minmax(0,1fr)}.c4-fallback>label:last-child{grid-column:2}}
+
+/* Know K5: the Knowledge page. A row is a card whose head carries its kind and sharing, then the text, where it came
+   from, and the actions that change it. All of it is server-rendered; the details open in place. */
+.kn-summary{display:flex;gap:18px;margin:0 0 14px}
+.kn-summary>div{display:flex;align-items:baseline;gap:6px;font-size:12px;color:var(--c4-muted)}
+.kn-summary strong{font-size:20px;color:var(--c4-ink)}
+.kn-add{margin:0 0 14px;border:1px solid var(--c4-line);border-radius:10px;padding:0 12px;background:var(--c4-surface)}
+.kn-add>summary{padding:10px 0}
+.kn-add .c4-more-body{padding-bottom:12px}
+.kn-list{display:grid;gap:12px}
+.kn-row{padding:14px 16px;border-left:3px solid transparent}
+.kn-row.is-pinned{border-left-color:var(--c4-accent)}
+.kn-row-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:8px;min-width:0}
+.kn-repo{overflow-wrap:anywhere}
+.kn-text{margin:0 0 8px;font-size:14px;line-height:1.55;color:var(--c4-ink);overflow-wrap:anywhere;white-space:pre-wrap}
+.kn-meta{margin:0 0 4px;font-size:12px;color:var(--c4-muted)}
+.kn-source{margin:0 0 10px;font-size:12px;color:var(--c4-muted)}
+.kn-source a{color:var(--c4-accent)}
+.kn-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.kn-actions form{margin:0}
+.kn-actions .c4-button{min-height:36px;padding:6px 12px;font-size:12px}
+.kn-actions .c4-more{flex:0 0 auto;min-width:0}
+.kn-actions .c4-more>summary{min-height:36px;justify-content:center;border:1px solid var(--c4-line);border-radius:8px;padding:6px 12px}
+.kn-actions .c4-more-body{flex-basis:100%;width:100%}
+.kn-team-note{margin:0;font-size:12px;color:var(--c4-muted)}
+.c4-form-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px;align-items:end}
+@media(max-width:640px){
+ .kn-summary{gap:12px}
+ .c4-form-row{grid-template-columns:1fr}
+ .kn-actions .c4-button{min-height:44px}
+}
+/* The Knowledge page's own panels stay closed until opened, at every width (the Memory page's open-on-desktop
+   rule would show every edit and share form at once), and an opened one takes the row's full width. */
+.kn-add:not([open]) > .c4-more-body,.kn-actions .c4-more:not([open]) > .c4-more-body{display:none}
+.kn-add.c4-more > summary,.kn-actions .c4-more > summary{display:flex}
+.kn-actions .c4-more[open]{flex:1 1 100%;order:2}
+.kn-actions form{order:0}
+@media(max-width:640px){.c4-tabs a{padding-left:8px;padding-right:8px}}
+/* Delete is quiet until asked: a text-coloured fold at the end of the row, with the real button inside it, so five
+   rows do not show five filled red buttons and one tap never deletes. */
+.kn-actions .kn-delete{margin-left:auto}
+.kn-actions .kn-delete>summary{border-color:transparent;color:var(--c4-danger);background:none}
+.kn-actions .kn-delete[open]>summary{border-color:var(--c4-line)}
+.kn-actions .c4-more:not(.kn-delete)>summary{color:var(--c4-ink);font-weight:600}
+.kn-confirm{margin:0 0 8px;font-size:13px;color:var(--c4-ink)}
+@media(max-width:640px){.kn-actions .c4-more>summary{min-height:44px}}
