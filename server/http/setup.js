@@ -84,7 +84,7 @@ function createSetupRoutes(ctx, kit) {
         const problem = d.machines.ok === false && d.machines.problem ? note(esc(d.machines.problem.detail || 'Your machines could not be read.'), 'bad') : '';
         const how = `<ol class="c4-setup-how">
 <li><b>Get a one-time code</b> on <a href="https://openvibe.bot/machines" rel="noopener">openvibe.bot/machines</a>. It lasts ten minutes.</li>
-<li><b>Run the installer on that computer</b> and give it the code:${command('curl -fsSL https://openvibe.bot/install | sh -s -- --worker', 'On the machine')}</li>
+<li><b>Run the installer on that computer</b> and give it the code:${command('curl -fsSL https://node.openvibe.network/install | sh -s -- --worker', 'On the machine')}</li>
 <li><b>It pairs itself</b> and shows up here as Online. It runs your work and nobody else's.</li></ol>`;
         return `${problem}${rows ? `<ul class="c4-rows">${rows}</ul>` : ''}${list.length ? `<details class="c4-setup-more"><summary>Pair another machine</summary>${how}</details>` : how}
 <div class="c4-setup-actions"><a class="c4-button${list.length ? ' c4-button-light' : ''}" href="/machines#pair">${list.length ? 'Manage machines' : 'I have a code'}</a><a class="c4-opill" href="/setup#step-machine">Check again</a></div>`;
