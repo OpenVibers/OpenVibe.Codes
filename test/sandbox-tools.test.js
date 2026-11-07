@@ -36,7 +36,7 @@ async function check(name, fn) {
     });
 
     await check('the terminal: the sandbox\'s own user, in /workspace, with input', async () => {
-        const who = await sbx.exec(['sh', '-c', 'id -un; id -u; pwd; hostname'], { timeoutMs: 10_000 });
+        const who = await sbx.exec(['sh', '-c', 'id -un; id -u; pwd; uname -n'], { timeoutMs: 10_000 });
         assert.deepStrictEqual(String(who.stdout).trim().split('\n'), ['agent', '1000', '/workspace', 'sandbox']);
         const shell = await sbx.exec(['sh', '-s'], { stdin: 'mkdir -p snake && cd snake && echo "<canvas></canvas>" > index.html && ls\n', timeoutMs: 10_000 });
         assert.strictEqual(String(shell.stdout).trim(), 'index.html');
@@ -54,6 +54,7 @@ async function check(name, fn) {
     });
 
     await check('the editor: read, write and list in the workspace; nothing outside it', async () => {
+        await sbx.writeFile('/workspace/snake/index.html', '<canvas></canvas>\n');
         await sbx.writeFile('/workspace/snake/game.js', 'let score = 0;\n');
         assert.strictEqual(String(await sbx.readFile('/workspace/snake/game.js')), 'let score = 0;\n');
         assert.strictEqual(String(await sbx.readFile('snake/game.js')), 'let score = 0;\n', 'a relative path is in the workspace');
