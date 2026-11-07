@@ -1,0 +1,13 @@
+# /etc/apparmor.d/openvibe-codes-sandbox-bwrap — only on a host where Ubuntu restricts unprivileged user namespaces
+# (kernel.apparmor_restrict_unprivileged_userns=1, the default since 23.10/24.04). It lets /usr/bin/bwrap, and nothing
+# else, create the user namespace a sandbox starts in; bubblewrap itself drops every capability and turns nested user
+# namespaces off (--disable-userns) before anything of the sandbox runs. install.sh installs it only when needed and
+# never changes the sysctl.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile openvibe-codes-sandbox-bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+
+  include if exists <local/openvibe-codes-sandbox-bwrap>
+}
