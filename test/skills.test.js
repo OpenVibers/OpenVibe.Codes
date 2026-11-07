@@ -114,6 +114,22 @@ const { boot, check, done } = require('./helpers/boot');
             assert.strictEqual(back.status, 200, back.text);
         });
 
+
+        await check('a people record opens for a member and for nobody else', async () => {
+            const people = (await create(ada, base({ title: 'For the team', slug: 'for-the-team', audience: 'people' }))).json().skill;
+            const member = JSON.stringify({ type: 'user', id: bo.subject });
+            const owner = JSON.stringify({ type: 'user', id: ada.subject });
+            await t.ctx.store.db.exec(`INSERT INTO share_members (service, kind, resource_id, subject, role, added_by, added_at)
+                VALUES ('codes', 'skill', $1, $2::jsonb, 'viewer', $3::jsonb, now())`, [people.id, member, owner]);
+            const allowed = await api(`/api/v1/skills/${people.id}`, { as: bo });
+            assert.strictEqual(allowed.status, 200, allowed.text);
+            assert.strictEqual(allowed.json().skill.id, people.id);
+            const anon = await api(`/api/v1/skills/${people.id}`);
+            assert.strictEqual(anon.status, 404, 'a people record is hidden from a stranger');
+            const listed = await gallery();
+            assert.ok(!listed.skills.some((s) => s.id === people.id), 'a people record is not in the gallery');
+        });
+
         await check('the sync manifest is each person\'s own picks', async () => {
             const now = (await api(`/api/v1/skills/${pub.id}`, { as: ada })).json().skill;
             const added = await api(`/api/v1/me/skills/${pub.id}`, { as: ada, method: 'POST', json: { project: 'demo' } });
