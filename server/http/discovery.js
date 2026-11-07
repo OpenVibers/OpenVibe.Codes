@@ -23,7 +23,7 @@ const SERVICES_ORIGIN = 'https://openvibe.services';
 const DESCRIPTION = 'The open coding-agent harness: run a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or a model you host, with routing by capability and cost, hand-offs between agents, and the way to improve OpenVibe itself.';
 const { version: VERSION } = require('../../package.json');
 const INSTALL_HINT = `npm install -g https://codeload.github.com/OpenVibers/OpenVibe.Codes/tar.gz/refs/tags/v${VERSION}`;
-const HARNESS_PAGES = ['/', '/start', '/harnesses', '/improve'];
+const HARNESS_PAGES = ['/', '/start', '/harnesses', '/skills', '/improve'];
 // Sign-in and the API are not for crawlers. The console's old addresses redirect to openvibe.services.
 const DISALLOW = ['/auth/', '/api/'];
 
@@ -33,6 +33,7 @@ const PAGE_TEXT = {
     '/': ['OpenVibe.Codes home', 'Code with any agent: the coding-agent harness, how a task is routed and handed off, what works today, and how to improve OpenVibe.'],
     '/start': ['Get started with the coding-agent harness', 'Install openvibe-codes; the agents it can use and what each needs; the commands, permission levels, hand-offs, the event format and using it from your own code.'],
     '/harnesses': ['The coding agents', 'Every harness the router can pick (Claude Code, Codex, OpenCode, Command Code, Aider, DeepSeek, your own model) with its models, capabilities, prices and limits.'],
+    '/skills': ['The skills hub', 'Skills, rules and MCP servers kept per person and per project, versioned, shared through the four audiences, and synced into each coding tool on your own machine with a dry run and an undo.'],
     '/improve': ['Improve OpenVibe', 'How OpenVibe is built in the open: every repository, and the path from a change to a reviewed pull request.'],
     '/updates': ['What shipped on OpenVibe.Codes', 'This site\'s update log, from the network changelog feed.'],
     '/policy': ['Community', 'The code of conduct, the contributing guide, the contributor ladder and the moderation policy.'],
@@ -68,6 +69,7 @@ function publicPages({ governance = [] }) {
         { path: '/', changefreq: 'weekly', priority: 1.0 },
         { path: '/start', changefreq: 'weekly', priority: 0.9 },
         { path: '/harnesses', changefreq: 'weekly', priority: 0.9 },
+        { path: '/skills', changefreq: 'weekly', priority: 0.9 },
         { path: '/improve', changefreq: 'weekly', priority: 0.8 },
         { path: '/updates', changefreq: 'daily', priority: 0.5 },
         { path: '/policy', changefreq: 'monthly', priority: 0.4 },
