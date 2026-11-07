@@ -10,7 +10,7 @@ const http = require('http');
 const { createNetworkSender, uncovered } = require('openvibe-sdk/account-data');
 const { signDeliveryHeaders } = require('openvibe-sdk/events');
 const { ids } = require('openvibe-contracts');
-const { TABLES, TASK_KEYED } = require('../server/account-data');
+const { TABLES, TASK_KEYED, EXEMPT } = require('../server/account-data');
 const { boot, check, done } = require('./helpers/boot');
 
 const SECRET = `whsec_${'fixture'.repeat(6)}`;
@@ -77,6 +77,7 @@ async function startNetworkStub() {
                     account_data_events: 'the ledger of requests itself: which export and deletion Codes applied',
                     event_outbox: 'no person column (the SDK outbox keeps envelopes); dropped with the console in 0002 anyway',
                     config_snapshots: 'D11 configuration revisions: created_by names the owner who changed a setting, not a person\'s account data',
+                    ...EXEMPT,
                 },
             });
             assert.deepStrictEqual(missing, [], `a table with a person column is neither covered nor exempted: ${missing.join(', ')}`);
