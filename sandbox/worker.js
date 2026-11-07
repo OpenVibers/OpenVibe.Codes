@@ -8,8 +8,9 @@
  *                 ready only when every isolation check passed AND the cgroup limits are there
  *   announce      every CODES_SANDBOX_ANNOUNCE_MS (30 s):
  *                   Live   POST {LIVE}/api/streams/agent/:id/plays/worker with the worker's own Network service token
- *                          (client credentials, audience openvibe.live, capability live.agent_sandbox.register), for
- *                          each stream it serves: CODES_SANDBOX_LIVE_STREAMS and the streams of its running sessions
+ *                          (client credentials, audience openvibe.live, capability live.agent_sandbox.register) and
+ *                          CODES_SANDBOX_LIVE_SUBJECT, the owner's usr_ subject, in X-OV-Subject, for each stream it
+ *                          serves: CODES_SANDBOX_LIVE_STREAMS and the streams of its running sessions
  *                   Codes  POST {CODES}/internal/sandbox-workers/heartbeat, HMAC-signed (sandbox/signature.js)
  *                 with the same body: the worker, ready, the checks, the isolation facts, capacity and what runs
  *   local API     HTTP on a Unix socket (CODES_SANDBOX_SOCKET, 0660: only the worker's user and group): Codes' runner
@@ -38,6 +39,9 @@ const { PORTS } = require('./egress-proxy');
 
 const VERSION = require('../package.json').version;
 const STREAM = /^[A-Za-z0-9_-]{1,64}$/;
+// A person's Network subject (the owner this worker works for): Live's registration names it in X-OV-Subject and
+// refuses the check-in unless it is the stream's owner.
+const SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const SESSION = /^[a-z0-9]{10}$/;
 const MB = 1024 * 1024;
 
@@ -87,6 +91,8 @@ function loadConfig(env = process.env) {
         live: {
             url: trim(env.CODES_SANDBOX_LIVE_URL || 'https://openvibe.live'),
             streams: String(env.CODES_SANDBOX_LIVE_STREAMS || '').split(',').map((s) => s.trim()).filter((s) => STREAM.test(s)),
+            // The person whose streams this worker serves; Live checks it against each stream's owner.
+            subject: SUBJECT.test(String(env.CODES_SANDBOX_LIVE_SUBJECT || '').trim()) ? String(env.CODES_SANDBOX_LIVE_SUBJECT).trim() : '',
         },
         network: {
             tokenUrl: `${trim(env.CODES_SANDBOX_NETWORK_URL || 'https://openvibe.network')}/oauth/token`,
@@ -198,12 +204,18 @@ function createWorker(opts = {}) {
         const streams = new Set(config.live.streams);
         for (const s of sessions.values()) if (s.stream && s.sbx.state === 'running') streams.add(s.stream);
         if (tokens && streams.size) {
+            if (!config.live.subject) {
+                // Live's registration requires the person the worker works for; without it every check-in is 403.
+                for (const stream of streams) lastAnnounce.live[stream] = { error: 'no_subject' };
+                return { codes: lastAnnounce.codes, live: { ...lastAnnounce.live } };
+            }
             let token = null;
             try { token = await tokens.getToken(); } catch (err) { log.error('[sandbox] no Network service token:', err.code || err.message); }
             for (const stream of streams) {
                 if (!token) { lastAnnounce.live[stream] = { error: 'no_token' }; continue; }
                 try {
-                    const status = await post(`${config.live.url}/api/streams/agent/${encodeURIComponent(stream)}/plays/worker`, body, { authorization: `Bearer ${token}` });
+                    const status = await post(`${config.live.url}/api/streams/agent/${encodeURIComponent(stream)}/plays/worker`, body,
+                        { authorization: `Bearer ${token}`, 'x-ov-subject': config.live.subject });
                     lastAnnounce.live[stream] = { status, at: new Date(now()).toISOString() };
                 } catch (err) { lastAnnounce.live[stream] = { error: err.code || err.name || 'failed' }; }
             }
@@ -296,6 +308,7 @@ function createWorker(opts = {}) {
     async function start() {
         if (!support) support = await probeSupport();
         if (!support.ok) log.error(`[sandbox] cannot make sandboxes: ${support.reason}`);
+        if (!config.live.subject) log.error('[sandbox] no CODES_SANDBOX_LIVE_SUBJECT (the owner\'s usr_ subject): it cannot check in with Live');
         if (!limiter) limiter = await detectLimits({ mode: config.limitsMode });
         if (!limiter.ok) log.error(`[sandbox] no limits: ${limiter.reason}`);
         fs.mkdirSync(config.runtimeDir, { recursive: true, mode: 0o750 });
