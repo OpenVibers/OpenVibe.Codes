@@ -94,6 +94,17 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch-mode:has(input:checked) .ch-mode-i{color:var(--ch-accent)}
 .ch-mode:has(input:focus-visible){outline:2px solid var(--ch-accent);outline-offset:2px}
 @media (max-width:520px){.ch-mode{padding:0 11px;font-size:13.5px}.ch-mode:not(:has(input:checked)) .ch-mode-i{display:none}}
+/* What it is (11-07): icon chips, one tap each; a game shows 2D / 3D beside it. */
+.ch-kinds{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.ch-kind,.ch-dim{position:relative;display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 12px 0 7px;border:1px solid var(--ch-line);border-radius:999px;color:var(--ch-soft);font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer;transition:border-color .15s,background-color .15s,color .15s}
+.ch-kind input,.ch-dim input{position:absolute;inset:0;margin:0;opacity:0;cursor:pointer}
+.ch-kind:hover,.ch-dim:hover{color:var(--ch-ink)}
+.ch-kind:has(input:checked),.ch-dim:has(input:checked){color:var(--ch-ink);border-color:color-mix(in srgb,var(--ch-accent) 65%,var(--ch-line));background:color-mix(in srgb,var(--ch-accent) 12%,transparent)}
+.ch-kind:has(input:focus-visible),.ch-dim:has(input:focus-visible){outline:2px solid var(--ch-accent);outline-offset:2px}
+.ch-dims{display:none;gap:4px;padding-left:4px;border-left:1px solid var(--ch-line);margin-left:2px}
+.ch-dim{height:32px;padding:0 11px;font-size:12.5px;font-weight:750;letter-spacing:.03em}
+.ch-kinds:has([data-ch-kind][value="game"]:checked) .ch-dims{display:inline-flex}
+@media (pointer:coarse){.ch-kind{height:40px}.ch-dim{height:40px}}
 /* Each picker and line shows for the way it belongs to. */
 .ch:has([data-ch-mode][value="new"]:checked) :is(.ch-for-openvibe,.ch-for-code,.ch-for-agents),
 .ch:has([data-ch-mode][value="openvibe"]:checked) :is(.ch-for-new,.ch-for-code),
