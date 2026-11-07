@@ -1,0 +1,61 @@
+[Unit]
+Description=OpenVibe.Codes chat plays sandbox worker (Agent Streams S6): bubblewrap sandboxes for viewers' requests
+# The worker checks in with Codes (loopback) and Live; it waits for neither and says "not ready" until its own
+# self-test passed. deploy/sandbox/install.sh installs this unit; nothing starts it until the owner does.
+After=network-online.target openvibe-codes.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Its own unprivileged user: no login, no home, no other service's files. Codes' user is in its group, for the
+# local API socket (0660) in the runtime directory.
+User=openvibe-sandbox
+Group=openvibe-sandbox
+WorkingDirectory=/opt/openvibe.codes
+EnvironmentFile=-/etc/openvibe/codes-sandbox.env
+Environment=NODE_ENV=production
+Environment=PATH=/usr/bin:/bin
+# The limits come from this unit's own cgroup subtree: one child cgroup per sandbox with cpu.max, memory.max and
+# pids.max (sandbox/limits.js). Without the delegation the worker reports itself not ready.
+Environment=CODES_SANDBOX_LIMITS=cgroup
+Delegate=cpu memory pids
+# Every sandbox of the worker, together: a ceiling over the per-sandbox limits (2 sandboxes of 2 GiB + 3 × 512 MiB).
+MemoryMax=10G
+TasksMax=2048
+ExecStart=/usr/bin/node /opt/openvibe.codes/bin/openvibe-sandbox-worker.js
+# A short, private runtime directory: each sandbox's egress socket path must fit in 108 bytes.
+RuntimeDirectory=openvibe-codes-sandbox
+RuntimeDirectoryMode=0750
+# Secrets as systemd credentials, never in the environment (sandbox/worker.js reads $CREDENTIALS_DIRECTORY).
+LoadCredential=codes-worker-secret:/etc/openvibe/codes-sandbox/codes-worker-secret
+LoadCredential=network-client-secret:/etc/openvibe/codes-sandbox/network-client-secret
+Restart=always
+RestartSec=5
+# Stopping the worker wipes every sandbox: SIGTERM first (the worker wipes them), then the whole cgroup.
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+# Hardening that leaves bubblewrap's unprivileged user namespaces working. The sandboxes inherit this view of the
+# machine, so even a bind the worker never makes could not reach /home, /root or the services' files.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelModules=yes
+ProtectClock=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+UMask=0077
+# Not set on purpose: RestrictNamespaces (bubblewrap needs user, mount, pid, net, ipc, uts and cgroup namespaces),
+# ProtectControlGroups (the worker writes its delegated subtree), PrivateUsers (bubblewrap maps its own user), and
+# ProtectKernelTunables / ProtectKernelLogs: they mount over parts of /proc, and the kernel then refuses the fresh
+# /proc a sandbox's pid namespace needs ("Can't mount proc on /newroot/proc: Operation not permitted"). The sandbox's
+# own /proc shows only its own processes, and it has no capability to write /proc/sys.
+
+[Install]
+WantedBy=multi-user.target
