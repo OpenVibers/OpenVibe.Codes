@@ -32,7 +32,7 @@ const TOOL_LABELS = {
     agents: 'AGENTS.md (Codex and friends)',
 };
 
-function createSkillPageRoutes({ config, store, skills, log = console }) {
+function createSkillPageRoutes({ config, skills }) {
     const r = asyncRouter();
     const signedIn = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     const sameOrigin = (req) => {
