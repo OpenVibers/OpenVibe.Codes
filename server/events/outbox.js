@@ -89,6 +89,35 @@ function payloadOf(row) {
     };
 }
 
+// ── The agent's step (design 2026-11-07: one agent, one timeline behind the Dock) ──
+// Codes publishes what its task is doing as agent.step.started|updated|ended, with the person's subject, so the
+// one timeline in OpenVibe.Actor shows it. The payload is a title, an outcome and a link: never the task's prompt,
+// never a diff, never a file.
+const AGENT_TOPICS = Object.freeze({ started: 'agent.step.started', updated: 'agent.step.updated', ended: 'agent.step.ended' });
+
+/** The agent's step for a task change: a title, an outcome and a link. */
+function agentStepOf(row, status) {
+    const repo = repoSlug(row.repo);
+    const result = objectOf(row.result) || {};
+    const cost = typeof result.cost_usd === 'number' && Number.isFinite(result.cost_usd) && result.cost_usd >= 0 ? result.cost_usd : null;
+    const at = (v) => (typeof v === 'number' ? new Date(v).toISOString() : isoOf(v));
+    return {
+        step_id: row.id,
+        mode: 'code',
+        product: 'codes',
+        ref: row.id,
+        // Never the prompt: a title names what the task is, not what it said.
+        title: repo ? 'Coding task on ' + repo : 'Coding task',
+        status,
+        started_at: at(row.created_at),
+        ended_at: status === 'running' ? null : at(row.updated_at),
+        placement: { where: 'On your machine', why: 'it needs your files and your sign-in, and it is free' },
+        cost_usd: cost,
+        link: 'https://codes.openvibe.network/tasks/' + encodeURIComponent(row.id),
+        reason: status === 'failed' ? (row.error == null ? null : String(row.error).slice(0, 240)) : null,
+    };
+}
+
 function createOutbox({ store, log = console }) {
     const db = store.db;
 
@@ -104,10 +133,34 @@ function createOutbox({ store, log = console }) {
              VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz, $5::timestamptz)`,
             [eventId, topic, row.subject, JSON.stringify(payloadOf(row)), at],
         );
+        await emitAgentStep(row);
         return eventId;
     }
 
-    return { emitTask, payloadOf, topicFor, groupOf };
+    /**
+     * The agent's step for the same change (design 2026-11-07): the task starts, or it ends. It is written in the
+     * same transaction, so a step exists if and only if the change committed.
+     */
+    async function emitAgentStep(row) {
+        const group = groupOf(row.state);
+        const type = group === 'running' ? AGENT_TOPICS.started
+            : group === 'succeeded' ? AGENT_TOPICS.ended
+            : group === 'failed' ? AGENT_TOPICS.ended
+            : group === 'cancelled' ? AGENT_TOPICS.ended
+            : null;
+        if (!type) return null;
+        const status = group === 'running' ? 'running' : group === 'succeeded' ? 'done' : group === 'failed' ? 'failed' : 'stopped';
+        const eventId = ids.newId('event', store.now());
+        const at = store.iso();
+        await db.exec(
+            `INSERT INTO codes_outbox (event_id, topic, subject, payload, created_at, next_attempt_at)
+             VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz, $5::timestamptz)`,
+            [eventId, type, row.subject, JSON.stringify(agentStepOf(row, status)), at],
+        );
+        return eventId;
+    }
+
+    return { emitTask, emitAgentStep, payloadOf, topicFor, groupOf };
 }
 
 function createPublisher({ config, store, fetchImpl = globalThis.fetch, log = console, intervalMs = (config.events && config.events.intervalMs) || 5000 }) {
@@ -280,4 +333,4 @@ function createPublisher({ config, store, fetchImpl = globalThis.fetch, log = co
     };
 }
 
-module.exports = { createOutbox, createPublisher, TOPICS, TOPIC_SET, topicFor, groupOf, payloadOf, repoSlug, MAX_BACKOFF_MS, DEAD_AFTER_REFUSALS, DEAD_AFTER_ATTEMPTS };
+module.exports = { createOutbox, createPublisher, TOPICS, TOPIC_SET, AGENT_TOPICS, agentStepOf, topicFor, groupOf, payloadOf, repoSlug, MAX_BACKOFF_MS, DEAD_AFTER_REFUSALS, DEAD_AFTER_ATTEMPTS };
