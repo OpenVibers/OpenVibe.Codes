@@ -195,7 +195,7 @@ async function check(name, fn) {
         return sbx;
     };
     const config = {
-        ...loadConfig({ CODES_SANDBOX_RUNTIME_DIR: tmp, CODES_SANDBOX_LIVE_STREAMS: 'ags_owner1,bad stream!,ags_owner2', CODES_SANDBOX_LIVE_URL: 'http://live.test', CODES_SANDBOX_CODES_URL: 'http://codes.test', CODES_SANDBOX_WORKER_SECRET: CODES_SECRET, CODES_SANDBOX_MAX_SESSIONS: '2' }),
+        ...loadConfig({ CODES_SANDBOX_RUNTIME_DIR: tmp, CODES_SANDBOX_LIVE_STREAMS: 'ags_owner1,bad stream!,ags_owner2', CODES_SANDBOX_LIVE_SUBJECT: 'usr_01JAB2C3D4E5F6G7H8J9K0MNA1', CODES_SANDBOX_LIVE_URL: 'http://live.test', CODES_SANDBOX_CODES_URL: 'http://codes.test', CODES_SANDBOX_WORKER_SECRET: CODES_SECRET, CODES_SANDBOX_MAX_SESSIONS: '2' }),
         socket: path.join(tmp, 'w.sock'),
     };
     const passed = { ok: true, checks: Object.fromEntries(require('../sandbox/selftest').CHECKS.map((c) => [c, true])), failed: [], at: new Date().toISOString() };
@@ -231,7 +231,10 @@ async function check(name, fn) {
         assert.strictEqual(signature.verify({ secrets: [CODES_SECRET], header: codes[0].init.headers[signature.HEADER], body: codes[0].init.body }).ok, true);
         const live = calls.filter((c) => c.url.startsWith('http://live.test/')).map((c) => c.url).sort();
         assert.deepStrictEqual(live, ['http://live.test/api/streams/agent/ags_owner1/plays/worker', 'http://live.test/api/streams/agent/ags_owner2/plays/worker', 'http://live.test/api/streams/agent/ags_session3/plays/worker']);
-        for (const c of calls.filter((x) => x.url.startsWith('http://live.test/'))) assert.strictEqual(c.init.headers.authorization, 'Bearer svc-token-for-live');
+        for (const c of calls.filter((x) => x.url.startsWith('http://live.test/'))) {
+            assert.strictEqual(c.init.headers.authorization, 'Bearer svc-token-for-live');
+            assert.strictEqual(c.init.headers['x-ov-subject'], 'usr_01JAB2C3D4E5F6G7H8J9K0MNA1', 'Live is told whose streams these are');
+        }
         const body = JSON.parse(calls[0].init.body);
         assert.strictEqual(body.ready, true);
         assert.strictEqual(body.isolation.network_namespace, true);
@@ -250,6 +253,17 @@ async function check(name, fn) {
             assert.ok(!String(c.init.body).includes(tmp), 'no path of the host');
             assert.ok(!/svc-token/.test(String(c.init.body)), 'no token in a body');
         }
+    });
+
+    await check('without the owner\'s subject there is no Live check-in: Live would refuse it', async () => {
+        const w = make({ config: { ...config, live: { ...config.live, subject: '' } } });
+        await w.selfTest();
+        calls.length = 0;
+        await w.openSession({ stream_id: 'ags_session3' });
+        const out = await w.announce();
+        assert.deepStrictEqual(calls.filter((c) => c.url.startsWith('http://live.test/')), [], 'nothing is sent to Live without a subject');
+        assert.strictEqual(out.live.ags_owner1.error, 'no_subject');
+        assert.strictEqual(out.live.ags_session3.error, 'no_subject');
     });
 
     await check('no service token, no Live check-in; no Codes secret, no heartbeat', async () => {
