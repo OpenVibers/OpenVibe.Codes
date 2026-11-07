@@ -8,12 +8,12 @@
   "port": 4900,
   "domain": "openvibe.codes",
   "contracts": "openvibe-contracts v0.289.1",
-  "sdk": "openvibe-sdk v0.91.0",
-  "shared": "openvibe-shared v4.123.0",
+  "sdk": "openvibe-sdk v0.93.0",
+  "shared": "openvibe-shared v4.124.0",
   "packages": [
     "openvibe-contracts v0.289.1",
-    "openvibe-sdk v0.91.0",
-    "openvibe-shared v4.123.0"
+    "openvibe-sdk v0.93.0",
+    "openvibe-shared v4.124.0"
   ],
   "summary": "Public at https://openvibe.codes (sudo ovhost deploy codes; unit openvibe-codes on 127.0.0.1:4900). Since 2026-10-08 Codes is the open coding-agent harness: openvibe-codes (a command-line tool and Node.js module, v0.5.2) runs a coding task on Claude Code, Claude Code on another provider, Codex, OpenCode, Command Code, MiniMax Code, Aider, the DeepSeek API or a person's own OpenAI-compatible model on their machine, hands it to the next agent when one fails or goes quiet, and keeps every run; the site carries the agent catalog with a public routing API, getting started, Improve OpenVibe and the community documents. The developer console that used to live here moved to OpenVibe.Services (https://openvibe.services) and every one of its addresses answers a permanent redirect there.",
   "works": [
@@ -64,5 +64,5 @@
     "The conductor's failover (CLI 0.7.0, owner 2026-11-03): Settings → Conductor picks up to three fallback agents (Codex, OpenCode) with a model each and a switch point (90% of a usage window by default); before each turn the conductor's own agent and the fallbacks are read against the machine's usage windows, the turn runs on the first with room and returns to the primary once its window frees; each agent resumes its own session and the one taking over is told what happened while it was away; the conductor's page shows each agent's usage and which takes the next turn",
     "OpenVibe Git through the person's own account (/git, CLI 0.6.2): link once (the forge's OAuth2 consent with PKCE, tokens sealed with CODES_SEAL_KEY), make a repository in your name and start a chat on it; a task on a forge repository takes the person's credential line to their machine for git only (never the agent), and the branch and its pull request open on OpenVibe Git"
   ],
-  "updated": "2026-11-06"
+  "updated": "2026-11-07"
 }

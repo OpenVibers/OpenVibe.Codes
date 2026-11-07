@@ -235,6 +235,8 @@ async function createApp(opts = {}) {
         ctx.sessionRetention = sessions.retention;
         app.use('/internal/events', consumer.router);
     }
+    // ── Chat plays sandbox workers → Codes (Agent Streams S6; loopback only, signed heartbeats) ──
+    app.use('/internal/sandbox-workers', require('./http/sandbox-workers').createSandboxWorkerRoutes({ store, config, log }));
 
     // ── Machine endpoints ───────────────────────────────────
     app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'openvibe-codes', version: VERSION }));
