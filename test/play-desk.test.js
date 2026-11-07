@@ -156,5 +156,15 @@ T('the injection test: no environment worth printing, no route to post', () => {
     assert.deepStrictEqual(Object.keys(s.workspace).sort(), ['files', 'path', 'wiped']);
 });
 
+T('nothing is dispatched: the desk is a state model, not a runner', () => {
+    // The desk hands a request to nobody: it starts no process and makes no request of its own. A chat
+    // plays request runs in a sandbox worker (a network-isolated container), and there is none yet.
+    const names = Object.keys(desk).filter((k) => /^(dispatch|dispatchTo|run|runRequest|start|startWorker|exec|execute|spawn|worker)$/i.test(k));
+    assert.deepStrictEqual(names, [], 'the desk has no way to run anything');
+    const src = require('fs').readFileSync(require.resolve('../server/domain/play-desk'), 'utf8');
+    assert.ok(!/require\(['"](http|https|node-fetch|axios|undici)['"]\)/.test(src), 'the desk makes no request');
+    assert.ok(!/require\(['"]child_process['"]\)/.test(src), 'the desk starts no process');
+});
+
 process.stdout.write(failed ? 'play-desk: FAILED\n' : 'play-desk: all checks passed\n');
 process.exit(failed ? 1 : 0);
