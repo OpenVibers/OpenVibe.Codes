@@ -179,6 +179,12 @@ function load(env = process.env) {
         },
         // The event stream of a task (GET /api/v1/tasks/:id/events): the heartbeat that keeps a connection alive.
         sse: { heartbeatMs: Math.max(1000, int(env.CODES_SSE_HEARTBEAT_MS, 15_000)) },
+        // The chat plays sandbox workers (Agent Streams S6, sandbox/worker.js): the secret their heartbeats are signed
+        // with (a comma list during a rotation), and how long a worker that stopped checking in still counts.
+        sandbox: {
+            workerSecrets: String(env.CODES_SANDBOX_WORKER_SECRET || '').split(',').map((s) => s.trim()).filter(Boolean),
+            staleMs: Math.max(10_000, int(env.CODES_SANDBOX_STALE_MS, 90_000)),
+        },
 
     };
 }
