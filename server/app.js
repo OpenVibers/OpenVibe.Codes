@@ -28,6 +28,9 @@ const { createSso } = require('./auth/sso');
 const { createHarnesses } = require('./domain/harnesses');
 const { createPageRoutes } = require('./http/pages');
 const { createSharing } = require('./sharing');
+const { createSkills } = require('./domain/skills');
+const { createSkillsApi } = require('./http/skills-api');
+const { createSkillPageRoutes } = require('./http/skills-pages');
 const { createRunRoutes } = require('./http/run');
 const { createTasksApi } = require('./http/tasks-api');
 const { createConnectionsApi } = require('./http/connections-api');
@@ -118,8 +121,10 @@ async function createApp(opts = {}) {
     const knowledge = createKnowledge({ store, config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The one sharing system (design 2026-11-06): a run task is its owner's until the Share sheet says otherwise.
     const sharing = opts.sharing || createSharing({ db: store.db, config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    // The skills hub (Compute plan §5, E6): versioned skills, rules and MCP servers, shared through the same SDK.
+    const skills = opts.skills || createSkills({ store, sharing, log });
     const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
-    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing };
+    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
     ctx.forgejo = createForgejoClient({ config, log });
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -278,6 +283,7 @@ async function createApp(opts = {}) {
         app.locals.sharingTimer = timer;
     }
     app.use('/api/v1', createApi(ctx));
+    app.use('/api/v1', createSkillsApi({ config, skills: ctx.skills, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, fleet: ctx.fleet, actorLimits: ctx.actorLimits, sharing, log }));
     app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, github: ctx.github, actorLimits: ctx.actorLimits, log }));
     // The Dock's agent view (Dock K-D3, Agent Streams S1): the person's own desk stream with a view ticket minted here.
@@ -296,6 +302,7 @@ async function createApp(opts = {}) {
 
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.CODES_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));   // per address; tests raise it
+    app.use(createSkillPageRoutes({ config, store, skills: ctx.skills, log }));
     const pageRoutes = createPageRoutes(ctx);
     // The agent layer (openvibe-shared/agent-layer): /.well-known/agent.json and the Markdown twins of the public
     // pages. The pages themselves keep their own routes — a signed-in visitor's account bar and forms are theirs

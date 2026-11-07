@@ -146,17 +146,31 @@ function createSharing({ db, config, fetchImpl = globalThis.fetch, log = console
             }
             return true;
         },
-        /** The uniform API's describe(ref): the task's first line and its page. */
+        /** The uniform API's describe(ref): the item's title and its page. */
         describe: async (ref) => {
-            if (ref.service !== SERVICE || ref.kind !== KIND) return {};
-            const row = await db.maybe('SELECT prompt FROM run_tasks WHERE id = $1', [String(ref.id)]);
-            if (!row) return {};
-            return {
-                title: String(row.prompt || 'A task').split('\n')[0].slice(0, 90),
-                link: `${config.baseUrl}/run/tasks/${encodeURIComponent(ref.id)}`,
-                roles: ['viewer'],
-                transferable: false,
-            };
+            if (ref.service !== SERVICE) return {};
+            if (ref.kind === KIND) {
+                const row = await db.maybe('SELECT prompt FROM run_tasks WHERE id = $1', [String(ref.id)]);
+                if (!row) return {};
+                return {
+                    title: String(row.prompt || 'A task').split('\n')[0].slice(0, 90),
+                    link: `${config.baseUrl}/run/tasks/${encodeURIComponent(ref.id)}`,
+                    roles: ['viewer'],
+                    transferable: false,
+                };
+            }
+            // A skill in the hub: the same four audiences and members, its own page, never transferable.
+            if (ref.kind === 'skill') {
+                const row = await db.maybe('SELECT title FROM codes_skills WHERE id = $1', [String(ref.id)]);
+                if (!row) return {};
+                return {
+                    title: String(row.title || 'A skill').slice(0, 90),
+                    link: `${config.baseUrl}/skills/${encodeURIComponent(ref.id)}`,
+                    roles: ['viewer'],
+                    transferable: false,
+                };
+            }
+            return {};
         },
         /** Expire members and transfers, then send the queued events and notifications. */
         work: async ({ flush = true } = {}) => {

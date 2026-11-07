@@ -27,6 +27,7 @@ const NAV = [
     { label: 'Get started', href: '/start', icon: 'fa-play' },
     { label: 'Run on your machine', href: '/run', icon: 'fa-microchip' },
     { label: 'Agents', href: '/harnesses', icon: 'fa-robot' },
+    { label: 'Skills', href: '/skills', icon: 'fa-puzzle-piece' },
     { label: 'Improve OpenVibe', href: '/improve', icon: 'fa-code', more: true },
     { label: 'Community', href: '/policy', icon: 'fa-people-group', more: true },
 ];

@@ -50,6 +50,14 @@ const TABLES = [
     { table: 'codes_knowledge', subject: 'subject', file: 'knowledge.json', order: 'created_at', columns: ['id', 'kind', 'text', 'repo', 'paths', 'visibility', 'team_id', 'pinned', 'redacted', 'seen', 'source_task', 'source_agent', 'created_at', 'updated_at', 'last_seen_at'] },
     // The person's default audience for new run tasks (design 2026-11-06): what their next task starts as.
     { table: 'codes_share_defaults', subject: 'subject', file: 'share-defaults.json', order: 'updated_at' },
+    // The skills hub (Compute plan §5): the records they own and the ones they chose to sync. A record's body lives
+    // in its versions, which leave with the record; the share rows are erased in extraErase with the record's ids.
+    {
+        table: 'codes_skills', subject: 'owner_subject', file: 'skills.json', order: 'created_at',
+        columns: ['id', 'kind', 'slug', 'title', 'official', 'tools', 'latest_version', 'created_at', 'updated_at'],
+        erase: { keep: 'deleted in extraErase with its versions, assignments and share rows' },
+    },
+    { table: 'codes_skill_assignments', subject: 'subject', file: 'skill-assignments.json', order: 'created_at', columns: ['skill_id', 'project', 'created_at'] },
 ];
 
 // The rows that hang under a person's tasks: exported under the task, erased before it.
@@ -101,6 +109,15 @@ function create({ db, log = console }) {
             }
             delete retained.run_tasks;
             add(erased, 'run_tasks', await t.exec('DELETE FROM run_tasks WHERE subject = ANY($1::text[])', [subjects]));
+            // The person's own skills, their versions (ON DELETE CASCADE) and the share rows of those records.
+            const skills = await t.many('SELECT id FROM codes_skills WHERE owner_subject = ANY($1::text[])', [subjects]);
+            if (skills.length) {
+                const ids = skills.map((r) => r.id);
+                await t.exec("DELETE FROM share_members WHERE service = 'codes' AND kind = 'skill' AND resource_id = ANY($1::text[])", [ids]);
+                await t.exec("DELETE FROM share_access_requests WHERE service = 'codes' AND kind = 'skill' AND resource_id = ANY($1::text[])", [ids]);
+                await t.exec("DELETE FROM shares WHERE service = 'codes' AND kind = 'skill' AND resource_id = ANY($1::text[])", [ids]);
+                add(erased, 'codes_skills', await t.exec('DELETE FROM codes_skills WHERE id = ANY($1::text[])', [ids]));
+            }
             // The sharing system's own rows (openvibe-sdk/share): a member or an access request is this person, and
             // the share rows they own carry their subject too. The subject column is jsonb, so the table map cannot
             // express it and they are erased here.
@@ -120,6 +137,9 @@ function create({ db, log = console }) {
 const EXEMPT = {
     share_members: 'the sharing system own member rows: the subject is a jsonb subject, so they are erased in extraErase',
     share_access_requests: 'the sharing system own access requests: the subject is a jsonb subject, so they are erased in extraErase',
+    // created_by is the author of a version, not the person whose account is being erased: a record's versions leave
+    // with the record (codes_skills), and a version never outlives it.
+    codes_skill_versions: 'created_by is the author of a version, not a subject column; versions leave with their skill',
 };
 
 module.exports = { create, TABLES, TASK_KEYED, TOPICS, EXEMPT };
