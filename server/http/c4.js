@@ -289,14 +289,26 @@ ${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="
         if (amount > 0) return `$${amount} per ${offer.price.unit || 'run'}`;
         return 'included in your plan';
     }
-    /** Every harness and model a conductor may lead with, with what the person's machines say and its price. */
-    function leadChoices(settings, aware, catalog = null) {
-        const chosen = settings && settings.conductor_agent ? `${settings.conductor_agent}|${settings.conductor_model || ''}` : '';
+    /** The person's saved "Who leads your tasks" as `agent|model`, or '' for the default. */
+    const savedLead = (settings) => (settings && settings.conductor_agent ? `${settings.conductor_agent}|${settings.conductor_model || ''}` : '');
+    /** The saved lead's name, as the composer's first option says it ("Claude Code on Opus" for the default). */
+    function savedLeadName(settings, catalog = null) {
+        const chosen = savedLead(settings);
+        const c = chosen && models.choices(harnesses, catalog).find((x) => x.value === chosen);
+        return c ? c.label : 'Claude Code on Opus';
+    }
+    /**
+     * Every harness and model a conductor may lead with, with what the person's machines say and its price.
+     * `select` marks the saved choice (Settings); the composer passes false, because its first option already
+     * means "my setting". Nothing is preselected for the default, so saving Settings untouched keeps following it.
+     */
+    function leadChoices(settings, aware, catalog = null, select = true) {
+        const chosen = select ? savedLead(settings) : '';
         return models.choices(harnesses, catalog).slice(1).map((c) => {
             const info = aware.get(String(c.agent));
             const price = c.detail || priceLine(c.agent, c.model);
             const attrs = optionAttrs({ ...(info || {}), desc: [info && info.desc, price].filter(Boolean).join(' · ') });
-            return `<option value="${esc(c.value)}"${chosen === c.value || (!chosen && c.value === 'claude-code|opus') ? ' selected' : ''}${attrs}>${esc(`${c.label} — ${price}`)}</option>`;
+            return `<option value="${esc(c.value)}"${chosen && chosen === c.value ? ' selected' : ''}${attrs}>${esc(`${c.label} — ${price}`)}</option>`;
         }).join('');
     }
     const conductorState = (row) => (['queued', 'placed', 'running'].includes(row.state)
@@ -545,7 +557,7 @@ ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h
         const content = `${header('Conductor', 'Your orchestrator, running here: the agent you choose on your own machine, carrying the plan forward through the other agents.')}${flash(req)}
 <section class="c4-card c4-composer"><form method="post" action="/conductor">
 <label for="c4-folder">Working folder</label><div class="c4-folder-row"><input id="c4-folder" name="folder" placeholder="/home/you/project" value="${esc(String(req.query.folder || ''))}" list="c4-folders" autocomplete="off" spellcheck="false"><select name="folder_pick" data-c4-folder-pick aria-label="Folders this machine has worked in"><option value="">A recent folder…</option>${folderChoices}</select></div><datalist id="c4-folders">${folders.map((f) => `<option value="${esc(f.folder)}"></option>`).join('')}</datalist>
-<div class="c4-controls"><label>Machine <select name="machine" data-c4-machine><option value="">Your default</option>${machineOptions}</select></label><label>Who leads this task <select name="who" data-c4-model><option value="">Today's choice: Claude Code on Opus</option>${leadChoices(settings, aware)}</select></label><label>Safety <select name="safety">${[['ask', 'Ask me'], ['project', 'Auto in the project'], ['full', 'Full access']].map(([v, l]) => `<option value="${v}"${settings.safety === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div>
+<div class="c4-controls"><label>Machine <select name="machine" data-c4-machine><option value="">Your default</option>${machineOptions}</select></label><label>Who leads this task <select name="who" data-c4-model><option value="">${esc(`Your setting: ${savedLeadName(settings)}`)}</option>${leadChoices(settings, aware, null, false)}</select></label><label>Safety <select name="safety">${[['ask', 'Ask me'], ['project', 'Auto in the project'], ['full', 'Full access']].map(([v, l]) => `<option value="${v}"${settings.safety === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div>
 <label class="c4-note-field" for="c4-conductor-note">What should it pick up? <small>Optional. It starts from the hand-over note and the plan; say here what you want first.</small></label><textarea id="c4-conductor-note" name="note" rows="2" placeholder="e.g. carry on with the next piece of the plan"></textarea>
 <p class="c4-hint">It opens that folder, so it loads that project's memory and AGENTS.md. It runs with your own login on that machine, and never with a key of ours.${mine.problem ? ` ${esc(mine.problem.detail || '')}` : ''}</p>
 <div class="c4-conductor-actions"><span class="c4-hint">One conductor is enough: it hands the work to the other agents through the Codes tools.</span><button class="c4-button" type="submit">Start your conductor</button></div>
@@ -821,8 +833,8 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
 <label>Default machine <select name="default_machine"><option value="">Auto</option>${machineOptions}</select></label>
 </div>
 <h3 class="c4-subhead" id="lead">Who leads your tasks</h3>
-<p class="c4-hint">The agent that plans the work and hands the parts to the others. Every harness and model you can run is listed with what your machines say about it and what it costs. A single task can still pick another leader in its composer.</p>
-<div class="c4-form-grid"><label>Who leads your tasks <select name="conductor_who"><option value="">Today's choice: Claude Code on Opus</option>${leadChoices(settings, aware)}</select></label></div>
+<p class="c4-hint">The agent that plans each task and hands its parts to the others. Each choice shows what your machines report about it and what it costs. One task can still pick another lead in its composer.</p>
+<div class="c4-form-grid"><label>Lead <select name="conductor_who"><option value="">The default (Claude Code on Opus today)</option>${leadChoices(settings, aware)}</select></label></div>
 <h3 class="c4-subhead">Limits</h3>
 <div class="c4-form-grid">
 <label>Steps per task ${limitSelect('steps', settings.steps, [[200, '200'], [350, '350'], [500, '500'], [1000, '1,000']], 'steps')}</label>

@@ -196,6 +196,12 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
             const res = await get('/conductor');
             assert.strictEqual(res.status, 200);
             assert.match(res.text, /<select name="who" data-c4-model>/, 'who leads is a list');
+            // The first option is the person's own setting, said by name, and it is the one selected: the composer never
+            // claims a default the person changed, and no other leader is preselected.
+            assert.match(res.text, /<select name="who" data-c4-model><option value="">Your setting: [^<]+<\/option>/, 'the first choice names the setting');
+            const whoList = res.text.split('<select name="who" data-c4-model>')[1].split('</select>')[0];
+            assert.ok(!/ selected/.test(whoList), 'nothing else is preselected');
+            assert.ok(!res.text.includes("Today's choice"), 'no "Today\'s choice" wording');
             for (const label of ['Claude Code · Opus', 'Claude Code · Sonnet', 'Codex', 'OpenCode', 'DeepSeek']) assert.ok(res.text.includes(label), `${label} is offered`);
             assert.match(res.text, /data-c4-folder-pick/, 'the recent folders are a choice beside the typed path');
             assert.ok(res.text.includes(`data-machine="${NODE}"`), 'this conductor&rsquo;s folder is one, on its machine');
