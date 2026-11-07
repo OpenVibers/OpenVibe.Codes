@@ -73,6 +73,26 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch-pick-file{cursor:pointer;padding:0 9px}
 .ch-pick-file input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .ch-pick-file.has-files{color:var(--ch-accent);border-color:color-mix(in srgb,var(--ch-accent) 50%,var(--ch-line))}
+/* Files waiting in the composer: one row that wraps, a chip per file that never outgrows a phone; the upload is a
+   2px line along the chip's foot, and the remove keeps a 44px target inside a 32px chip. */
+.ch-files{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;min-width:0}
+.ch-files[hidden]{display:none}
+.ch-file{position:relative;overflow:hidden;max-width:100%;min-width:0;min-height:32px;padding:3px 2px 3px 6px;gap:7px;cursor:default;color:var(--ch-ink)}
+.ch-file:hover{color:var(--ch-ink);border-color:var(--ch-line)}
+.ch-file img{width:24px;height:24px;flex:none;border-radius:6px;object-fit:cover}
+.ch-file>svg{width:15px;height:15px;flex:none;color:var(--ch-soft)}
+.ch-file>span{min-width:0;max-width:24ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-file small{flex:none;font-size:11.5px;color:var(--ch-muted);font-variant-numeric:tabular-nums}
+.ch-file progress{position:absolute;left:0;right:0;bottom:0;width:100%;height:2px;border:0;-webkit-appearance:none;appearance:none;background:transparent;color:var(--ch-accent)}
+.ch-file progress[hidden]{display:none}
+.ch-file progress::-webkit-progress-bar{background:transparent}
+.ch-file progress::-webkit-progress-value{background:var(--ch-accent)}
+.ch-file progress::-moz-progress-bar{background:var(--ch-accent)}
+.ch-file .ch-icon-btn{position:relative;width:26px;height:26px;border-radius:999px;font-size:17px;line-height:1}
+.ch-file .ch-icon-btn::after{content:"";position:absolute;inset:-9px}
+.ch-file.is-bad{border-color:color-mix(in srgb,var(--ch-bad) 55%,var(--ch-line));color:var(--ch-bad)}
+.ch-file.is-bad small{color:var(--ch-bad)}
+@media (max-width:520px){.ch-file>span{max-width:16ch}}
 .ch .ovt-c-note.is-bad{color:var(--ch-bad)}
 .ch .ovt-composer.is-sending textarea{opacity:.6}
 
