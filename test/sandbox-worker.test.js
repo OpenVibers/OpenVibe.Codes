@@ -269,8 +269,10 @@ async function check(name, fn) {
 
     await check('the local API: a Unix socket only the worker\'s user and group may use; health, sessions, Wipe now', async () => {
         const w = make();
+        fs.mkdirSync(path.join(tmp, 's-stale0001', 'net'), { recursive: true });
         await w.start();
         try {
+            assert.ok(!fs.existsSync(path.join(tmp, 's-stale0001')), 'a crashed worker\'s leftover sandbox directory is swept at start');
             assert.strictEqual(fs.statSync(config.socket).mode & 0o777, 0o660);
             const req = (method, p, body) => new Promise((resolve, reject) => {
                 const r = http.request({ socketPath: config.socket, method, path: p, headers: { 'content-type': 'application/json' } }, (res) => {

@@ -269,6 +269,11 @@ function createWorker(opts = {}) {
         if (!limiter) limiter = await detectLimits({ mode: config.limitsMode });
         if (!limiter.ok) log.error(`[sandbox] no limits: ${limiter.reason}`);
         fs.mkdirSync(config.runtimeDir, { recursive: true, mode: 0o750 });
+        // A worker that crashed left its sandboxes' directories (their processes died with it: --die-with-parent).
+        for (const name of fs.readdirSync(config.runtimeDir)) if (/^s-[a-z0-9-]+$/.test(name)) fs.rmSync(path.join(config.runtimeDir, name), { recursive: true, force: true });
+        if (limiter.ok && limiter.base) {
+            for (const name of fs.readdirSync(limiter.base)) if (/^sbx-[a-z0-9-]+$/.test(name)) { try { fs.rmdirSync(path.join(limiter.base, name)); } catch { /* still busy: left alone */ } }
+        }
         await selfTest();
         server = http.createServer((req, res) => {
             route(req, res).catch((err) => send(res, err.status || (/outside the workspace|not a file|ENOENT/.test(err.message) ? 400 : 500), { error: String(err.message).slice(0, 200) }));
