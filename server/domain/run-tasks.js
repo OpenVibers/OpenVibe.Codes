@@ -147,7 +147,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -582,6 +582,17 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             await taskOutbox.emitTask(inserted, null);
             return inserted;
         });
+        // Sharing (design 2026-11-06): the task is its owner's. The person's default audience for new tasks, then the
+        // Share sheet changes just this one. A sharing system that is unavailable leaves the task unreadable to
+        // others: every read asks canView, and a missing row answers no.
+        if (sharing) {
+            try {
+                const audience = await sharing.defaultOf(subject).catch(() => 'private');
+                await sharing.register({ subject }, inserted.id, audience);
+            } catch (e) {
+                log.warn(`[Codes] task ${id}: not registered with the sharing system: ${String((e && e.message) || e).slice(0, 200)}`);
+            }
+        }
         // The task's first attempt: every Run job is one attempt, and this one is the task as it was asked.
         // The budget of the attempt: the task's limits (a benchmark's per-task limits) or the person's default.
         const budget = budgetFor(runArgs.limits);

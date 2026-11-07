@@ -48,6 +48,8 @@ const TABLES = [
     // Know K5: the lessons and facts the person's runs taught. Theirs to take and to erase; a row already shared
     // with a team leaves with its owner's account (the team's other rows stay).
     { table: 'codes_knowledge', subject: 'subject', file: 'knowledge.json', order: 'created_at', columns: ['id', 'kind', 'text', 'repo', 'paths', 'visibility', 'team_id', 'pinned', 'redacted', 'seen', 'source_task', 'source_agent', 'created_at', 'updated_at', 'last_seen_at'] },
+    // The person's default audience for new run tasks (design 2026-11-06): what their next task starts as.
+    { table: 'codes_share_defaults', subject: 'subject', file: 'share-defaults.json', order: 'updated_at' },
 ];
 
 // The rows that hang under a person's tasks: exported under the task, erased before it.
@@ -99,8 +101,25 @@ function create({ db, log = console }) {
             }
             delete retained.run_tasks;
             add(erased, 'run_tasks', await t.exec('DELETE FROM run_tasks WHERE subject = ANY($1::text[])', [subjects]));
+            // The sharing system's own rows (openvibe-sdk/share): a member or an access request is this person, and
+            // the share rows they own carry their subject too. The subject column is jsonb, so the table map cannot
+            // express it and they are erased here.
+            const forms = subjects.map((s) => JSON.stringify({ type: 'user', id: s }));
+            const members = await t.exec('DELETE FROM share_members WHERE subject = ANY($1::jsonb[])', [forms]);
+            const requests = await t.exec('DELETE FROM share_access_requests WHERE subject = ANY($1::jsonb[])', [forms]);
+            const owned = await t.exec("DELETE FROM shares WHERE service = 'codes' AND owner_subject = ANY($1::jsonb[])", [forms]);
+            if (Number(members) || Number(requests) || Number(owned)) {
+                add(erased, 'share_rows', Number(members) + Number(requests) + Number(owned));
+            }
         },
     });
 }
 
-module.exports = { create, TABLES, TASK_KEYED, TOPICS };
+// The sharing system's own tables carry a person (a member, an access request). Their subject column is jsonb, so
+// the table map cannot express them: they are erased in extraErase, with the rest of the person's rows.
+const EXEMPT = {
+    share_members: 'the sharing system own member rows: the subject is a jsonb subject, so they are erased in extraErase',
+    share_access_requests: 'the sharing system own access requests: the subject is a jsonb subject, so they are erased in extraErase',
+};
+
+module.exports = { create, TABLES, TASK_KEYED, TOPICS, EXEMPT };

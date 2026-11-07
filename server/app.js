@@ -27,6 +27,7 @@ const { createKeyStore } = require('./auth/keys');
 const { createSso } = require('./auth/sso');
 const { createHarnesses } = require('./domain/harnesses');
 const { createPageRoutes } = require('./http/pages');
+const { createSharing } = require('./sharing');
 const { createRunRoutes } = require('./http/run');
 const { createTasksApi } = require('./http/tasks-api');
 const { createConnectionsApi } = require('./http/connections-api');
@@ -115,8 +116,10 @@ async function createApp(opts = {}) {
     const placementContext = createPlacementContext({ store, config, userSettings, outcomes: placementOutcomes, priors: benchPriors, harnesses, now: store.now });
     // Know K5: the lessons and facts a person's runs teach, private by default and shareable with a team.
     const knowledge = createKnowledge({ store, config, fetchImpl: fetchImpl || globalThis.fetch, log });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
-    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge };
+    // The one sharing system (design 2026-11-06): a run task is its owner's until the Share sheet says otherwise.
+    const sharing = opts.sharing || createSharing({ db: store.db, config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
+    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing };
     ctx.forgejo = createForgejoClient({ config, log });
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -254,8 +257,28 @@ async function createApp(opts = {}) {
     // ── API ─────────────────────────────────────────────────
     // Run on your machine (plan T16): coding tasks on the person's own machine, through OpenVibe Run, from the /run
     // pages below or, for a first-party service acting for the person, from /api/v1/tasks (codes.task.*).
+    // ── /api/v1/task/:id/share — the one Share sheet's API (openvibe-sdk/share) ──
+    // GET/PUT .../share, .../share/requests, .../share/transfer[/accept|decline|cancel], GET /api/v1/share/people
+    // and /api/v1/shared-with-me. Access is still decided by canView on every read path; the router answers only
+    // its own paths.
+    {
+        const shareApi = express.Router();
+        shareApi.use(sharing.shares.router({
+            service: 'codes',
+            authenticate: (req) => sharing.shareViewer(req.viewer),
+            describe: sharing.describe,
+        }));
+        const SHARE_PATH = /^\/api\/v1\/(?:shared-with-me$|share\/people$|[^/]+\/[^/]+\/share(?:\/|$))/;
+        app.use((req, res, next) => (SHARE_PATH.test(req.path) ? shareApi(req, res, next) : next()));
+    }
+    // Expire members and transfers and send queued share events/notifications. Unref'd: it never holds a test open.
+    if (opts.startSharingWorker !== false) {
+        const timer = setInterval(() => { sharing.work().catch(() => { /* logged inside */ }); }, 15_000);
+        if (timer.unref) timer.unref();
+        app.locals.sharingTimer = timer;
+    }
     app.use('/api/v1', createApi(ctx));
-    app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, fleet: ctx.fleet, actorLimits: ctx.actorLimits, log }));
+    app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, fleet: ctx.fleet, actorLimits: ctx.actorLimits, sharing, log }));
     app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, github: ctx.github, actorLimits: ctx.actorLimits, log }));
     // The Dock's agent view (Dock K-D3, Agent Streams S1): the person's own desk stream with a view ticket minted here.
     app.use('/api/v1', createAgentView({ config, sso, actorLimits: ctx.actorLimits, log }));
@@ -295,7 +318,7 @@ async function createApp(opts = {}) {
     c4Routes = require('./http/c4').createC4Routes(ctx);
     app.use(c4Routes);
     app.use(pageRoutes);
-    app.use(createRunRoutes({ config, store, sso, harnesses, run, tasks, sessions, keys, fetchImpl: fetchImpl || globalThis.fetch, log }));
+    app.use(createRunRoutes({ config, store, sso, harnesses, run, tasks, sessions, keys, sharing, fetchImpl: fetchImpl || globalThis.fetch, log }));
     app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try <a href="/harnesses">the agents</a>, <a href="/improve">Improve OpenVibe</a>, or the developer platform at <a href="https://openvibe.services">openvibe.services</a>.</p>` }));
 
     // eslint-disable-next-line no-unused-vars
