@@ -90,7 +90,7 @@ if [ ! -s "$SECRETS/network-client-secret" ]; then
 fi
 if [ ! -f "$ENV_FILE" ]; then
     install -m 0640 -o root -g "$SANDBOX_USER" "$here/sandbox-worker.env.example" "$ENV_FILE"
-    say "wrote $ENV_FILE from the example: set CODES_SANDBOX_WORKER_ID, CODES_SANDBOX_CLIENT_ID and CODES_SANDBOX_LIVE_STREAMS"
+    say "wrote $ENV_FILE from the example: set CODES_SANDBOX_WORKER_ID, CODES_SANDBOX_CLIENT_ID, CODES_SANDBOX_LIVE_SUBJECT and CODES_SANDBOX_LIVE_STREAMS"
 fi
 
 # 6. The browser (optional)
