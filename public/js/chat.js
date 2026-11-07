@@ -329,27 +329,125 @@
             return 'tool';
         };
         const attemptN = Number(live.dataset.attempt || 0);
+        const MD = window.CodesMarkdown;
+        // The live line says what the agent is doing, in words: "Editing server/app.js".
+        const VERB = { read: 'Reading', find: 'Searching', edit: 'Editing', run: 'Running', web: 'Browsing', sub: 'Handing over', tool: 'Using' };
+        // What a tool call was given: its one line, whatever shape the agent wrote it in.
+        const whatOf = (b) => {
+            if (b.what) return String(b.what);
+            const i = b.input;
+            if (!i) return '';
+            if (typeof i === 'string') return i;
+            return String(i.file_path || i.path || i.command || i.pattern || i.query || i.url || '');
+        };
         const es = page.es = new EventSource(stream);
-        let reloading = false;
-        const reload = () => { if (reloading) return; reloading = true; es.close(); setTimeout(() => location.reload(), 500); };
+        // The answer grows as the text arrives: it is drawn again at most every 120 ms, and the page follows only when
+        // the reader was at the bottom (the kit's rule).
+        let buffer = '', painted = 0, timer = 0, ended = false;
+        const nearBottom = () => (window.innerHeight || 0) + (window.scrollY || 0) >= (document.documentElement.scrollHeight || 0) - 220;
+        const answerOf = () => {
+            let node = live.querySelector('[data-ovt-answer]');
+            if (!node) {
+                node = document.createElement('div');
+                node.className = 'ovt-answer';
+                node.setAttribute('data-ovt-answer', '');
+                const reply = live.querySelector('.ovt-reply');
+                if (reply) reply.appendChild(node);
+            }
+            return node;
+        };
+        const paint = () => {
+            timer = 0;
+            painted = Date.now();
+            const node = answerOf();
+            if (!node) return;
+            const stay = nearBottom();
+            if (MD) { node.innerHTML = MD.markdown(buffer); if (MD.enhance) MD.enhance(node); }
+            else node.textContent = buffer;
+            if (stay) window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'auto' });
+        };
+        const schedule = () => {
+            if (timer) return;
+            timer = setTimeout(paint, Math.max(0, 120 - (Date.now() - painted)));
+        };
+        // A tool's output folds under its row, and the fold says how much is in it.
+        const foldOutput = (key, output) => {
+            if (output == null) return;
+            const rows = live.querySelectorAll('[data-ovt-work] > .ovt-w-tool');
+            let row = null;
+            for (const r of rows) if (String(r.getAttribute('data-key')) === String(key)) row = r;
+            if (!row) return;
+            const head = row.querySelector('.ovt-w-row');
+            if (head && MD) {
+                const mark = head.querySelector('.ovt-w-st');
+                const label = document.createElement('span');
+                label.className = 'ovt-w-in ovt-w-fold';
+                label.textContent = MD.outputLabel(output);
+                head.insertBefore(label, mark);
+            }
+            const det = document.createElement('details');
+            const sum = document.createElement('summary');
+            if (head) sum.appendChild(head);
+            det.appendChild(sum);
+            det.insertAdjacentHTML('beforeend', MD ? MD.outputBody(output) : '');
+            row.appendChild(det);
+        };
+        // The finished turn comes from the server: its answer has its Copy buttons and its work its output folds.
+        const finish = () => {
+            if (ended) return;
+            ended = true;
+            es.close();
+            const swap = (again) => {
+                fetch(window.location.href, { headers: { Accept: 'text/html' }, credentials: 'same-origin' })
+                    .then((r) => (r.ok ? r.text() : ''))
+                    .then((html) => {
+                        if (!html) { location.reload(); return; }
+                        const doc = new DOMParser().parseFromString(html, 'text/html');
+                        const fresh = doc.querySelector('[data-turn="' + id + '"]');
+                        if (!fresh) { location.reload(); return; }
+                        if (again && fresh.hasAttribute('data-open')) { setTimeout(() => swap(false), 900); return; }
+                        OV.replace(id, fresh.outerHTML);
+                        // The composer stops working with the turn.
+                        const form = $('[data-ovt-composer]', app);
+                        if (form) {
+                            form.classList.remove('is-busy');
+                            const stop = $('[data-ovt-stop]', form);
+                            if (stop) stop.hidden = true;
+                        }
+                    })
+                    .catch(() => location.reload());
+            };
+            setTimeout(swap, 400);
+        };
         es.addEventListener('line', (ev) => {
             let d; try { d = JSON.parse(ev.data); } catch { return; }
             if (attemptN && d.attempt_n && Number(d.attempt_n) !== attemptN) return;
             const b = d.body && typeof d.body === 'object' ? d.body : { t: d.kind, text: String(d.body || '') };
             if (b.t === 'tool') {
-                OV.tool(id, { name: b.name || 'tool', input: b.what || '', icon: kindOf(b.name), key: b.id });
-                OV.live(id, `${b.name || 'Working'} ${b.what || ''}`.trim());
+                const what = whatOf(b);
+                OV.tool(id, { name: b.name || 'tool', input: what, icon: kindOf(b.name), key: b.id });
+                OV.live(id, `${VERB[kindOf(b.name)] || 'Using'} ${what}`.trim());
             } else if (b.t === 'tool_result') {
                 OV.toolDone(id, b.ok !== false, b.id);
+                foldOutput(b.id, b.output);
             } else if (b.t === 'text' && b.text) {
-                OV.live(id, String(b.text).split('\n').find(Boolean) || 'Working');
-            } else if (b.t === 'done' || b.t === 'end' || d.kind === 'end') reload();
+                const t = String(b.text);
+                // The words may arrive as a whole message or as a piece of one; either way the answer holds all of them.
+                buffer = buffer && !t.startsWith(buffer) ? buffer + t : t;
+                OV.live(id, t.split('\n').find(Boolean) || 'Working');
+                schedule();
+            } else if (b.t === 'done') {
+                if (b.text) buffer = String(b.text);
+                schedule();
+                finish();
+            } else if (b.t === 'end' || d.kind === 'end') finish();
         });
         es.addEventListener('attempt', (ev) => {
             let d; try { d = JSON.parse(ev.data); } catch { return; }
             // The stream replays every attempt on connect: only the live one ending, or a newer one starting, is news.
-            if ((d.type === 'attempt_ended' && attemptN && Number(d.attempt_n) === attemptN) || (d.type === 'attempt_started' && attemptN && Number(d.attempt_n) > attemptN)) reload();
+            if (d.type === 'attempt_ended' && attemptN && Number(d.attempt_n) === attemptN) finish();
+            else if (d.type === 'attempt_started' && attemptN && Number(d.attempt_n) > attemptN) { es.close(); location.reload(); }
         });
-        es.addEventListener('end', reload);
+        es.addEventListener('end', finish);
     }
 })();

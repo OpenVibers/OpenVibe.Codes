@@ -17,7 +17,7 @@
 const express = require('express');
 const { send } = require('../render/layout');
 const { raw, esc } = require('../render/html');
-const { markdown } = require('../render/markdown');
+const md = require('../../public/js/md.js');
 const { asyncRouter } = require('./router');
 const { sessionLogOf } = require('../domain/run-tasks');
 const models = require('../data/models');
@@ -228,14 +228,40 @@ function createChatRoutes(ctx) {
     // A conversation is a list of turns: what the person said, and the agent's reply under its face and name. A
     // hand-over to another agent, or a wait, is a line across the thread. How a task ended is a card in its last reply.
     const STEP_ICON = { read: 'read', find: 'find', edit: 'edit', run: 'run', web: 'web', sub: 'sub', tool: 'tool' };
+    // The live line says what the agent is doing, in words: "Editing server/app.js".
+    const STEP_VERB = { read: 'Reading', find: 'Searching', edit: 'Editing', run: 'Running', web: 'Browsing', sub: 'Handing over', tool: 'Using' };
+    /** What a tool call was given: its one line, whatever shape the agent wrote it in. */
+    function toolWhat(b) {
+        if (b.what) return String(b.what);
+        const i = b.input;
+        if (!i) return '';
+        if (typeof i === 'string') return i;
+        return String(i.file_path || i.path || i.command || i.pattern || i.query || i.url || '');
+    }
     const errorRow = (msg) => thread.turn({ avatar: false, reply: thread.card({ tone: 'bad', text: msg }), attrs: { role: 'alert' } });
+    /** One tool as a row of the kit's work list: its name, the one line it was given, and how it ended. */
+    function workRow(s) {
+        const st = s.ok == null ? (s.running ? 'is-run' : 'is-done') : (s.ok ? 'is-ok' : 'is-bad');
+        const mark = st === 'is-run' ? '<span class="ovt-dot" aria-hidden="true"></span>' : st === 'is-done' ? '' : thread.icon(st === 'is-ok' ? 'ok' : 'bad');
+        const what = s.what ? `<span class="ovt-w-in">${esc(md.clip(s.what, 90))}</span>` : '';
+        const head = `${thread.icon(STEP_ICON[s.kind] || 'tool')}<b>${esc(s.name || 'Tool')}</b>${what}`;
+        if (s.output == null && st !== 'is-run') return `<li class="ovt-w-tool ${st}"><div class="ovt-w-row">${head}<span class="ovt-w-st">${mark}</span></div></li>`;
+        // Long output folds, and the fold says how much is in it: never hidden without a count.
+        const count = s.output != null ? `<span class="ovt-w-in ovt-w-fold">${esc(md.outputLabel(s.output))}</span>` : '';
+        const body = s.output != null ? md.outputBody(s.output) : '<p class="ovt-w-out ovt-muted">Running…</p>';
+        return `<li class="ovt-w-tool ${st}"><details><summary>${head}${count}<span class="ovt-w-st">${mark}</span></summary>${body}</details></li>`;
+    }
     /** The steps an agent took, as the kit's work rows: what it said along the way is a note, each tool a row. */
     function workHtml(steps, ms, { live = false, liveText = '' } = {}) {
         if (!steps.length && !live) return '';
         const rows = steps.map((s, i) => (s.said
-            ? { kind: 'note', text: s.what }
-            : { kind: 'tool', name: s.name, input: s.what || '', icon: STEP_ICON[s.kind] || 'tool', ok: s.ok == null ? undefined : s.ok, running: live && s.ok == null && i === steps.length - 1 ? true : false }));
-        return thread.work({ open: live, live: liveText || 'Starting', took: ms ? minutes(ms) : null, rows });
+            ? `<li class="ovt-w-note">${thread.icon('note')}<p>${esc(s.what)}</p></li>`
+            : workRow(s.ok == null && live && i === steps.length - 1 ? { ...s, running: true } : s))).join('');
+        const tools = steps.filter((s) => !s.said).length;
+        const line = live
+            ? `<span class="ovt-w-live" data-ovt-live>${esc(liveText || 'Starting')}…</span>`
+            : `<span>${ms ? `Worked for ${esc(minutes(ms))}` : 'Worked'}${tools ? ` · ${tools} tool${tools === 1 ? '' : 's'}` : ''}</span>`;
+        return `<details class="ovt-work"${live ? ' open data-open' : ''}><summary>${line}${thread.icon('chev', 'ovt-chev')}</summary><ol class="ovt-w-list" data-ovt-work>${rows}</ol></details>`;
     }
     /** One agent's reply from its session lines: the steps it took, then what it said last (its answer). */
     function agentReply(a, lines, { live = false, attempt = null } = {}) {
@@ -245,8 +271,8 @@ function createChatRoutes(ctx) {
         for (const l of lines) {
             const b = asObject(l.body) || { t: 'text', text: String(l.body || '') };
             const t = b.t || l.kind;
-            if (t === 'tool') steps.push({ id: b.id, name: b.name || 'tool', what: b.what || '', kind: stepKind(b.name), ok: null });
-            else if (t === 'tool_result') { const s = steps.slice().reverse().find((x) => x.id && x.id === b.id) || steps[steps.length - 1]; if (s) s.ok = b.ok !== false; }
+            if (t === 'tool') steps.push({ id: b.id, name: b.name || 'tool', what: toolWhat(b), kind: stepKind(b.name), ok: null, output: null });
+            else if (t === 'tool_result') { const s = steps.slice().reverse().find((x) => x.id && x.id === b.id) || steps[steps.length - 1]; if (s) { s.ok = b.ok !== false; if (b.output != null) s.output = String(b.output); } }
             else if (t === 'text' && b.text) said.push(String(b.text));
             else if (t === 'done') done = b;
             else if (t === 'note' && b.text) said.push(`> ${String(b.text)}`);
@@ -259,8 +285,8 @@ function createChatRoutes(ctx) {
         const all = [...along.map((text) => ({ said: true, what: firstLine(text, 140) })), ...steps];
         const ran = attempt ? [attempt.model, attempt.effort ? effortWord(attempt.effort) : null].filter(Boolean).join(' · ') : '';
         const lastStep = steps[steps.length - 1];
-        const liveText = lastStep ? `${lastStep.name} ${lastStep.what || ''}`.trim() : '';
-        const body = answer ? thread.answer({ html: markdown(answer) })
+        const liveText = lastStep ? `${STEP_VERB[lastStep.kind] || 'Using'} ${lastStep.what || ''}`.trim() : '';
+        const body = answer ? thread.answer({ html: md.markdown(answer) })
             : live ? '' : `<p class="ovt-muted">${esc(attempt && attempt.end_why ? attempt.end_why : 'It ended without a word.')}</p>`;
         return { who: { ...a, sub: ran }, reply: workHtml(all, ms, { live, liveText }) + body };
     }
@@ -318,7 +344,7 @@ function createChatRoutes(ctx) {
                 const r = agentReply(a, lines.reverse(), { live: true, attempt: { model: m.model || row.model } });
                 out.push(thread.turn({ id, open: true, state: 'running', you: mine, who: r.who, reply: r.reply }));
             } else if (m.result && m.result.summary) {
-                out.push(thread.turn({ id, you: mine, who, reply: thread.answer({ html: markdown(m.result.summary) }) }));
+                out.push(thread.turn({ id, you: mine, who, reply: thread.answer({ html: md.markdown(m.result.summary) }) }));
             } else if (m.error) {
                 out.push(thread.turn({ id, you: mine, who, reply: `<p class="ovt-muted">${esc(m.error)}</p>` }));
             } else if (m.state === 'queued') {
@@ -429,7 +455,7 @@ function createChatRoutes(ctx) {
             cls: page != null ? 'is-page' : '',
         });
         const body = `<div class="ch" data-chat${streamUrl ? ` data-ch-stream="${esc(streamUrl)}"` : ''}>${view}</div>`;
-        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css', 'thread.css', ...styles], sharedScripts: ['kit-web.js', 'ov-thread.js', ...sharedScripts], scripts: [...scripts, 'js/chat.js'], body: raw(body) });
+        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css', 'thread.css', ...styles], sharedScripts: ['kit-web.js', 'ov-thread.js', ...sharedScripts], scripts: [...scripts, 'js/md.js', 'js/chat.js'], body: raw(body) });
     }
 
     /** The panel: who worked on it, and where the work is. */
