@@ -11,7 +11,7 @@
  * thread, grows the composer and opens the rail and the side on a phone.
  *
  * A conversation is a run_tasks row: a coding task (its first message is the brief, each "carry on" is a turn, a
- * hand-over to another agent is a divider) or the conductor (each message is a turn of one Claude Code session).
+ * hand-over to another agent is a divider) or the conductor (each message is a turn of one long agent session).
  * A visitor who is not signed in falls through to the product's own home (server/http/c4.js).
  */
 const express = require('express');
@@ -25,6 +25,7 @@ const kit = require('openvibe-shared/kit');
 const thread = require('openvibe-shared/thread');
 const { readiness, optionAttrs } = require('../domain/readiness');
 const start = require('./start');
+const { formBody } = require('./upload');
 
 const LIVE = ['queued', 'placed', 'running'];
 const safeId = (s) => /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(s || ''));
@@ -74,7 +75,9 @@ const ico = (name, cls = '') => `<svg class="ch-i${cls ? ` ${cls}` : ''}" aria-h
 const AGENTS = {
     'claude-code': ['Claude Code', 'C', '#d97757'], codex: ['Codex', 'Cx', '#10a37f'], opencode: ['OpenCode', 'O', '#7c6cff'],
     'command-code': ['Command Code', 'Cc', '#f59e0b'], aider: ['Aider', 'A', '#14b8a6'], deepseek: ['DeepSeek', 'D', '#4f7cff'],
-    minimax: ['MiniMax', 'M', '#ec4899'], openai: ['Your model', 'Y', '#64748b'],
+    'minimax-code': ['MiniMax Code', 'M', '#ec4899'], minimax: ['MiniMax', 'M', '#ec4899'],
+    'openvibe-ai': ['OpenVibe.AI', 'AI', '#64748b'], 'openai-compatible': ['Your model', 'Y', '#64748b'],
+    'claude-other': ['Claude Code (another provider)', 'C', '#d97757'],
 };
 const agentOf = (id, names) => {
     const known = AGENTS[String(id || '').split(':')[0]];
@@ -130,7 +133,7 @@ const repoLabel = (repo) => { try { return new URL(String(repo)).pathname.split(
 
 function createChatRoutes(ctx) {
     const r = asyncRouter();
-    const { config, store, harnesses, tasks, conductor, approvals, userSettings, github, machines, fleet, aiCatalog } = ctx;
+    const { config, store, harnesses, tasks, conductor, approvals, userSettings, attachments, github, machines, fleet, aiCatalog } = ctx;
     /** What each agent is ready for on the person's machines (the stored fleet: no call out), for the pickers. */
     const readyFor = async (req) => (fleet && viewer(req) ? readiness(await fleet.agents(req.viewer.subject, harnesses).catch(() => [])) : new Map());
     /** OpenVibe.AI's catalog for the pickers, or [] (flag off, AI down, or the legacy single model): never an error,
@@ -142,7 +145,7 @@ function createChatRoutes(ctx) {
         try { return await Promise.race([aiCatalog.choices().catch(() => []), late]); } finally { clearTimeout(timer); }
     };
     const db = store.db;
-    const form = express.urlencoded({ extended: false, limit: '32kb' });
+    const form = formBody({ maxBytes: attachments ? attachments.MAX_MESSAGE_BYTES : 50 * 1024 * 1024 });
     const viewer = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     const sameOrigin = (req) => {
         const origin = req.get('origin');
@@ -150,6 +153,22 @@ function createChatRoutes(ctx) {
         try { return new URL(origin).origin === new URL(config.baseUrl).origin; } catch { return false; }
     };
     const agentNames = () => new Map((harnesses?.list?.() || []).map((a) => [a.id, a.name]));
+    /** The ids a message names: what the script uploaded before submit, or what a multipart form sent now. */
+    async function attachmentIds(req) {
+        if (!attachments) return [];
+        const body = (req && req.body) || {};
+        const named = Array.isArray(body.attachment_ids) ? body.attachment_ids : (body.attachment_ids ? [body.attachment_ids] : []);
+        const files = Array.isArray(req && req.files) ? req.files : [];
+        if (!named.length && !files.length) return [];
+        const saved = files.length ? await attachments.saveMany(req.viewer.subject, files) : [];
+        return [...saved.map((f) => f.id), ...named.map(String)].filter(Boolean);
+    }
+    /** One turn's files, as the kit's turn lists them (a link each, an image one drawn as a picture). */
+    async function filesFor(taskId, n) {
+        if (!attachments) return [];
+        const rows = await attachments.forTask(taskId, n).catch(() => []);
+        return rows.map((f) => ({ href: `/api/v1/attachments/${encodeURIComponent(f.id)}`, name: f.name, size: f.size, image: f.image }));
+    }
 
     // ── The rail ─────────────────────────────────────────────────────────────────────────────────────────────────
     async function conversations(subject) {
@@ -255,13 +274,14 @@ function createChatRoutes(ctx) {
         const live = LIVE.includes(row.state);
         // Each attempt is a turn; the brief (or a note to carry on) is its person's side, a hand-over a line before it.
         const parts = [];
-        let mine = { text: row.prompt || '', caption: 'The brief' };
+        let mine = { text: row.prompt || '', caption: 'The brief', files: await filesFor(row.id, 1) };
         let prev = null;
         for (const a of attempts) {
             const n = Number(a.n);
+            const files = n === 1 ? mine.files : await filesFor(row.id, n);
             if (prev) {
                 const note = /^carried on by the owner: /.exec(a.why || '') ? String(a.why).replace(/^carried on by the owner: /, '') : null;
-                if (note) mine = { text: note };
+                if (note) mine = { text: note, files };
                 else if (a.agent && prev.agent && a.agent !== prev.agent) parts.push({ divider: `${agentOf(a.agent, names).name} took over${prev.end_why ? `: ${agentOf(prev.agent, names).name} ${prev.end_why}` : ''}` });
                 else if (a.why) parts.push({ divider: String(a.why) });
             }
@@ -290,7 +310,7 @@ function createChatRoutes(ctx) {
             if (m.switch_note) out.push(thread.divider({ text: m.switch_note }));
             else if (previous && m.agent && m.agent !== previous) out.push(thread.divider({ text: `${a.name} carries on` }));
             if (m.agent) previous = m.agent;
-            const files = (m.attachments || []).map((f, i) => ({ href: `/api/v1/tasks/${encodeURIComponent(row.id)}/messages/${encodeURIComponent(m.id)}/attachments/${i}`, name: f.name, image: /^image\//.test(String(f.mime || '')) }));
+            const files = (m.attachments || []).map((f, i) => ({ href: `/api/v1/tasks/${encodeURIComponent(row.id)}/messages/${encodeURIComponent(m.id)}/attachments/${i}`, name: f.name, size: f.size, image: /^image\//.test(String(f.mime || '')) }));
             const mine = { text: m.n === 1 ? (m.prompt || 'Pick up the plan') : m.prompt, caption: m.n === 1 ? 'Hand-over brief' : '', files };
             const id = `m${Number(m.n) || out.length + 1}`;
             if (m.state === 'running' || (live && m === msgs[msgs.length - 1] && m.state !== 'done')) {
@@ -382,11 +402,16 @@ function createChatRoutes(ctx) {
     function effortPicker(selected = '', cls = '') {
         return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="How hard it thinks"><span class="ch-sr">Effort</span>${ico('sub')}<select name="effort" data-ch-effort data-ov-select="bare" data-ov-title="Effort">${EFFORT.map(([v, l]) => `<option value="${v}"${selected === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
+    /** Any file (not a program) up to 10 at once: the script adds chips and progress, the plain form posts multipart. */
+    function filePicker() {
+        return `<label class="ch-pick ch-pick-file ch-for-agents" title="Attach files">${ico('attach')}<span class="ch-sr">Attach files</span><input type="file" name="files" multiple data-ch-files></label>`;
+    }
     /** The kit's composer with Codes' pickers in its tools, where the work runs under the bar, and its JSON route. */
-    function composer({ action, api = '', placeholder, pickers = '', live = false, stopAction = '', note = '', id = null, where = '' }) {
+    function composer({ action, api = '', placeholder, pickers = '', live = false, stopAction = '', note = '', id = null, where = '', files = false }) {
         return thread.composer({
-            action, id, placeholder, label: placeholder, tools: pickers, foot: where, note,
-            attrs: api ? { 'data-ch-api': api } : {},
+            action, id, placeholder, label: placeholder, tools: pickers + (files ? filePicker() : ''),
+            foot: `${files ? '<div class="ch-files" data-ch-files-list role="list" aria-live="polite"></div>' : ''}${where}`, note,
+            attrs: { ...(api ? { 'data-ch-api': api } : {}), ...(files ? { enctype: 'multipart/form-data' } : {}) },
             busy: live, stopAction: live && stopAction ? stopAction : null, maxlength: 16000,
         });
     }
@@ -536,7 +561,7 @@ function createChatRoutes(ctx) {
         const hello = `<div class="ch-hello"><span class="ov-mark" data-size="40" aria-hidden="true"></span><h1>${name ? `What should we build, ${esc(name)}?` : 'What should we build?'}</h1><p>Say it the way you would to a friend.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
         return frame(req, res, {
             title: 'New chat', heading: 'New chat', start: true, empty: hello,
-            composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'What should change?', pickers, where }) + nudge + ideas,
+            composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'What should change?', pickers, where, files: true }) + nudge + ideas,
         });
     });
 
@@ -562,7 +587,19 @@ function createChatRoutes(ctx) {
         if (!text) return back('Write what you want made or changed first.');
         // Something new: OpenVibe AI builds it on openvibe.space. The words go there in the box; nothing is built
         // until the person presses Build, so a handed-over description is never spent behind their back.
-        if (mode === 'new') return res.redirect(303, start.spaceHref({ kind: b.kind, dim: b.dim, text }));
+        if (mode === 'new') {
+            const carrying = (Array.isArray(req.files) && req.files.length) || b.attachment_ids;
+            if (carrying) return back('Files go with a task on your code or an OpenVibe site. Something new starts in OpenVibe AI, where you can add them there.');
+            return res.redirect(303, start.spaceHref({ kind: b.kind, dim: b.dim, text }));
+        }
+        // The files this message carries: uploaded before submit by the page's script, or posted with the form now
+        // (no JavaScript). A limit or a program is refused before any task is started.
+        let ids = [];
+        try {
+            ids = await attachmentIds(req);
+            // Check the whole message now, so an over-limit upload is a sentence in the composer, not a 500.
+            if (ids.length && attachments) await attachments.pending(req.viewer.subject, ids);
+        } catch (e) { return back(String((e && e.message) || 'the files could not be attached').slice(0, 300)); }
         let repoUrl = '';
         let targets = null;   // several OpenVibe projects for one request: one task each, the first one opens
         if (mode === 'openvibe') {
@@ -600,12 +637,12 @@ function createChatRoutes(ctx) {
             for (const [i, x] of targets.entries()) {
                 const note = `\n\n(This request spans ${names.join(', ')}. This task is the ${names[i]} part; the others are separate tasks. Change only what this repository needs, and keep the names and behaviour consistent with the other parts.)`;
                 const each = parseArgs(jobInput(x.url, `${text}${note}`.slice(0, 16000)));
-                const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args: each });
+                const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args: each, attachmentIds: i === 0 ? ids : [] });
                 if (!first) first = row;
             }
             return res.redirect(303, `/tasks/${encodeURIComponent(first.id)}`);
         }
-        const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args });
+        const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args, attachmentIds: ids });
         return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}`);
     });
 
@@ -624,15 +661,14 @@ function createChatRoutes(ctx) {
             const view = await conductor.view(row);
             const last = await db.maybe('SELECT max(seq) AS seq FROM codes_session_lines WHERE task_id = $1', [row.id]);
             // The agent the next turn runs on: the conductor's own, or the fallback its usage moves it to.
-            const next = (view.usage && view.usage.next) || { agent: 'claude-code', model: row.model || 'opus' };
+            const next = (view.usage && view.usage.next) || { agent: row.agent || 'claude-code', model: row.model };
             const nextAgent = agentOf(next.agent);
-            const model = String(next.model || (next.agent === 'claude-code' ? row.model || 'opus' : 'its default model'));
-            const pickers = `<span class="ch-chip ch-chip-static" title="${esc(`The next turn runs ${nextAgent.name} on your machine`)}">${avatar(nextAgent)}${esc(model)}</span><label class="ch-pick ch-pick-file" title="Attach an image">${ico('attach')}<span class="ch-sr">Attach an image</span><input type="file" accept="image/*" multiple data-ch-images></label>`;
+            const pickers = `<span class="ch-chip ch-chip-static" title="${esc(`The next turn runs ${nextAgent.name} on your machine`)}">${avatar(nextAgent)}${esc(String(next.model || 'its default model'))}</span>` + whoPicker(`${next.agent}|${next.model || ''}`, { label: 'Who leads this task', ready: await readyFor(req), catalog: await aiModels() });
             return frame(req, res, {
                 currentId: row.id, title: 'Conductor', heading: titleOf(row), state, panel: await sideHtml(row, view),
                 turns: [...errorTurns, ...await conductorThread(row, view)],
                 streamUrl: `/api/v1/tasks/${encodeURIComponent(row.id)}/events?last_event_id=${last && last.seq != null ? Number(last.seq) : 0}`,
-                composerHtml: row.outcome === 'stopped' ? '' : composer({ action: `/tasks/${encodeURIComponent(row.id)}/messages`, api: `/api/v1/conductor/${encodeURIComponent(row.id)}/messages`, placeholder: live ? 'Say something: it is the next turn' : 'What next?', pickers, note: live ? 'A message waits until the current turn ends; it is not lost.' : '' }),
+                composerHtml: row.outcome === 'stopped' ? '' : composer({ action: `/tasks/${encodeURIComponent(row.id)}/messages`, api: `/api/v1/conductor/${encodeURIComponent(row.id)}/messages`, placeholder: live ? 'Say something: it is the next turn' : 'What next?', pickers, files: true, note: live ? 'A message waits until the current turn ends; it is not lost.' : '' }),
             });
         }
         // The stream starts after the last line this page already shows.
@@ -646,7 +682,7 @@ function createChatRoutes(ctx) {
             composerHtml: row.outcome === 'stopped' ? '' : composer({
                 action: `/tasks/${encodeURIComponent(row.id)}/continue`, api: `/api/v1/tasks/${encodeURIComponent(row.id)}/continue`, live,
                 stopAction: `/tasks/${encodeURIComponent(row.id)}/stop`,
-                placeholder: live ? 'Wait for this turn, or stop it' : 'Ask for a change, or tell it what to do next', pickers,
+                placeholder: live ? 'Wait for this turn, or stop it' : 'Ask for a change, or tell it what to do next', pickers, files: true,
             }),
         });
     });
@@ -664,7 +700,14 @@ function createChatRoutes(ctx) {
         // The same agent with another model carries on; another agent takes over.
         const agent = who.agent && who.agent !== row.agent ? who.agent : null;
         const effort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(b.effort) ? b.effort : null;
-        const out = await tasks.continueTask(row, { note: String(b.text || '').slice(0, 4000), agent, model: who.model, effort });
+        let ids = [];
+        try {
+            ids = await attachmentIds(req);
+            if (ids.length && attachments) await attachments.pending(req.viewer.subject, ids);
+        } catch (e) {
+            return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}?error=${encodeURIComponent(String((e && e.message) || 'the files could not be attached').slice(0, 300))}`);
+        }
+        const out = await tasks.continueTask(row, { note: String(b.text || '').slice(0, 4000), agent, model: who.model, effort, attachmentIds: ids });
         return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}${out.error ? `?error=${encodeURIComponent(out.error)}` : ''}`);
     });
 

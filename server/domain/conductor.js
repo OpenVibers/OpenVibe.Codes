@@ -1,8 +1,9 @@
 'use strict';
 
 /**
- * The conductor (Codes C9b): a long-lived task whose single attempt is one Claude Code session on a machine the person
- * chooses. It is the orchestrator that used to be a Claude Code session on the workstation, running in openvibe.codes.
+ * The conductor (Codes C9b): a long-lived task whose single attempt is one agent session on a machine the person
+ * chooses. The agent is their "Who leads your tasks" choice (Claude Code on Opus by default, migration 0030). It is the
+ * orchestrator that used to be a Claude Code session on the workstation, running in openvibe.codes.
  *
  *   createConductor({ store, config, log, run, attempts, tasks, sessions, approvals, notify, fetchImpl })
  *     create({ subject, project, folder, machine, model, safety, note })  the task, its one attempt and the hand-over turn
@@ -18,8 +19,8 @@
  * while a turn runs; when the turn ends the next queued message starts. A conductor is never "done": when a turn ends
  * and nothing waits, it is idle (state succeeded, outcome NULL) until the person writes again.
  *
- * The conductor uses the person's own Claude Code login on the machine (Node's plan_logins, opt-in and read-only, for
- * one job) and never a key of ours. It sets no steps or minutes budget; a turn's wall time is Run's job cap.
+ * The conductor uses the person's own login on the machine (Node's plan_logins, opt-in and read-only, for one job) and
+ * never a key of ours. It sets no steps or minutes budget; a turn's wall time is Run's job cap.
  *
  * Failover (owner 2026-11-03, conductor-failover.js): before each turn the conductor's agent and the fallbacks the
  * person chose in Settings are read against their machine's usage windows; the turn runs on the first with room under
@@ -40,8 +41,12 @@ const MODEL = /^[A-Za-z0-9._:-]{1,100}$/;
 const NODE = /^(?:nod_)?[0-9A-HJKMNP-TV-Z]{26}$/;
 const FRAGMENT = path.join(__dirname, '..', '..', 'engine', 'fragments', 'conductor.md');
 const MAX_MESSAGE = 16000;
-const MAX_ATTACHMENTS = 4;
-const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+const MAX_ATTACHMENTS = 10;
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+const MAX_MESSAGE_BYTES = 50 * 1024 * 1024;
+/** The legacy inline path (an image as base64 in the JSON body): four small images, as before the upload API. */
+const MAX_INLINE_ATTACHMENTS = 4;
+const MAX_INLINE_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 const MAX_NOTE = 4000;
 const MAX_FOLDER = 4096;
 /** The most of the conversation an agent taking over is told, so the turn stays inside a job's 16,000 characters. */
@@ -71,11 +76,14 @@ function validFolder(folder) {
     return f;
 }
 
-/** One attachment as it is stored: an image, its type and its bytes (base64). */
+/**
+ * The legacy attachments (an image as base64 in the JSON body), still accepted from an old client: four small images.
+ * A new client uploads first and sends `attachment_ids`, which attachments.js stores and checks.
+ */
 function cleanAttachments(list) {
     if (!Array.isArray(list)) return [];
     const out = [];
-    for (const a of list.slice(0, MAX_ATTACHMENTS)) {
+    for (const a of list.slice(0, MAX_INLINE_ATTACHMENTS)) {
         if (!a || typeof a !== 'object') continue;
         const name = String(a.name || '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
         const mime = String(a.mime || '').toLowerCase();
@@ -83,7 +91,7 @@ function cleanAttachments(list) {
         if (!name || !/^image\//.test(mime) || !data) continue;
         let bytes = 0;
         try { bytes = Buffer.from(data, 'base64').length; } catch { bytes = 0; }
-        if (!bytes || bytes > MAX_ATTACHMENT_BYTES) continue;
+        if (!bytes || bytes > MAX_INLINE_ATTACHMENT_BYTES) continue;
         out.push({ name, mime, data, size: bytes });
     }
     return out;
@@ -106,7 +114,7 @@ function ranOf(result) {
 
 const agentOf = (m) => (m && m.agent) || PRIMARY_AGENT;
 
-function createConductor({ store, config = {}, log = console, run, attempts, tasks, sessions, approvals = null, notify = null, fetchImpl = null, fleet = null, userSettings = null }) {
+function createConductor({ store, config = {}, log = console, run, attempts, tasks, sessions, approvals = null, notify = null, fetchImpl = null, fleet = null, userSettings = null, harnesses = null, attachments: filesStore = null }) {
     const db = store.db;
     const fetch = fetchImpl || globalThis.fetch;
     const baseUrl = String(config.baseUrl || '').replace(/\/+$/, '');
@@ -144,6 +152,39 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
         return await tasks.latestProject(subject);
     }
 
+    /**
+     * The agent and model a conductor leads with: the person's pick when they made one, else the "Who leads your tasks"
+     * setting, else today's choice (Claude Code on Opus). A model is only ever paired with an agent that takes it:
+     * Claude Code keeps Opus unless another model is named, and every other agent uses its own default.
+     */
+    async function leadFor(subject, agent = null, model = undefined) {
+        let settings = null;
+        if (userSettings && subject) { try { settings = await userSettings.get(subject); } catch { settings = null; } }
+        const chosen = agent || (settings && settings.conductor_agent) || PRIMARY_AGENT;
+        let chosenModel;
+        if (model !== undefined) chosenModel = model === '' ? null : model;
+        else if (settings && settings.conductor_agent && !agent) chosenModel = settings.conductor_model;
+        else chosenModel = chosen === PRIMARY_AGENT ? 'opus' : null;
+        if (chosenModel == null && chosen === PRIMARY_AGENT) chosenModel = 'opus';
+        return { agent: chosen, model: chosenModel == null ? null : String(chosenModel).slice(0, 100) };
+    }
+
+    /** A task's own pick wins over the setting: the conductor page may retarget one conversation, not every one. */
+    async function retarget(task, { agent = null, model = undefined } = {}) {
+        if (!task || !task.id) throw Object.assign(new Error('no such conductor'), { status: 404, code: 'conductor.not_found' });
+        if (agent == null && model === undefined) return task;
+        const lead = await leadFor(task.subject, agent || task.agent, model === undefined ? (agent ? undefined : task.model) : model);
+        if (!lead.agent || (harnesses && !harnesses.list().some((h) => h.id === lead.agent))) {
+            throw Object.assign(new Error('the agent that leads this conductor is one Codes offers'), { status: 422, code: 'conductor.agent_invalid' });
+        }
+        if (lead.model != null && !MODEL.test(String(lead.model))) throw Object.assign(new Error('the model is not a model name'), { status: 422, code: 'conductor.model_invalid' });
+        const row = await db.one('UPDATE run_tasks SET agent = $2, model = $3, updated_at = $4 WHERE id = $1 RETURNING *',
+            [task.id, lead.agent, lead.model == null ? null : String(lead.model).slice(0, 100), store.now()]);
+        const attempt = await attemptOf(task.id);
+        if (attempt) await db.exec('UPDATE codes_attempts SET agent = $2, model = $3 WHERE id = $1', [attempt.id, lead.agent, lead.model == null ? null : String(lead.model).slice(0, 100)]);
+        return row;
+    }
+
     /** The one attempt of a conductor task. */
     async function attemptOf(taskId) {
         return await db.maybe('SELECT * FROM codes_attempts WHERE task_id = $1 ORDER BY n ASC LIMIT 1', [taskId]);
@@ -155,10 +196,14 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
      * `pin`, its OpenVibe.Bot device id (`dev_…`, Codes C9c): every turn is pinned to it on Run, so the session runs
      * where its folder and its memory are.
      */
-    async function create({ subject, project, folder, machine = null, pin = null, model = 'opus', safety = 'ask', note = null, key = null } = {}) {
+    async function create({ subject, project, folder, machine = null, pin = null, agent = null, model = undefined, safety = 'ask', note = null, key = null, attachmentIds = [] } = {}) {
         const work = validFolder(folder);
         if (!work) throw Object.assign(new Error('the working folder must be an absolute path'), { status: 422, code: 'conductor.folder_invalid' });
-        if (!MODEL.test(String(model || ''))) throw Object.assign(new Error('the model is not a model name'), { status: 422, code: 'conductor.model_invalid' });
+        const lead = await leadFor(subject, agent, model);
+        if (!lead.agent || (harnesses && !harnesses.list().some((h) => h.id === lead.agent))) {
+            throw Object.assign(new Error('the agent that leads this conductor is one Codes offers'), { status: 422, code: 'conductor.agent_invalid' });
+        }
+        if (lead.model != null && !MODEL.test(String(lead.model))) throw Object.assign(new Error('the model is not a model name'), { status: 422, code: 'conductor.model_invalid' });
         if (!SAFETY.includes(safety)) throw Object.assign(new Error('safety is ask, project or full'), { status: 422, code: 'conductor.safety_invalid' });
         if (machine && !NODE.test(String(machine))) throw Object.assign(new Error('the machine is not one of the person\'s machines'), { status: 422, code: 'conductor.machine_invalid' });
         if (pin != null && !/^dev_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(pin))) throw Object.assign(new Error('the pin is not a machine id'), { status: 422, code: 'conductor.machine_invalid' });
@@ -172,35 +217,44 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
         await store.tx(async () => {
             row = await db.one(
                 `INSERT INTO run_tasks (id, subject, project_id, repo, prompt, agent, model, kind, folder, machine, pin, safety, state, idempotency_key, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, 'claude-code', $6, 'conductor', $7, $8, $9, $10, 'queued', $11, $12, $12) RETURNING *`,
-                [id, subject, project, repo, first.slice(0, 16000), String(model).slice(0, 100), work, machine || null, pin || null, safety, key || null, at],
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'conductor', $8, $9, $10, $11, 'queued', $12, $13, $13) RETURNING *`,
+                [id, subject, project, repo, first.slice(0, 16000), lead.agent, lead.model == null ? null : String(lead.model).slice(0, 100), work, machine || null, pin || null, safety, key || null, at],
             );
         });
         await attempts.create({
-            task: row, agent: 'claude-code', model: String(model).slice(0, 100), machine: machine || null,
+            task: row, agent: lead.agent, model: lead.model == null ? null : String(lead.model).slice(0, 100), machine: machine || null,
             why: 'the conductor session starts here', kind: 'first', state: 'queued',
         });
-        const message = await enqueue(row, { text: first, attachments: [], first: true });
+        const message = await enqueue(row, { text: first, attachments: [], attachmentIds, first: true });
         const started = await startNext(id);
         return { task: await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [id]), message, started };
     }
 
     /** Write one message: the next turn. It waits if a turn is running. */
-    async function enqueue(task, { text, attachments = [], first = false } = {}) {
+    async function enqueue(task, { text, attachments = [], attachmentIds = [], first = false } = {}) {
         const prompt = String(text == null ? '' : text).trim();
-        const files = cleanAttachments(attachments);
-        if (!prompt && !files.length) throw Object.assign(new Error('a message needs words or an image'), { status: 422, code: 'conductor.message_empty' });
+        const legacy = cleanAttachments(attachments);
+        const claimed = filesStore ? await filesStore.pending(task.subject, attachmentIds) : [];
+        const count = claimed.length + legacy.length;
+        const total = claimed.reduce((n, a) => n + Number(a.size || 0), 0) + legacy.reduce((n, a) => n + Number(a.size || 0), 0);
+        if (count > MAX_ATTACHMENTS) throw Object.assign(new Error(`a message carries at most ${MAX_ATTACHMENTS} files`), { status: 422, code: 'conductor.attachments_too_many' });
+        if (total > MAX_MESSAGE_BYTES) throw Object.assign(new Error('the files of one message are larger than 50 MB together'), { status: 413, code: 'conductor.attachments_too_large' });
+        if (!prompt && !count) throw Object.assign(new Error('a message needs words or a file'), { status: 422, code: 'conductor.message_empty' });
         if (prompt.length > MAX_MESSAGE) throw Object.assign(new Error(`a message is at most ${MAX_MESSAGE} characters`), { status: 422, code: 'conductor.message_too_long' });
+        const files = [...claimed.map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: Number(a.size) })), ...legacy];
+        const id = store.newId('msg');
         const made = await store.tx(async () => {
             const current = await db.maybe('SELECT * FROM run_tasks WHERE id = $1 FOR UPDATE', [task.id]);
             if (!current || current.kind !== 'conductor') throw Object.assign(new Error('no such conductor'), { status: 404, code: 'conductor.not_found' });
             if (current.outcome === 'stopped') throw Object.assign(new Error('this conductor was stopped: start a new one'), { status: 409, code: 'conductor.stopped' });
             const n = await db.one('SELECT COALESCE(MAX(n), 0) + 1 AS n FROM codes_conductor_messages WHERE task_id = $1', [task.id]);
-            return await db.one(
+            const row = await db.one(
                 `INSERT INTO codes_conductor_messages (id, task_id, n, prompt, attachments, state, created_at)
                  VALUES ($1, $2, $3, $4, $5::jsonb, 'queued', $6::timestamptz) RETURNING *`,
-                [store.newId('msg'), task.id, n.n, prompt || (first ? 'Begin.' : 'Look at the attached image.'), files.length ? JSON.stringify(files) : null, store.iso()],
+                [id, task.id, n.n, prompt || (first ? 'Begin.' : 'Look at the attached files.'), files.length ? JSON.stringify(files) : null, store.iso()],
             );
+            if (claimed.length) await filesStore.link(task.subject, claimed, { taskId: task.id, attemptN: 1, messageId: id });
+            return row;
         });
         return made;
     }
@@ -210,10 +264,11 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
      * token at hand, a fleet reading older than five minutes is read again first, so the turn's agent is chosen on
      * today's usage.
      */
-    async function message(task, { text, attachments = [], token = null } = {}) {
-        const made = await enqueue(task, { text, attachments });
-        await refreshFleet(task.subject, token);
-        const started = await startNext(task.id);
+    async function message(task, { text, attachments = [], attachmentIds = [], agent = null, model = undefined, token = null } = {}) {
+        const current = (agent != null || model !== undefined) ? await retarget(task, { agent, model }) : task;
+        const made = await enqueue(current, { text, attachments, attachmentIds });
+        await refreshFleet(current.subject, token);
+        const started = await startNext(current.id);
         return { message: made, started };
     }
 
@@ -222,9 +277,9 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
      * from startNext), or the conductor's own agent and the session the attempt carries.
      */
     function turnArgs(task, message, attempt, over = null) {
-        const files = Array.isArray(message.attachments) ? message.attachments : [];
-        const agent = (over && over.agent) || PRIMARY_AGENT;
-        const model = over && 'model' in over ? over.model : (task.model || 'opus');
+        const files = Array.isArray(message.attachments) ? message.attachments : asArray(message.attachments);
+        const agent = (over && over.agent) || task.agent || PRIMARY_AGENT;
+        const model = over && 'model' in over ? over.model : (task.model == null ? null : task.model);
         const resume = over && 'resume' in over ? over.resume : (attempt && attempt.session) || null;
         return {
             kind: 'conductor',
@@ -238,10 +293,10 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
             mcp: true,
             codes_url: baseUrl,
             ...(resume ? { resume } : {}),
-            // The image's bytes stay in the database: the job fetches it with the person's token and writes it as a
-            // file on the machine, so a turn's input stays far inside Run's limit.
+            // The file's bytes stay in the database: the job fetches it with the person's token and writes it under
+            // .openvibe/attachments/<message>/<name> on the machine, so a turn's input stays far inside Run's limit.
             ...(files.length
-                ? { attachments: files.map((a, i) => ({ name: a.name, mime: a.mime, size: a.size, url: `${baseUrl}/api/v1/tasks/${encodeURIComponent(task.id)}/messages/${encodeURIComponent(message.id)}/attachments/${i}` })) }
+                ? { attachments: files.map((a, i) => ({ name: a.name, mime: a.mime, size: a.size, dir: message.id, url: `${baseUrl}/api/v1/tasks/${encodeURIComponent(task.id)}/messages/${encodeURIComponent(message.id)}/attachments/${i}` })) }
                 : {}),
         };
     }
@@ -261,9 +316,11 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
 
     /** The conductor's chain: its own agent and model, then the person's fallbacks (none twice). */
     async function chainFor(task) {
-        const primary = { agent: task.agent || PRIMARY_AGENT, model: task.model || 'opus' };
         let settings = null;
         if (userSettings) { try { settings = await userSettings.get(task.subject); } catch { settings = null; } }
+        const agent = task.agent || (settings && settings.conductor_agent) || PRIMARY_AGENT;
+        const model = task.model != null ? task.model : (agent === PRIMARY_AGENT ? ((settings && settings.conductor_agent === PRIMARY_AGENT && settings.conductor_model) || 'opus') : null);
+        const primary = { agent, model };
         const fallbacks = (settings && settings.conductor_fallbacks) || [];
         const chain = [primary, ...fallbacks.filter((f) => !(f.agent === primary.agent && (f.model || null) === primary.model))];
         return { chain, switchPct: (settings && settings.conductor_switch_pct) || failover.DEFAULT_SWITCH_PCT };
@@ -368,13 +425,13 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
         let over = null;
         try {
             const choice = await choiceFor(task);
-            const pick = choice.pick || { agent: PRIMARY_AGENT, model: task.model || 'opus' };
+            const pick = choice.pick || { agent: task.agent || PRIMARY_AGENT, model: task.model == null ? null : task.model };
             const earlier = await db.many('SELECT * FROM codes_conductor_messages WHERE task_id = $1 AND n < $2 ORDER BY n ASC', [task.id, turn.n]);
             const ran = earlier.filter((m) => m.started_at);
             const previous = ran.length ? agentOf(ran[ran.length - 1]) : null;
             const own = [...ran].reverse().find((m) => agentOf(m) === pick.agent && m.session);
             let resume = own ? own.session : null;
-            if (!resume && pick.agent === PRIMARY_AGENT && !earlier.some((m) => m.agent)) resume = (attempt && attempt.session) || null;
+            if (!resume && pick.agent === (task.agent || PRIMARY_AGENT) && !earlier.some((m) => m.agent)) resume = (attempt && attempt.session) || null;
             let prompt = turn.prompt;
             if (previous && previous !== pick.agent) {
                 const intro = catchUp(ran, pick.agent, previous, choice.note);
@@ -390,8 +447,17 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
         }
         let job;
         try {
+            // Who leads can be an API harness too (DeepSeek, OpenVibe.AI, a local model): that turn is funded like a
+            // coding task, with the person's own key or a run token. A plan CLI needs nothing here.
+            const args = turnArgs(task, turn, attempt, over);
+            let funding = null;
+            try { funding = await tasks.fundTurn({ subject: task.subject, taskId: task.id, attemptId: attempt ? attempt.id : null, agent: args.agent }); } catch (e) {
+                log.warn(`[Codes] conductor ${task.id}: the turn could not be funded (${String(e && e.message).slice(0, 160)})`);
+            }
+            if (funding && funding.env && Object.keys(funding.env).length) args.env = funding.env;
+            if (funding && attempt) await attempts.bind(attempt.id, { run_mode: funding.mode });
             job = await run.submit({
-                subject: task.subject, project: task.project_id, args: turnArgs(task, turn, attempt, over), key: turn.id,
+                subject: task.subject, project: task.project_id, args, key: turn.id,
                 limits: { wall_ms: wallMs, cpu_ms: wallMs, mem_bytes: 4 * 1024 ** 3 }, ttlMs: Math.min(86_400_000, wallMs + 10 * 60_000),
                 // Pinned to the machine the person chose (Codes C9c): the turn resumes a session whose folder and
                 // memory are there, so Run must not place it anywhere else.
@@ -476,9 +542,9 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
                 // resumes it. A machine whose Codes runner is older runs Claude Code whatever was asked; the row then
                 // says so, and keeps the session under the agent that really ran.
                 const ran = ranOf(task.result);
-                const asked = turn.agent || PRIMARY_AGENT;
+                const asked = turn.agent || task.agent || PRIMARY_AGENT;
                 const agent = ran.agent && failover.CONDUCTOR_AGENTS.includes(ran.agent) ? ran.agent : asked;
-                const session = ran.session || (agent === PRIMARY_AGENT && !turn.agent ? (attempt && attempt.session) : null) || null;
+                const session = ran.session || (agent === (task.agent || PRIMARY_AGENT) && !turn.agent ? (attempt && attempt.session) : null) || null;
                 let note = turn.switch_note || null;
                 if (agent !== asked) {
                     note = `${note ? `${note} ` : ''}Your machine ran ${failover.nameOf(agent)} instead of ${failover.nameOf(asked)}: its Codes runner is older than the switch. Update OpenVibe Node on it to let the conductor switch agents.`.slice(0, 1000);
@@ -572,15 +638,22 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
     async function attachment(taskId, messageId, index) {
         const row = await db.maybe('SELECT * FROM codes_conductor_messages WHERE id = $1 AND task_id = $2', [messageId, taskId]);
         if (!row) return null;
-        const files = Array.isArray(row.attachments) ? row.attachments : [];
+        const files = Array.isArray(row.attachments) ? row.attachments : asArray(row.attachments);
         const file = files[Number(index)];
-        if (!file || !file.data) return null;
-        return { name: String(file.name || 'image'), mime: String(file.mime || 'application/octet-stream'), buffer: Buffer.from(String(file.data), 'base64') };
+        if (!file) return null;
+        // A file uploaded through the composer lives in codes_attachments, by its own id (two uploads can finish in
+        // either order); an older message kept its image inline.
+        if (file.id && filesStore) {
+            const got = await filesStore.byId(file.id);
+            if (got) return got;
+        }
+        if (!file.data) return null;
+        return { name: String(file.name || 'file'), mime: String(file.mime || 'application/octet-stream'), buffer: Buffer.from(String(file.data), 'base64') };
     }
 
     return {
-        create, enqueue, message, startNext, onTurnEnd, stop, view, presentMessage, attachment, fragment, turnArgs, projectFor, choiceFor, refreshFleet,
-        SAFETY, MESSAGE_STATES, MAX_MESSAGE, MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES,
+        create, enqueue, message, startNext, onTurnEnd, stop, view, presentMessage, attachment, fragment, turnArgs, projectFor, choiceFor, refreshFleet, leadFor, retarget,
+        SAFETY, MESSAGE_STATES, MAX_MESSAGE, MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, MAX_MESSAGE_BYTES,
     };
 }
 

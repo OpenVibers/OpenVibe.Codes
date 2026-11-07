@@ -1,17 +1,18 @@
 'use strict';
 
 /**
- * The conductor's API (Codes C9b), under /api/v1. A conductor is one long-lived Claude Code session on a machine the
- * person chose; a turn is a message, and each turn resumes the session. The approve MCP tool (bin/mcp.js) and
+ * The conductor's API (Codes C9b), under /api/v1. A conductor is one long-lived agent session on a machine the person
+ * chose (their "Who leads your tasks" choice, Claude Code on Opus by default); a turn is a message, and each turn
+ * resumes the session. The approve MCP tool (bin/mcp.js) and
  * `openvibe-codes mcp` speak these routes with the person's own Network token.
  *
- *   POST /conductor                          create it (folder, machine?, model?, safety?, note?)
+ *   POST /conductor                          create it (folder, machine?, agent?, model?, safety?, note?, attachment_ids?)
  *   GET  /conductor/:id                      the conductor, its one attempt and its turns
- *   POST /conductor/:id/messages             a message: the next turn, queued while one runs
+ *   POST /conductor/:id/messages             a message: the next turn, queued while one runs (attachment_ids?, agent?)
  *   POST /conductor/:id/stop                 stop the running turn and everything queued
  *   POST /conductor/:id/tasks                a sub-task on another harness (never Anthropic: see below)
  *   GET  /tasks/:id/lines?limit=20           the last lines of a task's session (what `codes_task_show` prints)
- *   GET  /tasks/:id/messages/:mid/attachments/:i   one image, for the machine to write as a file
+ *   GET  /tasks/:id/messages/:mid/attachments/:i   one attached file, for the machine to write in the workspace
  *   POST /tasks/:id/approvals                the approve MCP asks the person (tool, input, summary)
  *   GET  /tasks/:id/approvals/:aid?wait=1    the decision, long-polled
  *   GET  /approvals                          the person's waiting approvals, across tasks
@@ -147,9 +148,12 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
         try {
             const made = await conductor.create({
                 subject: req.person.subject, project, folder, machine, pin: pin.device,
-                model: typeof b.model === 'string' && b.model ? b.model : 'opus',
+                // Who leads it: the picker's choice, else the person's "Who leads your tasks" setting.
+                agent: typeof b.agent === 'string' && b.agent ? b.agent : null,
+                ...(typeof b.model === 'string' ? { model: b.model } : {}),
                 safety: typeof b.safety === 'string' && b.safety ? b.safety : 'ask',
                 note: typeof b.note === 'string' ? b.note : null,
+                attachmentIds: Array.isArray(b.attachment_ids) ? b.attachment_ids : [],
             });
             log.info(`[Codes] conductor ${made.task.id} started for ${req.person.subject}`);
             return res.status(201).json(await conductor.view(made.task));
@@ -169,8 +173,19 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
         const row = await ownConductor(req, req.params.id);
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such conductor of yours');
         const b = req.body && typeof req.body === 'object' ? req.body : {};
+        // A per-task leader: the composer's picker ("who") changes this conversation, not the saved setting.
+        const who = typeof b.who === 'string' && b.who !== '' ? require('../data/models').parse(b.who, harnesses, { aiCatalog: !!(config.aiCatalog && config.aiCatalog.enabled) }) : null;
+        if (b.who && !who) return problem(req, res, 422, 'codes.agent_unknown', 'who is one of GET /api/v1/harnesses/models');
         try {
-            const out = await conductor.message(row, { text: b.text, attachments: b.attachments, token: (req.person && req.person.token) || null });
+            const out = await conductor.message(row, {
+                text: b.text, attachments: b.attachments,
+                attachmentIds: Array.isArray(b.attachment_ids) ? b.attachment_ids : [],
+                ...(who && who.agent ? { agent: who.agent } : {}),
+                ...(who && who.agent ? { model: who.model || '' } : {}),
+                ...(!who && typeof b.agent === 'string' && b.agent ? { agent: b.agent } : {}),
+                ...(!who && typeof b.model === 'string' ? { model: b.model } : {}),
+                token: (req.person && req.person.token) || null,
+            });
             return res.status(201).json({
                 message: conductor.presentMessage(out.message),
                 started: !!(out.started && out.started.job),

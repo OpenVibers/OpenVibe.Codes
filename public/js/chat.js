@@ -3,7 +3,9 @@
 // L55 C4): ov-thread.js grows the composer, sends on Enter, filters the rail, opens the panel on a narrow screen, adds
 // Copy and keeps the thread at the bottom; kit-web.js opens the rail on a phone. The page works without either. Here:
 // - a new chat's three ways to start, the ideas rail, the projects picked from the words and the repository search;
-// - the conductor's images go up with the message through the JSON API;
+// - a composer's files go up through the attachments API first (chips with a thumbnail, progress and a ×), then the
+//   message names their ids; without JavaScript the same form posts the files as multipart;
+// - paste and drop add files, as choosing them does;
 // - a running turn streams into the thread (OVThread.tool / toolDone / live), and the page renders the finished turn
 //   when the attempt ends.
 //
@@ -163,33 +165,150 @@
             if ($('.ovt.is-start', app)) text.focus({ preventScroll: true });
         }
         if (form) {
-            const images = $('[data-ch-images]', form);
-            if (images) images.addEventListener('change', () => {
-                const n = (images.files || []).length;
-                images.closest('.ch-pick-file').classList.toggle('has-files', n > 0);
-                say(n ? `${n} image${n === 1 ? '' : 's'} will go with your message` : '');
+            // ── The composer's files: upload before send, with a chip, a thumbnail, a progress bar and a × ──
+            const picker = $('[data-ch-files]', form);
+            const chips = $('[data-ch-files-list]', form);
+            const BLOCKED = /\.(exe|dll|com|bat|cmd|msi|scr|ps1|sh|so|dylib|app|apk|deb|rpm|jar|bin|elf|vbs|wsf|hta)$/i;
+            const MAX_FILES = 10, MAX_FILE = 20 * 1024 * 1024, MAX_TOTAL = 50 * 1024 * 1024;
+            const entries = [];
+            const sizeWords = (n) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / (1024 * 1024)).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`);
+            const attachIcon = picker && picker.closest('label') && picker.closest('label').querySelector('svg');
+            const chipFor = (entry) => {
+                const li = document.createElement('span');
+                li.className = 'ch-chip ch-file';
+                li.setAttribute('role', 'listitem');
+                li.dataset.chFile = entry.file.name;
+                if (/^image\//i.test(entry.file.type)) {
+                    const img = document.createElement('img');
+                    img.width = 24; img.height = 24; img.alt = ''; img.src = entry.thumb;
+                    li.appendChild(img);
+                } else if (attachIcon) {
+                    li.appendChild(attachIcon.cloneNode(true));
+                }
+                const name = document.createElement('span'); name.textContent = entry.file.name; li.appendChild(name);
+                const size = document.createElement('small'); size.textContent = sizeWords(entry.file.size); li.appendChild(size);
+                const bar = document.createElement('progress'); bar.max = 100; bar.value = 0; bar.setAttribute('aria-label', `Uploading ${entry.file.name}`); li.appendChild(bar);
+                const remove = document.createElement('button');
+                remove.type = 'button'; remove.className = 'ch-icon-btn'; remove.title = `Remove ${entry.file.name}`;
+                remove.setAttribute('aria-label', `Remove ${entry.file.name}`); remove.textContent = '×';
+                remove.addEventListener('click', () => {
+                    const i = entries.indexOf(entry);
+                    if (i >= 0) entries.splice(i, 1);
+                    if (entry.xhr) entry.xhr.abort();
+                    if (entry.thumb) URL.revokeObjectURL(entry.thumb);
+                    li.remove();
+                    if (entry.id) fetch(`/api/v1/attachments/${encodeURIComponent(entry.id)}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
+                    say(entries.length ? `${entries.length} file${entries.length === 1 ? '' : 's'} ready to send` : '');
+                });
+                entry.bar = bar; entry.li = li;
+                li.appendChild(remove);
+                if (chips) { chips.hidden = false; chips.appendChild(li); }
+                return li;
+            };
+            const upload = (entry) => {
+                entry.uploading = true;
+                const xhr = entry.xhr = new XMLHttpRequest();
+                xhr.open('POST', '/api/v1/attachments');
+                xhr.withCredentials = true;
+                xhr.upload.onprogress = (e) => { if (e.lengthComputable && entry.bar) entry.bar.value = Math.round((e.loaded / e.total) * 100); };
+                xhr.onload = () => {
+                    entry.uploading = false;
+                    let doc = {};
+                    try { doc = JSON.parse(xhr.responseText || '{}'); } catch { doc = {}; }
+                    if (xhr.status === 201 && doc.attachment && doc.attachment.id) {
+                        entry.id = doc.attachment.id;
+                        if (entry.bar) { entry.bar.value = 100; entry.bar.hidden = true; }
+                        if (entry.li) entry.li.dataset.uploaded = '1';
+                    } else {
+                        if (entry.li) entry.li.classList.add('is-bad');
+                        say(doc.detail || `“${entry.file.name}” could not be attached`, true);
+                    }
+                };
+                xhr.onerror = () => { entry.uploading = false; if (entry.li) entry.li.classList.add('is-bad'); say(`“${entry.file.name}” could not be attached`, true); };
+                xhr.onabort = () => { entry.uploading = false; };
+                const data = new FormData();
+                data.append('file', entry.file, entry.file.name);
+                xhr.send(data);
+            };
+            const addFiles = (list) => {
+                const incoming = Array.from(list || []);
+                if (!incoming.length) return;
+                if (entries.length + incoming.length > MAX_FILES) { say(`A message carries at most ${MAX_FILES} files`, true); return; }
+                let total = entries.reduce((n, e) => n + e.file.size, 0);
+                for (const file of incoming) {
+                    if (BLOCKED.test(file.name)) { say(`“${file.name}” is a program or script, and cannot be attached`, true); continue; }
+                    if (!file.size) { say(`“${file.name}” is empty`, true); continue; }
+                    if (file.size > MAX_FILE) { say(`“${file.name}” is larger than 20 MB`, true); continue; }
+                    if (total + file.size > MAX_TOTAL) { say('The files of one message are larger than 50 MB together', true); break; }
+                    total += file.size;
+                    const entry = { file, id: null, uploading: false, thumb: /^image\//i.test(file.type) ? URL.createObjectURL(file) : null, xhr: null };
+                    entries.push(entry);
+                    chipFor(entry);
+                    upload(entry);
+                }
+                if (entries.length) say(`${entries.length} file${entries.length === 1 ? '' : 's'} ready to send`);
+            };
+            if (picker) {
+                picker.addEventListener('change', () => { addFiles(picker.files); picker.value = ''; });
+            }
+            // Paste an image from the clipboard, or drop files on the composer.
+            if (text) text.addEventListener('paste', (e) => {
+                const files = e.clipboardData && e.clipboardData.files;
+                if (files && files.length) { e.preventDefault(); addFiles(files); }
+            });
+            form.addEventListener('dragover', (e) => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) { e.preventDefault(); form.classList.add('is-dragging'); } });
+            form.addEventListener('dragleave', () => form.classList.remove('is-dragging'));
+            form.addEventListener('drop', (e) => {
+                if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+                e.preventDefault(); form.classList.remove('is-dragging'); addFiles(e.dataTransfer.files);
             });
             form.addEventListener('submit', async (e) => {
                 const submitter = e.submitter;
                 if (submitter && submitter.formAction && submitter.formAction !== form.action) return; // Stop: a plain post
-                const files = images ? Array.from(images.files || []).slice(0, 4) : [];
                 form.classList.add('is-sending');
                 form.querySelectorAll('button').forEach((b) => { b.disabled = b.matches('[data-ovt-send]'); });
-                if (!files.length) { say('Sending…'); return; }       // words alone: the plain form post
+                if (!entries.length) { say('Sending…'); return; }       // words alone: the plain form post
                 e.preventDefault();
-                say(files.length === 1 ? 'Sending the image…' : `Sending ${files.length} images…`);
-                const asData = (file) => new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve({ name: file.name, mime: file.type, data: String(r.result || '') }); r.onerror = () => resolve(null); r.readAsDataURL(file); });
-                try {
-                    const attachments = (await Promise.all(files.map(asData))).filter(Boolean);
-                    const res = await fetch(form.dataset.chApi, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ text: text.value, attachments }) });
-                    const doc = await res.json().catch(() => ({}));
-                    if (!res.ok) throw new Error(doc.detail || `the message was refused (${res.status})`);
-                    location.reload();
-                } catch (err) {
-                    say(String((err && err.message) || 'the message could not be sent'), true);
+                // A file still going up is waited for, not dropped: the message names ids and the server checks them.
+                if (entries.some((x) => x.uploading)) say('Uploading the files…');
+                while (entries.some((x) => x.uploading)) await new Promise((done) => setTimeout(done, 120));
+                const failed = entries.filter((x) => !x.id);
+                if (failed.length) {
+                    say(`${failed.length} file${failed.length === 1 ? '' : 's'} could not be attached`, true);
                     form.classList.remove('is-sending');
                     form.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+                    return;
                 }
+                const ids = entries.map((x) => x.id);
+                if (form.dataset.chApi) {
+                    say(ids.length === 1 ? 'Sending the file…' : `Sending ${ids.length} files…`);
+                    try {
+                        const who = $('[name="who"]', form);
+                        const res = await fetch(form.dataset.chApi, {
+                            method: 'POST', credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                            body: JSON.stringify({ text: text ? text.value : '', attachment_ids: ids, ...(who && who.value ? { who: who.value } : {}) }),
+                        });
+                        const doc = await res.json().catch(() => ({}));
+                        if (!res.ok) throw new Error(doc.detail || `the message was refused (${res.status})`);
+                        location.reload();
+                    } catch (err) {
+                        say(String((err && err.message) || 'the message could not be sent'), true);
+                        form.classList.remove('is-sending');
+                        form.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+                    }
+                    return;
+                }
+                // The files are up: a plain form post names their ids (and sends the words and the pickers as usual).
+                form.enctype = 'application/x-www-form-urlencoded';
+                if (picker) picker.value = '';
+                for (const id of ids) {
+                    const hidden = document.createElement('input');
+                    hidden.type = 'hidden'; hidden.name = 'attachment_ids'; hidden.value = id;
+                    form.appendChild(hidden);
+                }
+                say(ids.length === 1 ? 'Sending the file…' : `Sending ${ids.length} files…`);
+                form.submit();
             });
         }
 

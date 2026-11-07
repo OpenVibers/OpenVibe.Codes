@@ -20,8 +20,11 @@ const { execFile } = require('child_process');
 const { collectProof } = require('../engine/proof');
 
 const JOB_PROTOCOL = '1.0.0';
-/** The agents a conductor's turn may run on: the CLIs that resume a session and start the Codes MCP server. */
-const CONDUCTOR_AGENTS = ['claude-code', 'codex', 'opencode'];   // the job's contract with the Node (stdin, stdout lines, fd 3): unchanged by 1.1's lines
+/** The agents a conductor's turn may run on: every harness Codes offers. */
+// Every harness can lead a conductor; the three that resume a session and take the Codes MCP tools are
+// the failover chain's own (server/domain/conductor-failover.js). The job's contract with the Node (stdin, stdout
+// lines, fd 3) is unchanged by 1.1's lines.
+const CONDUCTOR_AGENTS = ['claude-code', 'claude-other', 'codex', 'opencode', 'command-code', 'minimax-code', 'aider', 'deepseek', 'openvibe-ai', 'openai-compatible'];
 const LINES = '1.1';            // 1.1: lines carry step ids, inputs, results, progress, helpers; the result keeps `log`
 const MAX_PROMPT = 16_000;
 const MAX_PATCH = 180_000;
@@ -148,6 +151,29 @@ function jobEnv(input) {
     return out;
 }
 
+/**
+ * The owner's files, as the job may fetch them: a name that is one file, an https URL on Codes, a MIME hint, and the
+ * message folder they belong under. Ten at most, as a message is; the bytes themselves stay in the server's database.
+ */
+function jobAttachments(list) {
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    for (const f of list.slice(0, 10)) {
+        if (!f || typeof f !== 'object') continue;
+        if (typeof f.url !== 'string' || !/^https?:\/\//.test(f.url) || f.url.length > 2000) continue;
+        const dir = String(f.dir || 'message');
+        out.push({
+            // The server already made the name one safe file; a space is part of a name, not a path separator.
+            name: String(f.name || 'file').replace(/[^A-Za-z0-9._ -]/g, '_').replace(/\s+/g, ' ').trim().replace(/^\.+/, '').slice(0, 120) || 'file',
+            mime: typeof f.mime === 'string' ? f.mime.slice(0, 100) : 'application/octet-stream',
+            ...(Number.isFinite(Number(f.size)) && Number(f.size) > 0 ? { size: Number(f.size) } : {}),
+            url: f.url,
+            dir: /^[A-Za-z0-9._-]{1,80}$/.test(dir) ? dir : 'message',
+        });
+    }
+    return out;
+}
+
 /** The job's input checked: a public https repository (file:// only when OPENVIBE_CODES_ALLOW_FILE_REPO=1, for tests). */
 function parseArgs(raw, env = process.env) {
     let a;
@@ -165,12 +191,7 @@ function parseArgs(raw, env = process.env) {
         const folder = String(a.folder || '').trim();
         if (!folder.startsWith('/') || folder.length > 4096 || /[\0-\x1f\x7f]/.test(folder)) throw new Error('folder must be an absolute path');
         const safety = ['ask', 'project', 'full'].includes(a.safety) ? a.safety : 'ask';
-        const files = Array.isArray(a.attachments) ? a.attachments.slice(0, 4).filter((f) => f && typeof f === 'object'
-            && typeof f.url === 'string' && /^https?:\/\//.test(f.url) && f.url.length <= 2000).map((f) => ({
-            name: String(f.name || 'image').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'image',
-            mime: typeof f.mime === 'string' ? f.mime.slice(0, 100) : 'application/octet-stream',
-            url: f.url,
-        })) : [];
+        const files = jobAttachments(a.attachments);
         const codesUrl = typeof a.codes_url === 'string' && /^https?:\/\//.test(a.codes_url) && a.codes_url.length <= 300 ? a.codes_url.replace(/\/+$/, '') : null;
         const resumeIn = a.resume == null || a.resume === '' ? env.RESUME : a.resume;
         const resume = typeof resumeIn === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(resumeIn) ? resumeIn : null;
@@ -191,6 +212,7 @@ function parseArgs(raw, env = process.env) {
             ...(Object.keys(wanted).length ? { env: wanted } : {}),
         };
     }
+    const attached = jobAttachments(a.attachments);
     let repo = null;
     if (kind === 'code') {
         try { repo = new URL(String(a.repo || '')); } catch { throw new Error('repo must be a repository URL'); }
@@ -221,6 +243,7 @@ function parseArgs(raw, env = process.env) {
     } : null;
     return {
         kind, repo: repo ? repo.toString() : null, ref, prompt, permission, push,
+        ...(attached.length ? { attachments: attached } : {}),
         ...(limits ? { limits } : {}),
         ...(resume ? { resume } : {}),
         ...(Object.keys(wanted).length ? { env: wanted } : {}),
@@ -464,30 +487,50 @@ function opencodeConfig(file, server) {
     return file;
 }
 
-/** The owner's attached images, written as files the turn can read: [{ path, name }] (the ones that arrived). */
-async function writeAttachments(job, { dir, env, fetchImpl, say }) {
+/**
+ * The owner's attached files, written where the agent can read them: `<root>/.openvibe/attachments/<dir>/<name>`. For a
+ * coding task root is the clone (and .openvibe/ is kept out of the diff); for a conductor it is the person's folder.
+ * Returns [{ path, rel, name, mime, size }] for the ones that arrived.
+ */
+async function writeAttachments(job, { dir, env, fetchImpl, say, root = null }) {
     const out = [];
     if (!Array.isArray(job.attachments) || !job.attachments.length) return out;
     const token = codesToken(env);
-    const at = path.join(dir, 'attachments');
-    fs.mkdirSync(at, { recursive: true });
+    const base = root || dir;
+    fs.mkdirSync(path.join(base, '.openvibe', 'attachments'), { recursive: true });
     for (const file of job.attachments) {
         try {
             const response = await fetchImpl(file.url, {
                 headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), Accept: file.mime },
-                signal: AbortSignal.timeout(30_000),
+                signal: AbortSignal.timeout(60_000),
             });
             if (!response.ok) throw new Error(`the server answered ${response.status}`);
             const bytes = Buffer.from(await response.arrayBuffer());
-            if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new Error('the image is empty or too large');
-            const target = path.join(at, file.name);
+            if (!bytes.length || bytes.length > 20 * 1024 * 1024) throw new Error('the file is empty or larger than 20 MB');
+            const folder = /^[A-Za-z0-9._-]{1,80}$/.test(String(file.dir || '')) ? String(file.dir) : 'message';
+            const at = path.join(base, '.openvibe', 'attachments', folder);
+            fs.mkdirSync(at, { recursive: true });
+            // Two uploads with one name stay two files: the second says which copy it is, rather than overwriting.
+            let name = file.name || 'file';
+            let target = path.join(at, name);
+            for (let n = 2; fs.existsSync(target) && n < 100; n++) {
+                const dot = name.lastIndexOf('.');
+                target = path.join(at, dot > 0 ? `${name.slice(0, dot)}-${n}${name.slice(dot)}` : `${name}-${n}`);
+            }
             fs.writeFileSync(target, bytes);
-            out.push({ path: target, name: file.name });
+            out.push({ path: target, rel: `.openvibe/attachments/${folder}/${path.basename(target)}`, name: file.name, mime: file.mime, size: bytes.length });
         } catch (e) {
-            say({ t: 'note', level: 'warning', text: `An attached image could not be read (${file.name}): ${scrub(e.message)}` });
+            say({ t: 'note', level: 'warning', text: `An attached file could not be read (${file.name}): ${scrub(e.message)}` });
         }
     }
     return out;
+}
+
+/** The lines a turn's prompt gets for its files: exactly where they are in the workspace. */
+function attachmentPrompt(files) {
+    const list = Array.isArray(files) ? files.filter((f) => f && f.rel) : [];
+    if (!list.length) return '';
+    return `\n\n---\n## Files the owner attached\n\n${list.map((f) => `- \`${f.rel}\`${f.mime ? ` (${f.mime}${f.size ? `, ${f.size} bytes` : ''})` : ''}`).join('\n')}\n\nThey are files in this workspace; read them.`;
 }
 
 /**
@@ -640,6 +683,13 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                     say({ t: 'note', level: 'warning', text: 'The earlier turns\' changes no longer apply to the branch; this turn starts from the branch as it is.' });
                 }
             }
+            // The owner's files are part of the workspace, not of the change: .openvibe/ stays out of git.
+            const files = await writeAttachments(job, { dir, env, fetchImpl, say, root: work });
+            if (files.length) {
+                try { fs.appendFileSync(path.join(work, '.git', 'info', 'exclude'), '\n.openvibe/\n'); } catch { /* not a git checkout: nothing to keep out */ }
+                job = { ...job, prompt: job.prompt + attachmentPrompt(files) };
+                say({ t: 'step', text: `${files.length} file${files.length === 1 ? '' : 's'} attached` });
+            }
         } else if (job.kind === 'conductor') {
             // The owner's own folder: never a clone, never touched by git. Claude Code opens it, so it loads that
             // project's memory and AGENTS.md.
@@ -650,21 +700,12 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             fs.chmodSync(dir, 0o700);
             result.folder = work;
             say({ t: 'step', text: `Opening ${work}` });
-            const images = await writeAttachments(job, { dir, env, fetchImpl, say });
-            let prompt = job.prompt;
-            if (images.length) {
-                prompt += `\n\n---\n## Images the owner attached\n\n${images.map((i) => `- \`${i.path}\``).join('\n')}\n\nThey are files on this machine; read them.`;
-                say({ t: 'step', text: `${images.length} image${images.length === 1 ? '' : 's'} attached` });
+            const files = await writeAttachments(job, { dir, env, fetchImpl, say, root: work });
+            if (files.length) {
+                job = { ...job, prompt: job.prompt + attachmentPrompt(files) };
+                say({ t: 'step', text: `${files.length} file${files.length === 1 ? '' : 's'} attached` });
             }
-            job = { ...job, prompt };
-            if (job.agent === 'codex' || job.agent === 'opencode') {
-                // A fallback agent (the server's failover): the same Codes tools, started by a launcher script.
-                const server = job.mcp ? conductorMcpLauncher(path.join(dir, 'codes-mcp.sh'), job, env) : null;
-                adapterOptions = server
-                    ? (job.agent === 'codex' ? { mcpServer: server } : { configFile: opencodeConfig(path.join(dir, 'opencode.json'), server) })
-                    : {};
-                say({ t: 'step', text: `This turn runs on ${job.agent === 'codex' ? 'Codex' : 'OpenCode'}` });
-            } else {
+            if (job.agent === 'claude-code' || job.agent === 'claude-other') {
                 adapterOptions = {
                     // "ask" is Claude Code's own default mode, where every risky call goes to the permission prompt tool
                     // (the MCP tool that asks the owner through Codes' approvals inbox).
@@ -672,6 +713,18 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                     ...(job.mcp ? { mcpConfig: conductorMcpConfig(path.join(dir, 'mcp.json'), job, env), allowedTools: ['mcp__codes'] } : {}),
                     ...(job.mcp && job.safety === 'ask' ? { permissionPromptTool: 'mcp__codes__approve' } : {}),
                 };
+            } else if (job.agent === 'codex' || job.agent === 'opencode') {
+                // The same Codes tools, started by a launcher script for an agent that takes no MCP config argument.
+                const server = job.mcp ? conductorMcpLauncher(path.join(dir, 'codes-mcp.sh'), job, env) : null;
+                adapterOptions = server
+                    ? (job.agent === 'codex' ? { mcpServer: server } : { configFile: opencodeConfig(path.join(dir, 'opencode.json'), server) })
+                    : {};
+                say({ t: 'step', text: `This turn runs on ${job.agent === 'codex' ? 'Codex' : 'OpenCode'}` });
+            } else {
+                // Another harness leading the conversation (the setting or a per-task pick): its own CLI/API takes the
+                // turn. It has no Codes MCP tools, so it plans and works in the folder itself.
+                adapterOptions = {};
+                say({ t: 'step', text: `This turn runs on ${job.agent}` });
             }
         } else {
             fs.mkdirSync(work, { recursive: true });
@@ -766,4 +819,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments, agentPrompt };
+module.exports = { CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments, attachmentPrompt, agentPrompt, jobAttachments };

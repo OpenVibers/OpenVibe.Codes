@@ -36,6 +36,7 @@ const { createTasksApi } = require('./http/tasks-api');
 const { createConnectionsApi } = require('./http/connections-api');
 const { createActionsApi } = require('./http/actions-api');
 const { createConductorApi } = require('./http/conductor-api');
+const { createAttachmentsApi } = require('./http/attachments-api');
 const { createRunClient } = require('./domain/run-client');
 const { createRunTasks } = require('./domain/run-tasks');
 const { createConnections } = require('./domain/connections');
@@ -66,6 +67,7 @@ const { createKnowledge } = require('./domain/knowledge');
 const { createFleet } = require('./domain/fleet');
 const { createNotices } = require('./domain/notices');
 const { createUserSettings } = require('./domain/user-settings');
+const { createAttachments } = require('./domain/attachments');
 const { createPlacementOutcomes } = require('./domain/placement-outcomes');
 const { createBenchPriors } = require('./domain/bench-priors');
 const { createPlacementContext } = require('./domain/placement-context');
@@ -123,7 +125,9 @@ async function createApp(opts = {}) {
     // The fleet (C9c): each machine's agents and limit windows, reported with its heartbeat and read from Bot.
     const fleet = createFleet({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log, now: store.now, balance: opts.balance || null });
     // A person's choices (their notification switches) and the notices a task sends once (C9c).
-    const userSettings = createUserSettings({ store });
+    const userSettings = createUserSettings({ store, harnesses });
+    // The files a person attaches to a message (owner 2026-11-07): their own store, linked to a turn when it is sent.
+    const attachments = createAttachments({ store, log });
     const notify = opts.notify || createNotify({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     const notices = createNotices({ store, config, notify, userSettings, log });
     const benchPublisher = createBenchPublisher({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -137,8 +141,8 @@ async function createApp(opts = {}) {
     const sharing = opts.sharing || createSharing({ db: store.db, config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The skills hub (Compute plan §5, E6): versioned skills, rules and MCP servers, shared through the same SDK.
     const skills = opts.skills || createSkills({ store, sharing, log });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
-    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, attachments, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
+    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, attachments, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
     ctx.forgejo = createForgejoClient({ config, log });
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -155,7 +159,7 @@ async function createApp(opts = {}) {
     ctx.approvals = createApprovals({ store, config, log, notify: ctx.notify, userSettings: ctx.userSettings });
     ctx.conductor = createConductor({
         store, config, log, run, attempts, tasks, sessions, approvals: ctx.approvals, notify: ctx.notify,
-        fetchImpl: fetchImpl || globalThis.fetch, fleet, userSettings,
+        fetchImpl: fetchImpl || globalThis.fetch, fleet, userSettings, harnesses, attachments,
     });
     tasks.setConductor(ctx.conductor);
 
@@ -304,7 +308,9 @@ async function createApp(opts = {}) {
     app.use('/api/v1', createApi(ctx));
     app.use('/api/v1', createSkillsApi({ config, skills: ctx.skills, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, fleet: ctx.fleet, actorLimits: ctx.actorLimits, sharing, log }));
-    app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, github: ctx.github, actorLimits: ctx.actorLimits, log }));
+    // The composer's files: upload before send (with progress), or as the multipart form without JavaScript.
+    app.use('/api/v1', createAttachmentsApi({ attachments: ctx.attachments, actorLimits: ctx.actorLimits, config, keys, log }));
+    app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, userSettings: ctx.userSettings, github: ctx.github, actorLimits: ctx.actorLimits, log }));
     // The Dock's agent view (Dock K-D3, Agent Streams S1): the person's own desk stream with a view ticket minted here.
     app.use('/api/v1', createAgentView({ config, sso, actorLimits: ctx.actorLimits, log }));
     // Know K5: the person's own agents read and add workspace knowledge with their token (the ov-know MCP server).
@@ -315,7 +321,8 @@ async function createApp(opts = {}) {
     // The conductor's own routes (Codes C9b): its turns, sub-tasks, and the approvals inbox the MCP tools speak to.
     app.use('/api/v1', createConductorApi({
         config, store, keys, harnesses, tasks, conductor: ctx.conductor, approvals: ctx.approvals,
-        machines: ctx.machines, fleet: ctx.fleet, actorLimits: ctx.actorLimits, log,
+        machines: ctx.machines, fleet: ctx.fleet, userSettings: ctx.userSettings, attachments: ctx.attachments,
+        actorLimits: ctx.actorLimits, log,
     }));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));
 

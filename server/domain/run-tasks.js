@@ -147,7 +147,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -528,9 +528,35 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         return budget.evaluate({ steps: usage.steps || 0, minutes, usd: usage.cost_usd }, limits).hit;
     }
 
-    async function start({ subject, project, args, via = null, key = null, actorRef = null }) {
+    /**
+     * The files a message names (ids from the upload API), checked and still unclaimed. They become the turn's files:
+     * job input names their routes, and the prompt names the path each one will have in the workspace.
+     */
+    async function claimFiles(subject, ids) {
+        return filesStore && Array.isArray(ids) && ids.length ? await filesStore.pending(subject, ids) : [];
+    }
+
+    /** The job's side of a turn's files: an absolute route to fetch, and the message folder to write them under. */
+    function fileArgs(rows, messageId) {
+        const base = String(config.baseUrl || '').replace(/\/+$/, '');
+        return rows.map((r) => ({
+            name: r.name, mime: r.mime, size: Number(r.size), dir: messageId,
+            url: `${base}/api/v1/attachments/${encodeURIComponent(r.id)}`,
+        }));
+    }
+
+    function withFiles(prompt, rows, messageId) {
+        if (!rows.length) return prompt;
+        const section = require('./attachments').promptSection(rows, messageId);
+        const base = String(prompt || '');
+        return `${base.slice(0, Math.max(0, 16000 - section.length))}${section}`;
+    }
+
+    async function start({ subject, project, args, via = null, key = null, actorRef = null, attachmentIds = [], messageId = null }) {
         const id = store.newId('tsk');
         const at = store.now();
+        const claims = await claimFiles(subject, attachmentIds);
+        const turnId = claims.length ? (messageId || store.newId('msg')) : null;
         // A task with no agent named is `auto` (Codes C9c): the router reads the fleet — who is signed in, whose window
         // still has room — and the task is started on the agent it picks. Never a fixed agent, and never an Anthropic one.
         let agent = args.agent || null;
@@ -557,6 +583,11 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                 log.warn(`[Codes] task ${id}: knowledge could not be recalled: ${String((e && e.message) || e).slice(0, 200)}`);
             }
         }
+        // The job gets the files and the lines naming them, after the knowledge recall so it is in the same prompt;
+        // the task row keeps the person's own words, so the page's "The brief" does not repeat the paths.
+        const jobArgs = claims.length
+            ? { ...runArgs, attachments: [...(Array.isArray(runArgs.attachments) ? runArgs.attachments : []), ...fileArgs(claims, turnId)], prompt: withFiles(runArgs.prompt, claims, turnId) }
+            : runArgs;
         const actorRefValue = actorRef && typeof actorRef === 'object' && !Array.isArray(actorRef) ? JSON.stringify(actorRef) : null;
         // Placement A1: the task's kind, its harness, and why the placer put it there. The person's rules, Bench priors
         // and learned counts are read once here; the placement itself is pure. A task whose task kind is review is
@@ -579,6 +610,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $16) RETURNING *`,
             [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, at]);
+            if (claims.length) await filesStore.link(subject, claims, { taskId: id, attemptN: 1, messageId: turnId });
             await taskOutbox.emitTask(inserted, null);
             return inserted;
         });
@@ -607,7 +639,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             // travels with the job's input and the machine's worker hands it to the harness.
             const funding = await attemptEnv({ subject, taskId: id, attemptId: first.attempt.id, agent: agent || null, budget });
             await attemptStore.bind(first.attempt.id, { run_mode: funding.mode });
-            job = await run.submit({ subject, project, args: await withEnv(subject, runArgs, funding.env), key: id });
+            job = await run.submit({ subject, project, args: await withEnv(subject, jobArgs, funding.env), key: id });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             await attemptStore.end(first.attempt.id, { state: 'failed', reason: refusal ? 'refused' : 'error', finished_at: store.iso() });
@@ -862,7 +894,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
      * continue after a crash, a wrap-up, another manual press — that attempt is returned, and no second one is started
      * beside it. Two sessions on one worktree would fight over the same files.
      */
-    async function continueTask(row, { note = null, agent = null, model = null, effort = null } = {}) {
+    async function continueTask(row, { note = null, agent = null, model = null, effort = null, attachmentIds = [], messageId = null } = {}) {
         if (!row || !row.id) return { error: 'no such task' };
         const attempts = await attemptStore.list(row.id);
         const ending = attempts[attempts.length - 1];
@@ -884,6 +916,12 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                 prompt: `${row.prompt}${soFar}${text ? `\n\n---\n## A note from the owner\n\n${text}\n` : ''}`,
                 why: text ? `carried on by the owner: ${text.slice(0, 200)}` : 'carried on by the owner',
             };
+        const claims = await claimFiles(row.subject, attachmentIds);
+        const turnId = claims.length ? (messageId || store.newId('msg')) : null;
+        if (claims.length) {
+            plan.attachments = fileArgs(claims, turnId);
+            plan.prompt = withFiles(plan.prompt, claims, turnId);
+        }
         let attempt = null;
         const before = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [row.id]);
         if (!before) return { error: 'no such task' };
@@ -907,6 +945,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                 task: current, agent: plan.agent, model: plan.model, effort: plan.effort || null, session: null, why: plan.why, kind: plan.kind, state: 'queued', budget: left.left,
             });
             attempt = made.attempt;
+            if (claims.length) await filesStore.link(row.subject, claims, { taskId: row.id, attemptN: Number(attempt.n), messageId: turnId });
             await db.one(`UPDATE run_tasks SET state = 'queued', outcome = NULL, outcome_note = NULL, error = NULL, job_id = NULL, finished_at = NULL, updated_at = $2 WHERE id = $1 RETURNING *`,
                 [row.id, store.now()]);
             return { row: current };
@@ -972,6 +1011,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             ...(plan.basePatch ? { base_patch: plan.basePatch } : {}),
             ...(row.push ? { push: { pull_request: !!row.pull_request } } : {}),
             ...(plan.session ? { resume: plan.session } : {}),
+            ...(plan.attachments && plan.attachments.length ? { attachments: plan.attachments } : {}),
         }));
     }
 
@@ -1016,9 +1056,17 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         });
     }
 
+    /**
+     * The environment one conductor turn runs with: the person's own plan login when the harness has one, else a
+     * short-lived run token for its provider (the same funding a coding task gets). `mode` is kept on the attempt.
+     */
+    async function fundTurn({ subject, taskId, attemptId = null, agent = null }) {
+        return await attemptEnv({ subject, taskId, attemptId, agent, budget: null });
+    }
+
     return {
         start, refresh, applyJob, applyEvent, recordState, afterEnd, continueTask, stopTask, proof: taskProof,
-        latestProject, present, who, attempts: attemptStore, setConductor,
+        latestProject, present, who, attempts: attemptStore, setConductor, fundTurn,
         setForge(f) { forge = f || null; },
     };
 }

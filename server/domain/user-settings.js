@@ -8,12 +8,13 @@
  *
  *   createUserSettings({ store })
  *     get(subject)                 → { default_agent, default_machine, notify_done, notify_needs, safety,
- *                                     steps, minutes, no_cloud, only_free, conductor_fallbacks,
- *                                     conductor_switch_pct }
+ *                                     steps, minutes, no_cloud, only_free, conductor_agent, conductor_model,
+ *                                     conductor_fallbacks, conductor_switch_pct }
  *     save(subject, patch)         → the saved row, in the same shape
  *
- * The conductor's failover (migration 0023): the agents and models it falls back to, in order, and the percentage of a
- * usage window at which it switches (server/domain/conductor-failover.js).
+ * "Who leads your tasks" (owner 2026-11-07, migration 0030): the agent and model a conductor starts on. NULL means
+ * today's choice, Claude Code on Opus. The failover (migration 0023) is the agents and models it falls back to, in
+ * order, and the percentage of a usage window at which it switches (server/domain/conductor-failover.js).
  *
  * Only a usr_ subject is accepted: a service token has no preferences of its own to keep.
  */
@@ -31,6 +32,8 @@ const DEFAULTS = Object.freeze({
     steps: null, minutes: null,
     // Placement A1: the person's rules, both off until they choose them.
     no_cloud: false, only_free: false,
+    // Who leads your tasks: today's choice until the person picks another agent and model.
+    conductor_agent: 'claude-code', conductor_model: 'opus',
     // The conductor's failover: no fallback until the person picks one; it switches at 90% of a window.
     conductor_fallbacks: [], conductor_switch_pct: failover.DEFAULT_SWITCH_PCT,
 });
@@ -58,12 +61,17 @@ function present(row) {
         minutes: row.minutes == null ? null : Number(row.minutes),
         no_cloud: row.no_cloud === true,
         only_free: row.only_free === true,
+        // A row with no agent is today's choice. A row that names another agent with no model uses that agent's own
+        // default (NULL), which is not Opus: only the Claude Code default is Opus.
+        conductor_agent: row.conductor_agent || DEFAULTS.conductor_agent,
+        conductor_model: row.conductor_model != null ? row.conductor_model : (row.conductor_agent && row.conductor_agent !== 'claude-code' ? null : DEFAULTS.conductor_model),
         conductor_fallbacks: failover.storedFallbacks(row.conductor_fallbacks),
         conductor_switch_pct: row.conductor_switch_pct == null ? failover.DEFAULT_SWITCH_PCT : Number(row.conductor_switch_pct),
     };
 }
 
-function createUserSettings({ store }) {
+function createUserSettings({ store, harnesses = null }) {
+    const knownAgent = (id) => !harnesses || (harnesses.list ? harnesses.list().some((a) => a.id === id) : true);
     const db = store.db;
 
     async function get(subject) {
@@ -91,6 +99,19 @@ function createUserSettings({ store }) {
             if (v !== null && !MACHINE.test(v)) throw Object.assign(new Error('the default machine is one of your machines, or empty for Auto'), { status: 422, code: 'settings.machine_unknown' });
             next.default_machine = v;
         }
+        // Who leads your tasks: an agent id and its model; empty means today's choice for the agent, or Claude Opus.
+        if (patch.conductor_agent !== undefined) {
+            const v = patch.conductor_agent === '' || patch.conductor_agent == null ? null : String(patch.conductor_agent);
+            if (v !== null && (!AGENT.test(v) || !knownAgent(v))) throw Object.assign(new Error('the agent that leads your tasks is a harness id Codes offers, or empty for Claude Code'), { status: 422, code: 'settings.conductor_agent_unknown' });
+            next.conductor_agent = v;
+            // Changing only the agent keeps its own default model unless one was sent; never Opus under Codex.
+            if (patch.conductor_model === undefined) next.conductor_model = v === 'claude-code' || v === null ? 'opus' : null;
+        }
+        if (patch.conductor_model !== undefined) {
+            const v = patch.conductor_model === '' || patch.conductor_model == null ? null : String(patch.conductor_model).trim();
+            if (v !== null && !/^[A-Za-z0-9._:/-]{1,100}$/.test(v)) throw Object.assign(new Error('the model that leads your tasks is a model name, or empty for its default'), { status: 422, code: 'settings.conductor_model_invalid' });
+            next.conductor_model = v;
+        }
         if (patch.notify_done !== undefined) next.notify_done = patch.notify_done !== false && patch.notify_done !== '0';
         if (patch.notify_needs !== undefined) next.notify_needs = patch.notify_needs !== false && patch.notify_needs !== '0';
         // Placement A1's rules: a checkbox sends '1' when set, nothing when not.
@@ -114,15 +135,16 @@ function createUserSettings({ store }) {
         if (switchPct !== undefined) next.conductor_switch_pct = switchPct == null ? failover.DEFAULT_SWITCH_PCT : switchPct;
         await db.exec(
             `INSERT INTO codes_user_settings (subject, default_agent, default_machine, notify_done, notify_needs, safety,
-                 steps, minutes, no_cloud, only_free, conductor_fallbacks, conductor_switch_pct, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, now())
+                 steps, minutes, no_cloud, only_free, conductor_agent, conductor_model, conductor_fallbacks, conductor_switch_pct, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, now())
              ON CONFLICT (subject) DO UPDATE SET default_agent = EXCLUDED.default_agent, default_machine = EXCLUDED.default_machine,
                  notify_done = EXCLUDED.notify_done, notify_needs = EXCLUDED.notify_needs, safety = EXCLUDED.safety,
                  steps = EXCLUDED.steps, minutes = EXCLUDED.minutes, no_cloud = EXCLUDED.no_cloud,
-                 only_free = EXCLUDED.only_free, conductor_fallbacks = EXCLUDED.conductor_fallbacks,
+                 only_free = EXCLUDED.only_free, conductor_agent = EXCLUDED.conductor_agent,
+                 conductor_model = EXCLUDED.conductor_model, conductor_fallbacks = EXCLUDED.conductor_fallbacks,
                  conductor_switch_pct = EXCLUDED.conductor_switch_pct, updated_at = now()`,
             [subject, next.default_agent, next.default_machine, next.notify_done, next.notify_needs, next.safety, next.steps, next.minutes, next.no_cloud, next.only_free,
-                JSON.stringify(next.conductor_fallbacks || []), next.conductor_switch_pct],
+                next.conductor_agent || null, next.conductor_model || null, JSON.stringify(next.conductor_fallbacks || []), next.conductor_switch_pct],
         );
         return next;
     }
