@@ -393,7 +393,7 @@ function createChatRoutes(ctx) {
 
     // ── Pages ────────────────────────────────────────────────────────────────────────────────────────────────────
     /** The frame every signed-in page shares: the rail, the conversation (or a page) and, for a task, the panel. */
-    async function frame(req, res, { currentId = null, title, heading = null, state = '', turns = [], empty = '', composerHtml = '', panel = '', streamUrl = '', start = false, page = null, here = '', css = [], scripts = [] }) {
+    async function frame(req, res, { currentId = null, title, heading = null, state = '', turns = [], empty = '', composerHtml = '', panel = '', streamUrl = '', start = false, page = null, here = '', css = [], scripts = [], styles = [], sharedScripts = [] }) {
         const rows = await conversations(req.viewer.subject);
         const waiting = approvals ? await approvals.inbox(req.viewer.subject).catch(() => []) : [];
         const waitingIds = new Set(waiting.map((a) => a.task_id));
@@ -404,7 +404,7 @@ function createChatRoutes(ctx) {
             cls: page != null ? 'is-page' : '',
         });
         const body = `<div class="ch" data-chat${streamUrl ? ` data-ch-stream="${esc(streamUrl)}"` : ''}>${view}</div>`;
-        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css', 'thread.css'], sharedScripts: ['kit-web.js', 'ov-thread.js'], scripts: [...scripts, 'js/chat.js'], body: raw(body) });
+        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css', 'thread.css', ...styles], sharedScripts: ['kit-web.js', 'ov-thread.js', ...sharedScripts], scripts: [...scripts, 'js/chat.js'], body: raw(body) });
     }
 
     /** The panel: who worked on it, and where the work is. */
@@ -446,8 +446,8 @@ function createChatRoutes(ctx) {
         ] });
     }
 
-    ctx.chatShell = (req, res, { title, body, css = [], scripts = [], here = '' }) => frame(req, res, {
-        title, page: body, here, css, scripts,
+    ctx.chatShell = (req, res, { title, body, css = [], scripts = [], styles = [], sharedScripts = [], here = '' }) => frame(req, res, {
+        title, page: body, here, css, scripts, styles, sharedScripts,
     });
 
     /** The person's machines, for the line that says where the work runs: never more than 1.5 s, never fatal. */

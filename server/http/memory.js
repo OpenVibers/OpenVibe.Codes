@@ -75,8 +75,13 @@ const agoOf = (value) => {
 
 const MEMORY_TABS = [
     ['notes', 'Notes'], ['disagree', 'Disagree'], ['suggested', 'Suggested'],
-    ['profile', 'Profile'], ['reads', 'Who read it'], ['import', 'Import'],
+    ['profile', 'Profile'], ['reads', 'Who read it'], ['services', 'Services'],
+    ['shared', 'Shared'], ['import', 'Import'], ['export', 'Export'],
 ];
+
+/** The share sheet and the gate are drawn by openvibe-shared (openvibe-shared 4.123.0); no inline script. */
+const SHARE_ASSETS = { styles: ['ov-share.css'], sharedScripts: ['ov-share.js'], scripts: ['js/memory-import.js'] };
+const SERVICES = ['mem0', 'letta', 'zep'];
 
 /** What the store's refusals say to a person. The words are ours: no note text ever reaches a flash. */
 const PROBLEMS = {
@@ -88,6 +93,18 @@ const PROBLEMS = {
     'memory.unreadable': 'That note could not be read.',
     'memory.unavailable': 'Your memory is not available right now.',
     'memory.signed_out': 'Sign in again to see your memory.',
+    'memory.services_unavailable': 'Memory services are not configured on OpenVibe yet.',
+    'memory.service_not_found': 'That memory service is not connected.',
+    'memory.service_key_required': 'Enter the key the first time.',
+    'memory.service_key_refused': 'The service refused that key. Check it and try again.',
+    'memory.service_unreachable': 'That service could not be reached. Check the address.',
+    'memory.service_rate_limited': 'The service is rate-limiting the key. Try again later.',
+    'memory.service_failed': 'The service did not answer in a way we could read.',
+    'memory.sharing_unavailable': 'Sharing is not configured on OpenVibe yet.',
+    'share.not_found': 'That sharing setting is not there.',
+    'share.exists': 'That store is already shared.',
+    'share.invalid': 'That sharing change was refused.',
+    'share.rate_limited': 'Too many name checks. Try again in a minute.',
     'import.bad_zip': 'That file is not a zip archive we can read.',
     'import.invalid': 'That file is not an export this page reads.',
     'import.expired': 'That preview has expired. Drop the export again.',
@@ -135,12 +152,19 @@ function createMemoryRoutes(ctx, kit) {
     /** The page. One call to the store holds every tab's data; only the open tab is built. */
     async function memoryPage(req, res) {
         const title = 'Memory';
+        const me = viewer(req);
         const head = header(title, 'What your assistants know about you, in one place.');
-        if (!viewer(req)) return page(req, res, title, wrap(head + signIn(req)));
+        if (!me) return page(req, res, title, wrap(head + signIn(req)));
+        // The owner's own store is shared from here. The sheet is openvibe-shared's markup and script; the API is
+        // Codes' proxy to AI (/api/v1/memory-store/:id/share), so the ACL stays where the notes are.
+        const shareButton = /^usr_/.test(String(me || ''))
+            ? `<div class="c4-actions"><button type="button" class="c4-button c4-button-quiet" data-ov-share-sheet data-kind="memory-store" data-id="${esc(me)}" data-title="Your memory">Share</button></div>`
+            : '';
         const asked = String(req.query.tab || '');
         const tab = MEMORY_TABS.some(([id]) => id === asked) ? asked : 'notes';
         const q = String(req.query.q || '').slice(0, 200);
         const scope = String(req.query.scope || '').slice(0, 80);
+        const owner = String(req.query.owner || '').slice(0, 80);
 
         let items = [];
         let problem = null;
@@ -179,6 +203,9 @@ function createMemoryRoutes(ctx, kit) {
         else if (tab === 'suggested') panel = suggestedPanel(byStatus.suggested);
         else if (tab === 'profile') panel = await profilePanel(req, res, scopes, byStatus.active);
         else if (tab === 'reads') panel = await readsPanel(req, res);
+        else if (tab === 'services') panel = await servicesPanel(req, res);
+        else if (tab === 'shared') panel = await sharedPanel(req, res, owner);
+        else if (tab === 'export') panel = exportPanel();
         else if (tab === 'import') {
             let walkthroughs = null;
             let prompt = '';
@@ -192,10 +219,10 @@ function createMemoryRoutes(ctx, kit) {
             panel = importPanel(walkthroughs, prompt);
         }
 
-        const content = head + flash(req)
+        const content = head + shareButton + flash(req)
             + (problem ? note('Your memory could not be read right now. ' + problemWord(problem), 'bad') : '')
             + sourcesPanel(sources) + tabs + panel;
-        return page(req, res, title, wrap(content));
+        return page(req, res, title, wrap(content), SHARE_ASSETS);
     }
 
     /** The Import tab: one walkthrough per cloud assistant, then one paste card that works anywhere. */
@@ -449,6 +476,111 @@ function createMemoryRoutes(ctx, kit) {
             + '<ul class="c4-rows">' + rows + '</ul></section>';
     }
 
+    /* ── Memory M5: services, the shared stores and the portable file ─────────────────────────────────── */
+
+    /** mem0, Letta and Zep: connect (with the person's own key), sync, forget. The key is never shown back. */
+    async function servicesPanel(req, res) {
+        let providers = [];
+        let problem = null;
+        try {
+            const out = await withToken(req, res, (token) => memory.services(token));
+            providers = Array.isArray(out.providers) ? out.providers : [];
+        } catch (e) { problem = e; }
+        if (problem) return '<section class="c4-card c4-empty"><h2>Services</h2><p>' + esc(problemWord(problem)) + '</p></section>';
+        const intro = '<p class="c4-hint">Connect a memory service with your own key. OpenVibe keeps the key sealed on the server, '
+            + 'shows only its last four characters, and reads the service only when you press Sync. The key is never written into a page or a log.</p>';
+        const cards = providers.map((p) => {
+            const connected = !!p.connected;
+            const state = !connected ? 'Not connected' : (p.status === 'failing' ? 'Key needs attention' : p.status === 'ok' ? 'Connected' : 'Saved, not tested');
+            const hint = connected && p.hint ? ' · key ending ' + esc(String(p.hint)) : '';
+            const when = p.last_sync_at ? ' · last sync ' + esc(agoOf(p.last_sync_at)) + ' (' + (Number(p.last_sync_count) || 0) + ' found)' : '';
+            const error = p.last_error ? '<p class="c4-note-meta">' + esc(String(p.last_error).slice(0, 200)) + '</p>' : '';
+            const fields = '<label class="c4-field"><span>Key</span><input type="password" name="key" autocomplete="off" spellcheck="false" '
+                + (connected ? 'placeholder="Leave empty to keep the saved key"' : 'required') + '></label>'
+                + '<label class="c4-field"><span>Address (optional)</span><input type="url" name="base_url" value="' + esc(p.base_url || '') + '" placeholder="' + esc(p.default_base_url || '') + '"></label>'
+                + '<label class="c4-field"><span>Account or agent (optional)</span><input type="text" name="account" value="' + esc(p.account || '') + '"></label>';
+            const connect = '<form method="post" action="/memory/services/' + esc(p.provider) + '">'
+                + '<input type="hidden" name="tab" value="services">' + fields
+                + '<button class="c4-button" type="submit">' + (connected ? 'Save and test again' : 'Save and test') + '</button></form>';
+            const actions = connected
+                ? '<form method="post" action="/memory/services/' + esc(p.provider) + '/sync"><input type="hidden" name="tab" value="services">'
+                    + '<button class="c4-button c4-button-quiet" type="submit">Sync now</button></form>'
+                    + '<form method="post" action="/memory/services/' + esc(p.provider) + '/disconnect"><input type="hidden" name="tab" value="services">'
+                    + '<button class="c4-button c4-button-danger" type="submit">Forget the key</button></form>'
+                : '';
+            return '<section class="c4-card"><div class="c4-card-head"><h2>' + esc(p.name || p.provider) + '</h2>'
+                + '<span class="c4-chip">' + esc(state + hint + when) + '</span></div>'
+                + '<p class="c4-sub">' + esc(p.docs || '') + '</p>' + error + connect + actions + '</section>';
+        }).join('');
+        return '<section class="c4-card c4-empty"><h2>Memory services</h2>' + intro + '</section>' + cards;
+    }
+
+    /** The store another person shared, read-only, and the gate when this reader is not on its list. */
+    async function sharedPanel(req, res, owner) {
+        const me = viewer(req);
+        if (owner) {
+            if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(owner)) {
+                return '<section class="c4-card c4-empty"><h2>Shared</h2><p>That store could not be found.</p></section>';
+            }
+            if (me && owner === me) return '<section class="c4-card c4-empty"><h2>That is your own memory</h2><p>Open Notes to see it. Share it with the Share button at the top.</p></section>';
+            let out = null;
+            let problem = null;
+            try { out = await withToken(req, res, (token) => memory.sharedStore(token, owner)); }
+            catch (e) { problem = e; }
+            if (problem) {
+                if (String(problem.code || '') !== 'memory.not_found') {
+                    return '<section class="c4-card c4-empty"><h2>Shared</h2><p>' + esc(problemWord(problem)) + '</p></section>';
+                }
+                // Specific people, and this reader is not on the list: the audience, never a note. The gate draws
+                // itself from this markup and asks for access through the same proxied share routes.
+                const signInUrl = me ? '' : '/auth/login?next=' + encodeURIComponent('/memory?tab=shared&owner=' + owner);
+                return '<section class="c4-card c4-empty"><h2>This memory is shared with specific people</h2>'
+                    + '<div id="memory-gate" data-ov-share-gate data-kind="memory-store" data-id="' + esc(owner) + '" data-signed-in-as="' + esc(me ? (req.viewer.username || me) : '') + '" data-sign-in-url="' + esc(signInUrl) + '">'
+                    + 'This is shared with specific people. Sign in with the OpenVibe account it was shared with, or ask its owner for access.</div></section>';
+            }
+            const rows = (out.items || []).map((item) => '<li class="c4-row c4-row-flat">'
+                + '<span class="c4-row-dot c4-dot-ok" aria-hidden="true"></span>'
+                + '<span class="c4-row-label">' + esc(item.text) + '</span>'
+                + '<span class="c4-row-note">' + esc(scopeName(item.scope)) + ' · ' + esc(kindName(item.kind)) + ' · from ' + esc(sourceName(item.source)) + '</span></li>').join('');
+            return '<section class="c4-card"><div class="c4-card-head"><h2>A shared memory</h2><span class="c4-chip">read-only</span></div>'
+                + '<p class="c4-sub">Its owner shared it with specific people. You can read it; only the owner can change or share it.</p>'
+                + (rows ? '<ul class="c4-rows">' + rows + '</ul>' : '<p class="c4-hint">This store has no active notes yet.</p>') + '</section>';
+        }
+        let stores = [];
+        let problem = null;
+        try {
+            const out = await withToken(req, res, (token) => memory.shared(token));
+            stores = Array.isArray(out.stores) ? out.stores : [];
+        } catch (e) { problem = e; }
+        if (problem) return '<section class="c4-card c4-empty"><h2>Shared</h2><p>' + esc(problemWord(problem)) + '</p></section>';
+        if (!stores.length) {
+            return '<section class="c4-card c4-empty"><h2>Nothing has been shared with you</h2>'
+                + '<p>When someone shares their memory with you, it appears here as a read-only store.</p></section>';
+        }
+        const rows = stores.map((s) => '<li class="c4-row"><span class="c4-row-dot c4-dot-ok" aria-hidden="true"></span>'
+            + '<span class="c4-row-label"><a href="/memory?tab=shared&amp;owner=' + esc(s.owner) + '">A memory store</a></span>'
+            + '<span class="c4-row-note">' + esc(s.role || 'viewer') + ' · shared ' + esc(agoOf(s.shared_at)) + '</span></li>').join('');
+        return '<section class="c4-card"><div class="c4-card-head"><h2>Shared with me</h2></div>'
+            + '<p class="c4-sub">Read-only stores other people shared with you. They never appear in your own notes.</p>'
+            + '<ul class="c4-rows">' + rows + '</ul></section>';
+    }
+
+    /** The portable file: download it, or paste/choose one to import. One documented JSON format. */
+    function exportPanel() {
+        return '<section class="c4-card"><div class="c4-card-head"><h2>Your portable file</h2></div>'
+            + '<p class="c4-sub">One JSON file with every note, its kind, its scope, its source and its confidence. '
+            + 'It carries no account id, no note id and no conflict link, so you can import it into another OpenVibe account. '
+            + 'The JSON is redacted again when it is imported, and a summary is rebuilt from the notes, never imported.</p>'
+            + '<p><a class="c4-button" href="/memory/export" download>Download memory.json</a></p></section>'
+            + '<section class="c4-card"><div class="c4-card-head"><h2>Import a portable file</h2></div>'
+            + '<p class="c4-sub">Choose the file or paste its JSON. Notes that say the same thing as one you already have are merged, not copied.</p>'
+            + '<form method="post" action="/memory/import"><input type="hidden" name="tab" value="export">'
+            + '<label class="c4-field"><span>File</span><input type="file" id="memory-import-file" accept="application/json,.json"></label>'
+            + '<label class="c4-field"><span>Or paste the JSON</span><textarea id="memory-import-text" name="document" rows="8" spellcheck="false"></textarea></label>'
+            + '<button class="c4-button" type="submit">Import</button></form>'
+            + '<p class="c4-hint">A file over 25 MB is refused. Nothing is kept until you press Import.</p></section>';
+    }
+
     /** The confirmation page: what one source's removal would take, and the one form that does it. */
     async function removePage(req, res) {
         const source = String(req.query.source || '');
@@ -483,6 +615,87 @@ function createMemoryRoutes(ctx, kit) {
 
     router.get('/memory', async (req, res) => memoryPage(req, res));
     router.get('/memory/remove', async (req, res) => removePage(req, res));
+
+    /* ── Memory M5: the memory services, the portable file and team sharing ─────────────────────────── */
+
+    // The portable file is decrypted by the store for the person's own token and streamed as a download. It is never
+    // cached: the body is the person's own notes.
+    router.get('/memory/export', async (req, res) => {
+        if (!viewer(req)) return res.redirect(303, '/auth/login?next=' + encodeURIComponent('/memory?tab=export'));
+        try {
+            const doc = await withToken(req, res, (token) => memory.exportFile(token, String(req.query.scope || '').slice(0, 80) || undefined));
+            res.set('Cache-Control', 'private, no-store');
+            res.set('Content-Disposition', `attachment; filename="openvibe-memory-${new Date().toISOString().slice(0, 10)}.json"`);
+            return res.type('application/json').send(JSON.stringify(doc));
+        } catch (e) {
+            return back(req, res, 'export', '', problemWord(e));
+        }
+    });
+
+    // The same document back in. A form body (pasted, or a file the page's own script copied into the textarea) is
+    // bounded at 25 MB; the store validates the format, redacts every item again and dedupes by its text MAC.
+    router.post('/memory/import', express.urlencoded({ extended: false, limit: '25mb' }), async (req, res) => {
+        if (refuse(req, res)) return;
+        const raw = String((req.body && req.body.document) || '');
+        if (!raw.trim()) return back(req, res, 'export', '', 'Choose a file or paste the JSON first.');
+        let doc;
+        try { doc = JSON.parse(raw); } catch { return back(req, res, 'export', '', 'That is not JSON. Choose the file the Export tab downloaded.'); }
+        try {
+            const out = await withToken(req, res, (token) => memory.importFile(token, doc));
+            return back(req, res, 'export', 'Imported ' + out.imported + (out.imported === 1 ? ' note' : ' notes')
+                + ' (' + out.created + ' new, ' + out.deduped + ' already there' + (out.skipped ? ', ' + out.skipped + ' skipped' : '') + ').');
+        } catch (e) {
+            return back(req, res, 'export', '', problemWord(e));
+        }
+    });
+
+    // Connect (or re-test) one service with the person's own key. The store seals it; the page never sees it again.
+    router.post('/memory/services/:provider', form, async (req, res) => {
+        if (refuse(req, res)) return res;
+        const provider = String(req.params.provider || '');
+        if (!SERVICES.includes(provider)) return back(req, res, 'services', '', 'No such memory service.');
+        const body = req.body || {};
+        try {
+            const out = await withToken(req, res, (token) => memory.connect(token, provider, {
+                ...(String(body.key || '') ? { key: String(body.key) } : {}),
+                ...(String(body.base_url || '').trim() ? { base_url: String(body.base_url).trim() } : {}),
+                ...(String(body.account || '').trim() ? { account: String(body.account).trim() } : {}),
+            }));
+            const service = out.service || {};
+            if (service.status === 'failing') return back(req, res, 'services', '', 'Saved, but the key test failed: ' + String(service.last_error || 'the service refused it').slice(0, 140));
+            return back(req, res, 'services', (service.name || provider) + ' is connected.');
+        } catch (e) {
+            return back(req, res, 'services', '', problemWord(e));
+        }
+    });
+
+    // Read the service and put what it has into the store. The answer is counts, never text.
+    router.post('/memory/services/:provider/sync', form, async (req, res) => {
+        if (refuse(req, res)) return res;
+        const provider = String(req.params.provider || '');
+        if (!SERVICES.includes(provider)) return back(req, res, 'services', '', 'No such memory service.');
+        try {
+            const out = await withToken(req, res, (token) => memory.syncService(token, provider));
+            return back(req, res, 'services', 'Synced ' + out.imported + (out.imported === 1 ? ' note' : ' notes') + ' from ' + provider
+                + (out.deduped ? ' (' + out.deduped + ' already there)' : '') + '.');
+        } catch (e) {
+            return back(req, res, 'services', '', problemWord(e));
+        }
+    });
+
+    // Forget the key: the row, and with it the evidence of the key, is deleted.
+    router.post('/memory/services/:provider/disconnect', form, async (req, res) => {
+        if (refuse(req, res)) return res;
+        const provider = String(req.params.provider || '');
+        if (!SERVICES.includes(provider)) return back(req, res, 'services', '', 'No such memory service.');
+        try {
+            await withToken(req, res, (token) => memory.disconnect(token, provider));
+            return back(req, res, 'services', provider + ' was forgotten.');
+        } catch (e) {
+            return back(req, res, 'services', '', problemWord(e));
+        }
+    });
+
 
     // Memory M3: the export is forwarded untouched to the store, which parses, redacts and holds a sealed draft.
     // The answer is shown once; nothing is kept until the person ticks and submits the preview form.
