@@ -76,6 +76,7 @@ const STREAM = (o = {}) => ({
 
         await check('the live stream comes with the embed, its ticket minted here, and the person\'s own token to Live', async () => {
             live.streams = [STREAM({ state: 'ended', last_frame_url: 'https://openvibe.live/x' }), STREAM()];
+            live.authorizations.length = 0;   // this check's calls only (a token's iat is the second it was minted)
             const token = t.network.userToken(ada);
             const res = await t.get('/api/v1/me/agent-view', { bearer: token });
             assert.strictEqual(res.status, 200, res.text);
