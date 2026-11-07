@@ -96,7 +96,7 @@ function createC4Routes(ctx) {
         const own = Array.isArray(extra.scripts) ? extra.scripts : [];
         if (viewer(req) && ctx.chatShell && !extra.index) {
             const here = '/' + (String(req.path || '/').split('/')[1] || '');
-            return ctx.chatShell(req, res, { title: title || 'Codes', body: String(body), css, scripts: ['js/c4.js', ...own], here });
+            return ctx.chatShell(req, res, { title: title || 'Codes', body: String(body), css, scripts: ['js/c4.js', ...own], styles: extra.styles, sharedScripts: extra.sharedScripts, here });
         }
         const wantsScript = req.path === '/' || /^\/tasks\/tsk_/.test(req.path) || /^\/(agents|machines|conductor)/.test(req.path);
         return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, ...(title ? { title: `${title} · Codes` } : {}), body: raw(body), ...extra, css, scripts: [...(wantsScript ? ['js/c4.js'] : []), ...own] });

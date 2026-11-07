@@ -261,6 +261,9 @@ async function createApp(opts = {}) {
     // GET/PUT .../share, .../share/requests, .../share/transfer[/accept|decline|cancel], GET /api/v1/share/people
     // and /api/v1/shared-with-me. Access is still decided by canView on every read path; the router answers only
     // its own paths.
+    // Memory M5: a memory store's share row lives in OpenVibe.AI, so its sheet is proxied there before the local
+    // share router sees the path. AI authenticates the same person token and decides; Codes only forwards.
+    app.use(require('./http/memory-share').createMemoryShareProxy({ config, sso: ctx.sso, fetchImpl: fetchImpl || globalThis.fetch, log }));
     {
         const shareApi = express.Router();
         shareApi.use(sharing.shares.router({

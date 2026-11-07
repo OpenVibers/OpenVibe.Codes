@@ -171,7 +171,64 @@ function createMemory({ config, fetchImpl = globalThis.fetch, log = console } = 
         return { discarded: Number(doc.discarded) || 0 };
     }
 
-    return { items, patch, remove, removeBySource, profile, reads, split, settle, providers, preview, commit, discard };
+    /* ── Memory M5: the memory services, the portable file and team sharing ─────────────────────────────── */
+
+    /** The three memory services, each with its health and its four-character hint, never a key. */
+    async function services(token) {
+        const doc = await call(token, 'GET', `${MEMORY_PATH}/services`);
+        return { providers: Array.isArray(doc.providers) ? doc.providers : [] };
+    }
+
+    /** Store or replace one service's key. The store seals it before it answers. */
+    async function connect(token, provider, body) {
+        const doc = await call(token, 'PUT', `${MEMORY_PATH}/services/${encodeURIComponent(provider)}`, body || {});
+        return { service: doc.service || null };
+    }
+
+    async function disconnect(token, provider) {
+        const doc = await call(token, 'DELETE', `${MEMORY_PATH}/services/${encodeURIComponent(provider)}`);
+        return { removed: Number(doc.removed) || 0 };
+    }
+
+    /** Read the service and put what it has into the store; the answer is counts only. */
+    async function syncService(token, provider) {
+        const doc = await call(token, 'POST', `${MEMORY_PATH}/services/${encodeURIComponent(provider)}/sync`, {});
+        return {
+            provider: doc.provider || provider, found: Number(doc.found) || 0, imported: Number(doc.imported) || 0,
+            deduped: Number(doc.deduped) || 0, skipped: Number(doc.skipped) || 0,
+        };
+    }
+
+    /** The one portable file, decrypted for the person's own export. */
+    async function exportFile(token, scope) {
+        const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
+        return await call(token, 'GET', `${MEMORY_PATH}/export${query}`);
+    }
+
+    /** Import the same document, under the person's own token. */
+    async function importFile(token, document) {
+        const doc = await call(token, 'POST', `${MEMORY_PATH}/import`, document);
+        return {
+            imported: Number(doc.imported) || 0, created: Number(doc.created) || 0,
+            deduped: Number(doc.deduped) || 0, skipped: Number(doc.skipped) || 0,
+        };
+    }
+
+    /** The stores other people shared with this person: owner ids and access only, never a note. */
+    async function shared(token) {
+        const doc = await call(token, 'GET', `${MEMORY_PATH}/shared`);
+        return { stores: Array.isArray(doc.stores) ? doc.stores : [] };
+    }
+
+    /** One shared store's active notes. A non-member gets memory.not_found from the store, never the notes. */
+    async function sharedStore(token, owner, scope) {
+        const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
+        const doc = await call(token, 'GET', `${MEMORY_PATH}/stores/${encodeURIComponent(owner)}${query}`);
+        return { owner: doc.owner || owner, items: Array.isArray(doc.items) ? doc.items : [], count: Number(doc.count) || 0 };
+    }
+
+    return { items, patch, remove, removeBySource, profile, reads, split, settle, providers, preview, commit, discard,
+        services, connect, disconnect, syncService, exportFile, importFile, shared, sharedStore };
 }
 
 module.exports = { createMemory, MEMORY_PATH };
