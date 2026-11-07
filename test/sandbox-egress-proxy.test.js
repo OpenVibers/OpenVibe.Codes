@@ -182,6 +182,129 @@ const connect = (port, authority) => raw(port, `CONNECT ${authority} HTTP/1.1\r\
         await small.close();
     });
 
+    await check('a download that spends the session\'s budget is cut off, and new requests get 429 egress.budget', async () => {
+        const budget = createEgressProxy({ ...world.egress, budgetDownBytes: 256, budgetUpBytes: 4096 });
+        await budget.listen({ port: 0, host: '127.0.0.1' });
+        const p = budget.address().port;
+        const first = await get(p, 'http://origin.example/big?n=65536');
+        assert.strictEqual(first.status, 200);
+        assert.ok(first.body.length <= 256, `the body stops at the budget (${first.body.length} bytes)`);
+        assert.ok(first.body.length > 0, 'some of it was delivered before the cut-off');
+        const stats = budget.stats();
+        assert.strictEqual(stats.spent, true, 'the session report says the budget is spent');
+        assert.strictEqual(stats.spent_direction, 'down');
+        assert.strictEqual(stats.down_bytes, 256, 'it counted exactly the budget');
+        const second = await get(p, 'http://origin.example/');
+        assert.strictEqual(second.status, 429);
+        assert.match(String(second.headers['x-ov-egress']), /^refused; code=egress\.budget$/);
+        assert.ok(budget.stats().budget_refusals >= 1);
+        // The tunnel counts too, and closes when the budget is spent.
+        const tunnel = createEgressProxy({ ...world.egress, budgetDownBytes: 2, budgetUpBytes: 4096 });
+        await tunnel.listen({ port: 0, host: '127.0.0.1' });
+        const t = await new Promise((resolve) => {
+            const s = net.connect(tunnel.address().port, '127.0.0.1', () => s.write('CONNECT origin.example:443 HTTP/1.1\r\nHost: origin.example:443\r\n\r\n'));
+            let buf = ''; let open = false;
+            s.on('data', (d) => { buf += d; if (!open && buf.includes('\r\n\r\n')) { open = true; buf = ''; s.write('ping'); } });
+            const done = () => resolve({ open, reply: buf });
+            s.on('end', done);
+            s.on('error', done);
+            setTimeout(() => { s.destroy(); done(); }, 3000);
+        });
+        assert.strictEqual(t.open, true, 'the tunnel opened');
+        await new Promise((r) => setTimeout(r, 100));
+        assert.strictEqual(tunnel.stats().spent, true, 'the tunnel spent the down budget and closed');
+        assert.strictEqual(tunnel.stats().spent_direction, 'down');
+        const after = await get(tunnel.address().port, 'http://origin.example/');
+        assert.strictEqual(after.status, 429);
+        assert.match(String(after.headers['x-ov-egress']), /code=egress\.budget/);
+
+        // The other direction counts too: a tunnel whose upload spends the up budget closes as well.
+        const upload = createEgressProxy({ ...world.egress, budgetDownBytes: 4096, budgetUpBytes: 2 });
+        await upload.listen({ port: 0, host: '127.0.0.1' });
+        const u = await new Promise((resolve) => {
+            const s = net.connect(upload.address().port, '127.0.0.1', () => s.write('CONNECT origin.example:443 HTTP/1.1\r\nHost: origin.example:443\r\n\r\n'));
+            let buf = ''; let open = false;
+            s.on('data', (d) => { buf += d; if (!open && buf.includes('\r\n\r\n')) { open = true; s.write('ping'); } });
+            const done = () => resolve({ open });
+            s.on('end', done);
+            s.on('error', done);
+            setTimeout(() => { s.destroy(); done(); }, 3000);
+        });
+        assert.strictEqual(u.open, true, 'the tunnel opened');
+        await new Promise((r) => setTimeout(r, 100));
+        assert.strictEqual(upload.stats().spent, true);
+        assert.strictEqual(upload.stats().spent_direction, 'up', 'the up budget is the one that went');
+
+        // Another session has its own budget: the same download there is not affected.
+        const other = createEgressProxy({ ...world.egress, budgetDownBytes: 256, budgetUpBytes: 4096 });
+        await other.listen({ port: 0, host: '127.0.0.1' });
+        const ok = await get(other.address().port, 'http://origin.example/');
+        assert.strictEqual(ok.status, 200);
+        assert.strictEqual(ok.body, 'origin-ok');
+        assert.strictEqual(other.stats().spent, false, 'a fresh session has its own budget');
+        for (const s of [budget, tunnel, upload, other]) await s.close();
+    });
+
+    await check('a session holds at most the per-host connection cap', async () => {
+        const capped = createEgressProxy({ ...world.egress, maxConnectionsPerHost: 2 });
+        await capped.listen({ port: 0, host: '127.0.0.1' });
+        const p = capped.address().port;
+        const held = [];
+        for (let i = 0; i < 2; i++) {
+            await new Promise((resolve, reject) => {
+                const s = net.connect(p, '127.0.0.1', () => s.write('CONNECT origin.example:443 HTTP/1.1\r\nHost: origin.example:443\r\n\r\n'));
+                let buf = '';
+                s.on('data', (d) => { buf += d; if (buf.includes('\r\n\r\n')) resolve(s); });
+                s.on('error', reject);
+                held.push(s);
+                setTimeout(() => reject(new Error('the tunnel did not open')), 3000);
+            });
+        }
+        const third = await get(p, 'http://origin.example/');
+        assert.strictEqual(third.status, 429);
+        assert.match(String(third.headers['x-ov-egress']), /code=egress\.connections/);
+        assert.ok(capped.stats().connection_refusals >= 1);
+        for (const s of held) s.destroy();
+        await capped.close();
+    });
+
+    await check('a flood to one host is rate-limited, another host is not, and another session is unaffected', async () => {
+        const limited = createEgressProxy({
+            ...world.egress, hostRequests: { rate: 2, burst: 3 }, sessionRequests: { rate: 50, burst: 50 },
+        });
+        await limited.listen({ port: 0, host: '127.0.0.1' });
+        const p = limited.address().port;
+        const statuses = [];
+        for (let i = 0; i < 6; i++) statuses.push((await get(p, 'http://origin.example/')).status);
+        assert.deepStrictEqual(statuses.slice(0, 3), [200, 200, 200], 'the burst gets through');
+        assert.ok(statuses.slice(3).every((s) => s === 429), `the flood is refused (${statuses.join(',')})`);
+        const denied = await get(p, 'http://origin.example/');
+        assert.match(String(denied.headers['x-ov-egress']), /code=egress\.rate/);
+        // The per-host bucket is the host's: a different destination still has its own.
+        assert.strictEqual((await get(p, 'http://alt.example/')).status, 200);
+        assert.ok(limited.stats().rate_refusals >= 1);
+        // A second session starts with its own buckets.
+        const fresh = createEgressProxy({ ...world.egress, hostRequests: { rate: 2, burst: 3 } });
+        await fresh.listen({ port: 0, host: '127.0.0.1' });
+        assert.strictEqual((await get(fresh.address().port, 'http://origin.example/')).status, 200);
+        await limited.close();
+        await fresh.close();
+    });
+
+    await check('the per-session request rate is shared by the session\'s destinations', async () => {
+        const limited = createEgressProxy({
+            ...world.egress, hostRequests: { rate: 100, burst: 100 }, sessionRequests: { rate: 1, burst: 2 },
+        });
+        await limited.listen({ port: 0, host: '127.0.0.1' });
+        const p = limited.address().port;
+        assert.strictEqual((await get(p, 'http://origin.example/')).status, 200);
+        assert.strictEqual((await get(p, 'http://alt.example/')).status, 200);
+        const third = await get(p, 'http://origin.example/');
+        assert.strictEqual(third.status, 429);
+        assert.match(String(third.headers['x-ov-egress']), /code=egress\.rate/);
+        await limited.close();
+    });
+
     await proxy.close();
     await world.close();
     console.log(failures ? `\n${failures} failed` : '\nall passed');

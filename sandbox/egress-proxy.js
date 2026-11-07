@@ -19,13 +19,27 @@
  * port, address, allowed or the refusal's code — never a path, a header or a body) goes to onDecision for the
  * owner's log.
  *
- *   const proxy = createEgressProxy({ lookup, dial, hostAddresses, ports, maxConnections, onDecision });
+ * A session has a budget and limits of its own (design §1; the owner sets the bytes through CODES_SANDBOX_EGRESS_MB_*):
+ *
+ *   - bytes: 500 MB down and 100 MB up by default. Every response body and tunnel counts both ways; an open tunnel
+ *     is closed as soon as the budget is spent, and a download is cut off at the byte that spends it. New requests
+ *     after that are 429 with `code=egress.budget`, and the session's report (stats()) says it is spent;
+ *   - requests: a token bucket per destination host (10/s, burst 30) and one for the session (50/s, burst 50). A
+ *     request over either is 429 `egress.rate` without a socket;
+ *   - connections: at most 8 open at once to one destination host (a CONNECT tunnel or an HTTP request in flight).
+ *     One more is 429 `egress.connections`.
+ *
+ * The counters are per proxy, and a proxy is one sandbox session, so one session can never spend another's budget.
+ *
+ *   const proxy = createEgressProxy({ lookup, dial, hostAddresses, ports, maxConnections,
+ *       budgetDownBytes, budgetUpBytes, hostRequests, sessionRequests, maxConnectionsPerHost, now, onDecision });
  *   await proxy.listen('/run/…/net/egress.sock') or proxy.listen({ port: 0, host: '127.0.0.1' })   (tests)
  *   await proxy.check(host, port) → { ok, host, port, address, family } | { ok: false, code, reason }
+ *   proxy.stats() → what this session has spent, its limits and the refusals it made
  *   proxy.address(), await proxy.close()
  *
  * lookup (dns.lookup-shaped) and dial ({ host: address, port } → net.Socket) are injectable for the tests; the worker
- * uses the system resolver and net.connect.
+ * uses the system resolver and net.connect. now() is the clock for the token buckets (tests).
  */
 const dns = require('dns');
 const fs = require('fs');
@@ -47,16 +61,80 @@ function defaultHostAddresses() {
 
 const defaultDial = ({ host, port }) => net.connect({ host, port });
 
+const DEFAULT_BUDGET_DOWN = 500 * 1024 * 1024;
+const DEFAULT_BUDGET_UP = 100 * 1024 * 1024;
+const DEFAULT_HOST_REQUESTS = Object.freeze({ rate: 10, burst: 30 });
+const DEFAULT_SESSION_REQUESTS = Object.freeze({ rate: 50, burst: 50 });
+const DEFAULT_MAX_PER_HOST = 8;
+
 function createEgressProxy({
     lookup = dns.lookup, dial = defaultDial, hostAddresses = defaultHostAddresses, ports = PORTS,
     maxConnections = 64, connectTimeoutMs = 10_000, idleMs = 120_000, lookupTimeoutMs = 5_000,
+    budgetDownBytes = DEFAULT_BUDGET_DOWN, budgetUpBytes = DEFAULT_BUDGET_UP,
+    hostRequests = DEFAULT_HOST_REQUESTS, sessionRequests = DEFAULT_SESSION_REQUESTS,
+    maxConnectionsPerHost = DEFAULT_MAX_PER_HOST, now = Date.now,
     onDecision = () => {}, log = console,
 } = {}) {
     const allowedPorts = new Set(ports.map(Number));
     const sockets = new Set();
     let server = null;
+    const clock = typeof now === 'function' ? now : Date.now;
+    // A non-positive budget or rate means "no limit" for that knob, never zero (a 0-byte budget would brick the
+    // session, and an env var left empty must not do that).
+    const limitOf = (v, def) => (Number(v) > 0 ? Number(v) : Number(def) > 0 ? Number(def) : Infinity);
+    const limits = { down: limitOf(budgetDownBytes, DEFAULT_BUDGET_DOWN), up: limitOf(budgetUpBytes, DEFAULT_BUDGET_UP) };
+    const hostRate = { rate: Number(hostRequests.rate) > 0 ? Number(hostRequests.rate) : 0, burst: Math.max(1, Number(hostRequests.burst) || DEFAULT_HOST_REQUESTS.burst) };
+    const sessionRate = { rate: Number(sessionRequests.rate) > 0 ? Number(sessionRequests.rate) : 0, burst: Math.max(1, Number(sessionRequests.burst) || DEFAULT_SESSION_REQUESTS.burst) };
+    const perHost = Number(maxConnectionsPerHost) > 0 ? Number(maxConnectionsPerHost) : Infinity;
+
+    const bytes = { down: 0, up: 0 };
+    let spent = false;
+    let spentAt = null;
+    let spentDirection = null;
+    const refusals = { budget: 0, rate: 0, connections: 0 };
+    const hosts = new Map();   // host → { tokens, last, active }
+    const sessionBucket = { tokens: sessionRate.burst, last: clock() };
 
     const refuse = (host, port, code, reason) => ({ ok: false, host, port, code, reason });
+
+    /** A token bucket: burst tokens, refilled at rate per second. No rate = unlimited. */
+    function take(bucket, cfg) {
+        if (!(cfg.rate > 0)) return true;
+        const t = Number(clock()) || Date.now();
+        bucket.tokens = Math.min(cfg.burst, bucket.tokens + Math.max(0, t - bucket.last) / 1000 * cfg.rate);
+        bucket.last = t;
+        if (bucket.tokens < 1) return false;
+        bucket.tokens -= 1;
+        return true;
+    }
+
+    function hostState(host) {
+        let h = hosts.get(host);
+        if (!h) { h = { tokens: hostRate.burst, last: clock(), active: 0 }; hosts.set(host, h); }
+        return h;
+    }
+
+    /** Count bytes both ways; at the byte that spends the budget the transfer is marked and the sockets it is on close. */
+    function account(direction, n, host, port, method) {
+        if (spent || !(n > 0)) return spent ? 0 : n;
+        const left = limits[direction] - bytes[direction];
+        const taken = Math.min(n, Number.isFinite(left) ? Math.max(0, left) : n);
+        bytes[direction] += taken;
+        if (taken < n) {
+            spent = true;
+            spentAt = new Date().toISOString();
+            spentDirection = direction;
+            report(method || 'TRANSFER', { host, port, code: 'egress.budget', reason: `the session's ${direction} budget is spent` });
+        }
+        return taken;
+    }
+
+    function spentRefusal(host, port, method) {
+        refusals.budget++;
+        const d = refuse(host, port, 'egress.budget', "the session's egress budget is spent");
+        report(method, d);
+        return d;
+    }
 
     function resolveAll(host) {
         return new Promise((resolve) => {
@@ -112,8 +190,17 @@ function createEgressProxy({
         res.end(`${text}\n`);
     }
 
+    /** The session's own budget is checked first: once it is spent every new request says so, whatever it asks for. */
+    function budgetDenied(host, port, method) {
+        return spentRefusal(host, port, method);
+    }
+
     async function onRequest(req, res) {
         if (req.socket.ovRefused) return;
+        if (spent) {
+            const shared = budgetDenied(null, null, req.method);
+            return deny(res, 429, shared.code, "The session's egress budget is spent");
+        }
         let url;
         try { url = new URL(req.url); } catch { return deny(res, 400, 'egress.bad_request', 'This is a forward proxy: send an absolute http:// URL, or CONNECT for https'); }
         if (url.protocol === 'https:') return deny(res, 400, 'egress.use_connect', 'Use CONNECT for https');
@@ -122,6 +209,24 @@ function createEgressProxy({
         const d = await check(url.hostname, url.port ? Number(url.port) : 80);
         report(req.method, d);
         if (!d.ok) return deny(res, 403, d.code, `Refused: ${d.reason}`);
+        if (spent) {
+            const shared = budgetDenied(d.host, d.port, req.method);
+            return deny(res, 429, shared.code, "The session's egress budget is spent");
+        }
+        const h = hostState(d.host);
+        if (!take(sessionBucket, sessionRate) || !take(h, hostRate)) {
+            refusals.rate++;
+            const limited = refuse(d.host, d.port, 'egress.rate', 'this session is sending requests too fast');
+            report(req.method, limited);
+            return deny(res, 429, limited.code, 'Too many requests: slow down');
+        }
+        if (h.active >= perHost) {
+            refusals.connections++;
+            const busy = refuse(d.host, d.port, 'egress.connections', `this session has ${h.active} connections open to ${d.host}`);
+            report(req.method, busy);
+            return deny(res, 429, busy.code, `Too many connections to ${d.host}: one at a time, please`);
+        }
+        h.active++;
 
         const headers = {};
         for (let i = 0; i < req.rawHeaders.length; i += 2) {
@@ -137,37 +242,90 @@ function createEgressProxy({
             host: d.address, port: d.port, method: req.method, path: url.pathname + url.search, headers, timeout: connectTimeoutMs,
             createConnection: () => dial({ host: d.address, port: d.port }),
         });
+        let released = false;
+        const release = () => { if (!released) { released = true; h.active = Math.max(0, h.active - 1); } };
+        upstream.on('close', release);
         upstream.on('response', (up) => {
             const out = [];
             for (let i = 0; i < up.rawHeaders.length; i += 2) if (!HOP.has(up.rawHeaders[i].toLowerCase())) out.push(up.rawHeaders[i], up.rawHeaders[i + 1]);
             res.writeHead(up.statusCode, up.statusMessage, out);
-            up.pipe(res);
+            // The body is counted as it arrives: a download that spends the budget is cut off at that byte, and the
+            // client sees the response end early (the next request gets the 429).
+            up.on('data', (chunk) => {
+                if (res.destroyed) return;
+                const n = account('down', chunk.length, d.host, d.port, req.method);
+                if (n > 0) {
+                    const body = n === chunk.length ? chunk : chunk.subarray(0, n);
+                    if (!res.write(body)) { up.pause(); res.once('drain', () => up.resume()); }
+                }
+                if (n < chunk.length) { up.destroy(); res.end(); }
+            });
+            up.on('end', () => { if (!res.destroyed && !res.writableEnded) res.end(); });
+            up.on('error', () => { if (!res.headersSent) deny(res, 502, 'egress.upstream', 'The site did not answer'); else res.destroy(); });
+        });
+        req.on('data', (chunk) => {
+            if (account('up', chunk.length, d.host, d.port, req.method) < chunk.length) {
+                req.destroy();
+                upstream.destroy();
+                if (!res.headersSent) deny(res, 429, 'egress.budget', "The session's egress budget is spent");
+            }
         });
         upstream.on('timeout', () => upstream.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })));
-        upstream.on('error', () => deny(res, 502, 'egress.upstream', 'The site did not answer'));
+        upstream.on('error', () => { release(); deny(res, 502, 'egress.upstream', 'The site did not answer'); });
         req.pipe(upstream);
     }
 
     async function onConnect(req, socket, head) {
         socket.on('error', () => {});
         if (socket.ovRefused) return;
+        if (spent) {
+            const shared = budgetDenied(null, null, 'CONNECT');
+            return socket.end(refusalHead(429, shared.code, "The session's egress budget is spent"));
+        }
         const m = /^\[([0-9a-fA-F:.]+)\]:(\d{1,5})$/.exec(req.url) || /^([^\s:[\]/@]+):(\d{1,5})$/.exec(req.url);
         if (!m) return socket.end(refusalHead(400, 'egress.bad_request', 'CONNECT needs host:port'));
         const d = await check(m[1], Number(m[2]));
         report('CONNECT', d);
         if (!d.ok) return socket.end(refusalHead(403, d.code, `Refused: ${d.reason}`));
+        if (spent) {
+            const shared = budgetDenied(d.host, d.port, 'CONNECT');
+            return socket.end(refusalHead(429, shared.code, "The session's egress budget is spent"));
+        }
+        const h = hostState(d.host);
+        if (!take(sessionBucket, sessionRate) || !take(h, hostRate)) {
+            refusals.rate++;
+            const limited = refuse(d.host, d.port, 'egress.rate', 'this session is sending requests too fast');
+            report('CONNECT', limited);
+            return socket.end(refusalHead(429, limited.code, 'Too many requests: slow down'));
+        }
+        if (h.active >= perHost) {
+            refusals.connections++;
+            const busy = refuse(d.host, d.port, 'egress.connections', `this session has ${h.active} connections open to ${d.host}`);
+            report('CONNECT', busy);
+            return socket.end(refusalHead(429, busy.code, `Too many connections to ${d.host}: one at a time, please`));
+        }
+        h.active++;
         const up = dial({ host: d.address, port: d.port });
+        let released = false;
+        const release = () => { if (!released) { released = true; h.active = Math.max(0, h.active - 1); } };
         const timer = setTimeout(() => up.destroy(), connectTimeoutMs);
+        const cut = (direction) => (chunk) => {
+            const n = account(direction, chunk.length, d.host, d.port, 'CONNECT');
+            if (n < chunk.length) { up.destroy(); socket.destroy(); }
+        };
         up.once('connect', () => {
             clearTimeout(timer);
             socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
             if (head && head.length) up.write(head);
+            // Both directions count: the tunnel closes the moment either budget is spent.
+            up.on('data', cut('down'));
+            socket.on('data', cut('up'));
             up.pipe(socket);
             socket.pipe(up);
         });
         up.on('error', () => { clearTimeout(timer); if (!socket.destroyed) socket.end(refusalHead(502, 'egress.upstream', 'The site did not answer')); });
-        socket.on('close', () => up.destroy());
-        up.on('close', () => socket.destroy());
+        up.on('close', () => { clearTimeout(timer); release(); socket.destroy(); });
+        socket.on('close', () => { release(); up.destroy(); });
     }
 
     function onConnection(sock) {
@@ -207,6 +365,16 @@ function createEgressProxy({
         },
         address: () => server && server.address(),
         connections: () => sockets.size,
+        /** What this session has spent and the limits it ran under (the worker's session report carries this). */
+        stats: () => ({
+            down_bytes: bytes.down, up_bytes: bytes.up,
+            down_limit_bytes: Number.isFinite(limits.down) ? limits.down : null,
+            up_limit_bytes: Number.isFinite(limits.up) ? limits.up : null,
+            spent, spent_at: spentAt, spent_direction: spentDirection,
+            budget_refusals: refusals.budget, rate_refusals: refusals.rate, connection_refusals: refusals.connections,
+            host_requests_per_second: hostRate.rate || null, session_requests_per_second: sessionRate.rate || null,
+            max_connections_per_host: Number.isFinite(perHost) ? perHost : null,
+        }),
         async close() {
             if (!server) return;
             for (const s of sockets) s.destroy();
@@ -216,4 +384,7 @@ function createEgressProxy({
     };
 }
 
-module.exports = { createEgressProxy, PORTS, defaultHostAddresses };
+module.exports = {
+    createEgressProxy, PORTS, defaultHostAddresses,
+    DEFAULT_BUDGET_DOWN, DEFAULT_BUDGET_UP, DEFAULT_HOST_REQUESTS, DEFAULT_SESSION_REQUESTS, DEFAULT_MAX_PER_HOST,
+};
