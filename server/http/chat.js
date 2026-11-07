@@ -483,7 +483,8 @@ function createChatRoutes(ctx) {
             machinesFor(req),
         ]);
         const asked = String(req.query.repo || '');
-        const repo = asked || (repos[0] && repos[0].url) || '';
+        // A repository shows by its name (owner/name), not a cut-off URL; the server reads either.
+        const repo = asked || (repos[0] && (repos[0].full_name || repos[0].url)) || '';
         const mode = start.MODES.includes(req.query.mode) ? req.query.mode : asked ? 'code' : repos.length ? 'code' : 'new';
         const kind = start.KINDS[req.query.kind] ? req.query.kind : 'website';
         const chosenProject = start.project(req.query.project) ? String(req.query.project) : 'auto';
@@ -491,12 +492,14 @@ function createChatRoutes(ctx) {
         const name = String(req.viewer.displayName || req.viewer.username || '').split(' ')[0];
 
         // The three ways to start: radio cards above the composer (they belong to its form by id).
+        // One switch (the owner, 11-07: the three tall cards "rework these"): a short name each; what it means is the line
+        // under the composer, which changes with the choice.
         const MODE_CARDS = [
-            ['new', 'spark', 'Something new', 'A website, game or app. OpenVibe AI builds it online: nothing to install.'],
-            ['openvibe', 'ov', 'An OpenVibe site', `Improve Live, Chat, Games or any of ${start.PROJECTS.length} projects.`],
-            ['code', 'repo', 'Your code', 'Any Git repository, private ones too. Agents work on your computer.'],
+            ['new', 'spark', 'New project', 'A website, game or app, built online: nothing to install'],
+            ['openvibe', 'ov', 'OpenVibe site', `Improve Live, Chat, Games or any of ${start.PROJECTS.length} OpenVibe projects`],
+            ['code', 'repo', 'My code', 'Any Git repository, private ones too; agents work on your computer'],
         ];
-        const modes = `<fieldset class="ch-modes"><legend class="ch-sr">What are you making?</legend>${MODE_CARDS.map(([v, icon, title, line]) => `<label class="ch-mode"><input type="radio" name="mode" value="${v}" form="ch-start"${mode === v ? ' checked' : ''} data-ch-mode><span class="ch-mode-i">${ico(icon)}</span><b>${esc(title)}</b><small>${esc(line)}</small></label>`).join('')}</fieldset>`;
+        const modes = `<div class="ch-modes" role="radiogroup" aria-label="What are you making?">${MODE_CARDS.map(([v, icon, title, line]) => `<label class="ch-mode" title="${esc(line)}"><input type="radio" name="mode" value="${v}" form="ch-start"${mode === v ? ' checked' : ''} data-ch-mode><span class="ch-mode-i">${ico(icon)}</span><b>${esc(title)}</b></label>`).join('')}</div>`;
 
         // The pickers: each shows for the way it belongs to (CSS reads the checked card).
         const kindPick = `<label class="ch-pick ch-for-new" title="What it is"><span class="ch-sr">What it is</span>${ico('web')}<select name="kind" data-ch-kind data-ov-select="bare" data-ov-title="What it is">${Object.entries(start.KINDS).map(([v, k]) => `<option value="${v}"${kind === v ? ' selected' : ''}>${esc(k.label)}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
@@ -510,7 +513,7 @@ function createChatRoutes(ctx) {
         const newRepo = `<a class="ch-chip ch-chip-new" href="/git">${ico('new')}New on OpenVibe Git</a>`;
         const recent = `<div class="ch-recent ch-for-code" role="group" aria-label="Your repositories">${newRepo}${repos.length > 1 ? repos.map((x) => `<button class="ch-chip" type="button" data-ch-saved-repo="${esc(x.url)}">${ico('repo')}${esc(x.full_name)}</button>`).join('') : ''}</div>`;
         const picked = `<p class="ch-picked ch-for-openvibe" data-ch-picked data-ch-match-url="/chat/match" aria-live="polite">${ico('ov')}<span data-ch-picked-text>Say what you want changed and which site, in your own words: Codes works out which projects to change.</span></p>`;
-        const where = `${recent}${picked}<p class="ch-where"><span class="ch-for-new">${ico('web')}<span>Built on OpenVibe’s servers at <b>openvibe.space</b> <span class="ch-where-tail">and you get a live link; you check it before anything is built</span></span></span><span class="ch-for-agents">${whereAgents(mine)}</span></p>`;
+        const where = `${recent}${picked}<p class="ch-where"><span class="ch-for-new">${ico('web')}<span>Built online at <b>openvibe.space</b><span class="ch-where-tail">: you see it before it is built</span></span></span><span class="ch-for-agents">${whereAgents(mine)}</span></p>`;
 
         // The ideas rail: it drifts sideways, stops under a pointer or the keyboard, and has its own pause. A press fills
         // the box (and picks the way it belongs to), ready to be changed. The second copy is only there for the loop.
@@ -522,11 +525,15 @@ function createChatRoutes(ctx) {
 
         // Not set up yet: one line to the guided setup, saying how far along the person is (database reads only).
         const progress = ctx.setupProgress ? await ctx.setupProgress(req).catch(() => null) : null;
-        const nudge = progress ? `<a class="ch-setup-nudge" href="/setup"><span class="ch-setup-nudge-bar" aria-hidden="true"><span style="width:${Math.round((progress.done / progress.of) * 100)}%"></span></span><span><b>Finish setting up</b> · ${progress.done} of ${progress.of} done · next: ${esc(progress.next)}</span>${ico('chevron', 'ch-setup-nudge-go')}</a>` : '';
-        const hello = `<div class="ch-hello"><span class="ov-mark" data-size="56" aria-hidden="true"></span><h1>${name ? `What should we build, ${esc(name)}?` : 'What should we build?'}</h1><p>Say it the way you would to a friend. Pick what it is, and Codes sends it to the right place.</p>${nudge}${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
+        // Setup, under the composer (the owner, 11-07: the centred bar that wrapped mid-phrase was "ugly"): a ring with the
+        // count, what it is, and the next step on its own line.
+        const pct = progress ? Math.round((progress.done / Math.max(1, progress.of)) * 100) : 0;
+        const nudge = progress ? `<a class="ch-setup-nudge" href="/setup"><span class="ch-setup-ring" style="--p:${pct}" aria-hidden="true"><b>${progress.done}/${progress.of}</b></span><span class="ch-setup-text"><b>Finish setting up Codes</b><small>Next: ${esc(progress.next)}</small></span>${ico('chevron', 'ch-setup-nudge-go')}</a>` : '';
+        // The greeting is one short line: the composer, the page's one action, stays on the first screen of a phone.
+        const hello = `<div class="ch-hello"><span class="ov-mark" data-size="40" aria-hidden="true"></span><h1>${name ? `What should we build, ${esc(name)}?` : 'What should we build?'}</h1><p>Say it the way you would to a friend.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
         return frame(req, res, {
             title: 'New chat', heading: 'New chat', start: true, empty: hello,
-            composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'Describe the change, question or fix', pickers, where }) + ideas,
+            composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'What should change?', pickers, where }) + nudge + ideas,
         });
     });
 

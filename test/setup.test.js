@@ -47,7 +47,7 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
             assert.match(css, /\.c4-setup-cmd code\{[^}]*white-space:pre-wrap;overflow-wrap:anywhere/);
             const home = await t.get('/', { as: ada });
             assert.match(home.text, /class="ch-setup-nudge" href="\/setup"/);
-            assert.match(home.text, /0 of 3 done · next: Your machine/);
+            assert.match(home.text, /<b>0\/3<\/b>[\s\S]*Finish setting up Codes[\s\S]*Next: Your machine/, 'a ring with the count, the name and the next step on its own line (11-07)');
         });
 
         await check('a paired machine with Claude Code signed in: two steps done, the pickers know', async () => {
@@ -64,7 +64,7 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
             assert.match(res.text, /<option value="claude-code"[^>]*data-state="ok" data-badge="41% used"/, 'the default agent picker says what is ready');
             assert.match(res.text, /<option value="opencode"[^>]*data-state="bad" data-badge="Sign in"[^>]*data-href="\/setup#agent-opencode"/);
             const home = await t.get('/', { as: ada });
-            assert.match(home.text, /2 of 3 done · next: Your choices/);
+            assert.match(home.text, /<b>2\/3<\/b>[\s\S]*Next: Your choices/);
             assert.match(home.text, /<option value="claude-code\|[^"]*"[^>]*data-state="ok"/, 'the composer\'s agent picker knows too');
             assert.match(home.text, /data-ch-who data-ov-select="bare"/, 'the composer\'s chips use the bare select');
         });
