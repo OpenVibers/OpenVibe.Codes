@@ -65,6 +65,7 @@ const INTERNAL = [`http://127.0.0.1:3000${PROBE}`, `http://2130706433${PROBE}`, 
             'server/domain/ship.js': 'the service\'s own GET <publicOrigin>/release.json and api.github.com\'s compare, both at fixed paths: the origin is the contracts\' service manifest, never a URL from a person; the shas are checked hex',
             'server/events-consumer.js': 'OpenVibe.Events subscriptions (EVENTS_URL, configured) at boot; no URL from a person',
             'server/report.js': 'OpenVibe.Report (OV_REPORT_INTERNAL_URL, configured) for the report of a finished task, and the Network token endpoint (OV_NETWORK_INTERNAL_URL, configured) for the Codes service token; the paths are fixed, no URL from a person',
+            'server/owner-inputs-tests.js': 'the admin panel\'s Test button for the owner\'s keys, owner-only (codes.config.manage): fixed origins only (api.github.com/rate_limit, github.com/login/oauth/access_token, registry.npmjs.org/-/whoami) and OpenVibe Git\'s token endpoint on the configured loopback (CODES_GIT_INTERNAL_URL); one read-only call each, never a URL from a person',
             'server/events/outbox.js': 'OpenVibe.Events publish (EVENTS_URL, configured) of fixed codes.task.* payloads; no URL from a person',
         };
         const root = path.join(__dirname, '..');

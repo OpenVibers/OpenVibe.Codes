@@ -55,6 +55,8 @@ const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
 const { createForgejoClient } = require('./domain/forgejo');
 const createAiCatalogConfig = require('./ai-catalog-config').create;
+const createOwnerInputs = require('./owner-inputs-config').create;
+const { createOwnerInputTests } = require('./owner-inputs-tests');
 const { createMachines } = require('./domain/machines');
 const { createMemory } = require('./domain/memory');
 const { createKnowledge } = require('./domain/knowledge');
@@ -85,7 +87,19 @@ async function createApp(opts = {}) {
 
     const keys = createKeyStore({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // D11 owner settings (codes.ai): the catalog switch reads through the store, env pins winning.
-    const aiCatalogConfig = await createAiCatalogConfig({ db: store.db, keys, config, env: opts.env || process.env, log });
+    // The owner's outside accounts (codes.accounts, codes.publishing; the owner-setup design): sealed in Codes' store,
+    // read at use time with the environment as the fallback. config.git's app and config.github's token become getters,
+    // so a value entered in the admin panel takes effect without a restart.
+    const ownerInputs = await createOwnerInputs({ db: store.db, env: opts.env || process.env, log });
+    const envGit = { clientId: config.git.clientId, clientSecret: config.git.clientSecret };
+    const envGithubToken = config.github ? config.github.token : '';
+    const fromPanel = (key, fallback) => { const v = ownerInputs.accounts.get(key); return typeof v === 'string' && v ? v : (fallback || ''); };
+    Object.defineProperty(config.git, 'clientId', { enumerable: true, configurable: true, get: () => fromPanel('forge.client_id', envGit.clientId) });
+    Object.defineProperty(config.git, 'clientSecret', { enumerable: true, configurable: true, get: () => fromPanel('forge.client_secret', envGit.clientSecret) });
+    config.github = config.github || {};
+    Object.defineProperty(config.github, 'token', { enumerable: true, configurable: true, get: () => fromPanel('github.token', envGithubToken) });
+    const findTest = createOwnerInputTests({ config, ownerInputs, fetchImpl: opts.fetchImpl || globalThis.fetch });
+    const aiCatalogConfig = await createAiCatalogConfig({ db: store.db, keys, config, env: opts.env || process.env, log, also: ownerInputs.stores, test: findTest });
     Object.defineProperty(config.aiCatalog, 'enabled', { enumerable: true, configurable: true, get: () => aiCatalogConfig.get('catalog') });
     const sso = createSso({ config, keys, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log });
     // The harness catalog (server/data/harness-offers.json), read once: a bad seed row fails boot.
