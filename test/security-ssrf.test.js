@@ -41,6 +41,10 @@ const INTERNAL = [`http://127.0.0.1:3000${PROBE}`, `http://2130706433${PROBE}`, 
         const REVIEWED = {
             'server/auth/keys.js': 'no request itself; openvibe-sdk/auth fetches the JWKS',
             'server/auth/sso.js': 'Network OAuth token and revoke (configured)',
+            'server/auth/keys.js': 'no request itself; openvibe-sdk/auth fetches the JWKS',
+            'server/domain/forgejo.js': 'OpenVibe Git API (CODES_GIT_INTERNAL_URL, configured loopback Forgejo) with a service token; paths built from validated owner/name',
+            'server/domain/agent-copilot.js': 'OpenVibe.Chat (the configured Chat base) with Codes\' own Network service token, for the owner\'s Co-pilot room: the digest, the poll and the answer line; the room id is the stream\'s own id, never a URL from a person',
+            'server/http/home.js': 'OpenVibe Git\'s public repository search (CODES_GIT_INTERNAL_URL, configured loopback Forgejo) for the home page; no token',
             'server/domain/forgejo.js': 'OpenVibe Git API (CODES_GIT_INTERNAL_URL, configured loopback Forgejo) with a service token; paths built from validated owner/name',
             'server/domain/run-client.js': 'OpenVibe.Run (CODES_RUN_URL, configured) and the Network token endpoint; job ids only, never a URL from a person',
             'server/domain/bench-publisher.js': 'OpenVibe.Bench (CODES_BENCH_URL, configured) run publishing and the Network token endpoint; artifact URLs use the configured render origin',
@@ -66,6 +70,7 @@ const INTERNAL = [`http://127.0.0.1:3000${PROBE}`, `http://2130706433${PROBE}`, 
             'server/domain/ship.js': 'the service\'s own GET <publicOrigin>/release.json and api.github.com\'s compare, both at fixed paths: the origin is the contracts\' service manifest, never a URL from a person; the shas are checked hex',
             'server/events-consumer.js': 'OpenVibe.Events subscriptions (EVENTS_URL, configured) at boot; no URL from a person',
             'server/report.js': 'OpenVibe.Report (OV_REPORT_INTERNAL_URL, configured) for the report of a finished task, and the Network token endpoint (OV_NETWORK_INTERNAL_URL, configured) for the Codes service token; the paths are fixed, no URL from a person',
+            'server/owner-inputs-tests.js': 'the admin panel\'s Test button for the owner\'s keys, owner-only (codes.config.manage): fixed origins only (api.github.com/rate_limit, github.com/login/oauth/access_token, registry.npmjs.org/-/whoami) and OpenVibe Git\'s token endpoint on the configured loopback (CODES_GIT_INTERNAL_URL); one read-only call each, never a URL from a person',
             'server/events/outbox.js': 'OpenVibe.Events publish (EVENTS_URL, configured) of fixed codes.task.* payloads; no URL from a person',
         };
         const root = path.join(__dirname, '..');

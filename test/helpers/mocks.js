@@ -73,6 +73,17 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
         const now = iat != null ? iat : Math.floor(Date.now() / 1000);
         return signJwt({ iss: issuer, sub: u.id, subject_id: u.subject, username: u.username, display_name: u.display_name, role: u.role, aud: audience || ['openvibe.network'], iat: now, exp: now + ttl }, privatePem);
     }
+    /**
+     * A Dock token exactly as Network mints one for the public client `companion`: the private `<network>/dock`
+     * issuer, audience openvibe.network, client_id, scope and refresh family, and no role or staff caps.
+     */
+    function dockToken(u, { ttl = 3600, iat = null, scope = 'agent.view', clientId = 'companion', subject = u.subject, fam = 'fam_0123456789abcdef01234567' } = {}) {
+        const now = iat != null ? iat : Math.floor(Date.now() / 1000);
+        return signJwt({
+            iss: `${issuer}/dock`, sub: u.id, id: u.id, subject_id: subject, username: u.username, display_name: u.display_name,
+            client_id: clientId, scope, fam, aud: ['openvibe.network', 'openvibe.chat'], iat: now, exp: now + ttl,
+        }, privatePem);
+    }
     function userFrom(req) {
         const h = String(req.headers.authorization || '');
         if (!h.startsWith('Bearer ')) return null;
@@ -398,7 +409,7 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
 
     return {
         url: srv.url, publicPem, privatePem, state: st, requests: st.requests, tokenRequests: st.tokenRequests,
-        addUser, userToken,
+        addUser, userToken, dockToken,
         /** An authorization code the mock will exchange for this user if the verifier matches. */
         issueCode(user, challenge) { const code = `code_${crypto.randomBytes(8).toString('hex')}`; st.codes.set(code, { user, challenge }); return code; },
         setAllowance(projectId, caps) { st.projects.get(projectId).allowance = caps; },

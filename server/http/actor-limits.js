@@ -42,6 +42,11 @@ const BUDGETS = {
     'codes.knowledge.write': { minute: 30, hour: 600 },
     // The Dock's agent view controls (K-D3): Curtain now and End. The owner presses them now and then, never in a burst.
     'codes.agent_view.control': { minute: 20, hour: 120 },
+    // The skills hub (Compute plan §5): save a version or share a record now and then; a script editing a library
+    // may do a few a minute, not a flood.
+    'codes.skill.write': { minute: 20, hour: 300 },
+    // Adding a skill to the sync is how the Node is set up; the first run adds several, then almost never.
+    'codes.skill.assign': { minute: 30, hour: 600 },
 };
 
 /**

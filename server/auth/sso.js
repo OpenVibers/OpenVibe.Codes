@@ -29,6 +29,14 @@ const ACCESS_COOKIE = 'codes_at';
 const REFRESH_COOKIE = 'codes_rt';
 const HINT_COOKIE = 'ov_sso_hint';
 
+// The Dock's private-issuer token (Network server/auth/dock-tokens.js): the Companion extension's one-click
+// sign-in. It is never a session here — only the agent view's two read routes opt in, and only for `agent.view`.
+const DOCK_CLIENT_ID = 'companion';
+const DOCK_AUDIENCE = 'openvibe.network';
+const DOCK_SCOPE = 'agent.view';
+const DOCK_FAMILY_RE = /^fam_[0-9a-f]{24}$/;
+const DOCK_SUBJECT_RE = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
+
 function pkcePair() {
     const verifier = crypto.randomBytes(32).toString('base64url');
     const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
@@ -151,6 +159,28 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
         };
     }
 
+    /**
+     * The Dock token, verified exactly as Network's own Dock guard verifies it (signature against Network's keys,
+     * the private `<network issuer>/dock` issuer, audience openvibe.network) and then its claim shape: no typed
+     * token, no role or staff caps, client `companion`, a refresh family, and a canonical person. Only a token
+     * that names the scope `agent.view` is a reader; the rest is a 403, and anything that does not verify is a 401.
+     * Codes cannot see Network's oauth_tokens table, so a revoked access token is refused by its expiry here.
+     */
+    async function dockViewer(token) {
+        if (!token) return { status: 401, code: 'auth.required' };
+        const issuer = `${String(config.networkIssuer || config.networkUrl).replace(/\/+$/, '')}/dock`;
+        const v = await keys.verifyUser(token, { issuer, audience: DOCK_AUDIENCE });
+        if (!v.ok) return { status: 401, code: 'auth.required', reason: v.reason };
+        const claims = v.claims;
+        const shaped = claims.typ === undefined && claims.purpose === undefined && claims.actor_type === undefined
+            && claims.client_id === DOCK_CLIENT_ID && claims.role === undefined && claims.staff_caps === undefined
+            && DOCK_FAMILY_RE.test(String(claims.fam || '')) && DOCK_SUBJECT_RE.test(String(claims.subject_id || ''));
+        if (!shaped) return { status: 401, code: 'auth.required' };
+        const scopes = String(claims.scope || '').split(/\s+/).filter(Boolean);
+        if (!scopes.includes(DOCK_SCOPE)) return { status: 403, code: 'auth.scope', scopes };
+        return { viewer: { ...viewerFrom(claims, token), dock: true }, token, scopes };
+    }
+
     /** A call with the person's own token; a 401 refreshes the session once and tries again. */
     async function asViewer(req, res, fn) {
         const token = req.token || (req.viewer && req.viewer.token) || null;
@@ -226,7 +256,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
         return r;
     }
 
-    return { middleware, routes, asViewer, tokenGrant: (fields) => sso.tokenGrant(fields), pkcePair, client: sso, checkClient: (o) => sso.checkClient(o) };
+    return { middleware, routes, asViewer, dockViewer, tokenGrant: (fields) => sso.tokenGrant(fields), pkcePair, client: sso, checkClient: (o) => sso.checkClient(o) };
 }
 
 module.exports = { createSso, pkcePair, sanitizeNext, ownOrigins, authorizeUrl, ACCESS_COOKIE, REFRESH_COOKIE };

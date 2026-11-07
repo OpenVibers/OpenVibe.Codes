@@ -28,6 +28,9 @@ const { createSso } = require('./auth/sso');
 const { createHarnesses } = require('./domain/harnesses');
 const { createPageRoutes } = require('./http/pages');
 const { createSharing } = require('./sharing');
+const { createSkills } = require('./domain/skills');
+const { createSkillsApi } = require('./http/skills-api');
+const { createSkillPageRoutes } = require('./http/skills-pages');
 const { createRunRoutes } = require('./http/run');
 const { createTasksApi } = require('./http/tasks-api');
 const { createConnectionsApi } = require('./http/connections-api');
@@ -55,6 +58,8 @@ const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
 const { createForgejoClient } = require('./domain/forgejo');
 const createAiCatalogConfig = require('./ai-catalog-config').create;
+const createOwnerInputs = require('./owner-inputs-config').create;
+const { createOwnerInputTests } = require('./owner-inputs-tests');
 const { createMachines } = require('./domain/machines');
 const { createMemory } = require('./domain/memory');
 const { createKnowledge } = require('./domain/knowledge');
@@ -85,7 +90,19 @@ async function createApp(opts = {}) {
 
     const keys = createKeyStore({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // D11 owner settings (codes.ai): the catalog switch reads through the store, env pins winning.
-    const aiCatalogConfig = await createAiCatalogConfig({ db: store.db, keys, config, env: opts.env || process.env, log });
+    // The owner's outside accounts (codes.accounts, codes.publishing; the owner-setup design): sealed in Codes' store,
+    // read at use time with the environment as the fallback. config.git's app and config.github's token become getters,
+    // so a value entered in the admin panel takes effect without a restart.
+    const ownerInputs = await createOwnerInputs({ db: store.db, env: opts.env || process.env, log });
+    const envGit = { clientId: config.git.clientId, clientSecret: config.git.clientSecret };
+    const envGithubToken = config.github ? config.github.token : '';
+    const fromPanel = (key, fallback) => { const v = ownerInputs.accounts.get(key); return typeof v === 'string' && v ? v : (fallback || ''); };
+    Object.defineProperty(config.git, 'clientId', { enumerable: true, configurable: true, get: () => fromPanel('forge.client_id', envGit.clientId) });
+    Object.defineProperty(config.git, 'clientSecret', { enumerable: true, configurable: true, get: () => fromPanel('forge.client_secret', envGit.clientSecret) });
+    config.github = config.github || {};
+    Object.defineProperty(config.github, 'token', { enumerable: true, configurable: true, get: () => fromPanel('github.token', envGithubToken) });
+    const findTest = createOwnerInputTests({ config, ownerInputs, fetchImpl: opts.fetchImpl || globalThis.fetch });
+    const aiCatalogConfig = await createAiCatalogConfig({ db: store.db, keys, config, env: opts.env || process.env, log, also: ownerInputs.stores, test: findTest });
     Object.defineProperty(config.aiCatalog, 'enabled', { enumerable: true, configurable: true, get: () => aiCatalogConfig.get('catalog') });
     const sso = createSso({ config, keys, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log });
     // The harness catalog (server/data/harness-offers.json), read once: a bad seed row fails boot.
@@ -118,8 +135,10 @@ async function createApp(opts = {}) {
     const knowledge = createKnowledge({ store, config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The one sharing system (design 2026-11-06): a run task is its owner's until the Share sheet says otherwise.
     const sharing = opts.sharing || createSharing({ db: store.db, config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    // The skills hub (Compute plan §5, E6): versioned skills, rules and MCP servers, shared through the same SDK.
+    const skills = opts.skills || createSkills({ store, sharing, log });
     const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
-    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing };
+    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
     ctx.forgejo = createForgejoClient({ config, log });
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -221,6 +240,8 @@ async function createApp(opts = {}) {
         ctx.sessionRetention = sessions.retention;
         app.use('/internal/events', consumer.router);
     }
+    // ── Chat plays sandbox workers → Codes (Agent Streams S6; loopback only, signed heartbeats) ──
+    app.use('/internal/sandbox-workers', require('./http/sandbox-workers').createSandboxWorkerRoutes({ store, config, log }));
 
     // ── Machine endpoints ───────────────────────────────────
     app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'openvibe-codes', version: VERSION }));
@@ -281,6 +302,7 @@ async function createApp(opts = {}) {
         app.locals.sharingTimer = timer;
     }
     app.use('/api/v1', createApi(ctx));
+    app.use('/api/v1', createSkillsApi({ config, skills: ctx.skills, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, fleet: ctx.fleet, actorLimits: ctx.actorLimits, sharing, log }));
     app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, github: ctx.github, actorLimits: ctx.actorLimits, log }));
     // The Dock's agent view (Dock K-D3, Agent Streams S1): the person's own desk stream with a view ticket minted here.
@@ -299,6 +321,7 @@ async function createApp(opts = {}) {
 
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.CODES_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));   // per address; tests raise it
+    app.use(createSkillPageRoutes({ config, skills: ctx.skills }));
     const pageRoutes = createPageRoutes(ctx);
     // The agent layer (openvibe-shared/agent-layer): /.well-known/agent.json and the Markdown twins of the public
     // pages. The pages themselves keep their own routes — a signed-in visitor's account bar and forms are theirs

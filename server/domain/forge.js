@@ -59,7 +59,8 @@ function createForge({ config, store, log = console }) {
     const internalUrl = String(git.internalUrl || publicUrl).replace(/\/+$/, '');
     const host = (() => { try { return new URL(publicUrl).host.toLowerCase(); } catch { return ''; } })();
     const seal = createSeal(git.sealKey);
-    const enabled = !!(git.clientId && git.clientSecret && seal);
+    // At use time: the app's ID and secret may be entered in the admin panel after boot (codes.accounts forge.*).
+    const isEnabled = () => !!(git.clientId && git.clientSecret && seal);
     const redirectUri = `${String(config.baseUrl || '').replace(/\/+$/, '')}/git/callback`;
     const db = store.db;
     const fail = (status, code, message) => Object.assign(new Error(message), { status, code });
@@ -89,7 +90,7 @@ function createForge({ config, store, log = console }) {
     }
 
     async function connect(subject, { code, verifier }) {
-        if (!enabled) throw fail(503, 'forge.off', 'Linking OpenVibe Git is not open yet');
+        if (!isEnabled()) throw fail(503, 'forge.off', 'Linking OpenVibe Git is not open yet');
         if (!USER.test(String(subject || ''))) throw fail(400, 'subject.required', 'a person signs in first');
         const t = await token({ grant_type: 'authorization_code', code: String(code || ''), code_verifier: String(verifier || ''), redirect_uri: redirectUri });
         const me = await call(internalUrl, 'GET', '/api/v1/user', { headers: { Authorization: `Bearer ${t.access_token}` } });
@@ -107,7 +108,7 @@ function createForge({ config, store, log = console }) {
 
     /** A live access token for the person: refreshed when it ends within `margin` ms. null when unlinked or refused. */
     async function tokenFor(subject, margin = 60_000) {
-        if (!enabled) return null;
+        if (!isEnabled()) return null;
         const row = await db.maybe('SELECT forge_user, token_sealed, refresh_sealed, expires_at FROM codes_forge_links WHERE subject = $1', [subject]);
         if (!row) return null;
         const ends = row.expires_at ? new Date(row.expires_at).getTime() : Infinity;
@@ -161,7 +162,7 @@ function createForge({ config, store, log = console }) {
         return { OPENVIBE_GIT_CREDENTIALS: `https://${encodeURIComponent(t.login)}:${encodeURIComponent(t.token)}@${host}` };
     }
 
-    return { enabled, publicUrl, host, authorizeUrl, connect, link, unlink, createRepo, repos, jobEnv, tokenFor };
+    return { get enabled() { return isEnabled(); }, publicUrl, host, authorizeUrl, connect, link, unlink, createRepo, repos, jobEnv, tokenFor };
 }
 
 module.exports = { createForge, REPO_NAME };
