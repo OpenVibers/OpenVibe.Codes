@@ -12,8 +12,9 @@
  *       sbx.ended (Promise of { reason }), sbx.state ('running' | 'wiping' | 'wiped'), sbx.id, sbx.pid, sbx.dir, sbx.cgroup
  *
  *   opts: runtimeDir (short: a socket path must fit 108 bytes), limits { memoryMb, diskMb, pids, cpuPercent }, timeBoxMs,
- *         limiter (sandbox/limits.js; null only with allowUnlimited, for tests), egress { lookup, dial, hostAddresses }
- *         (sandbox/egress-proxy.js), onEgress(decision), nodePath, browserPath, rootfs, bwrap, seccomp, log
+ *         limiter (sandbox/limits.js; null only with allowUnlimited, for tests), egress { lookup, dial, hostAddresses,
+ *         budgetDownBytes, budgetUpBytes, hostRequests, sessionRequests, maxConnectionsPerHost } (sandbox/egress-proxy.js),
+ *         onEgress(decision), nodePath, browserPath, rootfs, bwrap, seccomp, log
  *
  * How it is made (sandbox/bwrap.js has the whole list): bubblewrap with its own user, pid, network, ipc, uts and cgroup
  * namespaces, a read-only root of /usr and a few /etc entries, size-limited tmpfs for /workspace, /home/agent and /tmp,
@@ -336,7 +337,11 @@ class Sandbox {
     }
 
     info() {
-        return { id: this.id, state: this.state, started_at: new Date(this.startedAt).toISOString(), ends_at: new Date(this.endsAt).toISOString(), limits: this.limits };
+        return {
+            id: this.id, state: this.state, started_at: new Date(this.startedAt).toISOString(), ends_at: new Date(this.endsAt).toISOString(), limits: this.limits,
+            // What the session has spent on egress and the limits it ran under; spent is true once the budget is gone.
+            egress: this._proxy && this._proxy.stats ? this._proxy.stats() : null,
+        };
     }
 }
 

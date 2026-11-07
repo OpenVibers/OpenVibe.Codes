@@ -27,6 +27,8 @@ const SELF_IP = '93.184.215.99';        // public, and one of the host's own add
 
 const NAMES = {
     'origin.example': [ORIGIN_IP],
+    // The same public origin under a second name: per-destination limits can be told apart from the session's.
+    'alt.example': [ORIGIN_IP],
     'smtp.example': [SMTP_IP],
     'self.example': [SELF_IP],
     'private.example': ['10.0.0.5'],
@@ -82,6 +84,11 @@ async function startWorld() {
         const u = new URL(req.url, 'http://origin.example');
         if (u.pathname === '/redirect') { res.writeHead(302, { location: u.searchParams.get('to') || '/' }); return res.end(); }
         if (u.pathname === '/page') { res.writeHead(200, { 'content-type': 'text/html' }); return res.end('<!doctype html><title>Origin page</title><h1 id="h">origin-ok</h1>'); }
+        if (u.pathname === '/big') {
+            const n = Math.min(8 * 1024 * 1024, Math.max(1, parseInt(u.searchParams.get('n'), 10) || 1024));
+            res.writeHead(200, { 'content-type': 'application/octet-stream' });
+            return res.end(Buffer.alloc(n, 0x61));
+        }
         res.writeHead(200, { 'content-type': 'text/plain' });
         res.end('origin-ok');
     });

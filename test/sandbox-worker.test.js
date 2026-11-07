@@ -237,6 +237,14 @@ async function check(name, fn) {
         assert.strictEqual(body.isolation.network_namespace, true);
         assert.strictEqual(body.isolation.host_credentials, 'none');
         assert.strictEqual(body.isolation.limits.enforced, true);
+        // The five facts Live's registration requires (server/agent-streams/sandbox.js REQUIRED_ISOLATION), exactly.
+        assert.deepStrictEqual(
+            {
+                host_network: body.isolation.host_network, credentials: body.isolation.credentials, profile: body.isolation.profile,
+                egress_proxy: body.isolation.egress_proxy, workspace: body.isolation.workspace,
+            },
+            { host_network: false, credentials: false, profile: false, egress_proxy: true, workspace: 'ephemeral' },
+            'the report says what Live needs to register a sandbox worker');
         for (const c of calls) {
             assert.ok(!String(c.init.body).includes(CODES_SECRET), 'the Codes secret never travels');
             assert.ok(!String(c.init.body).includes(tmp), 'no path of the host');

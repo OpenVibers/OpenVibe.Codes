@@ -67,6 +67,15 @@ function loadConfig(env = process.env) {
             cpuPercent: int(env.CODES_SANDBOX_CPU_PERCENT, 100, 10, 6400),
         },
         maxSessions: int(env.CODES_SANDBOX_MAX_SESSIONS, 2, 1, 64),
+        // Each session's egress budget (design §1): 500 MB down and 100 MB up unless the owner sets it. The rate and
+        // connection limits are the proxy's own defaults (10/s burst 30 per host, 50/s per session, 8 per host).
+        egress: {
+            budgetDownBytes: int(env.CODES_SANDBOX_EGRESS_MB_DOWN, 500, 1, 1024 * 1024) * MB,
+            budgetUpBytes: int(env.CODES_SANDBOX_EGRESS_MB_UP, 100, 1, 1024 * 1024) * MB,
+            hostRequests: { rate: 10, burst: 30 },
+            sessionRequests: { rate: 50, burst: 50 },
+            maxConnectionsPerHost: 8,
+        },
         // The owner's time box is 5 to 30 minutes (design §3); the worker's own ceiling is that, never more.
         timeBoxMinMinutes: 5,
         timeBoxMaxMinutes: int(env.CODES_SANDBOX_TIME_BOX_MAX_MIN, 30, 5, 30),
@@ -118,6 +127,15 @@ function createWorker(opts = {}) {
     /** What the worker can enforce, as it found it (never a secret, a path or an address). */
     function isolation() {
         const c = (lastSelfTest && lastSelfTest.checks) || {};
+        // Live reads these five facts (server/agent-streams/sandbox.js REQUIRED_ISOLATION) and refuses a report that
+        // does not say each one exactly: false, false, false, true, 'ephemeral'. An unproven fact is left out, so a
+        // worker that cannot show it never registers instead of claiming it.
+        const live = {};
+        if (c.network_namespace === true) live.host_network = false;
+        if (c.clean_env === true && c.no_host_files === true && c.no_capabilities === true) live.credentials = false;
+        if (c.no_host_files === true) live.profile = false;
+        if (c.egress_refuses_private === true && c.no_direct_egress === true) live.egress_proxy = true;
+        if (c.wipe === true) live.workspace = 'ephemeral';
         return {
             sandbox: 'bubblewrap', bubblewrap: support && support.version || null,
             user_namespace: !!(support && support.ok), network_namespace: c.network_namespace === true,
@@ -126,7 +144,8 @@ function createWorker(opts = {}) {
             host_files: c.no_host_files === true ? 'none' : 'unknown',
             capabilities: c.no_capabilities === true ? 'none' : 'unknown',
             seccomp: c.seccomp === true,
-            workspace: 'tmpfs, wiped with the sandbox',
+            ...live,
+            workspace_kind: 'tmpfs, wiped with the sandbox',
             limits: {
                 kind: limiter && limiter.ok ? limiter.kind : 'none', enforced: c.limits === true,
                 memory_mb: config.limits.memoryMb, disk_mb: config.limits.diskMb, pids: config.limits.pids, cpu_percent: config.limits.cpuPercent,
@@ -204,7 +223,7 @@ function createWorker(opts = {}) {
         const egressLog = [];
         const sbx = await createSandbox({
             id, runtimeDir: config.runtimeDir, limiter, limits: config.limits, timeBoxMs: box * 60_000, nodePath: config.nodePath,
-            browserPath: config.browserPath, log,
+            browserPath: config.browserPath, egress: config.egress, log,
             onEgress: (d) => { egressLog.push(d); if (egressLog.length > 500) egressLog.shift(); },
         });
         const entry = { id, sbx, stream: stream ? String(stream) : null, egressLog, created: now() };
@@ -213,7 +232,18 @@ function createWorker(opts = {}) {
         return entry;
     }
 
-    const view = (e) => ({ ...e.sbx.info(), stream_id: e.stream, egress: { allowed: e.egressLog.filter((d) => d.allowed).length, refused: e.egressLog.filter((d) => !d.allowed).length } });
+    // The session's report: what it spent on egress (spent and why), beside the allow/refuse counts of its log.
+    const view = (e) => {
+        const info = e.sbx.info();
+        return {
+            ...info, stream_id: e.stream,
+            egress: {
+                ...(info.egress || {}),
+                allowed: e.egressLog.filter((d) => d.allowed).length,
+                refused: e.egressLog.filter((d) => !d.allowed).length,
+            },
+        };
+    };
 
     // ── The local API (a Unix socket; the runner on this host is its only client) ──
 
