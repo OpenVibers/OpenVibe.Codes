@@ -155,6 +155,56 @@ const STREAM = (o = {}) => ({
             assert.strictEqual(res.json().code, 'agent_view.unavailable');
             live.fail = false;
         });
+
+        // ── The Dock token (Companion's one-click sign-in) ─────────
+        // Network's Dock issuer and keys, the `agent.view` scope, the person it names: the two read routes
+        // accept it. Every write stays the owner's own session.
+
+        await check('a Dock token with agent.view reads the view and the still, as that person', async () => {
+            live.streams = [STREAM({ last_frame_url: 'https://openvibe.live/api/streams/agent/' + LIVE_ID + '/frame' })];
+            live.authorizations.length = 0;
+            const token = t.network.dockToken(ada);
+            const res = await t.get('/api/v1/me/agent-view', { bearer: token });
+            assert.strictEqual(res.status, 200, res.text);
+            const a = res.json().agent;
+            assert.strictEqual(a.id, LIVE_ID);
+            assert.strictEqual(a.state, 'live');
+            assert.strictEqual(a.embed_url, `https://openvibe.live/embed/agent/${LIVE_ID}?vt=wvt_the_view_ticket`);
+            for (const auth of live.authorizations) assert.strictEqual(auth, `Bearer ${token}`, 'the Dock token is the person\'s own bearer to Live');
+
+            const frame = await t.get('/api/v1/me/agent-view/frame', { bearer: token });
+            assert.strictEqual(frame.status, 200, frame.text);
+            assert.deepStrictEqual([...frame.buffer], [...FRAME]);
+        });
+
+        await check('a Dock token without agent.view is refused the read', async () => {
+            const res = await t.get('/api/v1/me/agent-view', { bearer: t.network.dockToken(ada, { scope: 'dock activity chat.read' }) });
+            assert.strictEqual(res.status, 403, res.text);
+            assert.strictEqual(res.json().code, 'auth.scope');
+            const frame = await t.get('/api/v1/me/agent-view/frame', { bearer: t.network.dockToken(ada, { scope: 'dock' }) });
+            assert.strictEqual(frame.status, 403, frame.text);
+        });
+
+        await check('a forged or expired Dock token is a 401', async () => {
+            const good = t.network.dockToken(ada);
+            const [h, p] = good.split('.');
+            const forged = `${h}.${p}.${'A'.repeat(342)}`;
+            assert.strictEqual((await t.get('/api/v1/me/agent-view', { bearer: forged })).status, 401);
+            assert.strictEqual((await t.get('/api/v1/me/agent-view', { bearer: t.network.dockToken(ada, { ttl: -120 }) })).status, 401);
+            const notDock = t.network.userToken(ada);
+            assert.strictEqual((await t.get('/api/v1/me/agent-view', { bearer: notDock })).status, 200, 'a normal session still reads');
+        });
+
+        await check('every write route refuses a Dock token with a plain reason', async () => {
+            const before = calls.length;
+            for (const what of ['pause', 'curtain', 'mute', 'end']) {
+                const res = await t.get(`/api/v1/me/agent-view/${what}`, { bearer: t.network.dockToken(ada), method: 'POST', json: {} });
+                assert.strictEqual(res.status, 403, `${what}: ${res.text}`);
+                assert.strictEqual(res.json().code, 'auth.read_only', what);
+                assert.match(res.json().detail, /openvibe\.codes/, what);
+            }
+            assert.strictEqual(calls.length, before, 'no control reached Live');
+        });
     } finally {
         await t.close();
         server.close();

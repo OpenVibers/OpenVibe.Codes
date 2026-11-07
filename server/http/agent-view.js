@@ -35,6 +35,10 @@ function createAgentView({ config, sso, actorLimits, fetchImpl = (...a) => fetch
     const json = express.json({ limit: '4kb' });
     const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
     const signedIn = (req) => !!(req.viewer && req.viewer.kind === 'user' && req.viewer.subject);
+    const bearerOf = (req) => {
+        const h = String(req.get('authorization') || '');
+        return h.startsWith('Bearer ') ? h.slice(7).trim() : '';
+    };
     const liveBase = () => String((config.live && config.live.url) || 'https://openvibe.live').replace(/\/+$/, '');
 
     /** One call to Live with the person's own token. Its own deadline: the Dock must not hang on a slow Live. */
@@ -143,10 +147,46 @@ function createAgentView({ config, sso, actorLimits, fetchImpl = (...a) => fetch
         return next();
     });
 
-    r.get('/me/agent-view', actorLimits.reads('codes.read'), async (req, res) => {
-        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to see your agent');
+    // ── The Dock's read-only token (Companion's one-click sign-in) ──
+    // The panel holds a Network token with the private `<network>/dock` issuer, which the SSO middleware rightly
+    // refuses as a session. The two GET routes below are the only ones that accept it, and only with `agent.view`;
+    // the person it names is the caller, with read rights. Every POST stays the owner's own session.
+    const dockReader = async (req, res, next) => {
+        if (signedIn(req)) return next();
+        const v = await sso.dockViewer(bearerOf(req));
+        if (v.viewer) {
+            req.viewer = v.viewer;      // the person, for the actor limit and the handlers
+            req.dock = true;
+        } else if (v.status === 403) {
+            req.dockReadDenied = v;     // a verified Dock token without agent.view
+        }
+        return next();
+    };
+
+    // A Dock token on a write is a 403 with the way to do it, never a 401: the panel is signed in, it is just read-only.
+    const dockWrite = async (req, res, next) => {
+        if (signedIn(req)) return next();
+        const v = await sso.dockViewer(bearerOf(req));
+        if (v.viewer || v.status === 403) {
+            return problem(req, res, 403, 'auth.read_only', 'the side panel shows the agent; its buttons open openvibe.codes');
+        }
+        return next();
+    };
+
+    /** The read routes' answer for a caller who is neither a session nor a Dock reader; true when it answered. */
+    const refusedRead = (req, res) => {
+        if (req.dockReadDenied) return !!problem(req, res, 403, 'auth.scope', 'this sign-in is not allowed to see your agent');
+        if (!signedIn(req)) return !!problem(req, res, 401, 'auth.required', 'sign in to see your agent');
+        return false;
+    };
+
+    /** The person's token to Live: the session's (refreshed once on a 401), or the Dock token as it is. */
+    const withViewer = (req, res, fn) => (req.dock ? fn(req.viewer.token) : sso.asViewer(req, res, fn));
+
+    r.get('/me/agent-view', dockReader, actorLimits.reads('codes.read'), async (req, res) => {
+        if (refusedRead(req, res)) return undefined;
         try {
-            const agent = await sso.asViewer(req, res, (token) => viewOf(token));
+            const agent = await withViewer(req, res, (token) => viewOf(token));
             return res.json({ agent });
         } catch (e) {
             if (e && e.status === 401) return problem(req, res, 401, 'auth.required', 'sign in to see your agent');
@@ -156,11 +196,11 @@ function createAgentView({ config, sso, actorLimits, fetchImpl = (...a) => fetch
     });
 
     // The last frame: Live serves it to the owner only, so Codes asks with their token and passes the picture on.
-    r.get('/me/agent-view/frame', actorLimits.reads('codes.read'), async (req, res) => {
-        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to see your agent');
+    r.get('/me/agent-view/frame', dockReader, actorLimits.reads('codes.read'), async (req, res) => {
+        if (refusedRead(req, res)) return undefined;
         let frame = null;
         try {
-            frame = await sso.asViewer(req, res, async (token) => {
+            frame = await withViewer(req, res, async (token) => {
                 const row = await streamOf(token);
                 if (!row || !row.last_frame_url) return null;
                 // Built here from the stream's id and our own Live base: Codes never fetches an address Live names.
@@ -224,10 +264,10 @@ function createAgentView({ config, sso, actorLimits, fetchImpl = (...a) => fetch
         }
     };
 
-    r.post('/me/agent-view/pause', actorLimits.budget('codes.agent_view.control'), json, controlWithBody('pause', actControl('pause', (req) => ({ control: 'pause', paused: !!(req.body && req.body.paused) }))));
-    r.post('/me/agent-view/curtain', actorLimits.budget('codes.agent_view.control'), json, control('curtain', act('/curtain', { up: true, reason: 'manual' })));
-    r.post('/me/agent-view/mute', actorLimits.budget('codes.agent_view.control'), json, controlWithBody('mute', actControl('mute', (req) => ({ control: 'mute', muted: !!(req.body && req.body.muted) }))));
-    r.post('/me/agent-view/end', actorLimits.budget('codes.agent_view.control'), json, control('end', act('/end', {})));
+    r.post('/me/agent-view/pause', dockWrite, actorLimits.budget('codes.agent_view.control'), json, controlWithBody('pause', actControl('pause', (req) => ({ control: 'pause', paused: !!(req.body && req.body.paused) }))));
+    r.post('/me/agent-view/curtain', dockWrite, actorLimits.budget('codes.agent_view.control'), json, control('curtain', act('/curtain', { up: true, reason: 'manual' })));
+    r.post('/me/agent-view/mute', dockWrite, actorLimits.budget('codes.agent_view.control'), json, controlWithBody('mute', actControl('mute', (req) => ({ control: 'mute', muted: !!(req.body && req.body.muted) }))));
+    r.post('/me/agent-view/end', dockWrite, actorLimits.budget('codes.agent_view.control'), json, control('end', act('/end', {})));
 
     return r;
 }
