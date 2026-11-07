@@ -10,6 +10,8 @@
  *   GET  /me/tasks/:id          → codes.task@1
  *   POST /me/tasks/:id/cancel   → codes.task@1
  *   GET  /me/repos?q=…          → { repos: [{ full_name, url, … }] }: the Home picker's search (Codes C4b)
+ *   GET  /me/settings           → { settings }: the person's choices, including who leads their tasks
+ *   PUT  /me/settings           → { settings }: save any of them (a field left out keeps what it had)
  */
 const express = require('express');
 const { http, validate } = require('openvibe-contracts');
@@ -21,7 +23,7 @@ const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const DELEGABLE = new Set(['owner', 'admin']);
 
-function createMeApi({ config, store, sso, run, harnesses, actorLimits, tasks = null, github = null, log = console }) {
+function createMeApi({ config, store, sso, run, harnesses, userSettings = null, actorLimits, tasks = null, github = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
@@ -100,6 +102,34 @@ function createMeApi({ config, store, sso, run, harnesses, actorLimits, tasks = 
         const row = await taskStore.start({ subject: req.viewer.subject, project, args });
         log.info(`[Codes] user ${req.viewer.subject} started task ${row.id} through the user API`);
         return res.status(201).json({ task: taskStore.present(row), created: true });
+    });
+
+    /**
+     * The person's choices over the API (owner 2026-11-07): the same row the Settings page reads, including the agent
+     * and model that lead their tasks (`conductor_agent`, `conductor_model`; empty means Claude Code on Opus). A field
+     * that is left out keeps what it had, as the page's form does.
+     */
+    r.get('/me/settings', actorLimits.reads('codes.read'), async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to read your settings');
+        if (!userSettings) return problem(req, res, 503, 'settings.unavailable', 'settings are not available here');
+        return res.json({ settings: await userSettings.get(req.viewer.subject) });
+    });
+
+    r.put('/me/settings', actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to save your settings');
+        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site JSON posts are refused');
+        if (!userSettings) return problem(req, res, 503, 'settings.unavailable', 'settings are not available here');
+        const b = req.body;
+        if (!b || typeof b !== 'object' || Array.isArray(b)) return problem(req, res, 422, 'settings.invalid', 'send an object of settings');
+        if (b.conductor_agent !== undefined) {
+            const v = b.conductor_agent == null ? null : String(b.conductor_agent);
+            if (v !== null && !harnesses.list().some((a) => a.id === v)) return problem(req, res, 422, 'settings.conductor_agent_unknown', 'conductor_agent is one of GET /api/v1/harnesses, or empty for Claude Code');
+        }
+        try {
+            return res.json({ settings: await userSettings.save(req.viewer.subject, b) });
+        } catch (e) {
+            return problem(req, res, e.status || 500, e.code || 'settings.failed', String((e && e.message) || 'the settings could not be saved'));
+        }
     });
 
     /**

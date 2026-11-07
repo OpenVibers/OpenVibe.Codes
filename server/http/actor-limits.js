@@ -35,6 +35,8 @@ const BUDGETS = {
     'codes.harness.route': { minute: 30, hour: 600 },
     // A service starting (or cancelling) a coding task for a person counts against that person (tasks-api.js).
     'codes.task.start': { minute: 6, hour: 60 },
+    // A file attached to a message (10 at most per message): a handful a minute, not a flood of 20 MB bodies.
+    'codes.attachment.upload': { minute: 60, hour: 1000 },
     // The Home picker's repository search asks GitHub, which allows an address few searches a minute. The person's
     // own repositories come first and cost nothing; this bounds what they may spend on the rest.
     'codes.repo.search': { minute: 6, hour: 60 },

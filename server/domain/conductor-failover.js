@@ -25,7 +25,11 @@ const { windowFull, FULL_PCT } = require('../../engine/router');
 
 /** The agents a conductor's turn can run on: the CLIs that resume a session and take the Codes MCP tools. */
 const CONDUCTOR_AGENTS = ['claude-code', 'codex', 'opencode'];
-const AGENT_NAMES = { 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
+const AGENT_NAMES = {
+    'claude-code': 'Claude Code', 'claude-other': 'Claude Code (another provider)', codex: 'Codex', opencode: 'OpenCode',
+    'command-code': 'Command Code', 'minimax-code': 'MiniMax Code', aider: 'Aider', deepseek: 'DeepSeek',
+    'openvibe-ai': 'OpenVibe.AI', 'openai-compatible': 'Your own model',
+};
 const MODEL = /^[A-Za-z0-9._:/-]{1,100}$/;
 const MAX_FALLBACKS = 3;
 const DEFAULT_SWITCH_PCT = 90;

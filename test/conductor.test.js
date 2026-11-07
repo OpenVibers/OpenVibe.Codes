@@ -195,20 +195,21 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
         await check('the start form: a model list the login offers, and the folders the machine has worked in', async () => {
             const res = await get('/conductor');
             assert.strictEqual(res.status, 200);
-            assert.match(res.text, /<select name="model" data-c4-model>/, 'the model is a list');
-            for (const label of ['Opus 5.5 (default)', 'Sonnet 5.5', 'Haiku 5.5', 'Other…']) assert.ok(res.text.includes(label), `${label} is offered`);
+            assert.match(res.text, /<select name="who" data-c4-model>/, 'who leads is a list');
+            for (const label of ['Claude Code · Opus', 'Claude Code · Sonnet', 'Codex', 'OpenCode', 'DeepSeek']) assert.ok(res.text.includes(label), `${label} is offered`);
             assert.match(res.text, /data-c4-folder-pick/, 'the recent folders are a choice beside the typed path');
             assert.ok(res.text.includes(`data-machine="${NODE}"`), 'this conductor&rsquo;s folder is one, on its machine');
             assert.ok(res.text.includes('/home/ada/openvibe'), 'and it is the folder this person has used');
         });
 
-        await check('a recent folder and a model the person named start a conductor', async () => {
-            const res = await t.get('/conductor', { as: ada, form: { folder: '', folder_pick: '/home/ada/openvibe', machine: NODE, model: 'other', model_other: 'claude-opus-5-5', safety: 'ask' } });
+        await check('a recent folder and a leader the person picked start a conductor', async () => {
+            const res = await t.get('/conductor', { as: ada, form: { folder: '', folder_pick: '/home/ada/openvibe', machine: NODE, who: 'codex|gpt-5.5', safety: 'ask' } });
             assert.strictEqual(res.status, 303, res.text);
             const id = decodeURIComponent(String(res.headers.get('location') || '').split('/').pop());
             const row = await rowOf(id);
             assert.strictEqual(row.folder, '/home/ada/openvibe', 'the picked folder');
-            assert.strictEqual(row.model, 'claude-opus-5-5', 'the model behind Other…');
+            assert.strictEqual(row.agent, 'codex', 'the leader the person picked');
+            assert.strictEqual(row.model, 'gpt-5.5', 'and its model');
             await post(`/api/v1/conductor/${id}/stop`, {});
         });
 
@@ -218,6 +219,49 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
             assert.match(res.text, /Hand-over brief/, 'the first turn is labelled');
             assert.match(res.text, /data-ch-stream="\/api\/v1\/tasks\/[^"]+\/events/, 'the conversation streams over the C2 events');
             assert.match(res.text, /What next\?|Say something/, 'the box for the next turn');
+        });
+
+        await check('who leads your tasks: the saved setting starts a conductor, and a message can change just this one', async () => {
+            await t.ctx.userSettings.save(ada.subject, { conductor_agent: 'codex', conductor_model: 'gpt-5.5' });
+            const made = await post('/api/v1/conductor', { folder: '/home/ada/openvibe', machine: NODE, safety: 'ask', note: 'lead with codex' });
+            assert.strictEqual(made.status, 201, made.text);
+            const id = made.json().task.id;
+            const row = await rowOf(id);
+            assert.strictEqual(row.agent, 'codex', 'the setting leads the new conductor');
+            assert.strictEqual(row.model, 'gpt-5.5');
+            const submit = submits().at(-1)[1];
+            assert.strictEqual(submit.args.agent, 'codex');
+            assert.strictEqual(submit.args.model, 'gpt-5.5');
+            // The composer's picker changes this conversation, not the saved setting.
+            const next = await post(`/api/v1/conductor/${id}/messages`, { text: 'lead this one too', who: 'opencode|' });
+            assert.strictEqual(next.status, 201, next.text);
+            const retargeted = await rowOf(id);
+            assert.strictEqual(retargeted.agent, 'opencode');
+            assert.strictEqual(retargeted.model, null);
+            const still = await t.ctx.userSettings.get(ada.subject);
+            assert.strictEqual(still.conductor_agent, 'codex', 'the setting itself did not move');
+            await post(`/api/v1/conductor/${id}/stop`, {});
+        });
+
+        await check('a conductor’s first turn takes the files uploaded before it was made', async () => {
+            const up = await t.get('/api/v1/attachments', { as: ada, method: 'POST', body: Buffer.from('the hand-over notes\n'), headers: { 'content-type': 'text/plain', 'x-file-name': 'notes.txt' } });
+            assert.strictEqual(up.status, 201, up.text);
+            const file = up.json().attachment;
+            const made = await post('/api/v1/conductor', { folder: '/home/ada/openvibe', machine: NODE, agent: 'codex', attachment_ids: [file.id] });
+            assert.strictEqual(made.status, 201, made.text);
+            const id = made.json().task.id;
+            assert.strictEqual(made.json().messages[0].attachments.length, 1);
+            assert.strictEqual(made.json().messages[0].attachments[0].name, 'notes.txt');
+            const stored = await db.maybe('SELECT * FROM codes_attachments WHERE id = $1', [file.id]);
+            assert.strictEqual(stored.task_id, id);
+            assert.strictEqual(stored.message_id, made.json().messages[0].id);
+            const submit = submits().at(-1)[1];
+            assert.strictEqual(submit.args.attachments.length, 1);
+            assert.strictEqual(submit.args.attachments[0].name, 'notes.txt');
+            assert.match(submit.args.attachments[0].url, /\/api\/v1\/tasks\/.+\/messages\/.+\/attachments\/0/);
+            const bytes = await t.ctx.conductor.attachment(id, made.json().messages[0].id, 0);
+            assert.strictEqual(bytes.buffer.toString(), 'the hand-over notes\n');
+            await post(`/api/v1/conductor/${id}/stop`, {});
         });
 
         await check('stopping a conductor stops its turn and its queue: nothing carries on', async () => {

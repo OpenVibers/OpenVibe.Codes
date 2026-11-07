@@ -8,6 +8,7 @@
  *   about it (codes_events_inbox);
  * - the run tokens minted for their attempts (codes_run_tokens, C3: ids and expiry, never the token);
  * - their workspace choices (codes_user_settings, C4b) and their placement rules;
+ * - the files they attached to a message (codes_attachments, owner 2026-11-07): names, types and sizes, never bytes;
  * - the placement counts learned about their tasks (placement_outcomes, A1): option keys and weights, never text;
  * - their conductor's turns (codes_conductor_messages, C9b) and the approvals it asked them (codes_approvals);
  * - the events Codes sent about them (codes_outbox);
@@ -35,6 +36,10 @@ const TABLES = [
         erase: { keep: 'erased with its task-keyed rows by the service extraErase' },
     },
     { table: 'codes_user_settings', subject: 'subject', file: 'settings.json', order: 'updated_at' },
+    // The files a person attached to a message (owner 2026-11-07): what they are and which turn they belong to. The
+    // bytes are theirs too, but the export carries the record, not a second copy of every 20 MB file; deletion takes
+    // the rows (and their bytes) with the person.
+    { table: 'codes_attachments', subject: 'subject', file: 'attachments.json', order: 'created_at', columns: ['id', 'task_id', 'attempt_n', 'message_id', 'name', 'mime', 'size', 'created_at', 'linked_at'] },
     // Placement A1's learned counts: the person's rows leave and are erased with them. No text, no payload.
     { table: 'placement_outcomes', subject: 'person_id', file: 'placement-outcomes.json', order: 'updated_at', columns: ['person_id', 'option_key', 'step_kind', 'ok_w', 'n_w', 'updated_at'] },
     // What each of the person's machines reported with its heartbeat (Codes C9c): labels, numbers and times only, no

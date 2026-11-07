@@ -213,7 +213,8 @@ const HOUR = 3600_000;
         assert.strictEqual(job.parseArgs(JSON.stringify({ ...base, agent: 'codex', safety: 'ask' }), {}).permission, 'edit');
         assert.strictEqual(job.parseArgs(JSON.stringify({ ...base, agent: 'opencode', safety: 'full' }), {}).permission, 'full');
         assert.strictEqual(job.parseArgs(JSON.stringify({ ...base, agent: 'claude-code', safety: 'full' }), {}).permission, 'edit', 'Claude Code keeps its own permission modes');
-        assert.strictEqual(job.parseArgs(JSON.stringify({ ...base, agent: 'aider' }), {}).agent, 'claude-code');
+        assert.strictEqual(job.parseArgs(JSON.stringify({ ...base, agent: 'aider' }), {}).agent, 'aider', 'every harness may lead');
+        assert.strictEqual(job.parseArgs(JSON.stringify({ ...base, agent: 'not-a-harness' }), {}).agent, 'claude-code');
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ov-codes-failover-'));
         try {
             const parsed = job.parseArgs(JSON.stringify({ ...base, agent: 'codex' }), {});

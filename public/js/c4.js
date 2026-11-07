@@ -197,12 +197,12 @@
             reader.readAsDataURL(file);
         });
         form.addEventListener('submit', async (event) => {
-            const files = Array.from(input.files || []).slice(0, 4);
-            if (!files.length) return;                 // words alone: the plain form post works without this script
+            const files = Array.from(input.files || []).slice(0, 10);
+            if (files.length) return; // the form itself posts the files as multipart
             event.preventDefault();
             const button = form.querySelector('button[type="submit"]');
             if (button) button.disabled = true;
-            say(files.length === 1 ? 'Sending the image…' : `Sending ${files.length} images…`);
+            say('Sending…');
             try {
                 const attachments = (await Promise.all(files.map(asData))).filter(Boolean);
                 const text = (form.querySelector('textarea[name="text"]') || {}).value || '';

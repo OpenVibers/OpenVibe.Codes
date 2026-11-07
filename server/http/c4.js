@@ -20,6 +20,8 @@ const { raw, esc } = require('../render/html');
 const { asyncRouter } = require('./router');
 const showcase = require('openvibe-shared/showcase');
 const { homeJsonLd } = require('./discovery');
+const models = require('../data/models');
+const { formBody } = require('./upload');
 
 const stateLabel = (s) => ({ running: 'Running', queued: 'Queued', placed: 'On its way', done: 'Done', succeeded: 'Done', failed: "Didn't finish", cancelled: 'Stopped by you', expired: 'Expired' }[s] || s || 'Unknown');
 const safeId = (s) => /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(s || ''));
@@ -87,9 +89,9 @@ const YOUR_AI = 'https://ai.openvibe.services/you';
 
 function createC4Routes(ctx) {
     const r = asyncRouter();
-    const { config, store, harnesses, tasks, sso, connections, machines, userSettings, github, usage, conductor, approvals, fleet } = ctx;
+    const { config, store, harnesses, tasks, sso, connections, machines, userSettings, github, usage, conductor, approvals, fleet, attachments } = ctx;
     const db = store.db;
-    const form = express.urlencoded({ extended: false, limit: '16kb' });
+    const form = formBody({ maxBytes: attachments ? attachments.MAX_MESSAGE_BYTES : 50 * 1024 * 1024 });
     const page = (req, res, title, body, extra = {}) => {
         // A page may add its own stylesheet (the guided setup's), so c4.css stays the size every page pays for.
         const css = ['css/c4.css', ...(Array.isArray(extra.css) ? extra.css : [])];
@@ -276,6 +278,27 @@ ${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="
     };
 
     // ── The conductor (C9b) ─────────────────────────────────────────────────────────────────────────────────────
+    /** The price line a "who leads" choice carries: known plans and keys say what they use, never an invented number. */
+    function priceLine(agentId, modelId) {
+        const offer = (harnesses?.list?.() || []).find((a) => a.id === agentId);
+        if (!offer) return 'uses your own account';
+        const agent = (offer.agents || []).find((a) => a.model === modelId) || (offer.agents || [])[0];
+        const out = agent && agent.price_per_1k_tokens ? Number(agent.price_per_1k_tokens.output_usd) : 0;
+        if (out > 0) return `$${out.toFixed(out < 0.01 ? 4 : 2)} per 1k output tokens`;
+        const amount = offer.price ? Number(offer.price.amount_usd) : 0;
+        if (amount > 0) return `$${amount} per ${offer.price.unit || 'run'}`;
+        return 'included in your plan';
+    }
+    /** Every harness and model a conductor may lead with, with what the person's machines say and its price. */
+    function leadChoices(settings, aware, catalog = null) {
+        const chosen = settings && settings.conductor_agent ? `${settings.conductor_agent}|${settings.conductor_model || ''}` : '';
+        return models.choices(harnesses, catalog).slice(1).map((c) => {
+            const info = aware.get(String(c.agent));
+            const price = c.detail || priceLine(c.agent, c.model);
+            const attrs = optionAttrs({ ...(info || {}), desc: [info && info.desc, price].filter(Boolean).join(' · ') });
+            return `<option value="${esc(c.value)}"${chosen === c.value || (!chosen && c.value === 'claude-code|opus') ? ' selected' : ''}${attrs}>${esc(`${c.label} — ${price}`)}</option>`;
+        }).join('');
+    }
     const conductorState = (row) => (['queued', 'placed', 'running'].includes(row.state)
         ? (row.state === 'queued' ? 'Getting ready' : 'Working')
         : row.outcome === 'stopped' ? 'Stopped' : row.outcome === 'unfinished' ? 'Needs you' : 'Waiting for you');
@@ -337,8 +360,8 @@ ${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="
         const outcome = row.outcome === 'unfinished' || row.outcome === 'stopped'
             ? `<div class="c4-outcome"><span class="c4-obadge" aria-hidden="true">${icon('<path d="m18 6-12 12M6 6l12 12"/>')}</span><div class="c4-outcome-copy"><b>${row.outcome === 'stopped' ? 'Stopped' : 'The last turn did not finish'}</b><span>${esc(row.outcome_note || row.error || 'Write a message to carry on.')}</span></div></div>` : '';
         const transcript = `<section class="c4-card c4-transcript" data-c4-conductor-stream="${esc(`${api}/events?last_event_id=${lastSeq}`)}" data-task="${esc(row.id)}" data-started-at="${esc(row.started_at || row.created_at || '')}" data-c4-conductor="${live ? 'live' : 'idle'}"><div class="c4-card-head"><h2>${live ? 'This turn, live' : 'The last turn'}</h2><span class="c4-muted" data-live-label>${live ? 'Connecting…' : 'Nothing is running'}</span></div><pre class="c4-log" data-task-log aria-live="polite" tabindex="0">${esc(lastLines)}</pre></section>`;
-        const composer = row.outcome === 'stopped' ? '' : `<section class="c4-card c4-conductor-composer"><form method="post" action="/tasks/${encodeURIComponent(row.id)}/messages" data-c4-conductor-form data-conductor-api="/api/v1/conductor/${encodeURIComponent(row.id)}/messages"><label for="c4-message">${live ? 'Say something: it is the next turn' : 'What next?'}</label><textarea id="c4-message" name="text" rows="3" placeholder="Tell your conductor what to do next, or ask what it is doing" required></textarea><div class="c4-conductor-actions"><label class="c4-file">Attach an image<input type="file" accept="image/*" multiple data-c4-images></label><button class="c4-button" type="submit">Send</button></div><p class="c4-hint" data-c4-message-status role="status">${live ? 'A message waits until the current turn ends; it is not lost.' : ''}</p></form></section>`;
-        const content = `${outcome}<section class="c4-card c4-conductor-head"><div class="c4-task-heading"><div class="c4-task-title-wrap"><h1>Conductor</h1></div><span class="c4-status c4-${esc(row.state)}">${esc(conductorState(row))}</span></div><div class="c4-chips" aria-label="Conductor details"><span class="c4-chip">${esc(row.folder || 'a folder')}</span><span class="c4-chip">${esc(modelLabel(row.model))}</span><span class="c4-chip">safety: ${esc(row.safety || 'ask')}</span><span class="c4-chip">${esc(machineLabel || 'your machine')}</span></div><p class="c4-hint">One Claude Code session on your own machine, with your own login. Each message is the next turn of the same conversation; its work is carried out through the Codes tools, on your other agents.</p></section>${approvals}${usageCard}<section class="c4-card c4-turns"><div class="c4-card-head"><h2>Turns</h2><span class="c4-muted">${(view.messages || []).length} so far</span></div>${turns ? `<ol class="c4-turn-list">${turns}</ol>` : '<div class="c4-emptyline">Its first turn is starting.</div>'}</section>${transcript}${composer}`;
+        const composer = row.outcome === 'stopped' ? '' : `<section class="c4-card c4-conductor-composer"><form method="post" action="/tasks/${encodeURIComponent(row.id)}/messages" enctype="multipart/form-data" data-c4-conductor-form data-conductor-api="/api/v1/conductor/${encodeURIComponent(row.id)}/messages"><label for="c4-message">${live ? 'Say something: it is the next turn' : 'What next?'}</label><textarea id="c4-message" name="text" rows="3" placeholder="Tell your conductor what to do next, or ask what it is doing"></textarea><div class="c4-conductor-actions"><label class="c4-file">Attach files<input type="file" name="files" multiple data-c4-images></label><button class="c4-button" type="submit">Send</button></div><p class="c4-hint" data-c4-message-status role="status">${live ? 'A message waits until the current turn ends; it is not lost.' : ''}</p></form></section>`;
+        const content = `${outcome}<section class="c4-card c4-conductor-head"><div class="c4-task-heading"><div class="c4-task-title-wrap"><h1>Conductor</h1></div><span class="c4-status c4-${esc(row.state)}">${esc(conductorState(row))}</span></div><div class="c4-chips" aria-label="Conductor details"><span class="c4-chip">${esc(row.folder || 'a folder')}</span><span class="c4-chip">${esc(row.agent === 'claude-code' ? modelLabel(row.model) : (row.model || 'its default model'))}</span><span class="c4-chip">safety: ${esc(row.safety || 'ask')}</span><span class="c4-chip">${esc(machineLabel || 'your machine')}</span></div><p class="c4-hint">One long session on your own machine, on the agent you chose and your own login. Each message is the next turn of the same conversation; it hands the work to your other agents through the Codes tools.</p></section>${approvals}${usageCard}<section class="c4-card c4-turns"><div class="c4-card-head"><h2>Turns</h2><span class="c4-muted">${(view.messages || []).length} so far</span></div>${turns ? `<ol class="c4-turn-list">${turns}</ol>` : '<div class="c4-emptyline">Its first turn is starting.</div>'}</section>${transcript}${composer}`;
         page(req, res, 'Conductor', wrap(content));
     }
 
@@ -378,7 +401,7 @@ ${showcase.features({ id: 'yours', title: 'Your plans, your keys, your machine',
             { title: 'Your computer', text: 'Pair it once from openvibe.network. Tasks run there with your own tools, and your logins never leave it.', href: '/run' },
             { title: 'Costs you can follow', text: 'Every turn shows its tokens, what came from cache and who paid, on openvibe.report.' },
         ] })}
-${showcase.features({ id: 'conductor', title: 'A conductor for the big jobs', lede: 'One Claude Code session plans the work, hands the parts to other agents in parallel, reads what they did, and asks you before anything risky.', items: [
+${showcase.features({ id: 'conductor', title: 'A conductor for the big jobs', lede: 'One long session on the agent you choose plans the work, hands the parts to other agents in parallel, reads what they did, and asks you before anything risky.', items: [
             { title: 'Plans, then delegates', text: 'Backend to one agent, tests to another, docs to a third, at the same time.' },
             { title: 'Asks before it acts', text: 'Pushing, deleting or spending waits for your Allow in the app.' },
             { title: 'Remembers the thread', text: 'One long conversation you can pick up from any device.' },
@@ -408,7 +431,7 @@ ${showcase.faq({ items: [
         const content = `${header(signedIn ? 'Home' : 'Every coding agent. One place.', signedIn ? '' : 'Your keys, your machines. Tell an agent what to do and follow the work from your phone.')}
 <section class="c4-card c4-composer"><form method="post" action="/start"><label for="c4-prompt">What should an agent do?</label><textarea id="c4-prompt" name="prompt" placeholder="Describe the change, question or fix" required></textarea><div class="c4-controls"><label class="c4-field-repo">Project<input type="url" name="repo" value="${esc(String(req.query.repo || ''))}" placeholder="Paste a repository URL" autocomplete="url" list="c4-repo-options" data-c4-repo-search data-c4-repo-url="/api/v1/me/repos"><datalist id="c4-repo-options">${repos.map((repo) => `<option value="${esc(repo.url)}">${esc(repo.full_name)}</option>`).join('')}</datalist></label><label>Agent <select name="agent"><option value="">Auto</option>${agentOptions}</select></label><label>Machine <select name="machine"><option value="">Auto</option>${machineOptions}</select></label><label>Cost cap <select name="cap"><option>$1.00</option><option>$5.00</option></select></label><button class="c4-button" type="submit">Start a task</button></div><p class="c4-hint">Run places the task on one of your own machines; the machine and agent you pick are saved as your defaults.<span class="c4-hint-status" data-c4-repo-status role="status"></span></p>${saved ? `<div class="c4-chips c4-saved" aria-label="Saved repositories">${saved}</div>` : ''}</form></section>
 <div class="c4-grid"><section class="c4-card"><div class="c4-card-head"><h2>Running</h2><a href="/tasks?state=running">All tasks</a></div>${rows.filter((x) => !['done', 'succeeded', 'failed', 'cancelled'].includes(x.state)).slice(0, 4).map(rowHtml).join('') || '<div class="c4-emptyline">No tasks running yet. <a href="/#c4-prompt">Start a task</a></div>'}</section><section class="c4-card"><div class="c4-card-head"><h2>Needs you</h2>${waiting.length ? '<a href="/approvals">The inbox</a>' : ''}</div><p class="c4-sub">Approvals and questions</p>${waiting.length ? waiting.slice(0, 3).map((a) => `<a class="c4-task" href="/approvals"><span class="c4-status-dot c4-running" aria-label="Waiting"></span><span class="c4-task-title">${esc(a.tool || 'a tool')}</span><span class="c4-task-meta">${esc(String(a.summary || '').slice(0, 120))}</span></a>`).join('') : '<div class="c4-emptyline">Nothing needs your attention. <a href="/tasks">View tasks</a></div>'}</section></div>
-${signedIn ? `<section class="c4-card c4-conductor-cta"><div class="c4-card-head"><h2>Your conductor</h2><a href="/conductor">${conductors.length ? 'Open' : 'Set it up'}</a></div><p class="c4-muted">One Claude Code session on your own machine, carrying the plan forward and handing the work to your other agents. Each message you send is its next turn${conductors.length ? `: ${conductors.length} running or waiting` : ''}.</p><p><a class="c4-button" href="/conductor">${conductors.length ? 'Open your conductor' : 'Start your conductor'}</a></p></section>` : ''}
+${signedIn ? `<section class="c4-card c4-conductor-cta"><div class="c4-card-head"><h2>Your conductor</h2><a href="/conductor">${conductors.length ? 'Open' : 'Set it up'}</a></div><p class="c4-muted">One long session on the agent you choose, on your own machine, carrying the plan forward and handing the work to your other agents. Each message you send is its next turn${conductors.length ? `: ${conductors.length} running or waiting` : ''}.</p><p><a class="c4-button" href="/conductor">${conductors.length ? 'Open your conductor' : 'Start your conductor'}</a></p></section>` : ''}
 <section class="c4-card"><div class="c4-card-head"><h2>Recent tasks</h2><a href="/tasks">View all</a></div>${rows.slice(0, 5).map(rowHtml).join('') || '<div class="c4-emptyline">No tasks yet. <a href="/#c4-prompt">Start a task</a></div>'}</section>
 ${signedIn && !mine.ok && mine.problem ? note(`Your machines could not be read, so the machine picker has only Auto. ${esc(mine.problem.detail || '')}`, 'bad') : ''}
 ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h2><div class="c4-grid">${[['Any agent', 'Bring a key or plan. Auto picks a good fit and can hand over when one gets stuck.'], ['Your computer or ours', 'Pair your computer with one command. A hosted sandbox is coming soon.'], ['Proof you can inspect', 'See the changes, tests, screenshots and review before you approve.'], ['A cost you can follow', 'Track task costs and plan limits. Set caps that stop with a wrap-up.']].map(([a, b]) => `<article><h3>${a}</h3><p>${b}</p></article>`).join('')}</div></section>`}`;
@@ -516,13 +539,15 @@ ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h
         const machineName = new Map((mine.machines || []).map((m) => [m.id, m.name || m.node_id || m.id]));
         const folderChoices = folders.map((f) => `<option value="${esc(f.folder)}" data-machine="${esc(f.machine || '')}">${esc(f.folder)}${f.machine ? ` · ${esc(machineName.get(f.machine) || f.machine)}` : ''}</option>`).join('');
         const existing = await db.many("SELECT * FROM run_tasks WHERE subject = $1 AND kind = 'conductor' ORDER BY created_at DESC LIMIT 4", [req.viewer.subject]);
-        const list = existing.map((row) => `<a class="c4-task" href="${taskHref(row)}"><span class="c4-status-dot c4-${esc(row.state)}" aria-label="${esc(conductorState(row))}"></span><span class="c4-task-title">${esc(row.folder || 'Conductor')}</span><span class="c4-task-meta">${esc([modelLabel(row.model), conductorState(row), age(row.created_at)].join(' · '))}</span></a>`).join('');
-        const content = `${header('Conductor', 'Your orchestrator, running here: one Claude Code session on your machine, on your own login, carrying the plan forward through the other agents.')}${flash(req)}
+        const list = existing.map((row) => `<a class="c4-task" href="${taskHref(row)}"><span class="c4-status-dot c4-${esc(row.state)}" aria-label="${esc(conductorState(row))}"></span><span class="c4-task-title">${esc(row.folder || 'Conductor')}</span><span class="c4-task-meta">${esc([failoverNames[row.agent] || row.agent, modelLabel(row.model), conductorState(row), age(row.created_at)].join(' · '))}</span></a>`).join('');
+        const fleetRows = fleet ? await fleet.agents(req.viewer.subject, harnesses).catch(() => []) : [];
+        const aware = agentReadiness(fleetRows);
+        const content = `${header('Conductor', 'Your orchestrator, running here: the agent you choose on your own machine, carrying the plan forward through the other agents.')}${flash(req)}
 <section class="c4-card c4-composer"><form method="post" action="/conductor">
 <label for="c4-folder">Working folder</label><div class="c4-folder-row"><input id="c4-folder" name="folder" placeholder="/home/you/project" value="${esc(String(req.query.folder || ''))}" list="c4-folders" autocomplete="off" spellcheck="false"><select name="folder_pick" data-c4-folder-pick aria-label="Folders this machine has worked in"><option value="">A recent folder…</option>${folderChoices}</select></div><datalist id="c4-folders">${folders.map((f) => `<option value="${esc(f.folder)}"></option>`).join('')}</datalist>
-<div class="c4-controls"><label>Machine <select name="machine" data-c4-machine><option value="">Your default</option>${machineOptions}</select></label><label>Model <select name="model" data-c4-model>${MODELS.map(([v, l]) => `<option value="${v}"${(settings.model || 'opus') === v ? ' selected' : ''}>${l}</option>`).join('')}<option value="other">Other…</option></select></label><label class="c4-model-other" data-c4-model-other hidden>Other model <input name="model_other" placeholder="a model name or id" autocomplete="off" spellcheck="false"></label><label>Safety <select name="safety">${[['ask', 'Ask me'], ['project', 'Auto in the project'], ['full', 'Full access']].map(([v, l]) => `<option value="${v}"${settings.safety === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div>
+<div class="c4-controls"><label>Machine <select name="machine" data-c4-machine><option value="">Your default</option>${machineOptions}</select></label><label>Who leads this task <select name="who" data-c4-model><option value="">Today's choice: Claude Code on Opus</option>${leadChoices(settings, aware)}</select></label><label>Safety <select name="safety">${[['ask', 'Ask me'], ['project', 'Auto in the project'], ['full', 'Full access']].map(([v, l]) => `<option value="${v}"${settings.safety === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div>
 <label class="c4-note-field" for="c4-conductor-note">What should it pick up? <small>Optional. It starts from the hand-over note and the plan; say here what you want first.</small></label><textarea id="c4-conductor-note" name="note" rows="2" placeholder="e.g. carry on with the next piece of the plan"></textarea>
-<p class="c4-hint">It opens that folder, so it loads that project's memory and AGENTS.md. It runs with your own Claude Code login on that machine, and never with a key of ours.${mine.problem ? ` ${esc(mine.problem.detail || '')}` : ''}</p>
+<p class="c4-hint">It opens that folder, so it loads that project's memory and AGENTS.md. It runs with your own login on that machine, and never with a key of ours.${mine.problem ? ` ${esc(mine.problem.detail || '')}` : ''}</p>
 <div class="c4-conductor-actions"><span class="c4-hint">One conductor is enough: it hands the work to the other agents through the Codes tools.</span><button class="c4-button" type="submit">Start your conductor</button></div>
 </form></section>
 ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors</h2><a href="/tasks">All tasks</a></div>${list}</section>` : ''}`;
@@ -535,16 +560,15 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
         const b = req.body || {};
         try {
             const folder = String(b.folder || b.folder_pick || '').trim();
-            const picked = String(b.model || 'opus');
-            const model = (picked === 'other' ? String(b.model_other || '') : picked).trim();
-            if (!model) throw Object.assign(new Error('name the model for Other: an alias such as opus, or a model id'), { status: 400 });
-            if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(model)) throw Object.assign(new Error('that is not a model name'), { status: 400 });
+            const [agent, model = ''] = String(b.who || '').split('|');
+            if (agent && !(harnesses?.list?.() || []).some((a) => a.id === agent)) throw Object.assign(new Error('choose who leads this task from the list'), { status: 400 });
             const project = await conductor.projectFor(req.viewer.token || null, req.viewer.subject);
             if (!project) throw Object.assign(new Error(`start one task at ${config.baseUrl}/run first: a conductor runs in your project, on your machine`), { status: 409 });
             const made = await conductor.create({
                 subject: req.viewer.subject, project,
                 folder, machine: b.machine || null,
-                model, safety: b.safety || 'ask', note: b.note || null,
+                ...(agent ? { agent, model } : {}),
+                safety: b.safety || 'ask', note: b.note || null,
             });
             await userSettings.save(req.viewer.subject, { safety: b.safety || 'ask', ...(b.machine ? { default_machine: b.machine } : {}) }).catch(() => {});
             return res.redirect(303, `/tasks/${encodeURIComponent(made.task.id)}`);
@@ -561,7 +585,12 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
         const row = await db.maybe("SELECT * FROM run_tasks WHERE id = $1 AND subject = $2 AND kind = 'conductor'", [req.params.id, req.viewer.subject]);
         if (!row) return res.status(404).send('Not found');
         try {
-            await conductor.message(row, { text: (req.body || {}).text, token: req.viewer.token || null });
+            const body = req.body || {};
+            const [agent, model = ''] = String(body.who || '').split('|');
+            const named = Array.isArray(body.attachment_ids) ? body.attachment_ids : (body.attachment_ids ? [body.attachment_ids] : []);
+            const saved = attachments && Array.isArray(req.files) && req.files.length ? await attachments.saveMany(req.viewer.subject, req.files) : [];
+            const attachmentIds = [...saved.map((f) => f.id), ...named.map(String)].filter(Boolean);
+            await conductor.message(row, { text: body.text, token: req.viewer.token || null, attachmentIds, ...(agent ? { agent, model } : {}) });
             return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}`);
         } catch (e) {
             return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}?error=${encodeURIComponent(String((e && e.message) || 'the message could not be sent').slice(0, 180))}`);
@@ -791,6 +820,9 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
 <label>Default agent <select name="default_agent"><option value="">Auto</option>${agentOptions}</select></label>
 <label>Default machine <select name="default_machine"><option value="">Auto</option>${machineOptions}</select></label>
 </div>
+<h3 class="c4-subhead" id="lead">Who leads your tasks</h3>
+<p class="c4-hint">The agent that plans the work and hands the parts to the others. Every harness and model you can run is listed with what your machines say about it and what it costs. A single task can still pick another leader in its composer.</p>
+<div class="c4-form-grid"><label>Who leads your tasks <select name="conductor_who"><option value="">Today's choice: Claude Code on Opus</option>${leadChoices(settings, aware)}</select></label></div>
 <h3 class="c4-subhead">Limits</h3>
 <div class="c4-form-grid">
 <label>Steps per task ${limitSelect('steps', settings.steps, [[200, '200'], [350, '350'], [500, '500'], [1000, '1,000']], 'steps')}</label>
@@ -827,6 +859,7 @@ ${conductorSection}
                 no_cloud: b.no_cloud === '1',
                 only_free: b.only_free === '1',
                 ...(b.safety ? { safety: b.safety } : {}),
+                ...(b.conductor_who !== undefined ? (() => { const [agent, model = ''] = String(b.conductor_who || '').split('|'); return { conductor_agent: agent, conductor_model: model }; })() : {}),
                 steps: b.steps === undefined ? undefined : b.steps,
                 minutes: b.minutes === undefined ? undefined : b.minutes,
                 // The conductor's fallbacks, in the order of the form's rows; an empty row is none.
