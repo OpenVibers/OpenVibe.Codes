@@ -6,7 +6,9 @@
  *
  *   GET  /api/v1/me/agent-view          → { agent }   the live stream, with a view ticket, or the last one as a still
  *   GET  /api/v1/me/agent-view/frame    → the last frame (JPEG or WebP), the picture when nothing is live
+ *   POST /api/v1/me/agent-view/pause    → { agent }   { paused } → Live's pause (S5)
  *   POST /api/v1/me/agent-view/curtain  → { agent }   { up } → Live's curtain, raised as the owner's own button
+ *   POST /api/v1/me/agent-view/mute     → { agent }   { muted } → Live's voice mute (S5)
  *   POST /api/v1/me/agent-view/end      → { agent }   Live's end
  *
  * The person's own token does all of it, passed through to OpenVibe.Live: Codes mints the view ticket server-side
@@ -83,6 +85,11 @@ function createAgentView({ config, sso, actorLimits, fetchImpl = (...a) => fetch
     function present(row, { ticket, expiresAt }) {
         if (!row || !AGENT.test(String(row.id || ''))) return null;
         return {
+            // S5: the pause and the voice's mute, shown by the Dock's four controls.
+            paused: !!row.paused,
+            paused_by: row.paused_by || null,
+            paused_by_role: row.paused_by_role || null,
+            mode: row.mode || 'watch',
             id: row.id,
             state: row.state,
             title: row.title,
@@ -101,10 +108,26 @@ function createAgentView({ config, sso, actorLimits, fetchImpl = (...a) => fetch
         };
     }
 
+    /** Live's voice state: the mute and the mode, for the Dock's Mute control. Null when Live does not answer. */
+    async function voiceOf(token, row) {
+        try {
+            const res = await live(token, `/api/streams/agent/${encodeURIComponent(row.id)}/voice`);
+            if (!res.ok) return null;
+            const body = await res.json().catch(() => null);
+            return body && body.voice ? body.voice : null;
+        } catch { return null; }
+    }
+
     async function viewOf(token) {
         const row = await streamOf(token);
         if (!row) return null;
-        return present(row, await ticketOf(token, row));
+        const [ticket, voice] = await Promise.all([ticketOf(token, row), voiceOf(token, row)]);
+        const out = present(row, ticket);
+        if (out) {
+            out.voice_muted = !!(voice && voice.muted);
+            out.mode = (voice && voice.mode) || out.mode;
+        }
+        return out;
     }
 
     // ── CORS: this one part of the API answers every site's Dock ──
@@ -180,7 +203,30 @@ function createAgentView({ config, sso, actorLimits, fetchImpl = (...a) => fetch
         return viewOf(token);
     };
 
+    // S5: pause/resume and mute/unmute. The Dock says which way, so two quick presses cannot race the state.
+    const actControl = (name, bodyOf) => async (req) => {
+        const token = req.ov && req.ov.token;
+        const row = await streamOf(token);
+        if (!row) return null;
+        const out = await live(token, `/api/streams/agent/${encodeURIComponent(row.id)}/control`, { method: 'POST', body: JSON.stringify(bodyOf(req)) });
+        if (!out.ok) throw Object.assign(new Error(`OpenVibe.Live answered ${out.status} for ${name}`), { status: 502, code: 'agent_view.unavailable' });
+        return viewOf(token);
+    };
+    const controlWithBody = (name, run) => async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', `sign in to ${name} your agent stream`);
+        try {
+            const agent = await sso.asViewer(req, res, (token) => { req.ov = { token }; return run(req); });
+            return res.json({ agent });
+        } catch (e) {
+            if (e && e.status === 401) return problem(req, res, 401, 'auth.required', `sign in to ${name} your agent stream`);
+            log.warn(`[Codes] agent view ${name}: ${String(e && e.message).slice(0, 200)}`);
+            return problem(req, res, 502, 'agent_view.unavailable', 'OpenVibe.Live did not answer. Try again in a moment.');
+        }
+    };
+
+    r.post('/me/agent-view/pause', actorLimits.budget('codes.agent_view.control'), json, controlWithBody('pause', actControl('pause', (req) => ({ control: 'pause', paused: !!(req.body && req.body.paused) }))));
     r.post('/me/agent-view/curtain', actorLimits.budget('codes.agent_view.control'), json, control('curtain', act('/curtain', { up: true, reason: 'manual' })));
+    r.post('/me/agent-view/mute', actorLimits.budget('codes.agent_view.control'), json, controlWithBody('mute', actControl('mute', (req) => ({ control: 'mute', muted: !!(req.body && req.body.muted) }))));
     r.post('/me/agent-view/end', actorLimits.budget('codes.agent_view.control'), json, control('end', act('/end', {})));
 
     return r;
