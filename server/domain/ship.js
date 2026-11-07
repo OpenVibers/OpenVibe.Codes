@@ -29,7 +29,8 @@ function serviceFor(manifests, repo) {
 
 function createShip({ config = {}, fetchImpl = globalThis.fetch, manifests = null, log = console } = {}) {
     const list = manifests || require('openvibe-contracts').services.manifests;
-    const token = String((config.github && config.github.token) || '').trim();
+    // Read at use time: the owner's token from the admin panel (codes.accounts github.token), else CODES_GITHUB_TOKEN.
+    const tokenOf = () => String((config.github && config.github.token) || '').trim();
     const base = String(process.env.GITHUB_API_URL || 'https://api.github.com').replace(/\/+$/, '');
 
     async function releaseOf(origin) {
@@ -45,7 +46,7 @@ function createShip({ config = {}, fetchImpl = globalThis.fetch, manifests = nul
         if (!SHA.test(String(release || ''))) return null;
         try {
             const res = await fetchImpl(`${base}/repos/${repo}/compare/${sha}...${release}`, {
-                headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'openvibe-codes', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'openvibe-codes', ...(tokenOf() ? { Authorization: `Bearer ${tokenOf()}` } : {}) },
                 signal: AbortSignal.timeout(6000),
             });
             if (!res.ok) return null;

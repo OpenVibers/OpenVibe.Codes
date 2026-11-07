@@ -7,6 +7,10 @@
  * /internal/config is openvibe-shared/config's adminRoutes, guarded by codes.config.manage (Network's service
  * token only). actor is the owner Network names in X-OV-Subject; X-OV-Fresh: 1 gates a secret or x-danger write
  * (this namespace has neither). Every activation writes one audit line with the actor and the keys, never a value.
+ *
+ * The same routes serve the stores passed as `also` (codes.accounts and codes.publishing, server/owner-inputs-config.js),
+ * and POST /internal/config/:namespace/test/:key, the admin panel's Setup tab Test button, answers for the keys a
+ * `test` hook knows (the owner-setup design of 2026-11-07); it is mounted before the config routes.
  */
 const express = require('express');
 const shared = require('openvibe-shared/config');
@@ -19,14 +23,14 @@ const CAPABILITY = 'codes.config.manage';
 const SCHEMA = {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     title: 'OpenVibe.AI in Codes',
-    description: 'Read OpenVibe.AI\'s model catalog so the pickers offer its aliases and exact ids.',
+    description: 'Whether Codes\' model pickers offer every model OpenVibe.AI can run. Change it when you want people to pick an exact model instead of the one default entry.',
     type: 'object',
     additionalProperties: false,
     required: ['catalog'],
     properties: {
         catalog: {
-            type: 'boolean', title: 'AI model catalog', 'x-group': 'AI Exchange', 'x-env': 'CODES_AI_CATALOG',
-            description: 'Read GET /v1/models with Codes\' own service token and cache the answer about five minutes. Off, the pickers keep today\'s one entry.',
+            type: 'boolean', title: 'Offer every AI model in the pickers', 'x-group': 'AI Exchange', 'x-env': 'CODES_AI_CATALOG',
+            description: 'When on, Codes reads OpenVibe.AI\'s model list (refreshed about every five minutes) and its pickers offer every model by name. Off (the default) keeps the single default entry.',
         },
     },
 };
@@ -66,7 +70,7 @@ function actor(req) {
 
 const requireFresh = (req) => String((req.headers && req.headers['x-ov-fresh']) || '') === '1';
 
-async function create({ db, keys, config, env = process.env, log = console, onActivate = null }) {
+async function create({ db, keys, config, env = process.env, log = console, onActivate = null, also = [], test = null }) {
     // CODES_AI_CATALOG has always accepted 1/true/yes/on; the shared store's boolean pin reads true/1.
     const storeEnv = { ...env };
     if (['1', 'true', 'yes', 'on'].includes(String(storeEnv.CODES_AI_CATALOG || '').trim().toLowerCase())) storeEnv.CODES_AI_CATALOG = '1';
@@ -80,14 +84,52 @@ async function create({ db, keys, config, env = process.env, log = console, onAc
     if (env.OV_CONFIG_KEKS) {
         try { await store.reseal(); } catch (err) { log.warn(`[config] ${NAMESPACE}: reseal failed: ${(err && err.message) || err}`); }
     }
-    const router = shared.adminRoutes([store], {
-        basePath: '/internal/config', requireAdmin: capabilityGuard({ keys, config, log }), actor, requireFresh, log,
+    const guard = capabilityGuard({ keys, config, log });
+    const router = shared.adminRoutes([store, ...also], {
+        basePath: '/internal/config', requireAdmin: guard, actor, requireFresh, log,
     });
     return {
         store, router,
         get: (key) => store.get(key),
-        mount(app) { app.use('/internal/config', express.json({ limit: '128kb' })); router.mount(app); },
+        mount(app) {
+            app.use('/internal/config', express.json({ limit: '128kb' }));
+            if (test) app.post('/internal/config/:namespace/test/:key', guard, testRoute({ test, log }));
+            router.mount(app);
+        },
     };
 }
 
-module.exports = { create, SCHEMA, NAMESPACE, CAPABILITY };
+/** One line, at most 200 characters, with the secret replaced. */
+function oneLine(text, secret) {
+    let s = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+    if (typeof secret === 'string' && secret.length >= 4) {
+        s = s.split(secret).join('[hidden]');
+        if (secret.length >= 12) s = s.split(secret.slice(0, 12)).join('[hidden]');
+    }
+    return s.length > 200 ? `${s.slice(0, 199)}…` : s;
+}
+
+/**
+ * The Setup tab's Test button: test(namespace, key) answers { value, source, env, run(value) } or null (no test).
+ * 200 { ok, message, state, source, namespace, key, tested_at } (openvibe-shared 4.125.0's { ok, message } with more
+ * beside it), 409 config.not_set when neither the panel nor the settings file has a value. Never the value itself.
+ */
+function testRoute({ test, log }) {
+    return async function configTest(req, res) {
+        const namespace = String(req.params.namespace || '');
+        const key = String(req.params.key || '');
+        let found = null;
+        try { found = await test(namespace, key); } catch { found = null; }
+        if (!found) return http.sendProblem(res, 404, 'config.test_not_found', { detail: `${namespace} has no test for ${key}`, ctx: req.ov });
+        if (!found.value) return http.sendProblem(res, 409, 'config.not_set', { detail: `${key} is not set, so there is nothing to test`, ctx: req.ov });
+        let out;
+        try { out = await found.run(found.value); } catch (err) { out = { ok: false, message: `The test could not run: ${(err && err.message) || 'unknown error'}` }; }
+        const ok = Boolean(out && out.ok);
+        const from = found.source === 'env' && found.env ? ` (the value from the server's settings file, ${found.env})` : '';
+        const message = oneLine(`${(out && out.message) || (ok ? 'It works.' : 'It did not work.')}${from}`, found.value);
+        (log.info || log.log).call(log, `[config] test ${namespace} ${key}: ${ok ? 'connected' : 'not working'}`);
+        return res.json({ ok, message, state: ok ? 'connected' : 'not_working', source: found.source || null, namespace, key, tested_at: new Date().toISOString() });
+    };
+}
+
+module.exports = { create, SCHEMA, NAMESPACE, CAPABILITY, oneLine };

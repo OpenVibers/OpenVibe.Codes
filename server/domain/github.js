@@ -61,7 +61,8 @@ function ciWord(status) {
 }
 
 function createGitHub({ config = {}, store = null, fetchImpl = globalThis.fetch, log = console, ship = null } = {}) {
-    const token = String((config.github && config.github.token) || '').trim();
+    // Read at use time: the owner's token from the admin panel (codes.accounts github.token), else CODES_GITHUB_TOKEN.
+    const tokenOf = () => String((config.github && config.github.token) || '').trim();
     const cache = new Map();
     const searches = new Map();
     // The host's own deploy signal: the service's /release.json, which `ovhost status` reads too (Codes C9c).
@@ -70,7 +71,7 @@ function createGitHub({ config = {}, store = null, fetchImpl = globalThis.fetch,
     const headers = () => ({
         Accept: 'application/vnd.github+json',
         'User-Agent': 'openvibe-codes',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(tokenOf() ? { Authorization: `Bearer ${tokenOf()}` } : {}),
     });
 
     async function getJson(path) {
