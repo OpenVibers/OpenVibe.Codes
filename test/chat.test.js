@@ -82,14 +82,15 @@ const { stepKind } = require('../server/http/chat');
             assert.ok(!/name="repo"[^>]*required/.test(h), 'the repository is not required: something new needs none');
             assert.match(h, /<select name="project"[^>]*>[\s\S]*?<option value="OpenVibers\/OpenVibe\.Live"[^>]*>Live · openvibe\.live<\/option>/, 'OpenVibe projects are a list');
             assert.match(h, /<option value="OpenVibers\/OpenVibe\.Shared"/, 'the shared libraries too');
-            assert.match(h, /<select name="kind"[^>]*>[\s\S]*?>Website<\/option>[\s\S]*?>Game<\/option>/, 'something new is a website, a game or an app');
+            assert.match(h, /<input type="radio" name="kind" value="website"[^>]*>[\s\S]*?Website[\s\S]*?name="kind" value="game"[\s\S]*?Game/, 'something new is a website, a game, an app or a stream overlay: one tap each (11-07)');
+            assert.match(h, /name="dim" value="2d"[^>]*checked[\s\S]*?name="dim" value="3d"/, 'a game is 2D or 3D');
             assert.match(h, /class="ch-where"[\s\S]*?openvibe\.space[\s\S]*?Runs on/, 'each way says where it runs');
             assert.match(h, /<section class="ch-spark" aria-label="Ideas to start from"[^>]*data-ch-ideasets="/, 'the ideas rail, with every set for the script');
             assert.match(h, /<ul class="ch-spark-list" aria-hidden="true">[\s\S]*?tabindex="-1"/, 'the loop copy is hidden from the keyboard and assistive tech');
             assert.match(h, /data-ch-ideas-pause aria-pressed="false" aria-label="Pause the ideas"/, 'the moving rail has a pause');
             const fresh = await t.get('/?mode=new&kind=game', { as: ada });
             assert.match(fresh.text, /value="new" form="ch-start" checked/, 'the chosen way is kept');
-            assert.match(fresh.text, /<option value="game" selected>Game<\/option>/);
+            assert.match(fresh.text, /<input type="radio" name="kind" value="game" form="ch-start" checked data-ch-kind>/);
             assert.match(fresh.text, /data-ch-idea-mode="new" data-ch-idea-kind="website"[\s\S]*?data-ch-idea-kind="game"[\s\S]*?data-ch-idea-kind="app"/, 'something new mixes the three kinds');
         });
 

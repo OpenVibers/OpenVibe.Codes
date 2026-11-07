@@ -21,10 +21,14 @@ const MODES = ['new', 'openvibe', 'code'];
 
 // What "Something new" can be, and the words Space's builder is handed so it knows which.
 const KINDS = {
-    website: { label: 'Website', lead: 'A website: ', words: /\b(site|website|page|portfolio|landing|blog)\b/i },
-    game: { label: 'Game', lead: 'A browser game: ', words: /\b(game|play|puzzle|quiz|arcade|platformer)\b/i },
-    app: { label: 'App or tool', lead: '', words: null },
+    website: { label: 'Website', icon: 'website', lead: 'A website: ', words: /\b(site|website|page|portfolio|landing|blog)\b/i },
+    game: { label: 'Game', icon: 'games', lead: 'A browser game: ', words: /\b(game|play|puzzle|quiz|arcade|platformer)\b/i },
+    app: { label: 'App', icon: 'tools', lead: '', words: null },
+    // A page for OBS: a transparent background, sized for a stream (alerts, a chat box, a goal bar, a countdown).
+    overlay: { label: 'Stream overlay', icon: 'live', lead: 'A stream overlay for OBS (a page with a transparent background, 1920×1080): ', words: /\b(overlay|obs|alert|browser source)\b/i },
 };
+// A game is 2D or 3D (the owner, 11-07): the words say which, so Space's builder picks the right engine.
+const DIMS = { '2d': 'A 2D browser game: ', '3d': 'A 3D browser game (three.js): ' };
 
 // The ideas on the rail: each one fills the box, ready to be changed. Plain, specific, and nothing that copies a
 // named game or product.
@@ -53,6 +57,12 @@ const IDEAS = {
         'A countdown to my next stream',
         'Flashcards for learning Japanese',
     ],
+    overlay: [
+        'A follower alert with my logo that slides in',
+        'A goal bar for my sub goal',
+        'A chat box that fades old messages',
+        'A starting-soon screen with a countdown',
+    ],
     code: [
         'Fix the failing tests',
         'Explain how this project is laid out',
@@ -77,7 +87,7 @@ const IDEAS = {
 function ideasFor(mode) {
     if (mode === 'new') {
         const out = [];
-        for (let i = 0; i < 6; i++) for (const kind of ['website', 'game', 'app']) if (IDEAS[kind][i]) out.push({ text: IDEAS[kind][i], mode: 'new', kind });
+        for (let i = 0; i < 6; i++) for (const kind of ['website', 'game', 'app', 'overlay']) if (IDEAS[kind][i]) out.push({ text: IDEAS[kind][i], mode: 'new', kind });
         return out;
     }
     return (IDEAS[mode] || IDEAS.code).map((text) => ({ text, mode, kind: null }));
@@ -206,14 +216,15 @@ const MAX_HANDOVER_URL = 6000;   // a request line nginx and every browser take 
  * the person back with the query; Space's own sign-in page would drop it). Long words are cut until the address fits,
  * and the person sees exactly what arrived before anything is built.
  */
-function spaceHref({ kind, text, origin = SPACE }) {
+function spaceHref({ kind, text, dim, origin = SPACE }) {
     const k = KINDS[kind] ? kind : 'website';
     let words = String(text || '').trim();
-    const lead = KINDS[k].lead && !(KINDS[k].words && KINDS[k].words.test(words)) ? KINDS[k].lead : '';
+    const said = KINDS[k].words && KINDS[k].words.test(words);
+    const lead = k === 'game' && DIMS[dim] ? DIMS[dim] : KINDS[k].lead && !said ? KINDS[k].lead : '';
     const build = (w) => `${origin}/auth/login?next=${encodeURIComponent(`/spaces/new?prompt=${encodeURIComponent(`${lead}${w}`.slice(0, 4000))}&from=codes`)}`;
     let href = build(words);
     while (href.length > MAX_HANDOVER_URL && words.length > 40) { words = words.slice(0, Math.floor(words.length * 0.85)).trimEnd(); href = build(words); }
     return href;
 }
 
-module.exports = { MODES, KINDS, IDEAS, ideasFor, PROJECTS, project, matchProjects, normalizeRepo, spaceHref, SPACE };
+module.exports = { MODES, KINDS, DIMS, IDEAS, ideasFor, PROJECTS, project, matchProjects, normalizeRepo, spaceHref, SPACE };
