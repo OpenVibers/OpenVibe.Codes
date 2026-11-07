@@ -24,12 +24,13 @@
         const grow = () => text.dispatchEvent(new Event('input', { bubbles: true }));
         const rail = $('[data-ch-ideas]', app);
         const track = rail && $('[data-ch-ideas-track]', rail);
-        const kind = $('[data-ch-kind]', form);
+        // The kind is a group of radios (11-07); an idea picks its own.
+        const setKind = (v) => { const r = app.querySelector(`[data-ch-kind][value="${v}"]`); if (r) r.checked = true; };
         const modes = Array.from(app.querySelectorAll('[data-ch-mode]'));
         let sets = {};
         try { sets = rail ? JSON.parse(rail.dataset.chIdeasets || '{}') : {}; } catch { sets = {}; }
         const PLACEHOLDER = { new: 'Describe your website, game or app', openvibe: 'Describe the change, question or fix', code: 'Describe the change, question or fix' };
-        const ICON = (i) => (i.kind === 'game' ? 'game' : i.kind === 'app' ? 'app' : i.kind === 'website' ? 'web' : i.mode === 'openvibe' ? 'ov' : 'spark');
+        const ICON = (i) => (i.kind === 'game' ? 'game' : i.kind === 'app' ? 'app' : i.kind === 'website' ? 'web' : i.kind === 'overlay' ? 'spark' : i.mode === 'openvibe' ? 'ov' : 'spark');
         // The rail's speed follows its length: about 32 px a second, whatever the ideas.
         const pace = () => { if (track) track.style.setProperty('--ch-drift', `${Math.max(30, Math.round(track.scrollWidth / 2 / 32))}s`); };
         function card(i, copy) {
@@ -104,7 +105,7 @@
                 const b = e.target.closest('[data-ch-idea]');
                 if (!b) return;
                 choose(b.dataset.chIdeaMode);
-                if (kind && b.dataset.chIdeaKind) kind.value = b.dataset.chIdeaKind;
+                if (b.dataset.chIdeaKind) setKind(b.dataset.chIdeaKind);
                 text.value = b.dataset.chIdea;
                 grow();
                 text.focus();
