@@ -30,7 +30,7 @@ const express = require('express');
 const { asyncRouter } = require('./router');
 const { esc } = require('../render/html');
 
-/** The adapter ids the Node reads and the services that write, and the names a person knows them by. */
+/** The adapter ids the Link reads and the services that write, and the names a person knows them by. */
 const SOURCE_NAMES = {
     'claude-code': 'Claude Code', agents: 'AGENTS.md', gemini: 'Gemini CLI', cursor: 'Cursor',
     copilot: 'GitHub Copilot', windsurf: 'Windsurf', cline: 'Cline', roo: 'Roo Code', kiro: 'Kiro',
@@ -314,7 +314,7 @@ function createMemoryRoutes(ctx, kit) {
         if (!rows.length) {
             return head + '<div class="c4-emptyline">Nothing here yet. On your computer, run '
                 + '<code class="c4-code-inline">openvibe-node memory upload</code>: it shows what it found and asks before sending anything. '
-                + '<a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/memory.md#the-upload">The Node docs</a></div></section>';
+                + '<a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/memory.md#the-upload">The Link docs</a></div></section>';
         }
         const sourceRow = (row) => {
             const fresh = row.seen && Date.now() - row.seen < SEVEN_DAYS;

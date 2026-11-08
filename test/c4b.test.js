@@ -5,7 +5,7 @@
  *   - Home's saved pickers: the repositories a person used here, last used first, and their paired machines
  *   - a task's Changes, Proof and Pull request panels are Codes' own, from run_tasks and codes_task_proof
  *   - Agents: the person's keys, added, tested and removed from the page (the key itself never comes back)
- *   - Machines: the person's paired Node machines, their state, and Node's pairing flow with a one-time code
+ *   - Machines: the person's paired Link machines, their state, and Node's pairing flow with a one-time code
  *   - Settings: remembered per person
  *   - Usage: runs, minutes and tokens per day, and no prices Codes does not know
  */

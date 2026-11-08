@@ -3,7 +3,7 @@
 /**
  * A person's machines, as OpenVibe.Network knows them (Codes C4b).
  *
- * A machine is paired by redeeming a one-time code on OpenVibe.Network (docs: OpenVibe.Node README and
+ * A machine is paired by redeeming a one-time code on OpenVibe.Network (docs: OpenVibe Link README and
  * internal/link/network.go): openvibe.bot/machines mints `pair_…` with a code that lasts ten minutes, and the machine
  * redeems it -> `openvibe-node pair --network <URL> --pairing pair_… --code ABCD-1234`. The result is a node principal
  * (`nod_…`) owned by the person; that principal, its status and when it was last seen are what this module reads.

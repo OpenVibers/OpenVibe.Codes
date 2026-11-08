@@ -39,7 +39,7 @@ const RESET_MONTH = new Date(Date.now() + 2.5 * 86400000).toISOString();
     /** The fleet Ada's machines reported with their last heartbeats. */
     const window = (name, pct, resetsAt) => JSON.stringify([{ name, pct, resets_at: resetsAt }]);
     // The machine, as OpenVibe.Bot answers it: the device id Run pins a job to, the Network id the machine is known
-    // by, and the fleet its Node last reported with its heartbeat.
+    // by, and the fleet its Link last reported with its heartbeat.
     t.bot.addMachine({
         id: 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1', node_id: NODE, name: 'ada-laptop', online: true, fleet_at: new Date().toISOString(),
         fleet: [

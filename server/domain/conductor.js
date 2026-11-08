@@ -547,7 +547,7 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
                 const session = ran.session || (agent === (task.agent || PRIMARY_AGENT) && !turn.agent ? (attempt && attempt.session) : null) || null;
                 let note = turn.switch_note || null;
                 if (agent !== asked) {
-                    note = `${note ? `${note} ` : ''}Your machine ran ${failover.nameOf(agent)} instead of ${failover.nameOf(asked)}: its Codes runner is older than the switch. Update OpenVibe Node on it to let the conductor switch agents.`.slice(0, 1000);
+                    note = `${note ? `${note} ` : ''}Your machine ran ${failover.nameOf(agent)} instead of ${failover.nameOf(asked)}: its Codes runner is older than the switch. Update OpenVibe Link on it to let the conductor switch agents.`.slice(0, 1000);
                 }
                 await db.exec(
                     `UPDATE codes_conductor_messages SET state = $2, result = $3::jsonb, error = $4, session = $5, finished_at = $6::timestamptz,

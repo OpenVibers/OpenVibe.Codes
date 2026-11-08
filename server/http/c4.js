@@ -7,7 +7,7 @@
  *   /                 the composer with the person's saved repositories and machines (last used first), running work
  *   /tasks, /tasks/:id  the person's tasks; a task's Live, Changes, Proof and Pull request panels are Codes' own
  *   /agents           the person's connections: their provider keys (they live in OpenVibe.AI), added, tested, removed
- *   /machines         their paired Node machines, their state, and Node's pairing flow with a one-time code
+ *   /machines         their paired Link machines, their state, and Node's pairing flow with a one-time code
  *   /usage            what Codes knows: runs, minutes and tokens per day (no prices: Billing is Billing's)
  *   /memory           what the person's own assistants know about them (the notes live in OpenVibe.AI's store)
  *   /settings         their choices, remembered per person (codes_user_settings)
@@ -753,7 +753,7 @@ ${before ? `<h3 class="c4-subhead">Saved in Codes before</h3><ul class="c4-rows"
 <p class="c4-sub">One command, one code</p>
 <ol class="c4-steps">
 <li><b>Get a one-time code</b> on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a>. It lasts ten minutes and works once.</li>
-<li><b>Run the installer on the machine</b>, with the code it gives you: <code class="c4-code-inline">curl -fsSL https://node.openvibe.network/install | sh -s -- --worker</code></li>
+<li><b>Run the installer on the machine</b>, with the code it gives you: <code class="c4-code-inline">curl -fsSL https://openvibe.link/install | sh -s -- --worker</code></li>
 <li><b>It pairs itself</b>, then appears here as Online. A machine runs your jobs and nobody else's.</li>
 </ol>
 <form class="c4-form c4-form-inline" method="get" action="/machines">
@@ -761,7 +761,7 @@ ${before ? `<h3 class="c4-subhead">Saved in Codes before</h3><ul class="c4-rows"
   <button class="c4-button" type="submit">Show the command</button>
 </form>
 ${badCode ? note('a pairing code is 8 letters and digits, like ABCD-1234', 'bad') : ''}
-${code ? `<div class="c4-pair-command"><p class="c4-kv"><span>On the machine</span><code class="c4-code-inline">sudo openvibe-node pair ${esc(code)} --network https://openvibe.network</code></p><p class="c4-kv"><span>Or with the installer</span><code class="c4-code-inline">curl -fsSL https://node.openvibe.network/install | sh -s -- --network https://openvibe.network --pairing <span class="c4-note-inline">pair_… from openvibe.bot</span> --code ${esc(code)} --worker</code></p><p class="c4-hint">The code is the one openvibe.bot gave you for this machine; Codes never mints it. Reload this page once the installer says it is paired.</p></div>` : ''}
+${code ? `<div class="c4-pair-command"><p class="c4-kv"><span>On the machine</span><code class="c4-code-inline">sudo openvibe-node pair ${esc(code)} --network https://openvibe.network</code></p><p class="c4-kv"><span>Or with the installer</span><code class="c4-code-inline">curl -fsSL https://openvibe.link/install | sh -s -- --network https://openvibe.network --pairing <span class="c4-note-inline">pair_… from openvibe.bot</span> --code ${esc(code)} --worker</code></p><p class="c4-hint">The code is the one openvibe.bot gave you for this machine; Codes never mints it. Reload this page once the installer says it is paired.</p></div>` : ''}
 </section>`;
         const content = `${header('Machines', 'Your own computers, paired with your account.')}${viewer(req) ? `${flash(req)}<section class="c4-card"><div class="c4-card-head"><h2>Your machines</h2></div><p class="c4-sub">${(mine.machines || []).length} paired</p><p class="c4-hint"><a href="https://openvibe.network/machines">All your machines are on openvibe.network/machines</a>.</p>${mine.ok ? (list ? `<ul class="c4-rows">${list}</ul>` : '<div class="c4-emptyline">No paired computers yet. Pair one below and it shows up here.</div>') : note(`Your machines could not be read. ${esc((mine.problem && mine.problem.detail) || 'Sign in again.')}`, 'bad')}</section>${pairCard}` : signIn(req)}`;
         page(req, res, 'Machines', wrap(content));
@@ -826,7 +826,7 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
 <p class="c4-hint">When your conductor's agent nears a usage limit (its 5-hour or weekly window), the next turn runs on the first fallback below that has room, and returns once the window frees. Each agent keeps its own session; the one taking over is told what happened while it was away.</p>
 <div class="c4-fallbacks">${[0, 1, 2].map(fallbackRow).join('')}</div>
 <div class="c4-form-grid"><label>Switch at <select name="conductor_switch_pct">${[70, 80, 85, 90, 95].map((v) => `<option value="${v}"${switchPct === v ? ' selected' : ''}>${v}% of a window</option>`).join('')}</select></label></div>
-<p class="c4-hint">Codex and OpenCode have no approval prompt: on "Ask first" they work with edits in the folder only. Your machine needs OpenVibe Node with Codes 0.7 or newer to switch.</p>` : '';
+<p class="c4-hint">Codex and OpenCode have no approval prompt: on "Ask first" they work with edits in the folder only. Your machine needs OpenVibe Link with Codes 0.7 or newer to switch.</p>` : '';
         const content = `${header('Settings', 'Your choices, remembered for your account.')}${viewer(req) ? `${flash(req)}<p class="c4-hint c4-setup-link">New here, or something not working? <a href="/setup">The guided setup</a> checks your machine, agents and keys step by step.</p><section class="c4-card"><form class="c4-form" method="post" action="/settings">
 <div class="c4-form-grid">
 <label>Default agent <select name="default_agent"><option value="">Auto</option>${agentOptions}</select></label>

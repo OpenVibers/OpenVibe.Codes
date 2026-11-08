@@ -18,7 +18,7 @@
  *   POST /api/v1/me/skills/:id             add a record to the sync
  *   POST /api/v1/me/skills/:id/remove      remove it
  *
- * The Node sync authenticates with the person's access token (Authorization: Bearer), which the same SSO middleware
+ * The Link sync authenticates with the person's access token (Authorization: Bearer), which the same SSO middleware
  * verifies as a browser session. Only public records are in the gallery; the others answer 404 to everyone who is
  * not allowed to read them.
  */

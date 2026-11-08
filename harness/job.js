@@ -1,14 +1,14 @@
 'use strict';
 
 /**
- * `openvibe-codes job`: one coding task as an OpenVibe Run job on the person's own machine (plan T16; the Node's job
+ * `openvibe-codes job`: one coding task as an OpenVibe Run job on the person's own machine (plan T16; the Link's job
  * worker runs it in its sandbox as artifact `openvibe-codes@1.0.0`, JOB_PROTOCOL below). The job's input is one JSON
  * line on stdin:
  *
  *   { repo, ref?, prompt, agent?, model?, permission?: 'edit'|'full', push?: { branch?, pull_request? } }
  *
  * It clones `repo` (https only) into a scratch directory, runs the harness there with hand-offs, and prints one compact
- * JSON line per event on stdout (what the page shows live). The result goes to fd 3 (the Node's result channel), or as
+ * JSON line per event on stdout (what the page shows live). The result goes to fd 3 (the Link's result channel), or as
  * a last `{ t: 'result_doc' }` line when fd 3 is not open: what the agents said, the changed files and the patch, and,
  * when `push` is asked and the machine holds GITHUB_TOKEN, the new branch it pushed (never the base branch) and its
  * pull request. Nothing here ever prints a token.
@@ -22,7 +22,7 @@ const { collectProof } = require('../engine/proof');
 const JOB_PROTOCOL = '1.0.0';
 /** The agents a conductor's turn may run on: every harness Codes offers. */
 // Every harness can lead a conductor; the three that resume a session and take the Codes MCP tools are
-// the failover chain's own (server/domain/conductor-failover.js). The job's contract with the Node (stdin, stdout
+// the failover chain's own (server/domain/conductor-failover.js). The job's contract with the Link (stdin, stdout
 // lines, fd 3) is unchanged by 1.1's lines.
 const CONDUCTOR_AGENTS = ['claude-code', 'claude-other', 'codex', 'opencode', 'command-code', 'minimax-code', 'aider', 'deepseek', 'openvibe-ai', 'openai-compatible'];
 const LINES = '1.1';            // 1.1: lines carry step ids, inputs, results, progress, helpers; the result keeps `log`
@@ -115,7 +115,7 @@ function cloneProblem(message, repo) {
     if (!/could not read Username|Authentication failed|terminal prompts disabled|403|401|not found/i.test(m)) return m;
     let host = 'its host';
     try { host = new URL(String(repo)).host; } catch { /* keep the words */ }
-    return `${m} — if the repository is private, give this machine's Codes runner a token for ${host} (GITHUB_TOKEN, GITLAB_TOKEN, or an OPENVIBE_GIT_CREDENTIALS line https://you:token@${host}) in the Node's config.json env, then restart the Node`;
+    return `${m} — if the repository is private, give this machine's Codes runner a token for ${host} (GITHUB_TOKEN, GITLAB_TOKEN, or an OPENVIBE_GIT_CREDENTIALS line https://you:token@${host}) in the Link's config.json env, then restart the Node`;
 }
 
 function scrub(s) {
@@ -734,7 +734,7 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             prompt: agentPrompt(job), task: 'edit', agent: job.agent, model: job.model, effort: job.effort || null, cwd: work,
             permission: job.permission, handoff: !job.agent, maxAttempts: job.kind === 'conductor' ? 1 : 3,
             // A job on the person's Node runs in its sandbox (own namespaces, a read-only root, no home folder, only
-            // what the job was given); the Node sets OPENVIBE_JOB_ID there. Only inside it may an agent with no
+            // what the job was given); the Link sets OPENVIBE_JOB_ID there. Only inside it may an agent with no
             // edits-only mode take an "edit" task unattended (harness/index.js unfitFor).
             sandboxed: !!env.OPENVIBE_JOB_ID,
             // A task carried on in the same conversation resumes its session (RESUME in the environment, or the job's
@@ -807,7 +807,7 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
     return result;
 }
 
-/** The Node's result channel is fd 3; outside a job the result is the last stdout line. */
+/** The Link's result channel is fd 3; outside a job the result is the last stdout line. */
 function resultWriter(emit) {
     return (doc) => {
         const text = JSON.stringify(doc);

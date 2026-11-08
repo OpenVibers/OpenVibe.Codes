@@ -179,7 +179,7 @@ async function fakeGitHub() {
                 assert.strictEqual(typeof a.installed, 'boolean');
                 assert.ok(Array.isArray(a.windows));
             }
-            // Codes answers with every machine's stored report: this machine is in Bot's list, but its Node has not
+            // Codes answers with every machine's stored report: this machine is in Bot's list, but its Link has not
             // reported a fleet yet, so there is nothing stored and nothing is invented.
             assert.ok(Array.isArray(out.machines), 'the stored fleet of every machine');
             assert.strictEqual(out.problem, undefined, 'Bot answered, so there is no problem beside the fleet');

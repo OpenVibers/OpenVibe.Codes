@@ -4,7 +4,7 @@
  * What this machine has: each coding CLI, whether it is installed, whether it is signed in, and the limit windows it
  * can read.
  *
- * The plan logins are the owner's own files (the Node's worker copies the ones the owner names into the job's private
+ * The plan logins are the owner's own files (the Link's worker copies the ones the owner names into the job's private
  * home, read-only, for that job only). This module reads them the way the portal's probes do:
  *
  *   installed   the CLI is on PATH
