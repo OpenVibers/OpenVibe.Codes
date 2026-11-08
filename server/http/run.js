@@ -139,7 +139,7 @@ ${error ? html`<p class="run-notice run-notice-error" role="alert">${error}</p>`
                 title: 'Run on your machine', index: true,
                 body: html`<h1>Run a coding task on your own machine</h1>
 <p class="lead">Start a task from any browser, your phone included, and your own computer does the work: the agents and keys you already have, in a sandbox, with nothing to host. You watch it live here and get the changes back as a patch, a branch or a pull request.</p>
-<ol class="run-steps"><li>Add your computer on <a href="${MACHINES_URL}">openvibe.bot/machines</a>: one command, which installs OpenVibe Node with its job worker.</li><li>Sign in here and describe the task.</li><li>Your machine clones the repository, runs the agent and sends the result back.</li></ol>
+<ol class="run-steps"><li>Add your computer on <a href="${MACHINES_URL}">openvibe.bot/machines</a>: one command, which installs OpenVibe Link with its job worker.</li><li>Sign in here and describe the task.</li><li>Your machine clones the repository, runs the agent and sends the result back.</li></ol>
 <p><a class="run-btn run-btn-primary" href="/auth/login?next=%2Frun">Sign in to start</a></p>`,
             });
         }

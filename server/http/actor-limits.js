@@ -47,7 +47,7 @@ const BUDGETS = {
     // The skills hub (Compute plan §5): save a version or share a record now and then; a script editing a library
     // may do a few a minute, not a flood.
     'codes.skill.write': { minute: 20, hour: 300 },
-    // Adding a skill to the sync is how the Node is set up; the first run adds several, then almost never.
+    // Adding a skill to the sync is how the Link is set up; the first run adds several, then almost never.
     'codes.skill.assign': { minute: 30, hour: 600 },
 };
 

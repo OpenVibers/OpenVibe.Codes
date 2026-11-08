@@ -127,7 +127,7 @@ ${table(['Version', 'When', 'Audience', 'Note'], versions.map((v) => [
             v.audience,
             v.note || '—',
         ]))}
-<p class="muted small">A rollback copies the chosen version into a new one, so history is never rewritten. The Node records the version it wrote.</p></section>
+<p class="muted small">A rollback copies the chosen version into a new one, so history is never rewritten. The Link records the version it wrote.</p></section>
 ${controls}`,
         }, status);
     }

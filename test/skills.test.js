@@ -6,7 +6,7 @@
  *   - a new record is private and is not in the gallery;
  *   - public is listed and readable anonymously, link is readable by id but not listed, private answers 404;
  *   - saving a version keeps the old one, and a rollback copies it into a new version (history is never rewritten);
- *   - the Node's sync manifest is exactly the person's picks, at their newest version;
+ *   - the Link's sync manifest is exactly the person's picks, at their newest version;
  *   - the page renders a skill body through the markup gate, never as HTML.
  */
 const assert = require('assert');

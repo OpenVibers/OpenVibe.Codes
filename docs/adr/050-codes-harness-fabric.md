@@ -58,7 +58,7 @@ first `docs/adr/` — the plan (§8) lists **ADR-050 Codes Harness Fabric** amon
 - **The product half of T16 does not exist in Codes yet.** There is no workspace, editor, terminal, task feed, diff,
   review verdict, cost, or branch/PR code in `server/` — the strings do not appear. T16's product line is
   "repository browser, workspace, editor, terminal, task feed, tests, diff, harness explanation, review verdict, cost,
-  branch/PR flow — usable hosted and on a Node (T14) for local harnesses", and T16's dependency line is
+  branch/PR flow — usable hosted and on a Link (T14) for local harnesses", and T16's dependency line is
   "T1 (Fabric offers), T2 (projects/grants), T5 (metering/Vibes), T17 (Actor for planning), T14 (Run/Node for
   execution)". The plan does not use the phrase "forge model"; the repository/branch/PR authority it describes is
   Forgejo/GitHub under T16, and the project/grant authority is T2.

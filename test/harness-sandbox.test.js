@@ -42,7 +42,7 @@ const collect = async (run) => { const out = []; for await (const e of run) out.
             assert.strictEqual(cli.opencode.editsOnly, false);
             assert.strictEqual(cli.commandCode.editsOnly, false);
             assert.ok(!(await argvOf(cli.opencode, { permission: 'edit' })).includes('--auto'), 'edit on the person’s computer: no --auto');
-            assert.ok((await argvOf(cli.opencode, { permission: 'edit', sandboxed: true })).includes('--auto'), 'edit in a Node sandbox: --auto');
+            assert.ok((await argvOf(cli.opencode, { permission: 'edit', sandboxed: true })).includes('--auto'), 'edit in a Link sandbox: --auto');
             assert.ok((await argvOf(cli.opencode, { permission: 'full' })).includes('--auto'), 'full: --auto');
             assert.ok(!(await argvOf(cli.opencode, { permission: 'read', sandboxed: true })).includes('--auto'), 'read: never');
             assert.ok(!(await argvOf(cli.commandCode, { permission: 'edit' })).includes('--yolo'), 'Command Code: no --yolo for edit outside a sandbox');

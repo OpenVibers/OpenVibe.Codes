@@ -4,7 +4,7 @@
 -- (public, link, people, private). A record's body lives only in its versions: every save is an immutable row, and a
 -- rollback copies an old version into a new one so a machine that synced version 3 can still name it.
 --
--- Only public records are in the gallery; link, people and private ones are never listed. The Node sync reads the
+-- Only public records are in the gallery; link, people and private ones are never listed. The Link sync reads the
 -- person's assignments through GET /api/v1/me/skills, never the gallery.
 CREATE TABLE IF NOT EXISTS codes_skills (
     id             text COLLATE "C" PRIMARY KEY,                 -- skl_<ULID>
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS codes_skill_versions (
     PRIMARY KEY (skill_id, version)
 );
 
--- What one person chose to sync, per project ('' is the person's own, everywhere). The Node asks for the person's
+-- What one person chose to sync, per project ('' is the person's own, everywhere). The Link asks for the person's
 -- scope plus the slug of the project it is writing into.
 CREATE TABLE IF NOT EXISTS codes_skill_assignments (
     subject    text COLLATE "C" NOT NULL,                        -- usr_<ULID>

@@ -97,7 +97,7 @@ const TOOLS = [
     },
     {
         name: 'codes_fleet',
-        description: 'The coding agents on the owner\'s machines: installed, signed in, and every limit window with when it frees. Each Node reports its fleet with its heartbeat; this machine is read directly from the CLIs\' own files. Read-only.',
+        description: 'The coding agents on the owner\'s machines: installed, signed in, and every limit window with when it frees. Each Link reports its fleet with its heartbeat; this machine is read directly from the CLIs\' own files. Read-only.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: true },
     },
     {
@@ -203,7 +203,7 @@ async function stopTask(args) {
     return text({ id: t.id, state: t.state, outcome: t.outcome ? t.outcome.state : null });
 }
 
-/** This machine's own reading: the CLIs' files, the same answer the Node sends with its heartbeat. */
+/** This machine's own reading: the CLIs' files, the same answer the Link sends with its heartbeat. */
 function here() {
     const rows = probeLogins({ home: os.homedir() });
     return {

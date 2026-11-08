@@ -294,7 +294,7 @@ function dry(adapter, ctx = {}) {
         // A job that works in one repository gets that repository's digest; a folder that holds many gets none.
         require('node:child_process').execFileSync('git', ['init', '-q'], { cwd: dir });
         fs.writeFileSync(path.join(dir, 'README.md'), '# Demo\n\nA demo repository.\n');
-        // On a Node the lessons come from the Know store's module (know/lessons.js), its path from the config.
+        // On a Link the lessons come from the Know store's module (know/lessons.js), its path from the config.
         const knowFile = path.join(dir, 'know.js');
         fs.writeFileSync(knowFile, "module.exports = { recall: () => '## What earlier jobs learned here (dated)\\n- 2026-10-30 · demo — the tests need the database' };\n");
         const built = assemble({ brief: 'fix the test', dir, env: { CODES_KNOW_LESSONS: knowFile } });
@@ -304,7 +304,7 @@ function dry(adapter, ctx = {}) {
         assert.ok(built.text.indexOf('House rules') < built.text.indexOf('learned'));
         assert.ok(built.text.indexOf('learned') < built.text.indexOf('demo repository'));
         assert.ok(built.text.trimEnd().endsWith('fix the test'), 'the brief is last');
-        // The Node's config path wins over the environment, and a store that cannot be read is skipped, not an error.
+        // The Link's config path wins over the environment, and a store that cannot be read is skipped, not an error.
         const fromConfig = assemble({ brief: 'x', dir, know: knowFile, env: { CODES_KNOW_LESSONS: path.join(dir, 'nope.js') } });
         assert.ok(fromConfig.parts.some((p) => p.name === 'lessons'), 'the config path is read');
         const none = assemble({ brief: 'x', dir, env: { CODES_KNOW_LESSONS: path.join(dir, 'nope.js') } });

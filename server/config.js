@@ -165,7 +165,7 @@ function load(env = process.env) {
             // The tokens one attempt may spend, when the task does not say (a run token's budget, Codes C3).
             tokens: int(env.CODES_TASK_TOKENS, 0),
         },
-        // Know (the shared lessons store, Know K): on a Node this is the portal's know/lessons.js, never a hard-coded
+        // Know (the shared lessons store, Know K): on a Link this is the portal's know/lessons.js, never a hard-coded
         // home. The path is configuration; a store that cannot be read gives no lessons, never an error.
         know: { lessons: String(env.CODES_KNOW_LESSONS || env.OPENVIBE_CODES_LESSONS || '').trim() },
         // The task's timeline (stage C2): how many automatic continues one task may have before it needs a person.

@@ -287,7 +287,7 @@ function createSkills({ store, sharing, log = console }) {
         await db.exec('DELETE FROM codes_skill_assignments WHERE subject = $1 AND project = $2 AND skill_id = $3', [subject, scope, id]);
     }
 
-    /** What the Node syncs: the person's picks, plus this project's picks, at their newest versions. */
+    /** What the Link syncs: the person's picks, plus this project's picks, at their newest versions. */
     async function manifest({ subject, project = '' }) {
         const scope = String(project || '');
         const rows = await db.many(`SELECT ${COLUMNS} ${FROM}

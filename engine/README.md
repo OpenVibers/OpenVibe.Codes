@@ -45,7 +45,7 @@ normaliser (`transcript.js`) into job lines (`joblines.js`), and a budget stop b
 ### `prompt.js` — the prompt every job gets
 
 The git rule, the house rules, the lessons, the repo digest (`repomap.js`), then the brief. The lessons come from the
-shared Know store's own `recall()` (the portal's `know/lessons.js`; on a Node its path is configuration —
+shared Know store's own `recall()` (the portal's `know/lessons.js`; on a Link its path is configuration —
 `CODES_KNOW_LESSONS` — never a hard-coded home). A store that cannot be read gives no lessons, not an error.
 
 ### `logins.js` — what this machine has

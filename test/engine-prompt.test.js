@@ -32,7 +32,7 @@ const { assemble, lessons, fragment } = require('../engine/prompt');
         assert.ok(got.trimEnd().endsWith('the database'), 'and its lesson is kept');
         assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(dir, 'seen.json'), 'utf8')),
             { brief: 'fix the database test', repo: 'demo', k: 5 }, 'the store gets the brief, the repo and the cap');
-        // The environment is how a Node passes the config path when the caller does not.
+        // The environment is how a Link passes the config path when the caller does not.
         assert.equal(lessons({ brief: 'x', env: { CODES_KNOW_LESSONS: file } }), got);
         fs.rmSync(dir, { recursive: true, force: true });
     });

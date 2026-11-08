@@ -36,7 +36,7 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
   openvibe-codes show <run id> [--json]       one run's attempts and result (--json: every event)
   openvibe-codes resume <run id> "follow-up"  continue a run's last session with its agent
   openvibe-codes job                          one task as an OpenVibe Run job (JSON input on stdin; the
-                                              OpenVibe Node's job worker runs it on your own machine)
+                                              OpenVibe Link's job worker runs it on your own machine)
   openvibe-codes task start|list|show|continue|stop   coding tasks on openvibe.codes, as you, on one of
                                               your machines (openvibe-codes task --help)
   openvibe-codes mcp                          the Codes MCP tools for a Claude Code session: tasks, the fleet,

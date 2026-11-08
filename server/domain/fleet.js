@@ -4,10 +4,10 @@
  * The fleet (Codes C9c): what each of a person's machines says about its coding agents right now — installed, signed
  * in, and every limit window with when it frees.
  *
- * The machine reports it with its heartbeat to OpenVibe.Bot (OpenVibe.Node `logins`), and Bot answers it for the
+ * The machine reports it with its heartbeat to OpenVibe.Bot (OpenVibe Link `logins`), and Bot answers it for the
  * machine's owner at GET /api/v1/machines with the person's own token. This module reads that answer, keeps the latest
  * per machine in codes_machine_fleet, and answers the Agents page, the router and the MCP fleet tool from it. It stores
- * no key, no token and no account name: the Node reports labels, numbers and times only.
+ * no key, no token and no account name: the Link reports labels, numbers and times only.
  *
  *   createFleet({ config, store, fetchImpl, log, now })
  *     refresh(subject, token)   read Bot now and replace the stored rows → { ok, machines } or { ok: false, problem }
@@ -121,7 +121,7 @@ function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = c
 
     /**
      * Read Bot now and replace what Codes holds for each machine whose answer names a fleet. A machine that is gone from
-     * the answer is gone here too; a machine that answers no fleet keeps its last reading (the Node may be older).
+     * the answer is gone here too; a machine that answers no fleet keeps its last reading (the Link may be older).
      */
     async function refresh(subject, token) {
         if (!USER.test(String(subject || '')) || !token) return { ok: false, problem: { status: 401, detail: 'sign in again to see your machines' } };

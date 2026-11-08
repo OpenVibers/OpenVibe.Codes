@@ -24,7 +24,7 @@ function fragment(name) {
 
 /**
  * The lessons a job gets: what earlier jobs learned here, through the shared Know store's own `recall()`
- * (the portal's know/lessons.js; on a Node its path comes from the configuration, never a hard-coded home).
+ * (the portal's know/lessons.js; on a Link its path comes from the configuration, never a hard-coded home).
  *
  * The store is optional and off by default. A path that cannot be required, a module without recall(), or a recall
  * that throws gives no lessons, never an error: a job must not fail because the memory is unreachable.
@@ -55,7 +55,7 @@ function lessons({ file, repo, brief, env = process.env } = {}) {
  * @param {string} opts.brief what the task is
  * @param {string} opts.dir the folder the job works in
  * @param {object} [opts.env] the environment (CODES_KNOW_LESSONS, or the older OPENVIBE_CODES_LESSONS)
- * @param {string} [opts.know] the Know module's path (the Node's config wins over the environment)
+ * @param {string} [opts.know] the Know module's path (the Link's config wins over the environment)
  * @returns {{text: string, parts: object[]}} the prompt and the parts it is made of
  */
 function assemble({ brief, dir, env = process.env, know } = {}) {

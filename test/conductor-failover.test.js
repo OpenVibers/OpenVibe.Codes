@@ -185,7 +185,7 @@ const HOUR = 3600_000;
             await endTurn(taskId, { agent: 'claude-code', session: 'sess_claude_2' });
             const m = (await messagesOf(taskId))[2];
             assert.strictEqual(m.agent, 'claude-code');
-            assert.match(m.switch_note, /Update OpenVibe Node/);
+            assert.match(m.switch_note, /Update OpenVibe Link/);
             report(10, 30);
             await refresh();
             await post(`/api/v1/conductor/${taskId}/messages`, { text: 'status?' });
