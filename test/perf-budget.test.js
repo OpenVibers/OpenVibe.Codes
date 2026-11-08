@@ -12,7 +12,7 @@ const { spawn } = require('child_process');
 const { measure, check, format } = require('openvibe-shared/perf-budget');
 
 // 2026-11-08: openvibe-shared v4.150.0; CI measured JS 371.1 KB raw / 88.8 KB brotli.
-
+// 2026-11-08: openvibe-shared v4.149.0; CI measured JS 370.2 KB raw / 88.6 KB brotli.
 const BUDGETS = {
     htmlRawKB: 42,   // 40.4 with the ten harnesses the catalogue holds (2026-10-30: MiniMax Code and Claude Code on another provider joined it, and the home lists every one); 35.7 with the Part of OpenVibe section (Shared 4.13, 2026-10-26); 31.5 with the home's quick start, OpenVibe Git and six FAQs with their FAQPage JSON-LD (2026-10-22; in production the forge's eight repositories add about 2.5); measured 27.0 (fresh database; the showcase home, 2026-09-29: sections + six inline ring icons)
     htmlBrotliKB: 11,   // 9.2 openvibe-shared 4.15 footer: the compact footer opens into the whole one, and the pulse line; 7.7 with those sections (2026-10-22); 6.7
