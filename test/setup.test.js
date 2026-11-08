@@ -35,7 +35,7 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
             for (const id of ['machine', 'agents', 'keys', 'accounts', 'choices']) assert.match(res.text, new RegExp(`id="step-${id}"`));
             assert.match(res.text, /0 of 5 done/);
             assert.match(res.text, /class="c4-card c4-setup-step is-next" id="step-machine"/, 'the machine is next');
-            assert.match(res.text, /curl -fsSL https:\/\/node\.openvibe\.network\/install \| sh -s -- --worker/);
+            assert.match(res.text, /curl -fsSL https:\/\/openvibe\.link\/install \| sh -s -- --worker/);
             assert.match(res.text, /npm install -g @openai\/codex/, 'an agent that is not there says how to install it');
             assert.match(res.text, /href="\/css\/setup\.css|css\/setup\.css/, 'the page brings its own stylesheet');
             assert.match(res.text, /js\/setup\.js/, 'and its own script (the Copy buttons), which no other page pays for');
