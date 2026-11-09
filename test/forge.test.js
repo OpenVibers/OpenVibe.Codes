@@ -1,77 +1,70 @@
 'use strict';
 /**
- * OpenVibe Git through the person's own account (server/domain/forge.js, server/http/git.js; the owner, 2026-11-01:
- * "make a repository through your OpenVibe account on our actual Git"). A stand-in forge answers the OAuth2 token
- * exchange (checking the PKCE verifier against the challenge the page sent), who the person is, their repositories and
- * a new one. Linking is off without the app and the seal key; the tokens are sealed; a repository on the forge takes
- * the person's credential line to their machine, and the job keeps it from the agent.
+ * OpenVibe Git through Codes' service token (server/domain/forge.js, server/http/git.js): Codes names the person
+ * signed in in X-OV-Subject, OpenVibe.Git makes a repository in their name and mints their clone token. Nothing is
+ * linked and no person's password is involved. A stand-in Git answers the three calls Codes makes.
  */
 const assert = require('assert');
-const crypto = require('crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const http = require('http');
 const { check, done, boot } = require('./helpers/boot');
-const { createSeal } = require('../server/domain/seal');
 const job = require('../harness/job');
 
-const SEAL_KEY = crypto.randomBytes(32).toString('base64');
-const TOKEN = 'forge-access-0123456789abcdef';
+const TOKEN = 'git_test_0123456789abcdef';
 
-function fakeForge() {
-    const st = { challenges: new Map(), repos: [], codes: new Map(), refreshes: 0 };
+function claimsOf(header) {
+    const raw = String(header || '').replace(/^Bearer\s+/i, '');
+    try { return JSON.parse(Buffer.from(raw.split('.')[1], 'base64url').toString('utf8')); } catch { return null; }
+}
+
+function fakeGit() {
+    const st = { repos: [], tokens: [], calls: [] };
     const srv = http.createServer((req, res) => {
-        let body = '';
-        req.on('data', (c) => { body += c; });
+        let raw = '';
+        req.on('data', (c) => { raw += c; });
         req.on('end', () => {
             const u = new URL(req.url, 'http://x');
+            const body = raw ? JSON.parse(raw) : null;
             const send = (status, doc) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(doc)); };
-            const authed = req.headers.authorization === `Bearer ${TOKEN}`;
-            if (req.method === 'POST' && u.pathname === '/login/oauth/access_token') {
-                const f = new URLSearchParams(body);
-                if (f.get('client_id') !== 'codes-app' || f.get('client_secret') !== 'codes-app-secret') return send(401, { error: 'invalid_client' });
-                if (f.get('grant_type') === 'refresh_token') { st.refreshes++; return send(200, { access_token: TOKEN, refresh_token: 'r2', expires_in: 3600 }); }
-                const challenge = st.codes.get(f.get('code'));
-                const ok = challenge && crypto.createHash('sha256').update(String(f.get('code_verifier'))).digest('base64url') === challenge;
-                return ok ? send(200, { access_token: TOKEN, refresh_token: 'r1', expires_in: 3600 }) : send(400, { error: 'invalid_grant' });
+            const subject = String(req.headers['x-ov-subject'] || '');
+            st.calls.push({ method: req.method, path: u.pathname, subject, body, claims: claimsOf(req.headers.authorization) });
+            if (req.method === 'POST' && u.pathname === '/api/v1/repos') {
+                if (!req.headers.authorization || !subject) return send(401, { code: 'auth.subject_required', detail: 'name the person' });
+                if (st.repos.some((r) => r.full_name === `${body.owner_username}/${body.name}`)) return send(409, { code: 'repo.exists', detail: 'That repository already exists.' });
+                const row = {
+                    name: body.name, full_name: `${body.owner_username}/${body.name}`, visibility: body.visibility,
+                    html_url: `https://git.openvibe.codes/${body.owner_username}/${body.name}`,
+                    clone_url: `https://git.openvibe.codes/${body.owner_username}/${body.name}.git`,
+                    default_branch: 'main', owner: { username: body.owner_username, subject },
+                };
+                st.repos.push(row);
+                return send(201, row);
             }
-            if (!authed) return send(401, { message: 'token is required' });
-            if (req.method === 'GET' && u.pathname === '/api/v1/user') return send(200, { login: 'ada', id: 7 });
-            if (req.method === 'GET' && u.pathname === '/api/v1/user/repos') return send(200, st.repos);
-            if (req.method === 'POST' && u.pathname === '/api/v1/user/repos') {
-                const b = JSON.parse(body || '{}');
-                if (st.repos.some((r) => r.name === b.name)) return send(409, { message: 'exists' });
-                const r = { name: b.name, full_name: `ada/${b.name}`, html_url: `https://git.openvibe.codes/ada/${b.name}`, clone_url: `https://git.openvibe.codes/ada/${b.name}.git`, private: !!b.private, description: b.description, updated_at: new Date().toISOString(), auto_init: b.auto_init };
-                st.repos.push(r);
-                return send(201, r);
+            const repoMatch = u.pathname.match(/^\/api\/v1\/repos\/([^/]+)\/([^/]+)$/);
+            if (req.method === 'GET' && repoMatch) {
+                const row = st.repos.find((r) => r.full_name === `${repoMatch[1]}/${repoMatch[2]}`);
+                return row ? send(200, row) : send(404, { code: 'repo.not_found' });
             }
-            return send(404, { message: 'not found' });
+            const who = u.pathname.match(/^\/api\/v1\/profile\/([^/]+)$/);
+            if (req.method === 'GET' && who) {
+                if (!req.headers.authorization || !subject) return send(401, { code: 'auth.required' });
+                return send(200, { username: who[1], repositories: st.repos.filter((r) => r.full_name.startsWith(`${who[1]}/`)) });
+            }
+            if (req.method === 'POST' && u.pathname === '/api/v1/tokens') {
+                if (!req.headers.authorization || !subject) return send(401, { code: 'auth.subject_required' });
+                st.tokens.push({ subject, body });
+                return send(201, { token: TOKEN, token_type: 'GitToken', scopes: body.scopes, expires_at: new Date(Date.now() + 7200_000).toISOString() });
+            }
+            return send(404, { code: 'route.not_found' });
         });
     });
     return new Promise((resolve) => srv.listen(0, '127.0.0.1', () => resolve({ st, url: `http://127.0.0.1:${srv.address().port}`, close: () => new Promise((r) => srv.close(r)) })));
 }
 
 (async () => {
-    await check('a sealed token opens only with the same key for the same person', () => {
-        const seal = createSeal(SEAL_KEY);
-        const sealed = seal.close('secret-token', 'usr_A');
-        assert.ok(!sealed.includes('secret-token'));
-        assert.strictEqual(seal.open(sealed, 'usr_A'), 'secret-token');
-        assert.strictEqual(seal.open(sealed, 'usr_B'), null, 'moved to another person, it does not open');
-        assert.strictEqual(createSeal(crypto.randomBytes(32).toString('base64')).open(sealed, 'usr_A'), null, 'another key cannot open it');
-        assert.strictEqual(createSeal('short'), null, 'no key, no sealing');
-    });
-
-    await check('without the forge app and a seal key, linking says it opens soon and nothing else answers', async () => {
-        const t = await boot();
-        try {
-            const ada = t.network.addUser('ada-off');
-            const page = await t.get('/git', { as: ada });
-            assert.strictEqual(page.status, 200);
-            assert.match(page.text, /Linking opens soon/);
-            assert.strictEqual((await t.get('/git/connect', { as: ada })).status, 404);
-        } finally { await t.close(); }
-    });
-
-    const forge = await fakeForge();
+    const git = await fakeGit();
     const submits = [];
     const run = {
         enabled: true,
@@ -80,78 +73,74 @@ function fakeForge() {
         async cancel(id) { return { id, state: 'cancelled' }; },
         async streamUrl() { throw new Error('not used'); },
     };
-    const t = await boot({ run, env: { CODES_GIT_INTERNAL_URL: forge.url, CODES_FORGE_CLIENT_ID: 'codes-app', CODES_FORGE_CLIENT_SECRET: 'codes-app-secret', CODES_SEAL_KEY: SEAL_KEY } });
-    const db = t.ctx.store.db;
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codes-git-data-'));
+    const t = await boot({ run, env: { CODES_GIT_INTERNAL_URL: git.url, CODES_GIT_DATA_DIR: dataDir } });
     const ada = t.network.addUser('ada');
-    const cookieOf = (r) => String(r.headers.get('set-cookie') || '').split(';')[0];
+    const nameless = t.network.addUser('');
     try {
-        await check('linking: the forge’s consent with PKCE, back with a code, the tokens sealed', async () => {
-            const first = await t.get('/git', { as: ada });
-            assert.match(first.text, /<a class="c4-button" href="\/git\/connect">Link OpenVibe Git<\/a>/);
-            const go = await t.get('/git/connect', { as: ada });
-            assert.strictEqual(go.status, 303);
-            const to = new URL(go.headers.get('location'));
-            assert.strictEqual(to.origin + to.pathname, 'https://git.openvibe.codes/login/oauth/authorize');
-            assert.strictEqual(to.searchParams.get('code_challenge_method'), 'S256');
-            assert.strictEqual(to.searchParams.get('redirect_uri'), 'https://openvibe.codes/git/callback');
-            const cookie = cookieOf(go);
-            assert.match(cookie, /^codes_forge_oauth=/);
-            assert.match(String(go.headers.get('set-cookie')), /HttpOnly/i);
-            forge.st.codes.set('code-1', to.searchParams.get('code_challenge'));
-            const wrong = await t.get(`/git/callback?code=code-1&state=nope`, { as: ada, headers: { cookie: `${t.signIn(ada)}; ${cookie}` } });
-            assert.match(decodeURIComponent(wrong.headers.get('location')), /did not start here/, 'a state that is not ours is refused');
-            const back = await t.get(`/git/callback?code=code-1&state=${to.searchParams.get('state')}`, { as: ada, headers: { cookie: `${t.signIn(ada)}; ${cookie}` } });
-            assert.strictEqual(back.status, 303);
-            assert.match(decodeURIComponent(back.headers.get('location')), /ok=Linked as ada/);
-            const row = await db.maybe('SELECT forge_user, token_sealed, refresh_sealed FROM codes_forge_links WHERE subject = $1', [ada.subject]);
-            assert.strictEqual(row.forge_user, 'ada');
-            assert.ok(!row.token_sealed.includes(TOKEN) && row.token_sealed.startsWith('v1.'), 'sealed, never plain');
-            assert.ok(!(await t.dbDump()).includes(TOKEN), 'the token is nowhere in the database in the clear');
+        await check('the page asks for no link: Codes acts with its service token for the person signed in', async () => {
+            const page = await t.get('/git', { as: ada });
+            assert.strictEqual(page.status, 200);
+            assert.doesNotMatch(page.text, /Link OpenVibe Git/);
+            assert.match(page.text, /A new repository/);
+            assert.match(page.text, /No repositories yet/);
+            const call = git.st.calls.find((c) => c.path === '/api/v1/profile/ada');
+            assert.ok(call, 'the page read ada\'s repositories');
+            assert.strictEqual(call.subject, ada.subject, 'named in X-OV-Subject');
+            assert.strictEqual(call.claims.sub, 'svc:codes', 'the service token, not a person\'s');
+            assert.ok(call.claims.cap.includes('git.write'), 'with git.write');
+            assert.ok(call.claims.aud.includes('openvibe.git'));
         });
 
-        await check('a new repository in the person’s name opens a new chat on it; a taken or bad name is said in words', async () => {
+        await check('a person with no username is told where to choose one', async () => {
+            const page = await t.get('/git', { as: nameless });
+            assert.match(page.text, /One more step on your account/);
+            const refused = await t.get('/git/repos', { as: nameless, form: { name: 'x' } });
+            assert.strictEqual(refused.status, 303);
+            assert.match(decodeURIComponent(refused.headers.get('location')), /no username/);
+        });
+
+        await check('a new repository is made in their name, private, and opens a new chat', async () => {
             const made = await t.get('/git/repos', { as: ada, form: { name: 'my-site', description: 'A site for my bakery', private: '1' } });
             assert.strictEqual(made.status, 303);
             assert.strictEqual(made.headers.get('location'), `/?mode=code&repo=${encodeURIComponent('https://git.openvibe.codes/ada/my-site')}`);
-            assert.ok(forge.st.repos[0].private && forge.st.repos[0].auto_init, 'private, with a README on main');
-            const again = await t.get('/git/repos', { as: ada, form: { name: 'my-site' } });
-            assert.match(decodeURIComponent(again.headers.get('location')), /already have a repository called my-site/);
-            const bad = await t.get('/git/repos', { as: ada, form: { name: '../etc' } });
-            assert.match(decodeURIComponent(bad.headers.get('location')), /A name is letters/);
+            const call = git.st.calls.filter((c) => c.method === 'POST' && c.path === '/api/v1/repos').pop();
+            assert.strictEqual(call.subject, ada.subject);
+            assert.deepStrictEqual([call.body.name, call.body.owner_username, call.body.visibility, call.body.starter], ['my-site', 'ada', 'private', 'empty']);
+        });
+
+        await check('their repositories are listed, private ones too, with a way to work on each', async () => {
             const page = await t.get('/git', { as: ada });
             assert.match(page.text, /ada\/my-site<\/a>[\s\S]*?Private[\s\S]*?href="\/\?mode=code&amp;repo=https%3A%2F%2Fgit\.openvibe\.codes%2Fada%2Fmy-site">Work on it/);
             assert.ok(!page.text.includes(TOKEN), 'no token on a page');
         });
 
-        await check('a task on a forge repository takes the credential line to the machine; any other repository does not', async () => {
+        await check('a task on the repository gets a Git token for the person, and the local disk when Codes shares it', async () => {
+            fs.mkdirSync(path.join(dataDir, 'repos', 'ada', 'my-site.git'), { recursive: true });
             const start = await t.get('/chat', { as: ada, form: { mode: 'code', repo: 'https://git.openvibe.codes/ada/my-site', text: 'Add a menu page' } });
             assert.match(start.headers.get('location'), /^\/tasks\/tsk_/, start.headers.get('location'));
             const sent = submits[submits.length - 1];
-            assert.strictEqual(sent.args.env.OPENVIBE_GIT_CREDENTIALS, `https://ada:${TOKEN}@git.openvibe.codes`);
-            await t.get('/chat', { as: ada, form: { mode: 'code', repo: 'https://github.com/ada/elsewhere', text: 'Fix it' } });
-            const other = submits[submits.length - 1];
-            assert.ok(!(other.args.env && other.args.env.OPENVIBE_GIT_CREDENTIALS), 'no forge line for a GitHub repository');
-            assert.ok(job.ENV_NAMES.has('OPENVIBE_GIT_CREDENTIALS'), 'the job accepts it');
+            assert.strictEqual(sent.args.env.OPENVIBE_GIT_CREDENTIALS, `https://x-access-token:${TOKEN}@git.openvibe.codes`);
+            assert.strictEqual(sent.args.env.OPENVIBE_GIT_LOCAL_ROOT, dataDir, 'clones from the disk, not the network');
+            const minted = git.st.tokens.pop();
+            assert.strictEqual(minted.subject, ada.subject, 'the token is the person\'s');
+            assert.deepStrictEqual(minted.body.scopes, ['git.read', 'git.write']);
+            assert.ok(job.ENV_NAMES.has('OPENVIBE_GIT_LOCAL_ROOT'), 'the job accepts the local root');
             const header = job.gitAuthFor('https://git.openvibe.codes/ada/my-site', { OPENVIBE_GIT_CREDENTIALS: sent.args.env.OPENVIBE_GIT_CREDENTIALS });
             assert.strictEqual(header.env.GIT_CONFIG_KEY_0, 'http.https://git.openvibe.codes/.extraheader', 'the machine clones and pushes with it');
-            assert.ok(job.giteaHosts({}).has('git.openvibe.codes'), 'a push to OpenVibe Git opens its pull request there');
+            assert.strictEqual(Buffer.from(header.env.GIT_CONFIG_VALUE_0.replace(/^Authorization: Basic /, ''), 'base64').toString(), `x-access-token:${TOKEN}`);
+            await t.get('/chat', { as: ada, form: { mode: 'code', repo: 'https://github.com/ada/elsewhere', text: 'Fix it' } });
+            assert.ok(!(submits[submits.length - 1].args.env && submits[submits.length - 1].args.env.OPENVIBE_GIT_LOCAL_ROOT), 'no local root for another host');
         });
 
-        await check('the composer offers a new repository on OpenVibe Git, and the rail has its place', async () => {
-            const home = await t.get('/', { as: ada });
-            assert.match(home.text, /<a class="ch-chip ch-chip-new" href="\/git">[\s\S]*?New on OpenVibe Git<\/a>/);
-            assert.match(home.text, /href="\/git"[^>]*>[\s\S]{0,400}?OpenVibe Git/);
-        });
-
-        await check('unlinking forgets the tokens', async () => {
-            const r = await t.get('/git/unlink', { as: ada, form: { confirm: '1' } });
-            assert.strictEqual(r.status, 303);
-            assert.strictEqual(await db.maybe('SELECT 1 FROM codes_forge_links WHERE subject = $1', [ada.subject]), null);
-            assert.match((await t.get('/git', { as: ada })).text, /Link OpenVibe Git/);
+        await check('a repository on another host takes no OpenVibe Git token', async () => {
+            assert.strictEqual(await t.ctx.forge.jobEnv(ada.subject, 'https://code.example.org/ada/site'), null);
+            assert.strictEqual(await t.ctx.forge.jobEnv(ada.subject, 'not a url'), null);
         });
     } finally {
         await t.close();
-        await forge.close();
+        await git.close();
+        fs.rmSync(dataDir, { recursive: true, force: true });
     }
     done();
 })().catch((e) => { console.error(e); process.exit(1); });

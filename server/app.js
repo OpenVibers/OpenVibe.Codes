@@ -57,7 +57,6 @@ const { createKnowledgeApi } = require('./http/knowledge-api');
 const { createMovedRoutes } = require('./http/moved');
 const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
-const { createForgejoClient } = require('./domain/forgejo');
 const createAiCatalogConfig = require('./ai-catalog-config').create;
 const createOwnerInputs = require('./owner-inputs-config').create;
 const { createOwnerInputTests } = require('./owner-inputs-tests');
@@ -93,17 +92,14 @@ async function createApp(opts = {}) {
     const keys = createKeyStore({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // D11 owner settings (codes.ai): the catalog switch reads through the store, env pins winning.
     // The owner's outside accounts (codes.accounts, codes.publishing; the owner-setup design): sealed in Codes' store,
-    // read at use time with the environment as the fallback. config.git's app and config.github's token become getters,
-    // so a value entered in the admin panel takes effect without a restart.
+    // read at use time with the environment as the fallback. config.github's token becomes a getter, so a value
+    // entered in the admin panel takes effect without a restart.
     const ownerInputs = await createOwnerInputs({ db: store.db, env: opts.env || process.env, log });
-    const envGit = { clientId: config.git.clientId, clientSecret: config.git.clientSecret };
     const envGithubToken = config.github ? config.github.token : '';
     const fromPanel = (key, fallback) => { const v = ownerInputs.accounts.get(key); return typeof v === 'string' && v ? v : (fallback || ''); };
-    Object.defineProperty(config.git, 'clientId', { enumerable: true, configurable: true, get: () => fromPanel('forge.client_id', envGit.clientId) });
-    Object.defineProperty(config.git, 'clientSecret', { enumerable: true, configurable: true, get: () => fromPanel('forge.client_secret', envGit.clientSecret) });
     config.github = config.github || {};
     Object.defineProperty(config.github, 'token', { enumerable: true, configurable: true, get: () => fromPanel('github.token', envGithubToken) });
-    const findTest = createOwnerInputTests({ config, ownerInputs, fetchImpl: opts.fetchImpl || globalThis.fetch });
+    const findTest = createOwnerInputTests({ ownerInputs, fetchImpl: opts.fetchImpl || globalThis.fetch });
     const aiCatalogConfig = await createAiCatalogConfig({ db: store.db, keys, config, env: opts.env || process.env, log, also: ownerInputs.stores, test: findTest });
     Object.defineProperty(config.aiCatalog, 'enabled', { enumerable: true, configurable: true, get: () => aiCatalogConfig.get('catalog') });
     const sso = createSso({ config, keys, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log });
@@ -143,15 +139,14 @@ async function createApp(opts = {}) {
     const skills = opts.skills || createSkills({ store, sharing, log });
     const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, attachments, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
     const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, attachments, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
-    ctx.forgejo = createForgejoClient({ config, log });
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The person's own memory store (OpenVibe Memory M2b): the notes live in OpenVibe.AI, sealed there, and only the
     // person's own token opens them. Codes forwards the token and renders the answer; it never holds a note.
     ctx.memory = createMemory({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     ctx.github = createGitHub({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
-    // OpenVibe Git through the person's own account (server/domain/forge.js): off until the forge trusts Codes as an app.
-    ctx.forge = opts.forge || require('./domain/forge').createForge({ config, store, log });
+    // OpenVibe Git through Codes' service token, acting for the person it names (server/domain/forge.js).
+    ctx.forge = opts.forge || require('./domain/forge').createForge({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     tasks.setForge?.(ctx.forge);
     ctx.usage = createUsage({ store });
     // The conductor (Codes C9b) and its approvals inbox. The conductor starts Run jobs and reads their events through

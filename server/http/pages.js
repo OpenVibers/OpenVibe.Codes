@@ -317,7 +317,7 @@ ${offers.map((o) => html`<h3>${o.name} <code>${o.id}</code></h3>${o.agents.lengt
         });
         return created.id;
     };
-    const repoForgejoUrl = (owner, name) => `${config.git.publicUrl}/${owner}/${name}`;
+    const repoGitUrl = (owner, name) => `${config.git.publicUrl}/${owner}/${name}`;
     const repoCloneUrl = (owner, name) => `${config.git.publicUrl}/${owner}/${name}.git`;
 
     // The four steps of every change; the index is step 1, a repository's page is step 2.
@@ -359,18 +359,18 @@ ${raw(lists)}
     async function improveRepoPage(owner, name, { signed = false } = {}) {
         const meta = repoMeta().find((m) => m.repository === `${owner}/${name}`);
         if (!meta) return null;
-        let forgejoInfo = null;
-        let forgejoError = null;
-        if (signed) {
-            try { forgejoInfo = await ctx.forgejo.getRepo(owner, name); } catch (e) { forgejoError = e.code === 'forgejo.unconfigured' ? null : e.message; }
+        let gitInfo = null;
+        let gitError = null;
+        if (signed && ctx.forge && ctx.forge.enabled) {
+            try { gitInfo = await ctx.forge.repo(owner, name); } catch (e) { gitError = e.message; }
         }
         const agents = harnesses.list();
         const opt = (v, label, sel) => html`<option value="${v}"${sel ? raw(' selected') : ''}>${label}</option>`;
         const form = signed ? html`<form class="run-card run-form" method="post" action="/improve/start">
-<input type="hidden" name="repo" value="${repoForgejoUrl(owner, name)}">
-<input type="hidden" name="ref" value="${(forgejoInfo && forgejoInfo.default_branch) || 'main'}">
+<input type="hidden" name="repo" value="${repoGitUrl(owner, name)}">
+<input type="hidden" name="ref" value="${(gitInfo && gitInfo.default_branch) || 'main'}">
 <h2>Start a guided run</h2>
-${forgejoError ? html`<p class="run-notice run-notice-error" role="alert">OpenVibe Git is not reachable right now (${forgejoError}); you can still start a run on your machine.</p>` : ''}
+${gitError ? html`<p class="run-notice run-notice-error" role="alert">OpenVibe Git is not reachable right now (${gitError}); you can still start a run on your machine.</p>` : ''}
 <label class="run-field"><span>What should the agent change?</span><textarea name="prompt" rows="5" required maxlength="16000" placeholder="Add a test for the date parser and fix what it finds"></textarea></label>
 <div class="run-field-row">
 <label class="run-field"><span>Agent</span><select name="agent">${opt('', 'Any: the best fit, with hand-offs', true)}${agents.map((a) => opt(a.id, a.name))}</select></label>
@@ -391,7 +391,7 @@ ${forgejoError ? html`<p class="run-notice run-notice-error" role="alert">OpenVi
 ${raw(improveSteps(1))}
 ${form}
 ${raw(kit.fold({ title: 'How the run works', body: '<ol class="steps"><li>The harness clones the repository onto <strong>your machine</strong> and checks out the default branch.</li><li>The agent makes the change you described and runs the tests.</li><li>If you asked it to push, it commits to a new branch and opens a pull request on OpenVibe Git.</li><li>You review the result, then the maintainers review the pull request.</li></ol>' }))}
-${raw(kit.fold({ title: 'Clone it yourself', meta: 'git clone', body: `${kit.snippet({ code: `git clone ${repoCloneUrl(owner, name)}`, id: 'clone-cmd' })}<p class="ovk-muted">Browse it at <a href="${kit.esc(repoForgejoUrl(owner, name))}">${kit.esc(repoForgejoUrl(owner, name))}</a> or on <a href="${kit.esc(`${GITHUB}/${name}`)}">GitHub</a>.</p>` }))}`,
+${raw(kit.fold({ title: 'Clone it yourself', meta: 'git clone', body: `${kit.snippet({ code: `git clone ${repoCloneUrl(owner, name)}`, id: 'clone-cmd' })}<p class="ovk-muted">Browse it at <a href="${kit.esc(repoGitUrl(owner, name))}">${kit.esc(repoGitUrl(owner, name))}</a> or on <a href="${kit.esc(`${GITHUB}/${name}`)}">GitHub</a>.</p>` }))}`,
         };
     }
     r.get('/improve/:owner/:name', async (req, res) => {

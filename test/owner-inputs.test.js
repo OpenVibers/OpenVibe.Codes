@@ -21,13 +21,12 @@ const ENV_GH = 'github_pat_madeUpENVtokenFROMSETTINGSFILE0001';
 const PANEL_GH = 'github_pat_madeUpPANELtokenNEVERSHOWN000002';
 const APP_SECRET = 'madeUpGitHubAppSecretNEVERSHOWN0000000003';
 const BAD_NPM = 'npm_madeUpBadTokenTHATNPMECHOESBACK0000004';
-const FORGE_SECRET = 'madeUpForgeSecretNEVERSHOWN00000000000005';
-const SECRETS = [ENV_GH, PANEL_GH, APP_SECRET, BAD_NPM, FORGE_SECRET];
+const SECRETS = [ENV_GH, PANEL_GH, APP_SECRET, BAD_NPM];
 
 const calls = [];
 async function fakeFetch(url, init = {}) {
     const u = String(url);
-    const outside = /^https:\/\/(api\.github\.com|github\.com|registry\.npmjs\.org)\//.test(u) || /\/login\/oauth\/access_token$/.test(u);
+    const outside = /^https:\/\/(api\.github\.com|github\.com|registry\.npmjs\.org)\//.test(u);
     if (!outside) return globalThis.fetch(url, init);
     const auth = String((init.headers && (init.headers.Authorization || init.headers.authorization)) || '');
     calls.push({ url: u, auth, body: init.body ? String(init.body) : '' });
@@ -43,10 +42,6 @@ async function fakeFetch(url, init = {}) {
             ? json(200, { error: 'bad_verification_code', error_description: 'The code passed is incorrect or expired.' })
             : json(200, { error: 'incorrect_client_credentials', error_description: 'The client_id and/or client_secret passed are incorrect.' });
     }
-    if (u.endsWith('/login/oauth/access_token')) {
-        const form = new URLSearchParams(String(init.body || ''));
-        return form.get('client_secret') === FORGE_SECRET ? json(400, { error: 'invalid_grant', error_description: 'client is not authorized' }) : json(400, { error: 'unauthorized_client', error_description: 'invalid client secret' });
-    }
     if (u === 'https://registry.npmjs.org/-/whoami') return json(401, { error: `token ${auth.replace(/^Bearer /, '')} is not valid` });
     return json(404, { message: 'not here' });
 }
@@ -55,7 +50,7 @@ async function fakeFetch(url, init = {}) {
     const consoleLines = [];
     const original = { log: console.log, warn: console.warn, error: console.error, info: console.info };
     for (const k of Object.keys(original)) console[k] = (...a) => { consoleLines.push(a.join(' ')); original[k](...a); };
-    const t = await boot({ env: { OV_CONFIG_KEKS: `k1:${KEK}`, OV_CONFIG_KEK_CURRENT: 'k1', CODES_GITHUB_TOKEN: ENV_GH, CODES_SEAL_KEY: crypto.randomBytes(32).toString('base64') }, fetchImpl: fakeFetch });
+    const t = await boot({ env: { OV_CONFIG_KEKS: `k1:${KEK}`, OV_CONFIG_KEK_CURRENT: 'k1', CODES_GITHUB_TOKEN: ENV_GH }, fetchImpl: fakeFetch });
     const admin = () => t.network.mintService('svc:network', 'openvibe.codes', CAP);
     const cfg = (method, p, json) => t.get(p, { method, bearer: admin(), headers: { 'x-ov-subject': OWNER, 'x-ov-fresh': '1' }, ...(json ? { json } : {}) });
     const test = (ns, key) => cfg('POST', `/internal/config/${ns}/test/${key}`);
@@ -69,8 +64,7 @@ async function fakeFetch(url, init = {}) {
 
         await check('the sign-in apps, the GitHub token and the publishing tokens are owner inputs in their groups', async () => {
             const a = (await cfg('GET', '/internal/config/codes.accounts')).json().schema.properties;
-            assert.deepStrictEqual(['forge.client_id', 'forge.client_secret', 'github.client_id', 'github.client_secret'].map((k) => a[k]['x-owner-input'].group), ['sign-in-apps', 'sign-in-apps', 'sign-in-apps', 'sign-in-apps']);
-            assert.strictEqual(a['forge.client_secret']['x-required-for'], 'Linking an OpenVibe Git account', 'Codes reads it: linking is off without it');
+            assert.deepStrictEqual(['github.client_id', 'github.client_secret'].map((k) => a[k]['x-owner-input'].group), ['sign-in-apps', 'sign-in-apps']);
             assert.strictEqual(a['github.client_secret']['x-required-for'], undefined, 'nothing reads the GitHub app yet: Optional');
             assert.match(a['github.client_id']['x-owner-input'].unlocks, /Optional/);
             assert.deepStrictEqual([a['github.token']['x-owner-input'].group, a['github.token']['x-owner-input'].test], ['data-sources', true]);
@@ -104,18 +98,6 @@ async function fakeFetch(url, init = {}) {
             assert.deepStrictEqual([carried.status, carried.json().code], [422, 'config.secret_write_only']);
             const row = await t.ctx.store.db.prepare("SELECT values_json FROM config_snapshots WHERE namespace = 'codes.accounts' AND state = 'active'").get();
             assert.ok(!row.values_json.includes(PANEL_GH), 'sealed at rest');
-        });
-
-        await check('the OpenVibe Git app from the panel opens linking at use time; its test checks the app with the forge', async () => {
-            assert.strictEqual(t.ctx.forge.enabled, false, 'no app yet: linking is closed');
-            const id = await cfg('POST', '/internal/config/codes.accounts', { values: { 'forge.client_id': 'forge-client-1234' }, merge: true, reason: 'setup' });
-            assert.strictEqual(id.status, 200, id.text.slice(0, 300));
-            const put = await cfg('PUT', '/internal/config/codes.accounts/secrets/forge.client_secret', { value: FORGE_SECRET, reason: 'setup' });
-            assert.strictEqual(put.status, 200, put.text.slice(0, 300));
-            assert.strictEqual(t.ctx.forge.enabled, true, 'the panel values opened linking without a restart');
-            assert.strictEqual(t.config.git.clientId, 'forge-client-1234');
-            const r = await test('codes.accounts', 'forge.client_secret');
-            assert.deepStrictEqual([r.json().ok, r.json().source, r.json().message], [true, 'vault', 'OpenVibe Git accepted the app\'s client ID and secret.']);
         });
 
         await check('the GitHub app is tested without signing anyone in; a wrong secret is refused in one line', async () => {
