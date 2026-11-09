@@ -114,7 +114,7 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
 
     /**
      * The machine a conductor runs on, pinned (Codes C9c): its OpenVibe.Bot device id (`dev_…`), which is what Run
-     * places a job on. Network knows the machine by its principal (`nod_…`); Bot's list names both. A machine Codes
+     * places a job on. Network knows the machine by its principal (`lnk_…`); Bot's list names both. A machine Codes
      * cannot find there, or a Bot that does not answer, is a problem — a conductor must never fall back to running
      * wherever Run likes, because its folder and its memory are on the chosen machine.
      */
@@ -127,7 +127,7 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
             log.warn(`[Codes] conductor: ${machine} could not be pinned: ${String(e && e.message).slice(0, 200)}`);
             return { problem: { status: 503, code: 'conductor.machine_unpinned', detail: 'OpenVibe.Bot did not answer, so Codes cannot pin the conductor to that machine; a conductor runs where its folder is, never wherever' } };
         }
-        if (!hit) return { problem: { status: 422, code: 'conductor.machine_invalid', detail: 'that machine is not on openvibe.bot/machines: add it there, so a conductor can run where its folder is' } };
+        if (!hit) return { problem: { status: 422, code: 'conductor.machine_invalid', detail: 'that machine is not on openvibe.link/machines: add it there, so a conductor can run where its folder is' } };
         if (!hit.online) return { problem: { status: 409, code: 'conductor.machine_offline', detail: `${hit.name || 'that machine'} is offline: a conductor starts on the machine its folder is on` } };
         return { device: hit.device };
     }

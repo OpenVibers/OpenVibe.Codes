@@ -12,8 +12,8 @@
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/boot');
 
-const NODE = 'nod_01ARZ3NDEKTSV4RRFFQ69G5FAV';
-const OTHER = 'nod_01ARZ3NDEKTSV4RRFFQ69G5FAC';
+const NODE = 'lnk_01ARZ3NDEKTSV4RRFFQ69G5FAV';
+const OTHER = 'lnk_01ARZ3NDEKTSV4RRFFQ69G5FAC';
 const TASK = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const TASK2 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAW';
 const TASK3 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAX';
@@ -139,29 +139,10 @@ const TASK3 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAX';
             assert.ok(empty.text.includes('No keys yet.') && empty.text.includes('Add one on Your AI'));
         });
 
-        await check('Machines: the person&rsquo;s own machines, their state, and Node&rsquo;s pairing code flow', async () => {
+        await check('Machine management leads to Link', async () => {
             const page = await t.get('/machines', { as: ada });
-            assert.strictEqual(page.status, 200);
-            assert.ok(page.text.includes('Desk'), 'the paired machine is listed');
-            assert.ok(page.text.includes('Online'), 'with its state');
-            assert.ok(page.text.includes(`/machines/${NODE}/revoke`), 'and a way to revoke it');
-            assert.ok(page.text.includes('Pair a machine') && page.text.includes('openvibe.bot/machines'), 'the pairing flow is Nodes');
-            assert.ok(page.text.includes('All your machines are on openvibe.network/machines'), 'the page points at the network&rsquo;s machines hub');
-            assert.ok(page.text.includes('"appBar":false') && !page.text.includes('c4-mobile') && page.text.includes('data-ovk-sidebar-open'), 'the app has no tab bar: the rail is its navigation (L31)');
-            const coded = await t.get('/machines?code=abcd-2345', { as: ada });
-            assert.ok(coded.text.includes('"appBar":false') && coded.text.includes('data-ovk-sidebar-open'), 'a query string keeps the page in the app');
-            assert.ok(coded.text.includes('sudo openvibe-node pair ABCD-2345 --network https://openvibe.network'), 'the code makes the command');
-            const wrong = await t.get('/machines?code=nope', { as: ada });
-            assert.ok(wrong.text.includes('a pairing code is 8 letters and digits, like ABCD-1234'), 'a wrong code gets Node&rsquo;s own words');
-            const revoke = await t.get(`/machines/${NODE}/revoke`, { as: ada, method: 'POST', form: { x: '1' } });
-            assert.strictEqual(revoke.status, 303);
-            const after = await t.get('/machines', { as: ada });
-            assert.ok(after.text.includes('Revoked'), 'the machine is revoked');
-            // Bo cannot revoke Ada's machine.
-            t.network.addNode(ada.subject, { principal: 'nod_01ARZ3NDEKTSV4RRFFQ69G5FAA', node_id: 'node-other', name: 'Other', status: 'active', last_seen_at: new Date().toISOString() });
-            const stolen = await t.get('/machines/nod_01ARZ3NDEKTSV4RRFFQ69G5FAA/revoke', { as: bo, method: 'POST', form: { x: '1' } });
-            assert.strictEqual(stolen.status, 303);
-            assert.ok(String(stolen.headers.get('location')).includes('error='), 'another person&rsquo;s machine is refused');
+            assert.strictEqual(page.status, 301);
+            assert.strictEqual(page.headers.get('location'), 'https://openvibe.link/machines');
         });
 
         await check('Settings are remembered per person', async () => {

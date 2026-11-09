@@ -137,6 +137,11 @@ function createC4Routes(ctx) {
             return { ok: false, machines: [], problem: { status: e && e.status, detail: 'your machines could not be read: sign in again' } };
         }
     }
+    async function computeOf(req, res = null) {
+        if (!viewer(req)) return { ok: false, sources: [], candidates: [] };
+        try { return await sso.asViewer(req, res, (token) => machines.compute(token)); }
+        catch (e) { return { ok: false, sources: [], candidates: [], problem: { detail: String(e && e.message || 'Link did not answer') } }; }
+    }
     /** The person's own recent repositories (no GitHub call): what the pickers offer first. */
     async function recentRepos(req, limit = 8) {
         if (!viewer(req)) return [];
@@ -498,7 +503,7 @@ ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h
             if (row.machine) {
                 const known = await machinesOf(req, res);
                 const hit = (known.machines || []).find((m) => m.id === row.machine || m.node_id === row.machine);
-                label = hit ? (hit.name || hit.node_id) : (/^nod_/.test(row.machine) ? 'your machine' : row.machine);
+                label = hit ? (hit.name || hit.node_id) : (/^lnk_/.test(row.machine) ? 'your machine' : row.machine);
             }
             return await conductorPage(req, res, row, label);
         }
@@ -513,7 +518,7 @@ ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h
         if (machineName) {
             const known = await machinesOf(req, res);
             const hit = (known.machines || []).find((m) => m.id === machineName || m.node_id === machineName);
-            machineName = hit ? (hit.name || hit.node_id || 'Your machine') : (/^nod_/.test(machineName) ? 'Your machine' : machineName);
+            machineName = hit ? (hit.name || hit.node_id || 'Your machine') : (/^lnk_/.test(machineName) ? 'Your machine' : machineName);
         }
         const taskApi = `/api/v1/tasks/${encodeURIComponent(row.id)}`;
         const events = `${taskApi}/events`;
@@ -671,7 +676,7 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
         return `<section class="c4-card" id="fleet"><div class="c4-card-head"><h2>Your fleet</h2><span class="c4-muted">${esc(at)}</span></div>
 <p class="c4-sub">What each agent on your machines has left. A machine reports it with its heartbeat; no key or account name leaves it.</p>
 ${problem ? note(`The fleet could not be refreshed: ${esc(problem.detail || 'Bot did not answer')}. ${latest && latest.at ? 'The last reading is below.' : ''}`, 'bad') : ''}
-${list ? `<ul class="c4-rows c4-fleet">${list}</ul>` : `<div class="c4-emptyline">No machine has reported its agents yet. <a href="/machines">Pair a machine</a>, and its agents appear here while it is connected.</div>`}
+${list ? `<ul class="c4-rows c4-fleet">${list}</ul>` : `<div class="c4-emptyline">No machine has reported its agents yet. <a href="https://openvibe.link/machines">Pair a machine</a>, and its agents appear here while it is connected.</div>`}
 </section>`;
     };
 
@@ -737,45 +742,8 @@ ${before ? `<h3 class="c4-subhead">Saved in Codes before</h3><ul class="c4-rows"
         }
     });
 
-    // ── Machines: Node's pairing flow with a one-time code, and each machine's state ───────────────────────────
-    const CODE_SHAPE = /^[0-9A-HJKMNP-TV-Z]{8}$/;
-    const normaliseCode = (s) => String(s || '').toUpperCase().replace(/[^0-9A-Z]/g, '').replace(/[ILO]/g, (c) => ({ I: '1', L: '1', O: '0' }[c]));
-    r.get('/machines', async (req, res) => {
-        const mine = viewer(req) ? await machinesOf(req, res) : { ok: false, machines: [] };
-        const raw = normaliseCode(req.query.code);
-        const badCode = raw.length > 0 && !CODE_SHAPE.test(raw);
-        const code = CODE_SHAPE.test(raw) ? `${raw.slice(0, 4)}-${raw.slice(4)}` : '';
-        const list = (mine.machines || []).map((m) => {
-            const kind = m.state === 'online' ? 'ok' : m.state === 'revoked' ? 'bad' : 'skip';
-            return `<li class="c4-row c4-row-flat"><span class="c4-row-dot c4-dot-${kind}" aria-hidden="true"></span><span class="c4-row-label">${esc(m.name || m.node_id || m.id)}</span><span class="c4-row-note">${esc(machines.STATE_WORD[m.state] || m.state)}${m.last_seen_at ? ` · seen ${esc(age(m.last_seen_at))}` : ' · never seen'}${m.paired_for && m.paired_for.service ? ` · paired for ${esc(m.paired_for.service)}` : ''}</span>${m.state === 'revoked' ? pill('Revoked', 'bad') : `<form method="post" action="/machines/${esc(m.id)}/revoke"><button class="c4-opill c4-opill-quiet" type="submit">Revoke</button></form>`}</li>`;
-        }).join('');
-        const pairCard = `<section class="c4-card" id="pair"><div class="c4-card-head"><h2>Pair a machine</h2></div>
-<p class="c4-sub">One command, one code</p>
-<ol class="c4-steps">
-<li><b>Get a one-time code</b> on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a>. It lasts ten minutes and works once.</li>
-<li><b>Run the installer on the machine</b>, with the code it gives you: <code class="c4-code-inline">curl -fsSL https://openvibe.link/install | sh -s -- --worker</code></li>
-<li><b>It pairs itself</b>, then appears here as Online. A machine runs your jobs and nobody else's.</li>
-</ol>
-<form class="c4-form c4-form-inline" method="get" action="/machines">
-  <label>Have a code? <input name="code" value="${esc(String(req.query.code || ''))}" placeholder="ABCD-1234" inputmode="text" autocomplete="off" spellcheck="false" maxlength="12"></label>
-  <button class="c4-button" type="submit">Show the command</button>
-</form>
-${badCode ? note('a pairing code is 8 letters and digits, like ABCD-1234', 'bad') : ''}
-${code ? `<div class="c4-pair-command"><p class="c4-kv"><span>On the machine</span><code class="c4-code-inline">sudo openvibe-node pair ${esc(code)} --network https://openvibe.network</code></p><p class="c4-kv"><span>Or with the installer</span><code class="c4-code-inline">curl -fsSL https://openvibe.link/install | sh -s -- --network https://openvibe.network --pairing <span class="c4-note-inline">pair_… from openvibe.bot</span> --code ${esc(code)} --worker</code></p><p class="c4-hint">The code is the one openvibe.bot gave you for this machine; Codes never mints it. Reload this page once the installer says it is paired.</p></div>` : ''}
-</section>`;
-        const content = `${header('Machines', 'Your own computers, paired with your account.')}${viewer(req) ? `${flash(req)}<section class="c4-card"><div class="c4-card-head"><h2>Your machines</h2></div><p class="c4-sub">${(mine.machines || []).length} paired</p><p class="c4-hint"><a href="https://openvibe.network/machines">All your machines are on openvibe.network/machines</a>.</p>${mine.ok ? (list ? `<ul class="c4-rows">${list}</ul>` : '<div class="c4-emptyline">No paired computers yet. Pair one below and it shows up here.</div>') : note(`Your machines could not be read. ${esc((mine.problem && mine.problem.detail) || 'Sign in again.')}`, 'bad')}</section>${pairCard}` : signIn(req)}`;
-        page(req, res, 'Machines', wrap(content));
-    });
-    r.post('/machines/:id/revoke', form, async (req, res) => {
-        if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/machines')}`);
-        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
-        try {
-            const out = await sso.asViewer(req, res, (token) => machines.revoke(token, req.params.id));
-            return res.redirect(303, `/machines?${out.ok ? 'ok' : 'error'}=${encodeURIComponent(out.ok ? 'The machine is revoked: it can no longer run your work' : (out.problem && out.problem.detail) || 'the machine could not be revoked')}`);
-        } catch (e) {
-            return res.redirect(303, `/machines?error=${encodeURIComponent(String((e && e.message) || 'the machine could not be revoked').slice(0, 180))}`);
-        }
-    });
+    // Machine management lives on Link. Existing Codes bookmarks lead to the owner’s Link hub.
+    r.get('/machines', (_req, res) => res.redirect(301, 'https://openvibe.link/machines'));
 
     // ── Usage: what Codes knows, and no prices it does not know ────────────────────────────────────────────────
     r.get('/usage', async (req, res) => {
@@ -897,7 +865,7 @@ ${conductorSection}
     // reads the database only, through ctx.setupProgress (the chat app's home asks it).
     const setupRoutes = require('./setup').createSetupRoutes(ctx, {
         page: (req, res, title, body) => page(req, res, title, body, { css: ['css/setup.css'], scripts: ['js/setup.js'] }),
-        wrap, header, pill, flash, sameOrigin, viewer, form, signIn, note, machinesOf, usageMeter, SAFETY_OPTIONS, YOUR_AI, PROVIDER_NAMES,
+        wrap, header, pill, flash, sameOrigin, viewer, form, signIn, note, machinesOf, computeOf, usageMeter, SAFETY_OPTIONS, YOUR_AI, PROVIDER_NAMES,
     });
     r.use(setupRoutes);
     ctx.setupProgress = setupRoutes.setupProgress;

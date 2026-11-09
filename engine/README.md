@@ -1,9 +1,9 @@
 # engine/
 
 The agent engine: the pieces of the private agent portal (learned in production, on this workstation, since June 2026)
-that every Codes surface shares — the CLI on a Node, the hosted runner and, until it retires, the portal itself.
+that every Codes surface shares — the CLI on a Link, the hosted runner and, until it retires, the portal itself.
 
-CommonJS, Node 22, no dependencies.
+CommonJS, Link 22, no dependencies.
 
 ```js
 const engine = require('./engine');

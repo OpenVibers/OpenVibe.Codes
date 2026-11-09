@@ -104,7 +104,7 @@ Added test/date.test.js: three cases, all pass.
         const statusTable = table(['Piece', 'State'], [
             [html`<a href="/start">The harness on your machine</a> (<code>openvibe-codes</code>)`, `Live, ${VERSION}: runs a task on any of the eight agents with your CLIs and keys, streams one event format, keeps every run to show or resume.`],
             ['Hand-offs between agents', 'Live: a failed, rate-limited or silent agent hands the task to the next one with a note on what was done.'],
-            [html`<a href="/run">Run on your machine</a>: start a task in any browser, your phone included; your own computer runs it`, 'Live: add your machine on openvibe.bot/machines (one command), then watch the task live here and get the patch, a branch or a pull request. It runs only on your own machines, in Link\'s job sandbox.'],
+            [html`<a href="/run">Run on your machine</a>: start a task in any browser, your phone included; your own computer runs it`, 'Live: add your machine on openvibe.link/machines (one command), then watch the task live here and get the patch, a branch or a pull request. It runs only on your own machines, in Link\'s job sandbox.'],
             [html`<a href="/harnesses">The agent catalog</a>`, 'Live: every harness and model with its capabilities, prices and limits.'],
             [html`<code>GET /api/v1/harnesses</code>, <code>POST /api/v1/harnesses/route</code>`, 'Live: public, no key needed; per-address and per-caller limits.'],
             [html`<a href="/improve">Improve OpenVibe</a>: a repository, a change on a branch with its test, a pull request that CI checks and a maintainer reviews`, 'Live: pick a repository, describe the change, and start a guided run on your machine.'],

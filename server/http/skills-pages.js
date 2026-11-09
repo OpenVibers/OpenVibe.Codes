@@ -78,7 +78,7 @@ ${audience ? html`<div class="field"><label for="sk-audience">Who may read it</l
             description: 'Skills, rules and MCP servers kept per person and per project, versioned, and synced into Claude Code, Codex, OpenCode and Command Code on your machine.',
             crumbs: [{ label: 'Skills' }],
             body: html`<h1>Skills</h1>
-<p class="lede">Skills, rules and MCP servers kept per person and per project, versioned, and synced into each agent tool's own folder on your machine. Add one from the gallery; <code>openvibe-node skills sync</code> writes it inside its marked block, with a dry run, a diff and an undo.</p>
+<p class="lede">Skills, rules and MCP servers kept per person and per project, versioned, and synced into each agent tool's own folder on your machine. Add one from the gallery; <code>openvibe-link skills sync</code> writes it inside its marked block, with a dry run, a diff and an undo.</p>
 ${error ? notice(error, 'bad') : ''}
 <form class="inline-form" method="get" action="/skills" role="search">
 <label>Search the gallery <input name="q" value="${q}" maxlength="80"></label>

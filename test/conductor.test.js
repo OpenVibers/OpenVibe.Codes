@@ -12,7 +12,7 @@ const assert = require('assert');
 const { boot, check, done } = require('./helpers/boot');
 
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
-const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
+const NODE = 'lnk_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
 const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
 
 (async () => {
@@ -134,7 +134,7 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
         });
 
         await check('a conductor is started only where its folder is: no such machine on Bot, away, or Bot itself away', async () => {
-            const other = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N2';
+            const other = 'lnk_01J8Z3Q4R5S6T7V8W9X0Y1Z2N2';
             t.network.addNode(ada.subject, { principal: other, node_id: 'node_ada_desktop', name: 'ada-desktop', status: 'active', last_seen_at: new Date().toISOString() });
             const before = submits().length;
             const unknown = await post('/api/v1/conductor', { folder: '/home/ada/openvibe', machine: other });

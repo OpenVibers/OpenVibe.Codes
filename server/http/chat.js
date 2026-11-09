@@ -208,7 +208,7 @@ function createChatRoutes(ctx) {
             nav: [
                 place('Conductor', '/conductor', 'conductor'),
                 place('Agents', '/agents', 'agents'),
-                place('Machines', '/machines', 'machines'),
+                place('Machines', 'https://openvibe.link/machines', 'machines'),
                 place('OpenVibe Git', '/git', 'repo'),
                 place('Memory', '/memory', 'memory'),
                 place('Knowledge', '/knowledge', 'proof'),
@@ -512,11 +512,19 @@ function createChatRoutes(ctx) {
         const out = await Promise.race([read, late]).finally(() => clearTimeout(timer));
         return out && out.ok ? (out.machines || []).filter((m) => m && m.state !== 'revoked') : null;
     }
+    async function computeFor(req) {
+        const token = req.token || (req.viewer && req.viewer.token) || null;
+        if (!token || !machines?.compute) return null;
+        let timer;
+        const late = new Promise((resolve) => { timer = setTimeout(resolve, 1500, null); if (timer.unref) timer.unref(); });
+        const read = Promise.resolve().then(() => machines.compute(token)).catch(() => null);
+        return await Promise.race([read, late]).finally(() => clearTimeout(timer));
+    }
     /** Where an agent's work runs, in one line: the person's own computer (which one, or how to pair one). */
     function whereAgents(list) {
         const tail = '<span class="ch-where-tail">in a fresh copy of the code, with a pull request at the end</span>';
         if (list == null) return `${ico('machines')}<span>Runs on your computer ${tail}</span>`;
-        if (!list.length) return `${ico('machines')}<span>Runs on your computer. <a href="/machines">Pair it first</a>: it takes a minute, and the task waits for it.</span>`;
+        if (!list.length) return `${ico('machines')}<span>Runs on your computer. <a href="https://openvibe.link/machines">Pair it first</a>: it takes a minute, and the task waits for it.</span>`;
         const on = list.find((m) => m.state === 'online');
         const m = on || list[0];
         const name = esc(m.name || m.node_id || 'your computer');
@@ -529,9 +537,10 @@ function createChatRoutes(ctx) {
     r.get('/', async (req, res, next) => {
         if (!viewer(req)) return next();
         const settings = await userSettings.get(req.viewer.subject).catch(() => ({}));
-        const [repos, mine] = await Promise.all([
+        const [repos, mine, compute] = await Promise.all([
             github ? github.recent(req.viewer.subject, 6).catch(() => []) : [],
             machinesFor(req),
+            computeFor(req),
         ]);
         const asked = String(req.query.repo || '');
         // A repository shows by its name (owner/name), not a cut-off URL; the server reads either.
@@ -562,7 +571,10 @@ function createChatRoutes(ctx) {
         const repoPick = `<label class="ch-pick ch-pick-repo ch-for-code" title="Repository"><span class="ch-sr">Repository: owner/name or any Git URL</span>${ico('repo')}<input name="repo" type="text" inputmode="url" spellcheck="false" autocapitalize="off" value="${esc(repo)}" placeholder="owner/name or any Git URL" list="ch-repos" autocomplete="off" data-ch-repo data-ch-repo-url="/api/v1/me/repos"><datalist id="ch-repos">${repos.map((x) => `<option value="${esc(x.url)}">${esc(x.full_name)}</option>`).join('')}</datalist></label>`;
         const ready = await readyFor(req);
         const catalog = await aiModels();
-        const pickers = kindPick + projectPick + repoPick + whoPicker(settings.default_agent ? `${settings.default_agent}|` : '', { cls: 'ch-for-agents', ready, catalog }) + effortPicker('', 'ch-for-agents');
+        const choices = (compute?.candidates || []).map((m) => `<option value="${esc(m.id)}"${m.status !== 'ready' ? ' disabled' : ''}${optionAttrs({ state: m.status === 'ready' ? 'ok' : 'off', badge: m.status === 'ready' ? 'Ready' : 'Unavailable', desc: m.reason || (m.price ? `$${m.price.amount_usd}/${m.price.unit}` : 'No rental fee') })}>${esc(m.name)} · ${m.status === 'ready' ? 'Ready' : esc(m.reason || 'Unavailable')}</option>`).join('');
+        const otherSources = (compute?.sources || []).filter((s) => s.kind !== 'personal').map((s) => `<option value="" disabled>${esc(s.name)} · ${s.status === 'coming_soon' ? 'Coming soon' : esc(s.reason || 'Unavailable')}${s.price ? ` · $${esc(s.price.amount_usd)}/${esc(s.price.unit)}` : ''}</option>`).join('');
+        const runsOnPicker = `<label class="ch-pick ch-for-agents" title="Runs on"><span class="ch-sr">Runs on</span>${ico('machines')}<select name="machine" data-ov-select="bare" data-ov-title="Runs on"><option value="">Auto · your ready Link machine</option>${choices}${otherSources}</select>${ico('chevron', 'ch-caret')}</label>`;
+        const pickers = kindPick + projectPick + repoPick + whoPicker(settings.default_agent ? `${settings.default_agent}|` : '', { cls: 'ch-for-agents', ready, catalog }) + effortPicker('', 'ch-for-agents') + runsOnPicker;
         // The repositories a person used last are a tap away (the box also searches every one they can reach).
         const newRepo = `<a class="ch-chip ch-chip-new" href="/git">${ico('new')}New on OpenVibe Git</a>`;
         const recent = `<div class="ch-recent ch-for-code" role="group" aria-label="Your repositories">${newRepo}${repos.length > 1 ? repos.map((x) => `<button class="ch-chip" type="button" data-ch-saved-repo="${esc(x.url)}">${ico('repo')}${esc(x.full_name)}</button>`).join('') : ''}</div>`;
@@ -656,6 +668,13 @@ function createChatRoutes(ctx) {
         try { project = (await tasks.latestProject?.(req.viewer.subject)) || await conductor.projectFor(req.viewer.token || null, req.viewer.subject); } catch { project = null; }
         if (!project) return back('Codes could not find or make a project for you on OpenVibe.Services: sign in again and retry.');
         if (agent) await userSettings.save(req.viewer.subject, { default_agent: agent }).catch(() => {});
+        let pin = null;
+        if (b.machine) {
+            const token = req.token || (req.viewer && req.viewer.token) || null;
+            const chosen = await machines.pick(token, String(b.machine)).catch(() => null);
+            if (!chosen?.ok || !chosen.choice?.id) return back((chosen?.problem && chosen.problem.detail) || 'Link could not check that machine.');
+            pin = chosen.choice.id;
+        }
         if (targets && targets.length > 1) {
             // One request across several projects: a task for each, each told what the others are, so the parts agree.
             const names = targets.map((x) => x.repository.replace(/^OpenVibers\//, ''));
@@ -663,12 +682,12 @@ function createChatRoutes(ctx) {
             for (const [i, x] of targets.entries()) {
                 const note = `\n\n(This request spans ${names.join(', ')}. This task is the ${names[i]} part; the others are separate tasks. Change only what this repository needs, and keep the names and behaviour consistent with the other parts.)`;
                 const each = parseArgs(jobInput(x.url, `${text}${note}`.slice(0, 16000)));
-                const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args: each, attachmentIds: i === 0 ? ids : [] });
+                const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args: each, attachmentIds: i === 0 ? ids : [], pin });
                 if (!first) first = row;
             }
             return res.redirect(303, `/tasks/${encodeURIComponent(first.id)}`);
         }
-        const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args, attachmentIds: ids });
+        const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args, attachmentIds: ids, pin });
         return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}`);
     });
 

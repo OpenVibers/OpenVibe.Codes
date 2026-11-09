@@ -19,7 +19,7 @@ const { boot, check, done } = require('./helpers/boot');
 const failover = require('../server/domain/conductor-failover');
 const job = require('../harness/job');
 
-const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2F1';
+const NODE = 'lnk_01J8Z3Q4R5S6T7V8W9X0Y1Z2F1';
 const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2F1';
 const HOUR = 3600_000;
 

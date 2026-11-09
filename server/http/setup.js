@@ -28,7 +28,7 @@ const { CONDUCTOR_AGENTS, AGENT_NAMES } = require('../domain/conductor-failover'
 const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
 
 function createSetupRoutes(ctx, kit) {
-    const { page, wrap, pill, flash, sameOrigin, viewer, form, signIn, note, machinesOf, usageMeter, SAFETY_OPTIONS = [], YOUR_AI, PROVIDER_NAMES = {} } = kit;
+    const { page, wrap, pill, flash, sameOrigin, viewer, form, signIn, note, machinesOf, computeOf, usageMeter, SAFETY_OPTIONS = [], YOUR_AI, PROVIDER_NAMES = {} } = kit;
     const { store, fleet, harnesses, connections, sso, forge, userSettings } = ctx;
     const db = store.db;
     const r = asyncRouter();
@@ -40,6 +40,7 @@ function createSetupRoutes(ctx, kit) {
     async function readAll(req, res) {
         const subject = req.viewer.subject;
         const machineList = await machinesOf(req, res);
+        const compute = await computeOf(req, res);
         let fleetProblem = null;
         if (fleet) {
             try {
@@ -54,16 +55,16 @@ function createSetupRoutes(ctx, kit) {
         try { git = forge && forge.enabled ? await forge.link(subject) : null; } catch { git = null; }
         const settings = await userSettings.get(subject);
         const saved = !!(await db.maybe('SELECT 1 AS one FROM codes_user_settings WHERE subject = $1', [subject]));
-        return { machines: machineList, rows, fleetProblem, keys, git, settings, saved };
+        return { machines: machineList, compute, rows, fleetProblem, keys, git, settings, saved };
     }
 
     function stepsOf(d) {
         const live = (d.machines.machines || []).filter((m) => m.state !== 'revoked');
-        const online = live.filter((m) => m.state === 'online');
+        const online = (d.compute.candidates || []).filter((m) => m.status === 'ready');
         const ready = d.rows.filter((x) => x.state === 'ok' || x.state === 'low');
         const credentials = (d.keys && d.keys.credentials) || [];
         return [
-            { id: 'machine', title: 'Your machine', short: 'Machine', done: online.length > 0, warn: !online.length && live.length > 0, required: true },
+            { id: 'machine', title: 'Pick where it runs', short: 'Runs on', done: online.length > 0, warn: !online.length && live.length > 0, required: true },
             { id: 'agents', title: 'Your agents', short: 'Agents', done: ready.length > 0, required: true },
             { id: 'keys', title: 'Your AI keys', short: 'AI keys', done: credentials.some((k) => k.status !== 'failing'), optional: true },
             { id: 'accounts', title: 'Your accounts', short: 'Accounts', done: !!d.git, optional: true },
@@ -80,14 +81,16 @@ function createSetupRoutes(ctx, kit) {
 
     function machineBody(d) {
         const list = (d.machines.machines || []).filter((m) => m.state !== 'revoked');
+        const sources = d.compute.sources || [];
+        const sourceRows = sources.map((s) => `<li class="c4-row c4-row-flat"><span class="c4-row-dot${s.status === 'ready' ? ' c4-dot-ok' : ''}" aria-hidden="true"></span><span class="c4-row-label">${esc(s.name)}</span><span class="c4-row-note">${s.status === 'ready' ? 'Ready' : s.status === 'coming_soon' ? 'Coming soon' : 'Unavailable'}${s.price && s.price.amount_usd != null ? ` · $${esc(s.price.amount_usd)}/${esc(s.price.unit)}` : ''}${s.reason ? ` · ${esc(s.reason)}` : ''}</span></li>`).join('');
         const rows = list.map((m) => `<li class="c4-row c4-row-flat"><span class="c4-row-dot c4-dot-${m.state === 'online' ? 'ok' : 'skip'}" aria-hidden="true"></span><span class="c4-row-label">${esc(m.name || m.node_id || m.id)}</span><span class="c4-row-note">${m.state === 'online' ? 'Online: ready for your work' : 'Offline: start it, and it comes back here'}</span></li>`).join('');
         const problem = d.machines.ok === false && d.machines.problem ? note(esc(d.machines.problem.detail || 'Your machines could not be read.'), 'bad') : '';
         const how = `<ol class="c4-setup-how">
-<li><b>Get a one-time code</b> on <a href="https://openvibe.bot/machines" rel="noopener">openvibe.bot/machines</a>. It lasts ten minutes.</li>
+<li><b>Get a one-time code</b> on <a href="https://openvibe.link/machines" rel="noopener">openvibe.link/machines</a>. It lasts ten minutes.</li>
 <li><b>Run the installer on that computer</b> and give it the code:${command('curl -fsSL https://openvibe.link/install | sh -s -- --worker', 'On the machine')}</li>
 <li><b>It pairs itself</b> and shows up here as Online. It runs your work and nobody else's.</li></ol>`;
-        return `${problem}${rows ? `<ul class="c4-rows">${rows}</ul>` : ''}${list.length ? `<details class="c4-setup-more"><summary>Pair another machine</summary>${how}</details>` : how}
-<div class="c4-setup-actions"><a class="c4-button${list.length ? ' c4-button-light' : ''}" href="/machines#pair">${list.length ? 'Manage machines' : 'I have a code'}</a><a class="c4-opill" href="/setup#step-machine">Check again</a></div>`;
+        return `${problem}${d.compute.ok === false && d.compute.problem ? note(esc(d.compute.problem.detail), 'bad') : ''}<p class="c4-hint">Choose a place for your work. Link checks readiness before a task can start. Rentals need a live price and a spending limit.</p>${sourceRows ? `<ul class="c4-rows">${sourceRows}</ul>` : ''}${rows ? `<ul class="c4-rows">${rows}</ul>` : ''}${list.length ? `<details class="c4-setup-more"><summary>Pair another machine</summary>${how}</details>` : how}
+<div class="c4-setup-actions"><a class="c4-button${list.length ? ' c4-button-light' : ''}" href="https://openvibe.link/machines#pair">${list.length ? 'Manage machines' : 'I have a code'}</a><a class="c4-opill" href="/setup#step-machine">Check again</a></div>`;
     }
 
     function agentsBody(d) {
@@ -166,7 +169,7 @@ ${rows ? `<ul class="c4-rows">${rows}</ul>` : d.keys ? '<div class="c4-emptyline
         const requiredLeft = steps.filter((s) => s.required && !s.done).length;
         const pctDone = Math.round((done / steps.length) * 100);
         const subs = {
-            machine: 'Where your agents run: one of your own computers, paired once.',
+            machine: 'Your Link machines, OpenVibe cloud, Exchange rentals and community machines.',
             agents: 'The coding agents on it, signed in with your own plans.',
             keys: 'Keys for the models you pay for by use.',
             accounts: 'Where your work is pushed.',

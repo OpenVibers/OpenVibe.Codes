@@ -552,7 +552,8 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         return `${base.slice(0, Math.max(0, 16000 - section.length))}${section}`;
     }
 
-    async function start({ subject, project, args, via = null, key = null, actorRef = null, attachmentIds = [], messageId = null }) {
+    async function start({ subject, project, args, via = null, key = null, actorRef = null, attachmentIds = [], messageId = null, pin = null }) {
+        if (pin && !/^dev_[0-9A-HJKMNP-TV-Z]{26}$/.test(pin)) throw new Error('the Link machine id is invalid');
         const id = store.newId('tsk');
         const at = store.now();
         const claims = await claimFiles(subject, attachmentIds);
@@ -607,9 +608,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const placementKind = placed ? `harness.${taskKind}` : null;
         let inserted;
         await store.tx(async () => {
-            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $16) RETURNING *`,
-            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, at]);
+            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, pin, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $17) RETURNING *`,
+            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, pin, at]);
             if (claims.length) await filesStore.link(subject, claims, { taskId: id, attemptN: 1, messageId: turnId });
             await taskOutbox.emitTask(inserted, null);
             return inserted;
@@ -639,7 +640,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             // travels with the job's input and the machine's worker hands it to the harness.
             const funding = await attemptEnv({ subject, taskId: id, attemptId: first.attempt.id, agent: agent || null, budget });
             await attemptStore.bind(first.attempt.id, { run_mode: funding.mode });
-            job = await run.submit({ subject, project, args: await withEnv(subject, jobArgs, funding.env), key: id });
+            job = await run.submit({ subject, project, args: await withEnv(subject, jobArgs, funding.env), key: id, node: pin });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             await attemptStore.end(first.attempt.id, { state: 'failed', reason: refusal ? 'refused' : 'error', finished_at: store.iso() });
@@ -867,7 +868,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             // through AI is capped like any other attempt.
             const funding = await attemptEnv({ subject: row.subject, taskId: row.id, attemptId: attempt.id, agent: plan.agent || null, budget: left.left });
             await attemptStore.bind(attempt.id, { run_mode: funding.mode });
-            job = await run.submit({ subject: row.subject, project: row.project_id, args: await withEnv(row.subject, args, funding.env), key: attempt.id });
+            job = await run.submit({ subject: row.subject, project: row.project_id, args: await withEnv(row.subject, args, funding.env), key: attempt.id, node: row.pin || null });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             await attemptStore.end(attempt.id, { state: 'failed', reason: 'error', finished_at: store.iso() });
@@ -956,7 +957,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             const funding = await attemptEnv({ subject: row.subject, taskId: row.id, attemptId: attempt.id, agent: plan.agent || null, budget: left.left });
             await attemptStore.bind(attempt.id, { run_mode: funding.mode });
             const args = followUpArgs(row, plan);
-            job = await run.submit({ subject: row.subject, project: row.project_id, args: await withEnv(row.subject, args, funding.env), key: attempt.id });
+            job = await run.submit({ subject: row.subject, project: row.project_id, args: await withEnv(row.subject, args, funding.env), key: attempt.id, node: row.pin || null });
         } catch (e) {
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             await attemptStore.end(attempt.id, { state: 'failed', reason: 'error', finished_at: store.iso() });

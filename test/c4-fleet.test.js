@@ -23,7 +23,7 @@ const { boot, check, done } = require('./helpers/boot');
     const RESET = nextWednesdayUtc();
     // The machine, as OpenVibe.Bot answers it: the page reads Bot and keeps the latest reading per machine.
     t.bot.addMachine({
-        id: 'dev_ada_laptop', node_id: 'nod_ada', name: 'ada-laptop', online: true, fleet_at: new Date().toISOString(),
+        id: 'dev_ada_laptop', node_id: 'lnk_ada', name: 'ada-laptop', online: true, fleet_at: new Date().toISOString(),
         fleet: [
             { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', used: 96, limit: 100, pct: 96, resets_at: RESET }] },
             { agent: 'minimax-code', installed: true, signed_in: true, windows: [] },
@@ -32,9 +32,9 @@ const { boot, check, done } = require('./helpers/boot');
     });
     await t.ctx.store.db.exec(
         `INSERT INTO codes_machine_fleet (subject, machine, node_id, name, agent, installed, signed_in, windows, online, reported_at, updated_at)
-         VALUES ($1,'dev_ada_laptop','nod_ada','ada-laptop','codex',true,true,$2::jsonb,true,now(),now()),
-                ($1,'dev_ada_laptop','nod_ada','ada-laptop','minimax-code',true,true,'[]'::jsonb,true,now(),now()),
-                ($1,'dev_ada_laptop','nod_ada','ada-laptop','opencode',true,false,'[]'::jsonb,true,now(),now())`,
+         VALUES ($1,'dev_ada_laptop','lnk_ada','ada-laptop','codex',true,true,$2::jsonb,true,now(),now()),
+                ($1,'dev_ada_laptop','lnk_ada','ada-laptop','minimax-code',true,true,'[]'::jsonb,true,now(),now()),
+                ($1,'dev_ada_laptop','lnk_ada','ada-laptop','opencode',true,false,'[]'::jsonb,true,now(),now())`,
         [ada.subject, JSON.stringify([{ name: 'week', used: 96, limit: 100, pct: 96, resets_at: RESET }])],
     );
 
