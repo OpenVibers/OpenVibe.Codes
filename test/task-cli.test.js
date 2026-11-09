@@ -168,7 +168,7 @@ function taskDoc(over = {}) {
             assert.match(noToken.err, /no Network token/);
             const badOption = await run(['list', '--nope']);
             assert.strictEqual(badOption.code, 2);
-            const namedMachine = await run(['start', '--repo', 'acme/thing', '--file', path.join(dir, 'brief.md'), '--machine', 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1']);
+            const namedMachine = await run(['start', '--repo', 'acme/thing', '--file', path.join(dir, 'brief.md'), '--machine', 'lnk_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1']);
             assert.strictEqual(namedMachine.code, 2);
             assert.match(namedMachine.err, /only --machine auto/);
         });

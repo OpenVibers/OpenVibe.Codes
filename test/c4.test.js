@@ -8,12 +8,14 @@ const { boot, check, done } = require('./helpers/boot');
     const ada = t.network.addUser('c4-ada');
     try {
         await check('all C4 pages render readable server content without JavaScript', async () => {
-            for (const [path, label] of [['/', 'What should an agent do?'], ['/tasks', 'Tasks'], ['/agents', 'Agents'], ['/machines', 'Machines'], ['/usage', 'Usage'], ['/settings', 'Settings']]) {
+            for (const [path, label] of [['/', 'What should an agent do?'], ['/tasks', 'Tasks'], ['/agents', 'Agents'], ['/usage', 'Usage'], ['/settings', 'Settings']]) {
                 const r = await t.get(path);
                 assert.strictEqual(r.status, 200, `${path} status`);
                 assert.ok(r.text.includes(label), `${path} content`);
                 assert.ok(r.text.includes('ov-workspace'), `${path} reserves the Frame app bar's height`);
             }
+            const machines = await t.get('/machines');
+            assert.strictEqual(machines.status, 301, '/machines moves to the Link product');
             const task = await t.get('/tasks/tsk_01ARZ3NDEKTSV4RRFFQ69G5FAV');
             assert.strictEqual(task.status, 200);
             assert.ok(task.text.includes('Sign in to see your work'));

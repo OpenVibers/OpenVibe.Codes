@@ -27,7 +27,7 @@ const DIR = path.join(__dirname, '..', 'engine');
             for (const m of source.matchAll(/require\('([^']+)'\)/g)) {
                 const name = m[1];
                 if (name.startsWith('.')) continue;
-                assert.ok(builtins.has(name.replace(/^node:/, '')), `${file} requires ${name}, which is not a node builtin`);
+                assert.ok(builtins.has(name.replace(/^link:/, '')), `${file} requires ${name}, which is not a node builtin`);
             }
         }
     });

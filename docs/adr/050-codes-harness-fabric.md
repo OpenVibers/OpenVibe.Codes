@@ -59,7 +59,7 @@ first `docs/adr/` — the plan (§8) lists **ADR-050 Codes Harness Fabric** amon
   review verdict, cost, or branch/PR code in `server/` — the strings do not appear. T16's product line is
   "repository browser, workspace, editor, terminal, task feed, tests, diff, harness explanation, review verdict, cost,
   branch/PR flow — usable hosted and on a Link (T14) for local harnesses", and T16's dependency line is
-  "T1 (Fabric offers), T2 (projects/grants), T5 (metering/Vibes), T17 (Actor for planning), T14 (Run/Node for
+  "T1 (Fabric offers), T2 (projects/grants), T5 (metering/Vibes), T17 (Actor for planning), T14 (Run/Link for
   execution)". The plan does not use the phrase "forge model"; the repository/branch/PR authority it describes is
   Forgejo/GitHub under T16, and the project/grant authority is T2.
 - **Forgejo is a Codes deliverable that must not gate Codes.** T16: "**Forgejo belongs here,** not in generic
@@ -88,7 +88,7 @@ first `docs/adr/` — the plan (§8) lists **ADR-050 Codes Harness Fabric** amon
    (`api.js:61-81`). Nothing in this surface launches a harness, streams a run, meters usage or resumes a session.
 5. **The write half is deferred, and its dependencies are named, not guessed.** Workspace, branch, PR/review, usage and
    execution depend on T1 (`platform.agent-offer@1` / Fabric offers), T2 (projects and grants), T5 (metering/Vibes),
-   T14 (Run/Node execution) and T17 (Actor planning), per T16's dependency line. This record fixes no interface for
+   T14 (Run/Link execution) and T17 (Actor planning), per T16's dependency line. This record fixes no interface for
    them; they are **open** until those tracks land.
 6. **Forgejo does not gate the fabric.** Codes must understand repository/branch/fork/PR/MR, CI and provenance, and
    the platform supports GitHub and Forgejo adapters "regardless of which is canonical" (T16). The migration to

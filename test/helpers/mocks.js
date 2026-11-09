@@ -360,7 +360,22 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
                 ? { id: 'msg_1', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'ok' }], model: 'openvibe', usage: { input_tokens: 1, output_tokens: 1 } }
                 : { id: 'chatcmpl_1', object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }], model: 'openvibe', usage: { prompt_tokens: 1, completion_tokens: 1 } });
         }
-        // ── Network's node principals (Codes C4b): a person's own machines ──
+        if (url.pathname === '/api/v1/link/compute' && req.method === 'GET') {
+            const u = userFrom(req);
+            if (!u) return problem(json, 401, 'auth.required', 'sign in to see where work can run');
+            const candidates = [...st.nodes.values()].filter((n) => n.owner === u.subject && n.view.status === 'active').map((n) => ({
+                id: n.view.principal, principal_id: n.view.principal, kind: 'personal', name: n.view.name || n.view.principal,
+                status: n.view.last_seen_at ? 'ready' : 'unavailable', reason: n.view.last_seen_at ? null : 'This machine is offline.',
+                price: { amount_usd: 0, unit: 'hour' },
+            }));
+            return json(200, { sources: [
+                { kind: 'personal', name: 'Your Link machines', status: candidates.some((c) => c.status === 'ready') ? 'ready' : 'unavailable', reason: null },
+                { kind: 'cloud', name: 'OpenVibe cloud machines', status: 'coming_soon', reason: 'No cloud pool is accepting jobs yet.' },
+                { kind: 'exchange', name: 'Exchange GPU rentals', status: 'coming_soon', reason: 'A live quote is required.', price: null },
+                { kind: 'community', name: 'Community machines', status: 'coming_soon', reason: 'Shared placement is being connected.' },
+            ], candidates });
+        }
+        // ── Network's Link principals (Codes C4b): a person's own machines ──
         if (url.pathname === '/api/v1/me/nodes' || url.pathname.startsWith('/api/v1/me/nodes/')) {
             const u = userFrom(req);
             if (!u) return problem(json, 401, 'auth.required', 'sign in to see your machines');

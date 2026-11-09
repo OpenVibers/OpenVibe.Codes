@@ -8,7 +8,7 @@ const assert = require('assert');
 const { boot, check, done } = require('./helpers/boot');
 const { readiness, optionAttrs } = require('../server/domain/readiness');
 
-const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
+const NODE = 'lnk_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
 const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
 
 (async () => {

@@ -4,11 +4,11 @@
  * A person's machines, as OpenVibe.Network knows them (Codes C4b).
  *
  * A machine is paired by redeeming a one-time code on OpenVibe.Network (docs: OpenVibe Link README and
- * internal/link/network.go): openvibe.bot/machines mints `pair_…` with a code that lasts ten minutes, and the machine
- * redeems it -> `openvibe-node pair --network <URL> --pairing pair_… --code ABCD-1234`. The result is a node principal
- * (`nod_…`) owned by the person; that principal, its status and when it was last seen are what this module reads.
+ * internal/link/network.go): openvibe.link/machines mints `pair_…` with a code that lasts ten minutes, and the machine
+ * redeems it -> `openvibe-link pair --network <URL> --pairing pair_… --code ABCD-1234`. The result is a node principal
+ * (`lnk_…`) owned by the person; that principal, its status and when it was last seen are what this module reads.
  *
- * Codes never mints a pairing: that is Bot's, holding network.node.manage. Codes reads the person's own machines with
+ * Codes never mints a pairing: that is Bot's, holding network.link.manage. Codes reads the person's own machines with
  * their own session token (GET /api/v1/me/nodes accepts it as a Bearer) and can revoke one (the person's own route).
  *
  *   createMachines({ config, fetchImpl, log })
@@ -22,7 +22,7 @@
  */
 
 const ONLINE_MS = 5 * 60_000;
-const NODE = /^(?:nod_)?[0-9A-HJKMNP-TV-Z]{26}$/;
+const NODE = /^(?:lnk_)?[0-9A-HJKMNP-TV-Z]{26}$/;
 
 const iso = (v) => {
     if (!v) return null;
@@ -103,7 +103,27 @@ function createMachines({ config, fetchImpl = globalThis.fetch, log = console } 
         return { ok: true, machine: present(out.doc) };
     }
 
-    return { list, revoke, present, STATE_WORD };
+    /** Link's placement sources; a read does not start a rental or reserve a machine. */
+    async function compute(token, kind) {
+        if (!token) return { ok: false, sources: [], candidates: [], problem: { detail: 'Sign in to see where work can run.' } };
+        try {
+            const out = await call(token, 'GET', `/api/v1/link/compute${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`);
+            if (out.ok) return { ok: true, sources: out.doc.sources || [], candidates: out.doc.candidates || [] };
+            return { ok: false, sources: [], candidates: [], problem: { detail: out.doc?.detail || `Link answered ${out.status}` } };
+        } catch (e) {
+            return { ok: false, sources: [], candidates: [], problem: { detail: `Link did not answer: ${String(e && e.message).slice(0, 120)}` } };
+        }
+    }
+
+    async function pick(token, id) {
+        if (!token || !id) return { ok: false, problem: { detail: 'Choose a Link machine first.' } };
+        try {
+            const out = await call(token, 'POST', '/api/v1/link/compute/pick', { kind: 'personal', id });
+            return out.ok ? { ok: true, choice: out.doc.choice } : { ok: false, problem: { detail: out.doc?.detail || 'This machine is unavailable.' } };
+        } catch (e) { return { ok: false, problem: { detail: `Link did not answer: ${String(e && e.message).slice(0, 120)}` } }; }
+    }
+
+    return { list, revoke, compute, pick, present, STATE_WORD };
 }
 
 module.exports = { createMachines, present, STATE_WORD, ONLINE_MS };

@@ -8,7 +8,7 @@
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/boot');
 
-const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N3';
+const NODE = 'lnk_01J8Z3Q4R5S6T7V8W9X0Y1Z2N3';
 // Measured from now, so the fleet stays spent however late the test runs (fixed dates went stale on 2026-11-02).
 const RESET_WEEK = new Date(Date.now() + 4.5 * 86400000).toISOString();
 const RESET_MONTH = new Date(Date.now() + 2.5 * 86400000).toISOString();
@@ -52,11 +52,11 @@ const RESET_MONTH = new Date(Date.now() + 2.5 * 86400000).toISOString();
     });
     await db.exec(
         `INSERT INTO codes_machine_fleet (subject, machine, node_id, name, agent, installed, signed_in, windows, online, reported_at, updated_at)
-         VALUES ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','nod_ada','ada-laptop','codex',true,true,$2::jsonb,true,now(),now()),
-                ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','nod_ada','ada-laptop','opencode',true,true,$3::jsonb,true,now(),now()),
-                ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','nod_ada','ada-laptop','command-code',true,true,$4::jsonb,true,now(),now()),
-                ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','nod_ada','ada-laptop','minimax-code',true,true,'[]'::jsonb,true,now(),now()),
-                ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','nod_ada','ada-laptop','deepseek',true,true,'[]'::jsonb,true,now(),now())`,
+         VALUES ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','lnk_ada','ada-laptop','codex',true,true,$2::jsonb,true,now(),now()),
+                ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','lnk_ada','ada-laptop','opencode',true,true,$3::jsonb,true,now(),now()),
+                ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','lnk_ada','ada-laptop','command-code',true,true,$4::jsonb,true,now(),now()),
+                ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','lnk_ada','ada-laptop','minimax-code',true,true,'[]'::jsonb,true,now(),now()),
+                ($1,'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1','lnk_ada','ada-laptop','deepseek',true,true,'[]'::jsonb,true,now(),now())`,
         [ada.subject, window('week', 100, RESET_WEEK), window('month', 100, RESET_MONTH), window('week', 96, RESET_WEEK)],
     );
 

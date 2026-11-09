@@ -45,7 +45,7 @@ openvibe-codes task stop tsk_01J…
 - **`--permission review|edit|full`**: `review` is a read-only task (research, an audit, a review) that runs at
   the harness's `read` level; `edit` is the default; `full` may also run commands.
 - **`--machine`** is `auto` only: Codes places the task on a machine of yours by itself (listed at
-  <https://openvibe.bot/machines>). A named machine is refused rather than silently ignored.
+  <https://openvibe.link/machines>). A named machine is refused rather than silently ignored.
 - **`--json`** prints the API's answer instead of the readable log.
 
 `task show` without `--follow` prints the task, its attempts and its outcome once. With `--follow` it reads

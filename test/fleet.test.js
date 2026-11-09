@@ -26,11 +26,11 @@ const answer = (doc) => ({ ok: true, status: 200, json: async () => doc });
     try {
         await check('the heartbeat report is stored per machine and agent, and answered per machine', async () => {
             let doc = machines([
-                { id: 'dev_ada_laptop', node_id: 'nod_ada', name: 'ada-laptop', online: true, fleet: [
+                { id: 'dev_ada_laptop', node_id: 'lnk_ada', name: 'ada-laptop', online: true, fleet: [
                     { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', used: 100, limit: 100, resets_at: RESET }] },
                     { agent: 'minimax-code', installed: true, signed_in: true, windows: [] },
                 ] },
-                { id: 'dev_ada_desk', node_id: 'nod_desk', name: 'ada-desk', online: false, fleet: [
+                { id: 'dev_ada_desk', node_id: 'lnk_desk', name: 'ada-desk', online: false, fleet: [
                     { agent: 'opencode', installed: true, signed_in: false, windows: [] },
                 ] },
             ]);
@@ -39,7 +39,7 @@ const answer = (doc) => ({ ok: true, status: 200, json: async () => doc });
             assert.equal(out.ok, true);
             assert.equal(out.machines.length, 2);
             const laptop = out.machines.find((m) => m.id === 'dev_ada_laptop');
-            assert.equal(laptop.node_id, 'nod_ada');
+            assert.equal(laptop.node_id, 'lnk_ada');
             assert.equal(laptop.agents.length, 2);
             assert.equal(laptop.agents[0].windows[0].pct, 100, 'the pct is derived from used/limit');
             assert.equal(laptop.agents[0].windows[0].resets_at, new Date(RESET).toISOString());
@@ -49,7 +49,7 @@ const answer = (doc) => ({ ok: true, status: 200, json: async () => doc });
 
         await check('the page rows: one per agent, a state each, usable first', async () => {
             const fleet = createFleet({ config: { bot: { internalUrl: 'http://bot.test' } }, store, log, now: () => NOW, fetchImpl: async () => machines([
-                { id: 'dev_ada_laptop', node_id: 'nod_ada', name: 'ada-laptop', online: true, fleet: [
+                { id: 'dev_ada_laptop', node_id: 'lnk_ada', name: 'ada-laptop', online: true, fleet: [
                     { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', used: 100, limit: 100, resets_at: RESET }] },
                     { agent: 'minimax-code', installed: true, signed_in: true, windows: [{ name: 'week', used: 10, limit: 100, resets_at: RESET }] },
                     { agent: 'command-code', installed: true, signed_in: true, windows: [{ name: 'week', pct: 84, resets_at: RESET }] },
@@ -71,7 +71,7 @@ const answer = (doc) => ({ ok: true, status: 200, json: async () => doc });
 
         await check('the router reads the fleet per runner, with the machine that has room', async () => {
             const fleet = createFleet({ config: { bot: { internalUrl: 'http://bot.test' } }, store, log, now: () => NOW, fetchImpl: async () => machines([
-                { id: 'dev_ada_laptop', node_id: 'nod_ada', name: 'ada-laptop', online: true, fleet: [
+                { id: 'dev_ada_laptop', node_id: 'lnk_ada', name: 'ada-laptop', online: true, fleet: [
                     { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', pct: 100, resets_at: RESET }] },
                     { agent: 'minimax-code', installed: true, signed_in: true, windows: [] },
                 ] },
@@ -86,10 +86,10 @@ const answer = (doc) => ({ ok: true, status: 200, json: async () => doc });
 
         await check('a plan with room on one machine is usable, and the meter shows the fullest reading', async () => {
             const fleet = createFleet({ config: { bot: { internalUrl: 'http://bot.test' } }, store, log, now: () => NOW, fetchImpl: async () => machines([
-                { id: 'dev_ada_laptop', node_id: 'nod_ada', name: 'ada-laptop', online: true, fleet: [
+                { id: 'dev_ada_laptop', node_id: 'lnk_ada', name: 'ada-laptop', online: true, fleet: [
                     { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', pct: 100, resets_at: RESET }] },
                 ] },
-                { id: 'dev_ada_desk', node_id: 'nod_desk', name: 'ada-desk', online: true, fleet: [
+                { id: 'dev_ada_desk', node_id: 'lnk_desk', name: 'ada-desk', online: true, fleet: [
                     { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', pct: 10, resets_at: RESET }] },
                 ] },
             ]) });
@@ -104,10 +104,10 @@ const answer = (doc) => ({ ok: true, status: 200, json: async () => doc });
 
         await check('a plan that is full on every machine is limited', async () => {
             const fleet = createFleet({ config: { bot: { internalUrl: 'http://bot.test' } }, store, log, now: () => NOW, fetchImpl: async () => machines([
-                { id: 'dev_ada_laptop', node_id: 'nod_ada', name: 'ada-laptop', online: true, fleet: [
+                { id: 'dev_ada_laptop', node_id: 'lnk_ada', name: 'ada-laptop', online: true, fleet: [
                     { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', pct: 100, resets_at: RESET }] },
                 ] },
-                { id: 'dev_ada_desk', node_id: 'nod_desk', name: 'ada-desk', online: true, fleet: [
+                { id: 'dev_ada_desk', node_id: 'lnk_desk', name: 'ada-desk', online: true, fleet: [
                     { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', pct: 96, resets_at: RESET }] },
                 ] },
             ]) });
@@ -119,17 +119,17 @@ const answer = (doc) => ({ ok: true, status: 200, json: async () => doc });
 
         await check('a machine gone from Bot\'s answer is gone here; one that reports no fleet keeps its reading', async () => {
             const fleet = createFleet({ config: { bot: { internalUrl: 'http://bot.test' } }, store, log, now: () => NOW, fetchImpl: async () => machines([
-                { id: 'dev_ada_laptop', node_id: 'nod_ada', name: 'ada-laptop', online: true, fleet: [
+                { id: 'dev_ada_laptop', node_id: 'lnk_ada', name: 'ada-laptop', online: true, fleet: [
                     { agent: 'codex', installed: true, signed_in: true, windows: [] },
                 ] },
-                { id: 'dev_ada_desk', node_id: 'nod_desk', name: 'ada-desk', online: true, fleet: [
+                { id: 'dev_ada_desk', node_id: 'lnk_desk', name: 'ada-desk', online: true, fleet: [
                     { agent: 'opencode', installed: true, signed_in: false, windows: [] },
                 ] },
             ]) });
             await fleet.refresh(SUBJECT, 'tok');
             // The desk's Node is old and reports no fleet; the laptop is unplugged from the answer.
             const next = createFleet({ config: { bot: { internalUrl: 'http://bot.test' } }, store, log, now: () => NOW, fetchImpl: async () => machines([
-                { id: 'dev_ada_desk', node_id: 'nod_desk', name: 'ada-desk', online: true },
+                { id: 'dev_ada_desk', node_id: 'lnk_desk', name: 'ada-desk', online: true },
             ]) });
             await next.refresh(SUBJECT, 'tok');
             const { machines: left } = await next.latest(SUBJECT);

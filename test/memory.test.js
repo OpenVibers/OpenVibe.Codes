@@ -313,7 +313,7 @@ await check('an empty store shows the empty state and how to fill it', async () 
         const res = await h.get('/memory', { as: user });
         assert.equal(res.status, 200);
         assert.ok(res.text.includes('Nothing here yet'), 'the empty line');
-        assert.ok(res.text.includes('openvibe-node memory upload'), 'the command');
+        assert.ok(res.text.includes('openvibe-link memory upload'), 'the command');
         assert.ok(res.text.includes('docs/memory.md'), 'the docs');
     } finally { await h.close(); await store.close(); }
 });

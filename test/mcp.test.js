@@ -15,7 +15,7 @@ const { spawn } = require('child_process');
 const { boot, check, done } = require('./helpers/boot');
 
 const MCP = path.join(__dirname, '..', 'bin', 'mcp.js');
-const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N3';
+const NODE = 'lnk_01J8Z3Q4R5S6T7V8W9X0Y1Z2N3';
 
 function mcpChild(env) {
     const child = spawn(process.execPath, [MCP], { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });

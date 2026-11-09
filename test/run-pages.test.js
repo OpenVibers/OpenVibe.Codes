@@ -37,7 +37,7 @@ const { boot, check, done } = require('./helpers/boot');
     await check('a guest is told what it is and asked to sign in', async () => {
         const r = await t.get('/run');
         assert.strictEqual(r.status, 200);
-        assert.ok(r.text.includes('Run a coding task on your own machine') && r.text.includes('/auth/login?next=%2Frun') && r.text.includes('openvibe.bot/machines'));
+        assert.ok(r.text.includes('Run a coding task on your own machine') && r.text.includes('/auth/login?next=%2Frun') && r.text.includes('openvibe.link/machines'));
     });
 
     let project;

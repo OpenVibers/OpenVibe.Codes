@@ -44,7 +44,7 @@ const { boot, check, done } = require('./helpers/boot');
         return r.json.task;
     };
     // The machine the fleet reports, and the agent it runs (a real fleet row, as Bot's answer would carry).
-    t.bot.addMachine({ id: 'dev_01J8Z4M2Q0R7T9YV3K6N8P1W2X', node_id: 'nod_01J8Z4M2Q0R7T9YV3K6N8P1W2X', name: 'ada-laptop', online: true,
+    t.bot.addMachine({ id: 'dev_01J8Z4M2Q0R7T9YV3K6N8P1W2X', node_id: 'lnk_01J8Z4M2Q0R7T9YV3K6N8P1W2X', name: 'ada-laptop', online: true,
         fleet: [{ agent: 'codex', installed: true, signed_in: true, windows: [] }] });
     // A person starts a service's task in the project of their latest task: seed one for each.
     for (const [i, subject] of [[1, ada.subject], [2, bo.subject]]) {

@@ -313,8 +313,8 @@ function createMemoryRoutes(ctx, kit) {
             + rows.length + (rows.length === 1 ? ' source' : ' sources') + '</span></div>';
         if (!rows.length) {
             return head + '<div class="c4-emptyline">Nothing here yet. On your computer, run '
-                + '<code class="c4-code-inline">openvibe-node memory upload</code>: it shows what it found and asks before sending anything. '
-                + '<a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/memory.md#the-upload">The Link docs</a></div></section>';
+                + '<code class="c4-code-inline">openvibe-link memory upload</code>: it shows what it found and asks before sending anything. '
+                + '<a href="https://github.com/OpenVibers/OpenVibe.Link/blob/main/docs/memory.md#the-upload">The Link docs</a></div></section>';
         }
         const sourceRow = (row) => {
             const fresh = row.seen && Date.now() - row.seen < SEVEN_DAYS;

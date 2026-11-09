@@ -23,7 +23,7 @@ const failover = require('./conductor-failover');
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const SAFETY = ['ask', 'project', 'full'];
 const AGENT = /^[a-z0-9-]{1,40}$/;
-const MACHINE = /^(?:nod_)?[0-9A-HJKMNP-TV-Z]{26}$/;
+const MACHINE = /^(?:lnk_)?[0-9A-HJKMNP-TV-Z]{26}$/;
 /** The most a person may set (the portal's own cap): a number of steps or minutes, or none at all. */
 const LIMIT_MAX = 100000;
 

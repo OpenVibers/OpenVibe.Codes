@@ -18,7 +18,7 @@ const { boot, check, done } = require('./helpers/boot');
 
 const BIN = path.join(__dirname, '..', 'bin', 'openvibe-codes.js');
 const MCP = path.join(__dirname, '..', 'bin', 'mcp.js');
-const NODE = 'nod_01J8Z3Q4R5S6T7V8W9X0Y1Z2N2';
+const NODE = 'lnk_01J8Z3Q4R5S6T7V8W9X0Y1Z2N2';
 
 /** A child MCP server that answers one JSON-RPC message at a time. */
 function mcpChild(env) {

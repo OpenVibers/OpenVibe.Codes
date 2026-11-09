@@ -250,7 +250,7 @@ function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = c
     }
 
     /**
-     * The OpenVibe.Bot device id (`dev_…`) of one of the person's machines, given the id Codes knows it by (`nod_…`, or
+     * The OpenVibe.Bot device id (`dev_…`) of one of the person's machines, given the id Codes knows it by (`lnk_…`, or
      * the device id itself): what a Run job is pinned to (Codes C9c; Run's `job.node`). null when Bot's list has no such
      * machine; a Bot that does not answer throws (with a status), so a caller never pins to a guess.
      */
