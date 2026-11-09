@@ -1,7 +1,7 @@
 'use strict';
 /**
  * A person's OpenVibe Git (git.openvibe.codes) through Codes' service token. Codes holds a typed Network token
- * for audience openvibe.git (client credentials, git.read and git.write) and names the person it works for in
+ * for audience openvibe.git (client credentials, git.repo.read and git.repo.write) and names the person it works for in
  * X-OV-Subject; OpenVibe.Git makes the repository in their name and mints their clone token. Codes never holds a
  * person's password and never asks them to link an account: the OpenVibe sign-in in Codes is the only one.
  *
@@ -36,7 +36,7 @@ function createForge({ config, fetchImpl = globalThis.fetch, log = console }) {
     const tokens = (config.oauth && config.oauth.clientId && config.oauth.clientSecret)
         ? createServiceTokenClient({
             tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId,
-            clientSecret: config.oauth.clientSecret, audience: 'openvibe.git', scope: 'git.read git.write', fetch: fetchImpl,
+            clientSecret: config.oauth.clientSecret, audience: 'openvibe.git', scope: 'git.repo.read git.repo.write', fetch: fetchImpl,
         })
         : null;
     const isEnabled = () => !!tokens;
@@ -101,7 +101,7 @@ function createForge({ config, fetchImpl = globalThis.fetch, log = console }) {
     /** A Git token for the person's session, minted by the service and good for two hours. */
     async function mintToken(subject) {
         if (!USER.test(String(subject || ''))) throw fail(400, 'subject.required', 'a person signs in first');
-        const r = await call('POST', '/api/v1/tokens', { subject, json: { scopes: ['git.read', 'git.write'], hours: 2, label: 'Codes session' } });
+        const r = await call('POST', '/api/v1/tokens', { subject, json: { scopes: ['git.repo.read', 'git.repo.write'], hours: 2, label: 'Codes session' } });
         if (r.status !== 201 || !r.doc || !r.doc.token) throw fail(502, 'git.token_refused', `OpenVibe Git did not hand over a token (${r.status})`);
         return r.doc.token;
     }

@@ -88,7 +88,7 @@ function fakeGit() {
             assert.ok(call, 'the page read ada\'s repositories');
             assert.strictEqual(call.subject, ada.subject, 'named in X-OV-Subject');
             assert.strictEqual(call.claims.sub, 'svc:codes', 'the service token, not a person\'s');
-            assert.ok(call.claims.cap.includes('git.write'), 'with git.write');
+            assert.ok(call.claims.cap.includes('git.repo.write'), 'with git.repo.write');
             assert.ok(call.claims.aud.includes('openvibe.git'));
         });
 
@@ -124,7 +124,7 @@ function fakeGit() {
             assert.strictEqual(sent.args.env.OPENVIBE_GIT_LOCAL_ROOT, dataDir, 'clones from the disk, not the network');
             const minted = git.st.tokens.pop();
             assert.strictEqual(minted.subject, ada.subject, 'the token is the person\'s');
-            assert.deepStrictEqual(minted.body.scopes, ['git.read', 'git.write']);
+            assert.deepStrictEqual(minted.body.scopes, ['git.repo.read', 'git.repo.write']);
             assert.ok(job.ENV_NAMES.has('OPENVIBE_GIT_LOCAL_ROOT'), 'the job accepts the local root');
             const header = job.gitAuthFor('https://git.openvibe.codes/ada/my-site', { OPENVIBE_GIT_CREDENTIALS: sent.args.env.OPENVIBE_GIT_CREDENTIALS });
             assert.strictEqual(header.env.GIT_CONFIG_KEY_0, 'http.https://git.openvibe.codes/.extraheader', 'the machine clones and pushes with it');
