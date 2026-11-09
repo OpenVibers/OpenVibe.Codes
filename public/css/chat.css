@@ -225,3 +225,21 @@ html[data-ov-motion=reduced] .ch-spark-list[aria-hidden],html[data-ov-motion=red
 .ch-hello h1>span{animation:ch-ask-in .28s cubic-bezier(.2,.9,.3,1) both}
 @keyframes ch-ask-in{from{opacity:0;transform:translateY(4px)}}
 @media (prefers-reduced-motion:reduce){.ch-hello h1>span{animation:none}}
+
+/* Motion (ask 40, 11-09, the owner: "more fluid… transitions… custom animations… resize"): one highlight slides between the
+   three modes, each mode's own parts rise in as they appear, and the ideas cross-fade when their set changes. Calm keeps
+   short fades (gentle, not still). */
+.ch-modes{position:relative;isolation:isolate}
+.ch-modes.has-glide .ch-mode:has(input:checked){background:transparent;box-shadow:none}
+.ch-modes.has-glide::before{content:"";position:absolute;z-index:-1;top:4px;bottom:4px;left:0;width:var(--ch-glide-w,0);border-radius:999px;
+transform:translateX(var(--ch-glide-x,0));background:var(--ch-card);box-shadow:0 1px 2px rgba(0,0,0,.18),inset 0 0 0 1px color-mix(in srgb,var(--ch-accent) 45%,var(--ch-line));
+transition:transform .34s cubic-bezier(.2,.9,.25,1.12),width .34s cubic-bezier(.2,.9,.25,1)}
+.ch-modes.is-placing::before{transition:none}
+.ch :is(.ch-for-new,.ch-for-openvibe,.ch-for-code){animation:ch-rise .32s cubic-bezier(.2,.8,.2,1) both}
+[data-ch-ideas-track]{transition:opacity .18s ease,transform .18s ease}
+[data-ch-ideas-track].is-swapping{opacity:0;transform:translateY(4px)}
+@keyframes ch-rise{from{opacity:0;transform:translateY(6px)}}
+@keyframes ch-fade{from{opacity:0}}
+html[data-ov-motion=reduced] .ch :is(.ch-for-new,.ch-for-openvibe,.ch-for-code){animation-name:ch-fade;animation-duration:.2s}
+html[data-ov-motion=reduced] .ch-modes.has-glide::before{transition-duration:.18s;transition-timing-function:ease}
+@media (prefers-reduced-motion:reduce){.ch :is(.ch-for-new,.ch-for-openvibe,.ch-for-code){animation-name:ch-fade;animation-duration:.15s}.ch-modes.has-glide::before{transition-duration:.12s}}

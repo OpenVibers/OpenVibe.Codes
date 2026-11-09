@@ -54,9 +54,15 @@
         if (tpl) tpl.content.querySelectorAll('svg[data-icon]').forEach((svg) => icons.set(svg.dataset.icon, svg));
         function fill(mode) {
             if (!track || !sets[mode]) return;
-            const lists = track.querySelectorAll('.ch-spark-list');
-            lists.forEach((ul, n) => { ul.textContent = ''; sets[mode].forEach((i) => ul.appendChild(card(i, n > 0))); });
-            pace();
+            const swap = () => {
+                const lists = track.querySelectorAll('.ch-spark-list');
+                lists.forEach((ul, n) => { ul.textContent = ''; sets[mode].forEach((i) => ul.appendChild(card(i, n > 0))); });
+                pace();
+            };
+            // The ideas cross-fade to the new mode's set (a first fill, before anything shows, swaps at once).
+            if (!track.childElementCount || !track.querySelector('.ch-idea')) return swap();
+            track.classList.add('is-swapping');
+            setTimeout(() => { swap(); requestAnimationFrame(() => track.classList.remove('is-swapping')); }, 180);
         }
         // A touch screen keeps its keyboard down until the box is tapped (11-09, the owner: picking a mode "puts up the
         // keyboard automatically… takes up a lot of space… overrides everything").
@@ -71,7 +77,24 @@
             if (form) form.dispatchEvent(new Event('ovt:options'));
             if (focus && text && fine) text.focus();
         }
-        modes.forEach((r) => r.addEventListener('change', () => { if (r.checked) { choose(r.value, { focus: true }); pick(); } }));
+        modes.forEach((r) => r.addEventListener('change', () => { if (r.checked) { choose(r.value, { focus: true }); pick(); glide(); } }));
+        // One highlight slides to the picked mode (it follows the label's box, so a resize or a font change moves it too).
+        const group = modes.length ? modes[0].closest('.ch-modes') : null;
+        function glide(first) {
+            if (!group) return;
+            const on = modes.find((r) => r.checked); const lab = on && on.closest('.ch-mode');
+            if (!lab) return;
+            if (first) group.classList.add('is-placing');
+            group.style.setProperty('--ch-glide-x', `${lab.offsetLeft}px`);
+            group.style.setProperty('--ch-glide-w', `${lab.offsetWidth}px`);
+            group.classList.add('has-glide');
+            if (first) requestAnimationFrame(() => requestAnimationFrame(() => group.classList.remove('is-placing')));
+        }
+        if (group) {
+            glide(true);
+            if (typeof ResizeObserver === 'function') new ResizeObserver(() => glide(true)).observe(group);
+            if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => glide(true)).catch(() => {});
+        }
 
         // An OpenVibe site, picked from the words: the line under the bar says which projects Codes will work on, as
         // the person types (GET /chat/match; the server decides again when the message is sent).
