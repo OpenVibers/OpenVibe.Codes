@@ -8,12 +8,14 @@ const { boot, check, done } = require('./helpers/boot');
     const ada = t.network.addUser('c4-ada');
     try {
         await check('all C4 pages render readable server content without JavaScript', async () => {
-            for (const [path, label] of [['/', 'What should an agent do?'], ['/tasks', 'Tasks'], ['/agents', 'Agents'], ['/machines', 'Machines'], ['/usage', 'Usage'], ['/settings', 'Settings']]) {
+            for (const [path, label] of [['/', 'What should an agent do?'], ['/tasks', 'Tasks'], ['/agents', 'Agents'], ['/usage', 'Usage'], ['/settings', 'Settings']]) {
                 const r = await t.get(path);
                 assert.strictEqual(r.status, 200, `${path} status`);
                 assert.ok(r.text.includes(label), `${path} content`);
                 assert.ok(r.text.includes('ov-workspace'), `${path} reserves the Frame app bar's height`);
             }
+            const machines = await t.get('/machines');
+            assert.strictEqual(machines.status, 301, '/machines moves to the Link product');
             const task = await t.get('/tasks/tsk_01ARZ3NDEKTSV4RRFFQ69G5FAV');
             assert.strictEqual(task.status, 200);
             assert.ok(task.text.includes('Sign in to see your work'));
@@ -58,7 +60,7 @@ const { boot, check, done } = require('./helpers/boot');
             const home = await t.get('/', { as: ada });
             assert.ok(!home.text.includes('Built for the way you work'));
             assert.ok(!home.text.includes('Recently shipped on'));
-            assert.ok(home.text.includes('What should we build') && home.text.includes('owner/name or any Git URL') && home.text.includes('name="mode"'), 'the greeting, the three ways to start and the repository');
+            assert.ok(home.text.includes('What should we make') && home.text.includes('owner/name or any Git URL') && home.text.includes('name="mode"'), 'the greeting, the three ways to start and the repository');
             assert.ok(home.text.includes('action="/chat"') && home.text.includes('data-ovt-composer'), 'one composer that starts the conversation');
             const id = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAV';
             await t.ctx.store.db.exec(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, state, result, error, created_at, updated_at)

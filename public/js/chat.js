@@ -54,18 +54,47 @@
         if (tpl) tpl.content.querySelectorAll('svg[data-icon]').forEach((svg) => icons.set(svg.dataset.icon, svg));
         function fill(mode) {
             if (!track || !sets[mode]) return;
-            const lists = track.querySelectorAll('.ch-spark-list');
-            lists.forEach((ul, n) => { ul.textContent = ''; sets[mode].forEach((i) => ul.appendChild(card(i, n > 0))); });
-            pace();
+            const swap = () => {
+                const lists = track.querySelectorAll('.ch-spark-list');
+                lists.forEach((ul, n) => { ul.textContent = ''; sets[mode].forEach((i) => ul.appendChild(card(i, n > 0))); });
+                pace();
+            };
+            // The ideas cross-fade to the new mode's set (a first fill, before anything shows, swaps at once).
+            if (!track.childElementCount || !track.querySelector('.ch-idea')) return swap();
+            track.classList.add('is-swapping');
+            setTimeout(() => { swap(); requestAnimationFrame(() => track.classList.remove('is-swapping')); }, 180);
         }
+        // A touch screen keeps its keyboard down until the box is tapped (11-09, the owner: picking a mode "puts up the
+        // keyboard automatically… takes up a lot of space… overrides everything").
+        const fine = !matchMedia('(pointer: coarse)').matches;
         function choose(mode, { focus = false } = {}) {
             const radio = modes.find((r) => r.value === mode);
             if (radio && !radio.checked) radio.checked = true;
             if (text && PLACEHOLDER[mode]) text.placeholder = PLACEHOLDER[mode];
+            // The box's placeholder walks through this mode's ideas (ov-thread.js reads data-ovt-examples).
+            if (text && sets[mode]) text.setAttribute('data-ovt-examples', JSON.stringify(sets[mode].slice(0, 12).map((i) => i.text)));
             if (rail && rail.dataset.chShown !== mode) { rail.dataset.chShown = mode; fill(mode); }
-            if (focus && text) text.focus();
+            if (form) form.dispatchEvent(new Event('ovt:options'));
+            if (focus && text && fine) text.focus();
         }
-        modes.forEach((r) => r.addEventListener('change', () => { if (r.checked) { choose(r.value, { focus: true }); pick(); } }));
+        modes.forEach((r) => r.addEventListener('change', () => { if (r.checked) { choose(r.value, { focus: true }); pick(); glide(); } }));
+        // One highlight slides to the picked mode (it follows the label's box, so a resize or a font change moves it too).
+        const group = modes.length ? modes[0].closest('.ch-modes') : null;
+        function glide(first) {
+            if (!group) return;
+            const on = modes.find((r) => r.checked); const lab = on && on.closest('.ch-mode');
+            if (!lab) return;
+            if (first) group.classList.add('is-placing');
+            group.style.setProperty('--ch-glide-x', `${lab.offsetLeft}px`);
+            group.style.setProperty('--ch-glide-w', `${lab.offsetWidth}px`);
+            group.classList.add('has-glide');
+            if (first) requestAnimationFrame(() => requestAnimationFrame(() => group.classList.remove('is-placing')));
+        }
+        if (group) {
+            glide(true);
+            if (typeof ResizeObserver === 'function') new ResizeObserver(() => glide(true)).observe(group);
+            if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => glide(true)).catch(() => {});
+        }
 
         // An OpenVibe site, picked from the words: the line under the bar says which projects Codes will work on, as
         // the person types (GET /chat/match; the server decides again when the message is sent).
@@ -110,9 +139,9 @@
                 if (b.dataset.chIdeaKind) setKind(b.dataset.chIdeaKind);
                 text.value = b.dataset.chIdea;
                 grow();
-                text.focus();
-                // The words are the person's to change: the caret goes to the end.
-                text.setSelectionRange(text.value.length, text.value.length);
+                // The words are the person's to change: on a computer the caret goes to the end; a phone keeps the
+                // keyboard down so the filled box and Send stay in view.
+                if (fine) { text.focus(); text.setSelectionRange(text.value.length, text.value.length); }
             });
             const pause = $('[data-ch-ideas-pause]', rail);
             if (pause) pause.addEventListener('click', () => {
@@ -139,7 +168,7 @@
             startPage(app, form, text);
             // The repository: a recent one is a tap away, and typing searches every repository the person can reach.
             const repo = $('[data-ch-repo]', form);
-            app.querySelectorAll('[data-ch-saved-repo]').forEach((b) => b.addEventListener('click', () => { if (repo) { repo.value = b.dataset.chSavedRepo; text.focus(); } }));
+            app.querySelectorAll('[data-ch-saved-repo]').forEach((b) => b.addEventListener('click', () => { if (repo) { repo.value = b.dataset.chSavedRepo; if (!matchMedia('(pointer: coarse)').matches) text.focus(); } }));
             if (repo && repo.dataset.chRepoUrl) {
                 const list = document.getElementById(repo.getAttribute('list'));
                 let timer = 0, seq = 0;
@@ -162,7 +191,7 @@
             }
             // The keyboard hint only where Enter sends (a phone keyboard's return is a new line).
             if (status && !status.textContent && !matchMedia('(pointer: coarse)').matches) status.textContent = 'Enter sends · Shift+Enter for a new line';
-            if ($('.ovt.is-start', app)) text.focus({ preventScroll: true });
+            if ($('.ovt.is-start', app) && !matchMedia('(pointer: coarse)').matches) text.focus({ preventScroll: true });
         }
         if (form) {
             // ── The composer's files: upload before send, with a chip, a thumbnail, a progress bar and a × ──

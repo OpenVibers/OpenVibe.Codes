@@ -201,3 +201,45 @@ html[data-ov-motion=reduced] .ch-spark-list[aria-hidden],html[data-ov-motion=red
 .ch .ch-setup-text b{color:var(--ch-ink);font-size:14px;font-weight:650}
 .ch .ch-setup-text small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--ch-muted)}
 .ch .ch-setup-nudge-go{flex:none;width:16px;height:16px;transform:rotate(-90deg)}
+/* ── 11-09: the composer's Options (openvibe-shared thread.composer options). Inside the panel each picker is a full row:
+   its name on the left in small type, the value as the control, the caret on the right; the kinds are a wrap of chips. ── */
+.ovt-opts-body .ch-pick{display:flex;width:100%;height:52px;padding:0 40px 0 14px;border:0;border-radius:14px;background:color-mix(in srgb,var(--ch-ink) 5%,transparent);color:var(--ch-ink);font-size:15px}
+.ovt-opts-body .ch-pick:hover{background:color-mix(in srgb,var(--ch-ink) 8%,transparent)}
+.ovt-opts-body .ch-pick .ch-sr,.ovt-opts-body .ch-kinds>.ch-sr{position:static;width:auto;height:auto;overflow:visible;clip:auto;flex:none;min-width:88px;color:var(--ch-muted);font-size:13px;font-weight:600}
+.ovt-opts-body .ch-pick select{flex:1;max-width:none;height:100%;font-size:15px;text-align:right;text-align-last:right;padding-right:6px}
+.ovt-opts-body .ch-pick .ch-i:not(.ch-caret){display:none}
+.ovt-opts-body .ch-pick .ch-caret{right:14px}
+.ovt-opts-body .ch-kinds{display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px 12px;border-radius:14px;background:color-mix(in srgb,var(--ch-ink) 5%,transparent)}
+.ovt-opts-body .ch-kinds>.ch-sr{flex-basis:100%;margin-bottom:2px}
+.ovt-opts-body .ch-kind,.ovt-opts-body .ch-dim{height:40px}
+/* In the bar: the repository as one chip that takes the room left. */
+.ovt-c-tools .ch-pick-repo{flex:1 1 180px;min-width:0}
+.ovt-c-tools .ch-pick-repo input{width:100%}
+/* What Codes will do and where it runs: one quiet list under the box, each row an icon and a line, the same size. */
+.ch-picked,.ch-where>span{min-height:24px;align-items:center}
+.ch-where a{display:inline-flex;align-items:center;min-height:32px;padding:0 10px;margin-left:2px;border-radius:999px;background:color-mix(in srgb,var(--ch-accent) 12%,transparent);text-decoration:none}
+/* The modes: three equal parts, the question above follows the checked one. */
+.ch-modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:min(420px,100%)}
+.ch-mode{justify-content:center}
+@media (max-width:520px){.ch-mode{padding:0 8px}.ch-mode:not(:has(input:checked)) .ch-mode-i{display:inline-grid}}
+.ch-hello h1>span{animation:ch-ask-in .28s cubic-bezier(.2,.9,.3,1) both}
+@keyframes ch-ask-in{from{opacity:0;transform:translateY(4px)}}
+@media (prefers-reduced-motion:reduce){.ch-hello h1>span{animation:none}}
+
+/* Motion (ask 40, 11-09, the owner: "more fluid… transitions… custom animations… resize"): one highlight slides between the
+   three modes, each mode's own parts rise in as they appear, and the ideas cross-fade when their set changes. Calm keeps
+   short fades (gentle, not still). */
+.ch-modes{position:relative;isolation:isolate}
+.ch-modes.has-glide .ch-mode:has(input:checked){background:transparent;box-shadow:none}
+.ch-modes.has-glide::before{content:"";position:absolute;z-index:-1;top:4px;bottom:4px;left:0;width:var(--ch-glide-w,0);border-radius:999px;
+transform:translateX(var(--ch-glide-x,0));background:var(--ch-card);box-shadow:0 1px 2px rgba(0,0,0,.18),inset 0 0 0 1px color-mix(in srgb,var(--ch-accent) 45%,var(--ch-line));
+transition:transform .34s cubic-bezier(.2,.9,.25,1.12),width .34s cubic-bezier(.2,.9,.25,1)}
+.ch-modes.is-placing::before{transition:none}
+.ch :is(.ch-for-new,.ch-for-openvibe,.ch-for-code){animation:ch-rise .32s cubic-bezier(.2,.8,.2,1) both}
+[data-ch-ideas-track]{transition:opacity .18s ease,transform .18s ease}
+[data-ch-ideas-track].is-swapping{opacity:0;transform:translateY(4px)}
+@keyframes ch-rise{from{opacity:0;transform:translateY(6px)}}
+@keyframes ch-fade{from{opacity:0}}
+html[data-ov-motion=reduced] .ch :is(.ch-for-new,.ch-for-openvibe,.ch-for-code){animation-name:ch-fade;animation-duration:.2s}
+html[data-ov-motion=reduced] .ch-modes.has-glide::before{transition-duration:.18s;transition-timing-function:ease}
+@media (prefers-reduced-motion:reduce){.ch :is(.ch-for-new,.ch-for-openvibe,.ch-for-code){animation-name:ch-fade;animation-duration:.15s}.ch-modes.has-glide::before{transition-duration:.12s}}

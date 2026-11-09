@@ -420,22 +420,25 @@ function createChatRoutes(ctx) {
             return `<option value="${esc(c.value)}"${chosen === c.value ? ' selected' : ''}${c.note ? ` title="${esc(c.note)}"` : ''}${attrs}>${esc(c.label)}</option>`;
         };
         const first = auto ? `<option value="">${esc(auto)}</option>` : opt(all[0]);
-        return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="${esc(label)}"><span class="ch-sr">${esc(label)}</span>${ico('agents')}<select name="who" data-ch-who data-ov-select="bare" data-ov-title="${esc(label)}">${first}${[...groups].map(([g, list]) => list.length > 1 ? `<optgroup label="${esc(g)}">${list.map(opt).join('')}</optgroup>` : opt(list[0])).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+        // What the page opened with: a different pick shows as a chip beside the composer's Options (thread.js).
+        const opened = chosen && all.some((c) => c.value === chosen) ? chosen : auto ? '' : String(all[0].value);
+        return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="${esc(label)}"><span class="ch-sr">${esc(label)}</span>${ico('agents')}<select name="who" data-ch-who data-ov-select="bare" data-ov-title="${esc(label)}" data-ovt-default="${esc(opened)}">${first}${[...groups].map(([g, list]) => list.length > 1 ? `<optgroup label="${esc(g)}">${list.map(opt).join('')}</optgroup>` : opt(list[0])).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
     // The effort in plain words (the shared ladder underneath; each agent gets the nearest level it accepts).
     const EFFORT = [['', 'Effort: auto'], ['low', 'Quick'], ['medium', 'Balanced'], ['high', 'Thorough'], ['max', 'Deepest']];
     const effortWord = (v) => (EFFORT.find(([k]) => k === v) || [null, v])[1];
     function effortPicker(selected = '', cls = '') {
-        return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="How hard it thinks"><span class="ch-sr">Effort</span>${ico('sub')}<select name="effort" data-ch-effort data-ov-select="bare" data-ov-title="Effort">${EFFORT.map(([v, l]) => `<option value="${v}"${selected === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+        return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="How hard it thinks"><span class="ch-sr">Effort</span>${ico('sub')}<select name="effort" data-ch-effort data-ov-select="bare" data-ov-title="Effort" data-ovt-default="${esc(selected)}">${EFFORT.map(([v, l]) => `<option value="${v}"${selected === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
     /** Any file (not a program) up to 10 at once: the script adds chips and progress, the plain form posts multipart. */
     function filePicker() {
         return `<label class="ch-pick ch-pick-file ch-for-agents" title="Attach files">${ico('attach')}<span class="ch-sr">Attach files</span><input type="file" name="files" multiple data-ch-files></label>`;
     }
     /** The kit's composer with Codes' pickers in its tools, where the work runs under the bar, and its JSON route. */
-    function composer({ action, api = '', placeholder, pickers = '', live = false, stopAction = '', note = '', id = null, where = '', files = false }) {
+    function composer({ action, api = '', placeholder, pickers = '', options = '', examples = [], live = false, stopAction = '', note = '', id = null, where = '', files = false }) {
         return thread.composer({
-            action, id, placeholder, label: placeholder, tools: pickers + (files ? filePicker() : ''),
+            action, id, placeholder, label: placeholder, tools: (files ? filePicker() : '') + pickers,
+            options: options ? { html: options, label: 'Options' } : null, examples,
             foot: `${files ? '<div class="ch-files" data-ch-files-list role="list" aria-live="polite"></div>' : ''}${where}`, note,
             attrs: { ...(api ? { 'data-ch-api': api } : {}), ...(files ? { enctype: 'multipart/form-data' } : {}) },
             busy: live, stopAction: live && stopAction ? stopAction : null, maxlength: 16000,
@@ -555,8 +558,10 @@ function createChatRoutes(ctx) {
         // One switch (the owner, 11-07: the three tall cards "rework these"): a short name each; what it means is the line
         // under the composer, which changes with the choice.
         const MODE_CARDS = [
-            ['new', 'spark', 'New project', 'A website, game or app, built online: nothing to install'],
-            ['openvibe', 'ov', 'OpenVibe site', `Improve Live, Chat, Games or any of ${start.PROJECTS.length} OpenVibe projects`],
+            // 11-09, the owner: "project makes it sound a little scary… something cooler, that knows you can do different
+            // things"; and "instead of OpenVibe site, just OpenVibe: people work on OpenVibe, which lets you do any platform".
+            ['new', 'spark', 'Create', 'A website, game or app, built online: nothing to install'],
+            ['openvibe', 'ov', 'OpenVibe', `Improve Live, Chat, Games or any of ${start.PROJECTS.length} OpenVibe projects`],
             ['code', 'repo', 'My code', 'Any Git repository, private ones too; agents work on your computer'],
         ];
         const modes = `<div class="ch-modes" role="radiogroup" aria-label="What are you making?">${MODE_CARDS.map(([v, icon, title, line]) => `<label class="ch-mode" title="${esc(line)}"><input type="radio" name="mode" value="${v}" form="ch-start"${mode === v ? ' checked' : ''} data-ch-mode><span class="ch-mode-i">${ico(icon)}</span><b>${esc(title)}</b></label>`).join('')}</div>`;
@@ -565,17 +570,20 @@ function createChatRoutes(ctx) {
         // What it is: icon chips from the design system's icons (the owner, 11-07: "switching from website to game should
         // be easy … 2D or 3D … more icons"); a game asks 2D or 3D right beside it.
         const dim = start.DIMS[req.query.dim] ? String(req.query.dim) : '2d';
-        const kindPick = `<div class="ch-kinds ch-for-new" role="radiogroup" aria-label="What it is">${Object.entries(start.KINDS).map(([v, k]) => `<label class="ch-kind"><input type="radio" name="kind" value="${v}" form="ch-start"${kind === v ? ' checked' : ''} data-ch-kind><span class="ov-icon" data-icon="${esc(k.icon || 'ov')}" data-size="22" aria-hidden="true"></span><span>${esc(k.label)}</span></label>`).join('')}<span class="ch-dims" role="radiogroup" aria-label="2D or 3D">${Object.keys(start.DIMS).map((d) => `<label class="ch-dim"><input type="radio" name="dim" value="${d}" form="ch-start"${dim === d ? ' checked' : ''}><span>${d.toUpperCase()}</span></label>`).join('')}</span></div>`;
+        const kindPick = `<div class="ch-kinds ch-for-new" role="radiogroup" aria-label="What it is" data-ovt-default="${esc(kind)}"><span class="ch-sr">What it is</span>${Object.entries(start.KINDS).map(([v, k]) => `<label class="ch-kind"><input type="radio" name="kind" value="${v}" form="ch-start"${kind === v ? ' checked' : ''} data-ch-kind><span class="ov-icon" data-icon="${esc(k.icon || 'ov')}" data-size="22" aria-hidden="true"></span><span>${esc(k.label)}</span></label>`).join('')}<span class="ch-dims" role="radiogroup" aria-label="2D or 3D" data-ovt-default="${esc(dim)}">${Object.keys(start.DIMS).map((d) => `<label class="ch-dim"><input type="radio" name="dim" value="${d}" form="ch-start"${dim === d ? ' checked' : ''}><span>${d.toUpperCase()}</span></label>`).join('')}</span></div>`;
         const groups = [...new Set(start.PROJECTS.map((p) => p.group))];
-        const projectPick = `<label class="ch-pick ch-for-openvibe" title="Which OpenVibe project"><span class="ch-sr">Which OpenVibe project</span>${ico('ov')}<select name="project" data-ch-project data-ov-select="bare" data-ov-title="Which OpenVibe project"><option value="auto"${chosenProject === 'auto' ? ' selected' : ''}>Codes picks for you</option>${groups.map((g) => `<optgroup label="${esc(g)}">${start.PROJECTS.filter((p) => p.group === g).map((p) => `<option value="${esc(p.repository)}"${chosenProject === p.repository ? ' selected' : ''}${p.line ? ` title="${esc(p.line)}"` : ''}>${esc(p.name)}${p.domain ? ` · ${esc(p.domain)}` : ''}</option>`).join('')}</optgroup>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
+        const projectPick = `<label class="ch-pick ch-for-openvibe" title="Which OpenVibe project"><span class="ch-sr">Which OpenVibe project</span>${ico('ov')}<select name="project" data-ch-project data-ov-select="bare" data-ov-title="Which OpenVibe project" data-ovt-default="${esc(chosenProject)}"><option value="auto"${chosenProject === 'auto' ? ' selected' : ''}>Codes picks for you</option>${groups.map((g) => `<optgroup label="${esc(g)}">${start.PROJECTS.filter((p) => p.group === g).map((p) => `<option value="${esc(p.repository)}"${chosenProject === p.repository ? ' selected' : ''}${p.line ? ` title="${esc(p.line)}"` : ''}>${esc(p.name)}${p.domain ? ` · ${esc(p.domain)}` : ''}</option>`).join('')}</optgroup>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
         const repoPick = `<label class="ch-pick ch-pick-repo ch-for-code" title="Repository"><span class="ch-sr">Repository: owner/name or any Git URL</span>${ico('repo')}<input name="repo" type="text" inputmode="url" spellcheck="false" autocapitalize="off" value="${esc(repo)}" placeholder="owner/name or any Git URL" list="ch-repos" autocomplete="off" data-ch-repo data-ch-repo-url="/api/v1/me/repos"><datalist id="ch-repos">${repos.map((x) => `<option value="${esc(x.url)}">${esc(x.full_name)}</option>`).join('')}</datalist></label>`;
         const ready = await readyFor(req);
         const catalog = await aiModels();
         const choices = (compute?.candidates || []).map((m) => `<option value="${esc(m.id)}"${m.status !== 'ready' ? ' disabled' : ''}${optionAttrs({ state: m.status === 'ready' ? 'ok' : 'off', badge: m.status === 'ready' ? 'Ready' : 'Unavailable', desc: m.reason || (m.price ? `$${m.price.amount_usd}/${m.price.unit}` : 'No rental fee') })}>${esc(m.name)} · ${m.status === 'ready' ? 'Ready' : esc(m.reason || 'Unavailable')}</option>`).join('');
         const otherSources = (compute?.sources || []).filter((s) => s.kind !== 'personal').map((s) => `<option value="" disabled>${esc(s.name)} · ${s.status === 'coming_soon' ? 'Coming soon' : esc(s.reason || 'Unavailable')}${s.price ? ` · $${esc(s.price.amount_usd)}/${esc(s.price.unit)}` : ''}</option>`).join('');
         const runsOnPicker = `<label class="ch-pick ch-for-agents" title="Runs on"><span class="ch-sr">Runs on</span>${ico('machines')}<select name="machine" data-ov-select="bare" data-ov-title="Runs on"><option value="">Auto · your ready Link machine</option>${choices}${otherSources}</select>${ico('chevron', 'ch-caret')}</label>`;
-        const pickers = kindPick + projectPick + repoPick + whoPicker(settings.default_agent ? `${settings.default_agent}|` : '', { cls: 'ch-for-agents', ready, catalog }) + effortPicker('', 'ch-for-agents') + runsOnPicker;
-        // The repositories a person used last are a tap away (the box also searches every one they can reach).
+
+        // In the bar: the clip and, for your own code, the repository (the one choice that cannot be guessed). Everything
+        // else is behind Options (11-09, the owner: "too many options… hidden under a cog"), and a changed one shows as a chip.
+        const pickers = repoPick;
+        const options = kindPick + projectPick + whoPicker(settings.default_agent ? `${settings.default_agent}|` : '', { cls: 'ch-for-agents', ready, catalog }) + effortPicker('', 'ch-for-agents') + runsOnPicker;        // The repositories a person used last are a tap away (the box also searches every one they can reach).
         const newRepo = `<a class="ch-chip ch-chip-new" href="/git">${ico('new')}New on OpenVibe Git</a>`;
         const recent = `<div class="ch-recent ch-for-code" role="group" aria-label="Your repositories">${newRepo}${repos.length > 1 ? repos.map((x) => `<button class="ch-chip" type="button" data-ch-saved-repo="${esc(x.url)}">${ico('repo')}${esc(x.full_name)}</button>`).join('') : ''}</div>`;
         const picked = `<p class="ch-picked ch-for-openvibe" data-ch-picked data-ch-match-url="/chat/match" aria-live="polite">${ico('ov')}<span data-ch-picked-text>Say what you want changed and which site, in your own words: Codes works out which projects to change.</span></p>`;
@@ -596,10 +604,14 @@ function createChatRoutes(ctx) {
         const pct = progress ? Math.round((progress.done / Math.max(1, progress.of)) * 100) : 0;
         const nudge = progress ? `<a class="ch-setup-nudge" href="/setup"><span class="ch-setup-ring" style="--p:${pct}" aria-hidden="true"><b>${progress.done}/${progress.of}</b></span><span class="ch-setup-text"><b>Finish setting up Codes</b><small>Next: ${esc(progress.next)}</small></span>${ico('chevron', 'ch-setup-nudge-go')}</a>` : '';
         // The greeting is one short line: the composer, the page's one action, stays on the first screen of a phone.
-        const hello = `<div class="ch-hello"><span class="ov-mark" data-size="40" aria-hidden="true"></span><h1>${name ? `What should we build, ${esc(name)}?` : 'What should we build?'}</h1><p>Say it the way you would to a friend.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
+        // The question follows the way you start (11-09, the owner); the mark and the line under it fold away while the
+        // keyboard is up (thread.css, data-ovt-fold), so the box stays in view.
+        const you = name ? `, ${esc(name)}` : '';
+        const ask = `<span class="ch-for-new">What should we make${you}?</span><span class="ch-for-openvibe">What should we improve on OpenVibe${you}?</span><span class="ch-for-code">What should we work on${you}?</span>`;
+        const hello = `<div class="ch-hello"><span class="ov-mark" data-size="40" aria-hidden="true" data-ovt-fold></span><h1>${ask}</h1><p data-ovt-fold>Say it the way you would to a friend.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
         return frame(req, res, {
             title: 'New chat', heading: 'New chat', start: true, empty: hello,
-            composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'What should change?', pickers, where, files: true }) + nudge + ideas,
+            composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'What should change?', pickers, options, examples: (sets[mode] || []).slice(0, 12).map((i) => i.text), where, files: true }) + nudge + ideas,
         });
     });
 

@@ -86,7 +86,7 @@ const split = (links) => ({
         await check('a signed-in person&rsquo;s home is a new chat, not a page of cards (plan L31)', async () => {
             const page = await t.get('/', { as: ada });
             assert.strictEqual(page.status, 200);
-            assert.ok(page.text.includes('What should we build') && page.text.includes('action="/chat"'), 'the greeting and the composer');
+            assert.ok(page.text.includes('What should we make') && page.text.includes('action="/chat"'), 'the greeting and the composer');
             assert.ok(!page.text.includes('class="c4-card'), 'no cards');
             assert.ok(page.text.includes('aria-label="Your conversations"'), 'the rail of conversations is the navigation');
         });
