@@ -133,9 +133,10 @@ const ENV_NAMES = new Set([
     'DEEPSEEK_BASE_URL', 'DEEPSEEK_API_KEY',
     'OPENVIBE_AI_URL', 'OPENVIBE_AI_TOKEN', 'OPENVIBE_CODES_BASE_URL', 'OPENVIBE_CODES_API_KEY',
     'OPENVIBE_CODES_MODEL', 'OPENVIBE_CODES_HEADERS',
-    // A repository on OpenVibe Git: the person's credential line for the forge (Codes' forge link). For git only:
-    // bin/openvibe-codes.js keeps it out of the agent's environment.
-    'OPENVIBE_GIT_CREDENTIALS',
+    // A repository on OpenVibe Git: the person's credential line for its host. The local root lets a session on the
+    // same host clone from the disk (G3) instead of the network. For git only: bin/openvibe-codes.js keeps them out
+    // of the agent's environment.
+    'OPENVIBE_GIT_CREDENTIALS', 'OPENVIBE_GIT_LOCAL_ROOT',
 ]);
 
 /** The environment a job's input asks for: the allowlisted names only, each a short string. */
@@ -538,7 +539,9 @@ function attachmentPrompt(files) {
  * exist yet: never the base, never a protected name, never someone's existing branch (GitHub is asked first, and a push
  * is never forced, so a branch made meanwhile is not overwritten either).
  */
-// The forges that answer Gitea's API (Forgejo, Gitea): OpenVibe Git, and any the machine names in OPENVIBE_GITEA_HOSTS.
+// The forges that answer Gitea's API (Gitea and its descendants): any the machine names in OPENVIBE_GITEA_HOSTS.
+// OpenVibe Git itself is ours now (git.openvibe.codes): its push works with the person's Git token, and opening a
+// change request there arrives with G2, so the request below answers until then.
 function giteaHosts(env = process.env) {
     return new Set(['git.openvibe.codes', ...String(env.OPENVIBE_GITEA_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean)]);
 }
@@ -567,7 +570,10 @@ async function pushForge(dir, job, { env, fetchImpl, base }) {
     await git(['checkout', '-b', branch], { cwd: dir });
     await git(['commit', '-m', job.prompt.split('\n')[0].slice(0, 72) || 'OpenVibe.Codes task'], { cwd: dir, env: who });
     await git(['push', job.repo, `HEAD:refs/heads/${branch}`], { cwd: dir, timeout: 180_000, env: auth });
-    const out = { pushed: true, branch, branch_url: `https://${host}/${owner}/${name}/src/branch/${encodeURIComponent(branch)}` };
+    const own = host === 'git.openvibe.codes';
+    const out = { pushed: true, branch, branch_url: own
+        ? `https://${host}/${owner}/${name}/tree?ref=${encodeURIComponent(branch)}`
+        : `https://${host}/${owner}/${name}/src/branch/${encodeURIComponent(branch)}` };
     if (job.push.pull_request) {
         const r = await fetchImpl(`https://${host}/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls`, {
             method: 'POST',
@@ -637,7 +643,30 @@ function agentPrompt(job) {
 }
 
 /**
- * Run one job. `harness` is createHarness(); `emit(line)` prints a line; `writeResult(doc)` hands the result over.
+ * The bare repository on this machine, when the job is for OpenVibe Git and its disk is here (G3: a Codes session
+ * on the same host as git.openvibe.codes clones from the disk, no network). The HTTPS address stays the origin, so
+ * the branch is pushed back over HTTPS with the person's token.
+ */
+const OWNER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+function localGitSource(repoUrl, env = process.env) {
+    const root = String(env.OPENVIBE_GIT_LOCAL_ROOT || '').trim();
+    if (!root) return null;
+    let u;
+    try { u = new URL(String(repoUrl)); } catch { return null; }
+    if (u.protocol !== 'https:') return null;
+    const line = String(env.OPENVIBE_GIT_CREDENTIALS || '').split(/[\n,]+/).map((l) => l.trim()).filter(Boolean)[0];
+    let host = null;
+    try { host = line ? new URL(line).host.toLowerCase() : null; } catch { host = null; }
+    if (!host || u.host.toLowerCase() !== host) return null;
+    const parts = u.pathname.replace(/\.git$/i, '').split('/').filter(Boolean);
+    if (parts.length !== 2 || !OWNER_RE.test(parts[0]) || !NAME_RE.test(parts[1])) return null;
+    const bare = path.join(root, 'repos', parts[0], `${parts[1]}.git`);
+    try { return fs.statSync(bare).isDirectory() ? bare : null; } catch { return null; }
+}
+
+/**
+ * One job. `harness` is createHarness(); `emit(line)` prints a line; `writeResult(doc)` hands the result over.
  * → the result document.
  */
 async function runJob({ input, harness, emit, writeResult, env = process.env, tmp = os.tmpdir(), fetchImpl = globalThis.fetch, proof = null }) {
@@ -662,8 +691,13 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         if (job.kind === 'code') {
             say({ t: 'step', text: `Cloning ${scrub(job.repo)}${job.ref ? ` (${job.ref})` : ''}` });
             const auth = gitAuthFor(job.repo, env);
+            const local = localGitSource(job.repo, env);
             try {
-                await git(['clone', '--depth', '50', ...(job.ref ? ['--branch', job.ref] : []), '--', job.repo, work], { timeout: 300_000, ...(auth.env ? { env: auth.env } : {}) });
+                await git(['clone', '--depth', '50', ...(job.ref ? ['--branch', job.ref] : []), '--', local || job.repo, work], { timeout: 300_000, ...(auth.env ? { env: auth.env } : {}) });
+                if (local) {
+                    await git(['remote', 'set-url', 'origin', job.repo], { cwd: work });
+                    say({ t: 'step', text: 'Cloned from the disk on this host; the branch is pushed over HTTPS' });
+                }
             } catch (e) { throw new Error(cloneProblem(e.message, job.repo)); }
             if (auth.env) say({ t: 'step', text: 'Cloned with this machine\'s token for a private repository' });
             base = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: work })).trim();
@@ -819,4 +853,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments, attachmentPrompt, agentPrompt, jobAttachments };
+module.exports = { CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, localGitSource, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments, attachmentPrompt, agentPrompt, jobAttachments };

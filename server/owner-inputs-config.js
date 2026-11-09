@@ -4,9 +4,6 @@
  * as two namespaces on openvibe-shared/config that the admin panel's Setup tab lists.
  *
  *   codes.accounts     the sign-in apps and the GitHub reader:
- *                        forge.client_id / forge.client_secret   the OpenVibe Git (Forgejo) OAuth app that lets a
- *                                                                 person link their OpenVibe Git account (read by
- *                                                                 server/domain/forge.js; CODES_FORGE_CLIENT_* fallback)
  *                        github.client_id / github.client_secret the GitHub OAuth app for a GitHub sign-in in Codes.
  *                                                                 Nothing reads it yet: Optional, waiting for that sign-in
  *                        github.token                            a read-only GitHub token that raises GitHub's limits
@@ -33,30 +30,6 @@ const ACCOUNTS_SCHEMA = {
     type: 'object',
     additionalProperties: false,
     properties: {
-        'forge.client_id': {
-            type: 'string', minLength: 8, maxLength: 200, title: 'OpenVibe Git app: client ID', 'x-group': 'OpenVibe Git', 'x-example': '3f2a9c1e-…',
-            description: 'The client ID of the OAuth2 application registered on OpenVibe Git for Codes. With its secret and the seal key it lets people link their OpenVibe Git account; without it linking stays closed.',
-            'x-owner-input': {
-                group: 'sign-in-apps',
-                unlocks: 'Lets people link their OpenVibe Git account in Codes, so tasks can make repositories and push as them. Without it the Link button says linking is not open yet.',
-                get_it_at: 'https://git.openvibe.codes/user/settings/applications',
-                get_it_how: 'Signed in as the owner, create an OAuth2 application named Codes with the redirect URI https://openvibe.codes/git/callback, and copy its Client ID.',
-                test: false,
-            },
-            'x-required-for': 'Linking an OpenVibe Git account',
-        },
-        'forge.client_secret': {
-            type: 'string', minLength: 8, maxLength: 512, title: 'OpenVibe Git app: client secret', 'x-group': 'OpenVibe Git',
-            description: 'The secret of the same OpenVibe Git application, shown once when it is created. Codes sends it only to OpenVibe Git, when a person links their account; it is never shown again here.',
-            'x-owner-input': {
-                group: 'sign-in-apps',
-                unlocks: 'Completes the OpenVibe Git app: with the client ID it lets people link their OpenVibe Git account in Codes.',
-                get_it_at: 'https://git.openvibe.codes/user/settings/applications',
-                get_it_how: 'Copy the Client Secret shown when the application is created (or regenerate it there).',
-                test: false,
-            },
-            'x-required-for': 'Linking an OpenVibe Git account',
-        },
         'github.client_id': {
             type: 'string', minLength: 8, maxLength: 200, title: 'GitHub app: client ID', 'x-group': 'GitHub', 'x-example': 'Ov23li…',
             description: 'The client ID of a GitHub OAuth app for signing in to Codes with GitHub. Codes does not offer that sign-in yet; the app waits here until it does, and nothing uses it before then.',
@@ -159,14 +132,12 @@ const PUBLISHING_SCHEMA = {
     },
 };
 
-const ACCOUNTS_SECRETS = new Set(['forge.client_secret', 'github.client_secret', 'github.token']);
+const ACCOUNTS_SECRETS = new Set(['github.client_secret', 'github.token']);
 const classifyAccounts = (key) => (ACCOUNTS_SECRETS.has(key) ? 'secret' : 'internal');
 const classifyPublishing = (key) => (key === 'chrome.client_id' || key === 'firefox.jwt_issuer' ? 'internal' : 'secret');
 
 /** The environment variable each key falls back to (only the keys Codes reads today have one). */
 const ENV_FALLBACK = Object.freeze({
-    'forge.client_id': 'CODES_FORGE_CLIENT_ID',
-    'forge.client_secret': 'CODES_FORGE_CLIENT_SECRET',
     'github.token': 'CODES_GITHUB_TOKEN',
 });
 

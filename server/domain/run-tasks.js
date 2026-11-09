@@ -257,8 +257,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
      */
     /**
      * A job's input with its environment: the run token's (attemptEnv), and for a repository on OpenVibe Git the
-     * person's credential line for the forge (server/domain/forge.js jobEnv), so their machine clones a private
-     * repository and pushes the branch. The job keeps the line out of the agent's environment (harness/job.js).
+     * person's Git token line (server/domain/forge.js jobEnv), so their machine clones a private repository and
+     * pushes the branch; when Codes shares the host's disk it also names the bare repositories for a local clone.
+     * The job keeps both out of the agent's environment (harness/job.js).
      */
     let forge = null;
     async function withEnv(subject, args, env) {

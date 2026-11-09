@@ -48,17 +48,15 @@ function load(env = process.env) {
         // OpenVibe.Report (the session report of a finished task, Agent Streams S3).
         reportInternalUrl: trim(env.OV_REPORT_INTERNAL_URL || 'http://127.0.0.1:5080'),
         networkIssuer: trim(env.OV_NETWORK_ISSUER || networkUrl),
-        // OpenVibe Git (Forgejo, deploy/forgejo): its loopback address for the home page's repository list (public
-        // repositories only, no token), and the public address people use.
+        // OpenVibe Git (git.openvibe.codes): its loopback address for the home page's repository list and the API
+        // calls, and the public address people use. Codes acts for a person with its own Network service token
+        // (audience openvibe.git), so there is no app secret of its own here.
         git: {
-            internalUrl: trim(env.CODES_GIT_INTERNAL_URL || 'http://127.0.0.1:5060'),
+            internalUrl: trim(env.CODES_GIT_INTERNAL_URL || 'http://127.0.0.1:5270'),
             publicUrl: trim(env.CODES_GIT_URL || 'https://git.openvibe.codes'),
-            // Linking a person's OpenVibe Git account (the owner, 11-01: "make a repository through your OpenVibe
-            // account on our actual Git"): an OAuth2 application on the forge, and the key that seals the tokens it
-            // hands Codes (32 bytes, base64). Without all three, linking is off and the page says so.
-            clientId: env.CODES_FORGE_CLIENT_ID || '',
-            clientSecret: env.CODES_FORGE_CLIENT_SECRET || '',
-            sealKey: env.CODES_SEAL_KEY || '',
+            // G3: the directory OpenVibe Git keeps its bare repositories in, when Codes runs on the same host. A
+            // session then clones from the disk instead of the network; empty anywhere else.
+            dataDir: trim(env.CODES_GIT_DATA_DIR || ''),
         },
         // OpenVibe.Live (Agent Streams S1, Dock K-D3): the person's own agent streams, read and steered with their own
         // token for the Dock's agent view (server/http/agent-view.js). Codes holds no token of its own here.

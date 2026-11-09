@@ -33,7 +33,7 @@ async function oauthApp(name, url, clientId, clientSecret, fetchImpl) {
     return { ok: false, message: `${name} answered ${r.status}${said(r.json) ? `: ${said(r.json)}` : ''}; the app could not be checked.` };
 }
 
-function createOwnerInputTests({ config, ownerInputs, fetchImpl = globalThis.fetch }) {
+function createOwnerInputTests({ ownerInputs, fetchImpl = globalThis.fetch }) {
     const github = String(process.env.GITHUB_API_URL || 'https://api.github.com').replace(/\/+$/, '');
     const tests = {
         'codes.accounts': {
@@ -47,10 +47,6 @@ function createOwnerInputTests({ config, ownerInputs, fetchImpl = globalThis.fet
                 return { ok: false, message: `GitHub ${r.status === 401 ? 'refused the token (401)' : `answered ${r.status}`}${said(r.json) ? `: ${said(r.json)}` : '.'}` };
             },
             'github.client_secret': async (secret) => oauthApp('GitHub', 'https://github.com/login/oauth/access_token', ownerInputs.value('codes.accounts', 'github.client_id').value, secret, fetchImpl),
-            'forge.client_secret': async (secret) => {
-                const base = String((config.git && config.git.internalUrl) || 'http://127.0.0.1:5060').replace(/\/+$/, '');
-                return oauthApp('OpenVibe Git', `${base}/login/oauth/access_token`, ownerInputs.value('codes.accounts', 'forge.client_id').value, secret, fetchImpl);
-            },
         },
         'codes.publishing': {
             'npm.token': async (token) => {

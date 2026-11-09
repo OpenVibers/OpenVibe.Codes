@@ -1,168 +1,146 @@
 'use strict';
 /**
- * A person's OpenVibe Git (git.openvibe.codes, Forgejo), through their own account. The owner, 2026-11-01: "you should
- * be able to make a repository… link the repositories to OpenVibe OAuth… through your OpenVibe account on our actual
- * Git." The forge's sign-in is OpenVibe's, so linking is one consent: Codes is an OAuth2 application on the forge, the
- * person allows it once, and Codes keeps the tokens sealed (seal.js). Codes holds no admin key: everything it does on
- * the forge, it does as that person, and the person can unlink here or revoke it in the forge's settings.
+ * A person's OpenVibe Git (git.openvibe.codes) through Codes' service token. Codes holds a typed Network token
+ * for audience openvibe.git (client credentials, git.repo.read and git.repo.write) and names the person it works for in
+ * X-OV-Subject; OpenVibe.Git makes the repository in their name and mints their clone token. Codes never holds a
+ * person's password and never asks them to link an account: the OpenVibe sign-in in Codes is the only one.
  *
- *   createForge({ config, store, log })
- *     enabled                                   linking is configured (the application and the seal key)
- *     publicUrl, host                           where the forge is
- *     authorizeUrl({ state, challenge })        the forge's consent page (PKCE S256)
- *     connect(subject, { code, verifier })      the code exchanged, the forge login read, the tokens sealed → { forge_user }
- *     link(subject)                             → { forge_user, created_at } or null
- *     unlink(subject)
- *     createRepo(subject, { name, description, isPrivate }) → { full_name, html_url, clone_url, private }
- *     repos(subject)                            → their repositories, last changed first (up to 50)
- *     jobEnv(subject, repoUrl)                  → { OPENVIBE_GIT_CREDENTIALS } for a repository on the forge, or null
+ *   createForge({ config, fetchImpl, log })
+ *     enabled                                   Codes has its Network client (a service token can be had)
+ *     publicUrl, host                           where OpenVibe Git is
+ *     repo(owner, name)                         → one repository (default_branch, …) or null
+ *     createRepo({ subject, username }, { name, description, isPrivate }) → { full_name, html_url, clone_url, private }
+ *     repos({ subject, username })              → their repositories, last changed first (up to 50)
+ *     jobEnv(subject, repoUrl)                  → { OPENVIBE_GIT_CREDENTIALS, OPENVIBE_GIT_LOCAL_ROOT? } or null
  *
- * The forge listens on 127.0.0.1:5060, a port fetch refuses (SIP), so the calls go through node:http (as home.js does).
- * No token is ever logged, returned by a route or written anywhere but codes_forge_links, sealed.
+ * The loopback address is config.git.internalUrl (the default port is OpenVibe.Git's 5270), so no call leaves the
+ * host. The service token is cached by the SDK's client until a minute before it ends; no token is ever logged or
+ * returned by a route.
  */
-const { createSeal } = require('./seal');
+const fs = require('node:fs');
+const path = require('node:path');
+const { createServiceTokenClient } = require('openvibe-sdk/auth');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const REPO_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const LOGIN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
 
-function call(base, method, pathname, { headers = {}, json = null, form = null, timeoutMs = 8000 } = {}) {
-    return new Promise((resolve, reject) => {
-        const u = new URL(pathname, `${String(base).replace(/\/+$/, '')}/`);
-        const lib = u.protocol === 'https:' ? require('https') : require('http');
-        const body = json != null ? JSON.stringify(json) : form != null ? new URLSearchParams(form).toString() : null;
-        const req = lib.request(u, {
-            method,
-            timeout: timeoutMs,
-            headers: {
-                Accept: 'application/json',
-                ...(json != null ? { 'Content-Type': 'application/json' } : form != null ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
-                ...(body != null ? { 'Content-Length': Buffer.byteLength(body) } : {}),
-                ...headers,
-            },
-        }, (res) => {
-            let text = '';
-            res.setEncoding('utf8');
-            res.on('data', (c) => { text += c; if (text.length > 2_000_000) req.destroy(new Error('the forge answered too much')); });
-            res.on('end', () => { let doc = null; try { doc = JSON.parse(text); } catch { doc = null; } resolve({ status: res.statusCode, doc }); });
-        });
-        req.on('timeout', () => req.destroy(new Error('the forge did not answer in time')));
-        req.on('error', reject);
-        if (body != null) req.write(body);
-        req.end();
-    });
-}
-
-function createForge({ config, store, log = console }) {
+function createForge({ config, fetchImpl = globalThis.fetch, log = console }) {
     const git = config.git || {};
     const publicUrl = String(git.publicUrl || 'https://git.openvibe.codes').replace(/\/+$/, '');
     const internalUrl = String(git.internalUrl || publicUrl).replace(/\/+$/, '');
+    const dataDir = String(git.dataDir || '').replace(/\/+$/, '');
     const host = (() => { try { return new URL(publicUrl).host.toLowerCase(); } catch { return ''; } })();
-    const seal = createSeal(git.sealKey);
-    // At use time: the app's ID and secret may be entered in the admin panel after boot (codes.accounts forge.*).
-    const isEnabled = () => !!(git.clientId && git.clientSecret && seal);
-    const redirectUri = `${String(config.baseUrl || '').replace(/\/+$/, '')}/git/callback`;
-    const db = store.db;
+    // At use time: Codes' Network client may be set in the admin panel after boot (codes.accounts forge.* is gone;
+    // the service's own OAuth client, codes, is what a service token is minted with).
+    const tokens = (config.oauth && config.oauth.clientId && config.oauth.clientSecret)
+        ? createServiceTokenClient({
+            tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId,
+            clientSecret: config.oauth.clientSecret, audience: 'openvibe.git', scope: 'git.repo.read git.repo.write', fetch: fetchImpl,
+        })
+        : null;
+    const isEnabled = () => !!tokens;
     const fail = (status, code, message) => Object.assign(new Error(message), { status, code });
 
-    function authorizeUrl({ state, challenge }) {
-        const q = new URLSearchParams({
-            client_id: git.clientId, redirect_uri: redirectUri, response_type: 'code', state,
-            code_challenge: challenge, code_challenge_method: 'S256', scope: 'write:repository read:user',
-        });
-        return `${publicUrl}/login/oauth/authorize?${q}`;
-    }
-
-    async function token(form) {
-        const r = await call(internalUrl, 'POST', '/login/oauth/access_token', { form: { client_id: git.clientId, client_secret: git.clientSecret, ...form } });
-        if (r.status !== 200 || !r.doc || !r.doc.access_token) throw fail(502, 'forge.token_refused', `OpenVibe Git did not hand over a token (${r.status})`);
-        return r.doc;
-    }
-    async function save(subject, login, t) {
-        const expires = Number(t.expires_in) > 0 ? new Date(Date.now() + Number(t.expires_in) * 1000) : null;
-        await db.exec(
-            `INSERT INTO codes_forge_links (subject, forge_user, token_sealed, refresh_sealed, expires_at)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (subject) DO UPDATE SET forge_user = EXCLUDED.forge_user, token_sealed = EXCLUDED.token_sealed,
-                 refresh_sealed = EXCLUDED.refresh_sealed, expires_at = EXCLUDED.expires_at, updated_at = now()`,
-            [subject, login, seal.close(t.access_token, subject), t.refresh_token ? seal.close(t.refresh_token, subject) : null, expires],
-        );
-    }
-
-    async function connect(subject, { code, verifier }) {
-        if (!isEnabled()) throw fail(503, 'forge.off', 'Linking OpenVibe Git is not open yet');
-        if (!USER.test(String(subject || ''))) throw fail(400, 'subject.required', 'a person signs in first');
-        const t = await token({ grant_type: 'authorization_code', code: String(code || ''), code_verifier: String(verifier || ''), redirect_uri: redirectUri });
-        const me = await call(internalUrl, 'GET', '/api/v1/user', { headers: { Authorization: `Bearer ${t.access_token}` } });
-        const login = me.doc && me.doc.login;
-        if (me.status !== 200 || !LOGIN.test(String(login || ''))) throw fail(502, 'forge.user_unknown', 'OpenVibe Git did not say who you are there');
-        await save(subject, login, t);
-        return { forge_user: login };
-    }
-
-    async function link(subject) {
-        const row = await db.maybe('SELECT forge_user, created_at FROM codes_forge_links WHERE subject = $1', [subject]);
-        return row ? { forge_user: row.forge_user, created_at: row.created_at } : null;
-    }
-    async function unlink(subject) { await db.exec('DELETE FROM codes_forge_links WHERE subject = $1', [subject]); }
-
-    /** A live access token for the person: refreshed when it ends within `margin` ms. null when unlinked or refused. */
-    async function tokenFor(subject, margin = 60_000) {
-        if (!isEnabled()) return null;
-        const row = await db.maybe('SELECT forge_user, token_sealed, refresh_sealed, expires_at FROM codes_forge_links WHERE subject = $1', [subject]);
-        if (!row) return null;
-        const ends = row.expires_at ? new Date(row.expires_at).getTime() : Infinity;
-        if (ends - Date.now() > margin) { const t = seal.open(row.token_sealed, subject); return t ? { token: t, login: row.forge_user } : null; }
-        const refresh = row.refresh_sealed ? seal.open(row.refresh_sealed, subject) : null;
-        if (!refresh) return null;
+    /** One call to OpenVibe.Git's API, as Codes; `subject` is the person it acts for. */
+    async function call(method, pathname, { subject = null, json = null, auth = true, timeoutMs = 8000 } = {}) {
+        const headers = { Accept: 'application/json' };
+        if (auth) headers.Authorization = `Bearer ${await tokens.getToken()}`;
+        if (subject) headers['X-OV-Subject'] = subject;
+        if (json != null) headers['Content-Type'] = 'application/json';
+        let res;
         try {
-            const t = await token({ grant_type: 'refresh_token', refresh_token: refresh });
-            await save(subject, row.forge_user, t);
-            return { token: t.access_token, login: row.forge_user };
+            res = await fetchImpl(`${internalUrl}${pathname}`, {
+                method, headers, ...(json != null ? { body: JSON.stringify(json) } : {}),
+                signal: AbortSignal.timeout(timeoutMs),
+            });
         } catch (e) {
-            log.warn(`[Codes] OpenVibe Git refused a refresh for a linked account: ${String(e && e.message).slice(0, 120)}`);
-            return null;
+            throw fail(503, 'git.unreachable', `OpenVibe Git did not answer: ${e.message}`);
         }
+        const text = await res.text().catch(() => '');
+        let doc = null;
+        try { doc = text ? JSON.parse(text) : null; } catch { doc = null; }
+        return { status: res.status, doc };
     }
 
-    async function createRepo(subject, { name, description = '', isPrivate = false }) {
-        const n = String(name || '').trim();
-        if (!REPO_NAME.test(n) || /\.git$/i.test(n)) throw fail(422, 'forge.name_invalid', 'A name is letters, digits, dots, dashes or underscores (up to 100), and not ending in .git');
-        const t = await tokenFor(subject);
-        if (!t) throw fail(409, 'forge.unlinked', 'Link your OpenVibe Git account first');
-        const r = await call(internalUrl, 'POST', '/api/v1/user/repos', {
-            headers: { Authorization: `Bearer ${t.token}` },
-            json: { name: n, description: String(description || '').slice(0, 255), private: !!isPrivate, auto_init: true, default_branch: 'main', readme: 'Default' },
+    async function repo(owner, name) {
+        if (!isEnabled()) return null;
+        const r = await call('GET', `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, { auth: false }).catch(() => null);
+        return r && r.status === 200 ? r.doc : null;
+    }
+
+    async function createRepo(actor, { name, description = '', isPrivate = false } = {}) {
+        const n = String(name || '').trim().toLowerCase();
+        if (!REPO_NAME.test(n) || /\.git$/i.test(n)) throw fail(422, 'git.name_invalid', 'A name is letters, digits, dots, dashes or underscores (up to 100), and not ending in .git');
+        if (!isEnabled()) throw fail(503, 'git.off', 'OpenVibe Git is not open from Codes yet');
+        if (!USER.test(String(actor && actor.subject || ''))) throw fail(400, 'subject.required', 'a person signs in first');
+        if (!LOGIN.test(String(actor.username || ''))) throw fail(409, 'git.unlinked', 'Your OpenVibe account has no username Codes can make a repository under yet');
+        const r = await call('POST', '/api/v1/repos', {
+            subject: actor.subject,
+            json: {
+                name: n, owner_username: actor.username, description: String(description || '').slice(0, 500),
+                visibility: isPrivate ? 'private' : 'public', starter: 'empty',
+            },
         });
-        if (r.status === 409) throw fail(409, 'forge.name_taken', `You already have a repository called ${n}`);
-        if (r.status !== 201 || !r.doc) throw fail(502, 'forge.create_failed', `OpenVibe Git did not make the repository (${r.status})`);
-        return { full_name: r.doc.full_name, html_url: r.doc.html_url, clone_url: r.doc.clone_url, private: !!r.doc.private };
+        if (r.status === 409) throw fail(409, 'git.name_taken', r.doc && r.doc.detail && /username/.test(r.doc.detail) ? r.doc.detail : `You already have a repository called ${n}`);
+        if (r.status !== 201 || !r.doc) throw fail(502, 'git.create_failed', `OpenVibe Git did not make the repository (${r.status})`);
+        return { full_name: r.doc.full_name, html_url: r.doc.html_url, clone_url: r.doc.clone_url, private: r.doc.visibility === 'private' };
     }
 
-    async function repos(subject) {
-        const t = await tokenFor(subject);
-        if (!t) return [];
-        const r = await call(internalUrl, 'GET', '/api/v1/user/repos?limit=50', { headers: { Authorization: `Bearer ${t.token}` } }).catch(() => null);
-        if (!r || r.status !== 200 || !Array.isArray(r.doc)) return [];
-        return r.doc.map((x) => ({ full_name: x.full_name, html_url: x.html_url, private: !!x.private, updated_at: x.updated_at || null, description: x.description || '' }))
-            .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+    async function repos(actor) {
+        if (!isEnabled() || !USER.test(String(actor && actor.subject || ''))) return [];
+        if (!LOGIN.test(String(actor.username || ''))) return [];
+        const r = await call('GET', `/api/v1/profile/${encodeURIComponent(actor.username.toLowerCase())}`, { subject: actor.subject }).catch(() => null);
+        if (!r || r.status !== 200 || !r.doc || !Array.isArray(r.doc.repositories)) return [];
+        return r.doc.repositories.map((x) => ({
+            full_name: x.full_name, html_url: x.html_url, private: x.visibility === 'private',
+            updated_at: x.pushed_at || x.updated_at || null, description: x.description || '',
+        })).sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+    }
+
+    /** A Git token for the person's session, minted by the service and good for two hours. */
+    async function mintToken(subject) {
+        if (!USER.test(String(subject || ''))) throw fail(400, 'subject.required', 'a person signs in first');
+        const r = await call('POST', '/api/v1/tokens', { subject, json: { scopes: ['git.repo.read', 'git.repo.write'], hours: 2, label: 'Codes session' } });
+        if (r.status !== 201 || !r.doc || !r.doc.token) throw fail(502, 'git.token_refused', `OpenVibe Git did not hand over a token (${r.status})`);
+        return r.doc.token;
+    }
+
+    /** The bare repository on this host, when Codes and OpenVibe Git share the disk (G3: no network clone). */
+    function localRoot(repoUrl) {
+        if (!dataDir) return null;
+        let u;
+        try { u = new URL(String(repoUrl || '')); } catch { return null; }
+        if (u.protocol !== 'https:' || u.host.toLowerCase() !== host) return null;
+        const parts = u.pathname.replace(/\.git$/i, '').split('/').filter(Boolean);
+        if (parts.length !== 2 || !LOGIN.test(parts[0]) || !REPO_NAME.test(parts[1])) return null;
+        const bare = path.join(dataDir, 'repos', parts[0], `${parts[1]}.git`);
+        try { return fs.statSync(bare).isDirectory() ? dataDir : null; } catch { return null; }
     }
 
     /**
-     * What a job on the person's machine needs for a repository on the forge: one credential line for the forge's host
-     * (harness/job.js gitAuthFor), so a private repository clones and the branch pushes. The token lives at least an
-     * hour from now (a job's cap), and it goes to git only: the job keeps it out of the agent's environment.
+     * What a job on the person's machine needs for a repository on OpenVibe Git: one credential line for its host
+     * (harness/job.js gitAuthFor), so a private repository clones and the branch pushes. The token lives two hours.
+     * When Codes and OpenVibe Git share their disk, the job also learns where the bare repositories are: it clones
+     * from the local disk and pushes over HTTPS as usual.
      */
     async function jobEnv(subject, repoUrl) {
         let u;
         try { u = new URL(String(repoUrl || '')); } catch { return null; }
         if (u.protocol !== 'https:' || u.host.toLowerCase() !== host) return null;
-        const t = await tokenFor(subject, 65 * 60_000).catch(() => null);
-        if (!t) return null;
-        return { OPENVIBE_GIT_CREDENTIALS: `https://${encodeURIComponent(t.login)}:${encodeURIComponent(t.token)}@${host}` };
+        let token;
+        try { token = await mintToken(subject); } catch (e) {
+            log.warn(`[Codes] no OpenVibe Git token for a session: ${String(e && e.message).slice(0, 120)}`);
+            return null;
+        }
+        const root = localRoot(repoUrl);
+        return {
+            OPENVIBE_GIT_CREDENTIALS: `https://x-access-token:${encodeURIComponent(token)}@${host}`,
+            ...(root ? { OPENVIBE_GIT_LOCAL_ROOT: root } : {}),
+        };
     }
 
-    return { get enabled() { return isEnabled(); }, publicUrl, host, authorizeUrl, connect, link, unlink, createRepo, repos, jobEnv, tokenFor };
+    return { get enabled() { return isEnabled(); }, publicUrl, host, repo, createRepo, repos, mintToken, jobEnv };
 }
 
 module.exports = { createForge, REPO_NAME };

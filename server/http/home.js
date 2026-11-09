@@ -3,15 +3,15 @@
  * The home page's sections beyond the kit's generic ones: OpenVibe Git (the forge at git.openvibe.codes, read from its
  * public API: how many repositories, which changed last), quick-start commands for the harness and the public router,
  * and the questions people ask, which the FAQPage JSON-LD repeats. The repository list is read in the background at most
- * every ten minutes and never awaited by a page; a forge that does not answer leaves the list out.
+ * every ten minutes and never awaited by a page; a Git that does not answer leaves the list out.
  */
 const contracts = require('openvibe-contracts');
 const showcase = require('openvibe-shared/showcase');
 
 const esc = showcase.esc;
 
-// Forgejo listens on 127.0.0.1:5060, a port the Fetch standard blocks (SIP), so Node's fetch refuses it ("bad port"):
-// the read goes through node:http instead, which has no such list.
+// OpenVibe Git's API is read over node:http on its loopback address; its default port (5270) is not a blocked one,
+// but the reader stays on node:http so a configured port can never be refused by the Fetch standard.
 function getJson(url, timeoutMs) {
     return new Promise((resolve, reject) => {
         const u = new URL(url);
@@ -36,13 +36,12 @@ function createGitReader({ internalUrl, publicUrl, enabled = true, ttlMs = 10 * 
         if (inflight) return inflight;
         inflight = (async () => {
             try {
-                const res = await getJson(`${String(internalUrl).replace(/\/+$/, '')}/api/v1/repos/search?limit=${limit}&sort=updated&order=desc`, timeoutMs);
+                const res = await getJson(`${String(internalUrl).replace(/\/+$/, '')}/api/v1/repos?limit=${limit}&sort=pushed`, timeoutMs);
                 if (res.status === 200) {
-                    const { body, total } = res;
-                    const repos = (Array.isArray(body.data) ? body.data : [])
-                        .filter((r) => r && !r.private && /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(String(r.full_name || '')))
-                        .map((r) => ({ name: r.full_name, url: `${pub}/${r.full_name}`, updated: r.updated_at || null, language: r.language || '' }));
-                    if (repos.length) value = { total: total && total >= repos.length ? total : null, repos, publicUrl: pub };
+                    const repos = (Array.isArray(res.body && res.body.repositories) ? res.body.repositories : [])
+                        .filter((r) => r && r.visibility !== 'private' && /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(String(r.full_name || '')))
+                        .map((r) => ({ name: r.full_name, url: `${pub}/${r.full_name}`, updated: r.pushed_at || r.updated_at || null, language: r.language || '' }));
+                    if (repos.length) value = { total: null, repos, publicUrl: pub };
                 }
             } catch { /* keep the last answer */ }
             // A failed read is tried again after a minute, not after the full ten.

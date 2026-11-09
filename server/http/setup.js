@@ -52,7 +52,7 @@ function createSetupRoutes(ctx, kit) {
         let keys = null;
         try { keys = connections ? await sso.asViewer(req, res, (token) => connections.mine(token)) : null; } catch { keys = null; }
         let git = null;
-        try { git = forge && forge.enabled ? await forge.link(subject) : null; } catch { git = null; }
+        try { git = forge && forge.enabled ? await forge.repos({ subject, username: req.viewer.username || '' }) : null; } catch { git = null; }
         const settings = await userSettings.get(subject);
         const saved = !!(await db.maybe('SELECT 1 AS one FROM codes_user_settings WHERE subject = $1', [subject]));
         return { machines: machineList, compute, rows, fleetProblem, keys, git, settings, saved };
@@ -67,7 +67,7 @@ function createSetupRoutes(ctx, kit) {
             { id: 'machine', title: 'Pick where it runs', short: 'Runs on', done: online.length > 0, warn: !online.length && live.length > 0, required: true },
             { id: 'agents', title: 'Your agents', short: 'Agents', done: ready.length > 0, required: true },
             { id: 'keys', title: 'Your AI keys', short: 'AI keys', done: credentials.some((k) => k.status !== 'failing'), optional: true },
-            { id: 'accounts', title: 'Your accounts', short: 'Accounts', done: !!d.git, optional: true },
+            { id: 'accounts', title: 'Your accounts', short: 'Accounts', done: !!(d.git && d.git.length), optional: true },
             { id: 'choices', title: 'Your choices', short: 'Choices', done: d.saved, required: true },
         ];
     }
@@ -125,10 +125,10 @@ ${rows ? `<ul class="c4-rows">${rows}</ul>` : d.keys ? '<div class="c4-emptyline
     }
 
     function accountsBody(d) {
-        if (!forge || !forge.enabled) return '<p class="c4-hint">OpenVibe Git opens here once it trusts Codes. Your tasks can already work on any GitHub or OpenVibe Git repository you can reach.</p>';
-        return d.git
-            ? `<ul class="c4-rows"><li class="c4-row c4-row-flat"><span class="c4-row-dot c4-dot-ok" aria-hidden="true"></span><span class="c4-row-label">OpenVibe Git</span><span class="c4-row-note">Linked as ${esc(d.git.forge_user || 'you')}</span>${pill('Linked', 'ok')}</li></ul><div class="c4-setup-actions"><a class="c4-opill" href="/git">Your repositories</a></div>`
-            : `<p class="c4-hint">Link OpenVibe Git once, and Codes can make repositories in your name and push your tasks' branches there. It is one consent with your OpenVibe account.</p><div class="c4-setup-actions"><a class="c4-button c4-button-light" href="/git/connect">Link OpenVibe Git</a></div>`;
+        if (!forge || !forge.enabled) return '<p class="c4-hint">OpenVibe Git opens here once Codes can reach it. Your tasks can already work on any GitHub or OpenVibe Git repository you can reach.</p>';
+        return d.git && d.git.length
+            ? `<ul class="c4-rows"><li class="c4-row c4-row-flat"><span class="c4-row-dot c4-dot-ok" aria-hidden="true"></span><span class="c4-row-label">OpenVibe Git</span><span class="c4-row-note">${d.git.length} ${d.git.length === 1 ? 'repository' : 'repositories'} in your name</span>${pill('Ready', 'ok')}</li></ul><div class="c4-setup-actions"><a class="c4-opill" href="/git">Your repositories</a></div>`
+            : '<p class="c4-hint">Codes makes repositories on OpenVibe Git in your name with your OpenVibe account, and your tasks push their branches there. Nothing to link.</p><div class="c4-setup-actions"><a class="c4-button c4-button-light" href="/git">Make a repository</a></div>';
     }
 
     function choicesBody(d, machines) {
