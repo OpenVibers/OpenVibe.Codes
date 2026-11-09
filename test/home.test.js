@@ -50,7 +50,7 @@ const { boot, check, done } = require('./helpers/boot');
         await check('a signed-in person gets the chat, not the front door', async () => {
             const r = await t.get('/', { as: t.network.addUser('rosa') });
             assert.strictEqual(r.status, 200);
-            assert.match(r.text, /What should we build/);
+            assert.match(r.text, /What should we make/);
             assert.ok(!r.text.includes('class="c4-demo"'), 'no front door once signed in');
         });
     } finally { await t.close(); }
