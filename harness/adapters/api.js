@@ -202,7 +202,10 @@ function apiAgent(spec) {
             const key = spec.keyEnv ? env[spec.keyEnv] : (t.apiKey || '');
             const model = t.model || spec.model;
             const level = LEVELS[t.permission] || 1;
+            // Tools in a fixed name order, and the system message above never carries the task: the request prefix a
+            // provider caches (system + tools) is byte-identical from one task to the next, and only the prompt differs.
             const tools = Object.entries(TOOL_DEFS).filter(([, d]) => LEVELS[d.level] <= level)
+                .sort(([a], [b]) => a.localeCompare(b))
                 .map(([name, d]) => ({ type: 'function', function: { name, description: d.description, parameters: d.parameters } }));
             const sessionId = t.resume || `api_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
             const startedAt = Date.now();
