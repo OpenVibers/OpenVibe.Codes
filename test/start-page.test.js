@@ -29,7 +29,7 @@ const { version } = require('../package.json');
         assert.ok(r.text.includes('href="/run"'));
         assert.ok(r.text.includes('What should an agent do?'));
         const me = await t.get('/', { as: t.network.addUser('ada') });
-        assert.match(me.text, /What should we build/);
+        assert.match(me.text, /What should we make/);
     });
 
     await check('the command line prints this version and points at the guide', () => {
