@@ -83,13 +83,12 @@ function createSetupRoutes(ctx, kit) {
         const list = (d.machines.machines || []).filter((m) => m.state !== 'revoked');
         const sources = d.compute.sources || [];
         const sourceRows = sources.map((s) => `<li class="c4-row c4-row-flat"><span class="c4-row-dot${s.status === 'ready' ? ' c4-dot-ok' : ''}" aria-hidden="true"></span><span class="c4-row-label">${esc(s.name)}</span><span class="c4-row-note">${s.status === 'ready' ? 'Ready' : s.status === 'coming_soon' ? 'Coming soon' : 'Unavailable'}${s.price && s.price.amount_usd != null ? ` · $${esc(s.price.amount_usd)}/${esc(s.price.unit)}` : ''}${s.reason ? ` · ${esc(s.reason)}` : ''}</span></li>`).join('');
-        const rows = list.map((m) => `<li class="c4-row c4-row-flat"><span class="c4-row-dot c4-dot-${m.state === 'online' ? 'ok' : 'skip'}" aria-hidden="true"></span><span class="c4-row-label">${esc(m.name || m.node_id || m.id)}</span><span class="c4-row-note">${m.state === 'online' ? 'Online: ready for your work' : 'Offline: start it, and it comes back here'}</span></li>`).join('');
         const problem = d.machines.ok === false && d.machines.problem ? note(esc(d.machines.problem.detail || 'Your machines could not be read.'), 'bad') : '';
         const how = `<ol class="c4-setup-how">
-<li><b>Get a one-time code</b> on <a href="https://openvibe.link/machines" rel="noopener">openvibe.link/machines</a>. It lasts ten minutes.</li>
+<li><b>Get a one-time code</b> on <a href="https://openvibe.link/add-computer?return_to=https%3A%2F%2Fopenvibe.codes%2Fsetup" rel="noopener">openvibe.link</a>. It lasts ten minutes.</li>
 <li><b>Run the installer on that computer</b> and give it the code:${command('curl -fsSL https://openvibe.link/install | sh -s -- --worker', 'On the machine')}</li>
 <li><b>It pairs itself</b> and shows up here as Online. It runs your work and nobody else's.</li></ol>`;
-        return `${problem}${d.compute.ok === false && d.compute.problem ? note(esc(d.compute.problem.detail), 'bad') : ''}<p class="c4-hint">Choose a place for your work. Link checks readiness before a task can start. Rentals need a live price and a spending limit.</p>${sourceRows ? `<ul class="c4-rows">${sourceRows}</ul>` : ''}${rows ? `<ul class="c4-rows">${rows}</ul>` : ''}${list.length ? `<details class="c4-setup-more"><summary>Pair another machine</summary>${how}</details>` : how}
+        return `${problem}${d.compute.ok === false && d.compute.problem ? note(esc(d.compute.problem.detail), 'bad') : ''}<p class="c4-hint">Choose a place for your work. Link checks readiness before a task can start. Rentals need a live price and a spending limit.</p>${sourceRows ? `<ul class="c4-rows">${sourceRows}</ul>` : ''}${how}
 <div class="c4-setup-actions"><a class="c4-button${list.length ? ' c4-button-light' : ''}" href="https://openvibe.link/machines#pair">${list.length ? 'Manage machines' : 'I have a code'}</a><a class="c4-opill" href="/setup#step-machine">Check again</a></div>`;
     }
 
@@ -131,13 +130,12 @@ ${rows ? `<ul class="c4-rows">${rows}</ul>` : d.keys ? '<div class="c4-emptyline
             : '<p class="c4-hint">Codes makes repositories on OpenVibe Git in your name with your OpenVibe account, and your tasks push their branches there. Nothing to link.</p><div class="c4-setup-actions"><a class="c4-button c4-button-light" href="/git">Make a repository</a></div>';
     }
 
-    function choicesBody(d, machines) {
+    function choicesBody(d, machines, pickedMachine = '') {
         const s = d.settings;
         const ready = readiness(d.rows);
         const offers = (harnesses && harnesses.list ? harnesses.list() : []).filter((a) => a && a.id);
         const agentOption = (id, name, selected) => `<option value="${esc(id)}"${selected ? ' selected' : ''}${optionAttrs(ready.get(id))}>${esc(name)}</option>`;
         const agents = offers.map((a) => agentOption(a.id, a.name || a.id, s.default_agent === a.id)).join('');
-        const machineOptions = (machines.machines || []).filter((m) => m.state !== 'revoked').map((m) => `<option value="${esc(m.node_id || m.id)}"${s.default_machine && (s.default_machine === m.node_id || s.default_machine === m.id) ? ' selected' : ''} data-state="${m.state === 'online' ? 'ok' : 'off'}" data-badge="${m.state === 'online' ? 'Online' : 'Offline'}">${esc(m.name || m.node_id || m.id)}</option>`).join('');
         const fallbacks = s.conductor_fallbacks || [];
         const fallbackRow = (i) => {
             const f = fallbacks[i] || { agent: '', model: '' };
@@ -148,7 +146,7 @@ ${rows ? `<ul class="c4-rows">${rows}</ul>` : d.keys ? '<div class="c4-emptyline
         return `<form class="c4-form" method="post" action="/setup/choices">
 <div class="c4-form-grid">
 <label>Default agent <select name="default_agent" data-ov-title="Default agent"><option value="" data-desc="Codes picks the agent with room for each task">Auto</option>${agents}</select></label>
-<label>Default machine <select name="default_machine" data-ov-title="Default machine"><option value="" data-desc="Your machine with room, else OpenVibe's">Auto</option>${machineOptions}</select></label>
+<div data-ov-machines data-needs="worker" data-name="default_machine" data-auto-label="Auto" data-value="${esc(pickedMachine || s.default_machine || '')}"></div>
 </div>
 <h3 class="c4-subhead">When your conductor's agent runs low</h3>
 <p class="c4-hint">Your conductor runs Claude Code. When it nears a usage limit, the next turn moves to the first fallback with room, and comes back once the window frees.</p>
@@ -175,7 +173,7 @@ ${rows ? `<ul class="c4-rows">${rows}</ul>` : d.keys ? '<div class="c4-emptyline
             accounts: 'Where your work is pushed.',
             choices: 'What Codes uses when you do not say.',
         };
-        const bodies = { machine: machineBody(d), agents: agentsBody(d), keys: keysBody(d), accounts: accountsBody(d), choices: choicesBody(d, d.machines) };
+        const bodies = { machine: machineBody(d), agents: agentsBody(d), keys: keysBody(d), accounts: accountsBody(d), choices: choicesBody(d, d.machines, String(req.query.machine || '')) };
         const nav = steps.map((s, i) => `<li><a class="c4-setup-chip${s.done ? ' is-done' : ''}${s.id === next ? ' is-next' : ''}" href="#step-${s.id}"><span class="c4-setup-chip-n" aria-hidden="true">${s.done ? CHECK : i + 1}</span>${esc(s.short)}<span class="c4-sr-only">${s.done ? ', done' : s.optional ? ', optional' : ''}</span></a></li>`).join('');
         const ready = requiredLeft === 0
             ? `<section class="c4-card c4-setup-ready"><h2>You are set</h2><p>Your machine, an agent and your choices are in place.${steps.some((s) => s.optional && !s.done) ? ' The optional steps can wait.' : ''}</p><div class="c4-setup-actions"><a class="c4-button" href="/">Start a task</a><a class="c4-opill" href="/conductor">Start your conductor</a></div></section>`

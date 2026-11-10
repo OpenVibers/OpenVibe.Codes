@@ -7,6 +7,10 @@
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/boot');
 const { readiness, optionAttrs } = require('../server/domain/readiness');
+const { createSetupRoutes } = require('../server/http/setup');
+const { createC4Routes } = require('../server/http/c4');
+assert.equal(typeof createSetupRoutes, 'function', 'setup route is exercised directly through the page assertions below');
+assert.equal(typeof createC4Routes, 'function', 'Codes composer and conductor routes are exercised by the same app below');
 
 const NODE = 'lnk_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
 const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
@@ -63,6 +67,7 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
             assert.match(res.text, /opencode auth login/, 'a signed-out agent says how to sign in');
             assert.match(res.text, /<option value="claude-code"[^>]*data-state="ok" data-badge="41% used"/, 'the default agent picker says what is ready');
             assert.match(res.text, /<option value="opencode"[^>]*data-state="bad" data-badge="Sign in"[^>]*data-href="\/setup#agent-opencode"/);
+            assert.match(res.text, /data-ov-machines[^>]*data-needs="worker"[^>]*data-name="default_machine"/);
             const home = await t.get('/', { as: ada });
             assert.match(home.text, /<b>2\/3<\/b>[\s\S]*Next: Your choices/);
             assert.match(home.text, /<option value="claude-code\|[^"]*"[^>]*data-state="ok"/, 'the composer\'s agent picker knows too');

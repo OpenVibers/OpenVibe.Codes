@@ -41,7 +41,6 @@ const WORKSPACE_NAV = [
     { label: 'Tasks', href: '/tasks', icon: 'fa-list' },
     { label: 'Conductor', href: '/conductor', icon: 'fa-diagram-project' },
     { label: 'Agents', href: '/agents', icon: 'fa-robot' },
-    { label: 'Machines', href: '/machines', icon: 'fa-display' },
     { label: 'Memory', href: '/memory', icon: 'fa-brain' },
     { label: 'Knowledge', href: '/knowledge', icon: 'fa-book' },
     { label: 'Usage', href: '/usage', icon: 'fa-chart-line' },
@@ -117,7 +116,9 @@ function renderPage(o) {
     const crumbs = (o.crumbs || []).length
         ? html`<nav class="crumbs" aria-label="Breadcrumbs">${o.crumbs.map((c, i) => html`${i ? ' / ' : ''}${c.href ? html`<a href="${c.href}">${c.label}</a>` : c.label}`)}</nav>`
         : '';
-    const scripts = (o.sharedScripts || []).map((name) => html`<script src="${ovServe.url(name)}" defer></script>`).concat((o.scripts || []).map((rel) => html`<script src="${asset(rel)}" defer></script>`));
+    const scripts = (o.sharedScripts || []).map((name) => html`<script src="${ovServe.url(name)}" defer></script>`);
+    if (String(o.body || '').includes('data-ov-machines')) scripts.push(raw('<script src="/shared/machines.js" defer></script>'));
+    scripts.push(...(o.scripts || []).map((rel) => html`<script src="${asset(rel)}" defer></script>`));
     return shell.page({
         name: SITE_NAME,
         lang: 'en',
