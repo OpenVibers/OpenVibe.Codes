@@ -144,7 +144,8 @@ function usageOf(result) {
     })();
     return {
         cost_usd: typeof d.cost_usd === 'number' && Number.isFinite(d.cost_usd) ? d.cost_usd : null,
-        tokens: tokens || null,
+        // The harness's own token count when its log has no usage lines (the CLI agents report it on the result).
+        tokens: tokens || (Number.isFinite(Number(d.tokens)) ? Number(d.tokens) : null),
         steps: steps || null,
         turns: turns || null,
         session: session || null,

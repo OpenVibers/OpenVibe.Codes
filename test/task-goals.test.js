@@ -71,6 +71,7 @@ const { boot, check, done } = require('./helpers/boot');
         const row = await rowOf(id);
         const result = {
             ok: state === 'succeeded', summary: 'I wrote notes.txt.', files: [{ path: 'notes.txt', added: 1, removed: 0 }],
+            tokens: 2000,
             turns, log: [{ t: 'agent', agent: row.agent, session }, { t: 'done', ok: state === 'succeeded', text: 'I wrote notes.txt.' }],
             ...(go ? { goal: go } : {}),
         };
@@ -143,6 +144,15 @@ const { boot, check, done } = require('./helpers/boot');
             assert.match(row.outcome_note, /stopped by budget: the task used 7 of its 1 turns/);
             const shown = await call('GET', `/tasks/${id}`);
             assert.strictEqual(shown.json.outcome.state, 'stopped_by_budget');
+        });
+
+        await check('a spent token budget also ends the task stopped by budget', async () => {
+            next = [{ status: 'rejected', reason: 'still empty', check_output: rejectedCheck.check_output }];
+            const id = await startTask({ ...GOAL, budget: { tokens: 100 } });
+            const { row, attempts } = await endAttempt(id, { go: rejectedCheck });
+            assert.strictEqual(attempts.length, 1);
+            assert.strictEqual(row.end_state, 'stopped_by_budget');
+            assert.match(row.outcome_note, /stopped by budget: the task spent 2000 of its 100 tokens/);
         });
 
         await check('a verifier that could not run leaves the task waiting, never ready', async () => {
