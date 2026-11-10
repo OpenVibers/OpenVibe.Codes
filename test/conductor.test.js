@@ -6,7 +6,8 @@
  *
  * What this checks: the shape the task, its attempt and its first turn are written with; the hand-over brief; a message
  * that waits while a turn runs and starts when it ends, resuming the session; an idle conductor (succeeded, no outcome)
- * and a stopped one; and the server's rule that a conductor may start sub-tasks on any agent except an Anthropic one.
+ * and a stopped one; the server's rule that a conductor may start sub-tasks on any agent except an Anthropic one; and
+ * the child return contract (a named report path, a shaped return on the show).
  */
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/boot');
@@ -190,6 +191,36 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
             const subRow = await rowOf(sub.id);
             assert.strictEqual(subRow.kind, 'code', 'a sub-task is a coding task, not a conductor');
             assert.strictEqual(subRow.via, 'conductor');
+        });
+
+        await check('a sub-task names its report path; its return comes back shaped', async () => {
+            const named = await post(`/api/v1/conductor/${taskId}/tasks`, { prompt: 'fix the parser', repo: 'https://github.com/octocat/Hello-World', report_path: 'notes/work.md' });
+            assert.strictEqual(named.status, 201, named.text);
+            const submit = submits().at(-1)[1];
+            assert.ok(submit.args.prompt.startsWith('fix the parser\n\n'), 'the brief comes first');
+            assert.match(submit.args.prompt, /write your full output to notes\/work\.md/, 'the brief carries the instruction');
+            const sub = named.json().task;
+            const stored = (await rowOf(sub.id)).actor_ref;
+            const ref = typeof stored === 'string' ? JSON.parse(stored) : stored;
+            assert.strictEqual(ref.conductor.report_path, 'notes/work.md');
+            const bad = await post(`/api/v1/conductor/${taskId}/tasks`, { prompt: 'x', repo: 'https://github.com/octocat/Hello-World', report_path: '../evil.md' });
+            assert.strictEqual(bad.status, 422, bad.text);
+            assert.strictEqual(bad.json().code, 'codes.report_path_invalid');
+            // The child ends shaped: six bullets, a block, a concern.
+            const row = await rowOf(sub.id);
+            const updated = await t.ctx.tasks.applyEvent(row, { state: 'succeeded', job: { id: row.job_id, state: 'succeeded', result: { ok: true, summary: '- a\n- b\n- c\n- d\n- e\n- f\nBLOCKED: the token\nCONCERNS: the flake' } } });
+            await t.ctx.tasks.afterEnd(updated.id);
+            const shown = await get(`/api/v1/tasks/${sub.id}`);
+            assert.strictEqual(shown.status, 200, shown.text);
+            assert.deepStrictEqual(shown.json().report, { path: 'notes/work.md', bullets: ['a', 'b', 'c', 'd', 'e'], blocked: ['the token'], concerns: ['the flake'], truncated: true });
+            // A default path and unshaped prose: the first lines are the return.
+            const plain = await post(`/api/v1/conductor/${taskId}/tasks`, { prompt: 'tidy up', repo: 'https://github.com/octocat/Hello-World' });
+            const plainSub = plain.json().task;
+            const plainRow = await rowOf(plainSub.id);
+            const plainUpdated = await t.ctx.tasks.applyEvent(plainRow, { state: 'succeeded', job: { id: plainRow.job_id, state: 'succeeded', result: { ok: true, summary: 'Tidied.\nAll green.' } } });
+            await t.ctx.tasks.afterEnd(plainUpdated.id);
+            const plainShown = await get(`/api/v1/tasks/${plainSub.id}`);
+            assert.deepStrictEqual(plainShown.json().report, { path: 'report.md', bullets: ['Tidied.', 'All green.'], blocked: [], concerns: [], truncated: false });
         });
 
         await check('the start form: a model list the login offers, and the folders the machine has worked in', async () => {

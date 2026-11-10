@@ -4,7 +4,7 @@
  * `openvibe-codes mcp` — the Codes MCP server: the conductor's tools (Codes C9b). A stdio JSON-RPC server, started by
  * the Claude Code session a conductor's turn runs, and usable from any Claude Code session with a Codes login.
  *
- *   codes_task_start    { prompt, repo, agent?, model? }   a sub-task on one of the person's machines
+ *   codes_task_start    { prompt, repo, agent?, model?, report_path? }   a sub-task on one of the person's machines
  *   codes_task_list     { state? }                          running | needs | done
  *   codes_task_show     { id }                              state, attempts, outcome, the last lines
  *   codes_task_continue { id, message }                     carry a task on in the same conversation
@@ -70,6 +70,7 @@ const TOOLS = [
                 agent: { type: 'string', description: 'codex, opencode, command-code, deepseek, aider: never claude-code or claude-other' },
                 model: { type: 'string', description: 'The model for that agent (never an Anthropic one)' },
                 ref: { type: 'string', description: 'A branch or tag to start from' },
+                report_path: { type: 'string', description: 'Where the child writes its full output (default report.md); its return is that path plus at most 5 bullets and BLOCKED/CONCERNS lines' },
             },
             required: ['prompt', 'repo'],
             additionalProperties: true,
@@ -137,6 +138,7 @@ async function startTask(args) {
     const c = auth();
     const answer = await call(c, 'POST', `/api/v1/conductor/${encodeURIComponent(task)}/tasks`, {
         prompt, repo, ...(agent ? { agent } : {}), ...(model ? { model } : {}), ...(args.ref ? { ref: String(args.ref).slice(0, 100) } : {}),
+        ...(args.report_path ? { report_path: String(args.report_path).slice(0, 200) } : {}),
     });
     const t = answer.task || {};
     return text({
@@ -173,6 +175,7 @@ async function showTask(args) {
         outcome: t.outcome ? { state: t.outcome.state, note: t.outcome.note } : null,
         attempts: (t.attempts || []).map((a) => ({ n: a.n, agent: a.agent, model: a.model, machine: a.machine, state: a.state, why: a.why, end_why: a.end_why })),
         summary: t.result && t.result.summary ? String(t.result.summary).slice(0, 4000) : null,
+        ...(t.report ? { report: t.report } : {}),
         error: t.error || null,
         last_lines: lines.map((l) => {
             const b = l.body || {};

@@ -32,6 +32,7 @@
 const { RunError } = require('./run-client');
 const { chain, budget } = require('../../engine');
 const { parseArgs } = require('../../harness/job');
+const childReport = require('./child-report');
 
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'expired']);
 const STATE_LABEL = {
@@ -597,6 +598,12 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         }
         const runArgs = { ...args, agent, model };
         if (runArgs.goal) runArgs.prompt = `${runArgs.prompt}\n\nGoal: ${runArgs.goal.goal}\nCheck (${runArgs.goal.check.kind}): ${runArgs.goal.check.value}\nWork toward this outcome, show the check output as evidence, and propose completion when ready. The independent verifier decides whether the task is accepted.`;
+        // A conductor's child writes its full output where the parent named it and ends with the shaped return
+        // (server/domain/child-report.js). After routing, like the goal: the router reads the parent's own words.
+        if (actorRef && actorRef.conductor && typeof actorRef.conductor === 'object') {
+            const reportPath = typeof actorRef.conductor.report_path === 'string' && actorRef.conductor.report_path ? actorRef.conductor.report_path : childReport.DEFAULT_PATH;
+            runArgs.prompt = `${runArgs.prompt}\n\n${childReport.instruction(reportPath)}`;
+        }
         // Know K5: the lessons and facts earlier runs learned, in the prompt this run's harness gets. A store that
         // cannot be read is skipped, never an error: a run must not fail because the memory is unavailable. The
         // project the run belongs to also scopes the team rows it may read.

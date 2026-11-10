@@ -35,6 +35,7 @@ const { createRunTasks, TERMINAL } = require('../domain/run-tasks');
 const { createTaskEvents } = require('./task-events');
 const { createServiceTokenClient } = require('openvibe-sdk/auth');
 const { expandMatrix } = require('../domain/bench');
+const childReport = require('../domain/child-report');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -142,10 +143,14 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
     /** The task, its attempts and its outcome in plain words. The task's own fields stay at the top level. */
     const timeline = async (row) => {
         const attempts = await taskStore.attempts.list(row.id);
+        // A conductor's child hands its parent the shaped report (path, ≤5 bullets, BLOCKED/CONCERNS);
+        // anything else has none to give, and says nothing.
+        const report = childReport.of(row);
         return {
             ...taskStore.present(row),
             attempts: attempts.map((a) => taskStore.attempts.present(a)),
             outcome: { state: row.end_state || row.outcome || null, note: row.outcome_note || null },
+            ...(report ? { report } : {}),
         };
     };
 
