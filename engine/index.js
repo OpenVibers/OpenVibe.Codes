@@ -39,6 +39,7 @@ const logins = require('./logins');
 const redact = require('./redact');
 const proof = require('./proof');
 const review = require('./review');
+const goal = require('./goal');
 
 module.exports = {
     router,
@@ -57,6 +58,7 @@ module.exports = {
     redact,
     proof,
     review,
+    goal,
     // The names a caller usually wants, in one place.
     classify: router.classify,
     pick: router.pick,
