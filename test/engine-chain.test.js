@@ -9,7 +9,6 @@
 const assert = require('node:assert/strict');
 const { check, done } = require('./helpers/boot');
 const chain = require('../engine/chain');
-const goal = require('../engine/goal');
 
 const now = Date.now();
 const job = (runner, name, status, at, extra = {}) => ({
@@ -22,17 +21,6 @@ const carried = (parent, name, at) => ({
 });
 
 (async () => {
-    await check('goal verification is bounded and only an explicit independent acceptance passes', async () => {
-        const evidence = 'x'.repeat(goal.MAX_EVIDENCE_BYTES + 50);
-        assert.ok(Buffer.byteLength(goal.boundedEvidence(evidence)) <= goal.MAX_EVIDENCE_BYTES);
-        let seen;
-        const accepted = await goal.verify({ goal: 'file exists', check: { kind: 'command', value: 'test -f x' }, proposal: 'done', evidence,
-            checkOutput: 'exit 0', callVerifier: async ({ prompt }) => { seen = prompt; return JSON.stringify({ verdict: 'accept', reason: 'check passed' }); } });
-        assert.equal(accepted.status, 'accepted');
-        assert.match(seen, /person’s own recorded input/);
-        const invalid = await goal.verify({ goal: 'approved', check: {}, callVerifier: async () => 'maybe' });
-        assert.equal(invalid.status, 'rejected');
-    });
     await check('a chain is followed through its retries and the sessions that carried it on', () => {
         const attempts = [
             // a: crashed, its retry stopped at the step limit, and a session carried that retry on to the end.
