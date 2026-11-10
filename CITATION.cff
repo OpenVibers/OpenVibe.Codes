@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use OpenVibe.Codes in research or a product, cite it as below."
+title: openvibe-codes
+type: software
+authors:
+  - name: OpenVibe
+    alias: OpenVibers
+    website: https://openvibe.network
+repository-code: https://github.com/OpenVibers/OpenVibe.Codes
+url: https://openvibe.codes
+license: AGPL-3.0-only
+abstract: "A coding-agent workspace for Claude Code, Codex, OpenCode and DeepSeek across your computers, at openvibe.codes."
+keywords:
+  - openvibe
+  - ai
+  - claude-code
+  - codex
+  - coding-agents

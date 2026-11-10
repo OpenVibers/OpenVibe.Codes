@@ -2,6 +2,9 @@
 
 > Code with any agent: the open coding-agent harness for Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API and models you host yourself, and the way to improve OpenVibe itself.
 
+**Live site:** https://openvibe.codes · **API docs:** https://openvibe.services · **For AI:** https://openvibe.codes/llms.txt
+**Run it:** `npm ci && npm run dev` (Node 22 or newer) · **Tests:** `npm test`
+
 **Status:** alpha. Public at `https://openvibe.codes` (openvibe-ovh, unit `openvibe-codes` on 127.0.0.1:4900 behind nginx). On 2026-10-08 the owner made Codes the open, modular coding-agent harness; the developer console that used to live here (projects, apps, keys, grants, the API reference, OAuth and webhook tools, releases) moved to [OpenVibe.Services](https://github.com/OpenVibers/OpenVibe.Services) at `https://openvibe.services`, and every one of its addresses here answers a permanent redirect there. See [STATUS.json](STATUS.json) for exactly what works and what does not.
 **Domain:** `openvibe.codes` · **Port:** 4900 · **Service id:** `codes`
 **Plan:** plan T16 (the coding-harness fabric); the harness boundaries are [ADR-050](docs/adr/050-codes-harness-fabric.md) (proposed).
