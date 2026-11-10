@@ -38,6 +38,9 @@ function fake(dir, name, lines) {
         assert.equal(res.sessionId, 's-1');
         assert.equal(res.summary, 'landed');
         assert.equal(res.ok, true);
+        assert.equal(res.promptLayers.at(-1).layer, 'task');
+        assert.equal(res.promptLayers.at(-1).text, 'do it');
+        assert.ok(res.promptLayers.slice(0, -1).every((part) => part.source && part.version === 1));
         assert.ok(fs.existsSync(res.log), 'the feed is kept');
         fs.rmSync(dir, { recursive: true, force: true });
     });

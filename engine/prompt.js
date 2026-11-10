@@ -63,12 +63,14 @@ function assemble({ brief, dir, env = process.env, know } = {}) {
     const houseRules = fragment('house-rules.md');
     const repo = repomap(dir);
     const learned = lessons({ file: know, repo: repo.repo, brief, env });
+    // Every prompt section is inspectable as a versioned layer. Stable layers stay first;
+    // the request is always last so changing the task leaves the cached prefix byte-identical.
     const parts = [
-        { name: 'git-rule', text: gitRule },
-        { name: 'house-rules', text: houseRules },
-        { name: 'lessons', text: learned },
-        { name: 'repo-digest', text: repo.text },
-        { name: 'brief', text: String(brief || '') },
+        { name: 'git-rule', layer: 'platform', source: 'engine/fragments/git-rule.md', version: 1, text: gitRule },
+        { name: 'house-rules', layer: 'product', source: 'engine/fragments/house-rules.md', version: 1, text: houseRules },
+        { name: 'lessons', layer: 'role', source: 'Know recall', version: 1, text: learned },
+        { name: 'repo-digest', layer: 'role', source: 'engine/repomap.js', version: 1, text: repo.text },
+        { name: 'brief', layer: 'task', source: 'launch request', version: 1, text: String(brief || '') },
     ].filter((p) => p.text && p.text.trim());
     return { text: parts.map((p) => p.text).join('\n\n'), parts };
 }
