@@ -182,6 +182,10 @@ function parseArgs(raw, env = process.env) {
     if (!a || typeof a !== 'object' || Array.isArray(a)) throw new Error('the job input must be an object');
     const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
     const effort = EFFORTS.includes(a.effort) ? a.effort : null;
+    // AL3: a job may ask the OpenVibe.AI agent for an advisor; the caps and the model choice belong to AI.
+    const advisor = a.advisor === true ? true
+        : a.advisor && typeof a.advisor === 'object' && !Array.isArray(a.advisor) && (a.advisor.model == null || /^[A-Za-z0-9][A-Za-z0-9._:-]*\/[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$/.test(String(a.advisor.model)))
+            ? (a.advisor.model ? { model: String(a.advisor.model) } : {}) : null;
     const kind = a.kind === 'bench' ? 'bench' : a.kind === 'conductor' ? 'conductor' : 'code';
     const prompt = typeof a.prompt === 'string' ? a.prompt.trim() : '';
     if (!prompt || prompt.length > MAX_PROMPT) throw new Error(`prompt must be 1-${MAX_PROMPT} characters`);
@@ -251,6 +255,7 @@ function parseArgs(raw, env = process.env) {
         agent: typeof a.agent === 'string' && /^[a-z0-9-]{1,40}$/.test(a.agent) ? a.agent : null,
         model: typeof a.model === 'string' && a.model.length <= 100 ? a.model : null,
         ...(effort ? { effort } : {}),
+        ...(advisor ? { advisor } : {}),
         // Know K5: the lessons and facts earlier runs learned, from the server's own store and already a short block.
         // It is prepended to the prompt in runJob, so every harness (CLI or API) gets it the same way.
         ...(typeof a.knowledge === 'string' && a.knowledge.trim() ? { knowledge: a.knowledge.trim().slice(0, 4000) } : {}),
@@ -765,7 +770,8 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             say({ t: 'step', text: 'Preparing an empty benchmark workspace' });
         }
         const run = harness.run({
-            prompt: agentPrompt(job), task: 'edit', agent: job.agent, model: job.model, effort: job.effort || null, cwd: work,
+            prompt: agentPrompt(job), task: 'edit', agent: job.agent, model: job.model, effort: job.effort || null,
+            advisor: job.advisor || null, cwd: work,
             permission: job.permission, handoff: !job.agent, maxAttempts: job.kind === 'conductor' ? 1 : 3,
             // A job on the person's Node runs in its sandbox (own namespaces, a read-only root, no home folder, only
             // what the job was given); the Link sets OPENVIBE_JOB_ID there. Only inside it may an agent with no

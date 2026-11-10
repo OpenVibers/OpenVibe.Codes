@@ -212,6 +212,21 @@ const toolResults = (events) => events.filter((e) => e.type === 'user').flatMap(
         assert.deepStrictEqual([input.file_path, input.content], ['note.txt', 'hello'], 'a new file shows what it holds');
     });
 
+    await check('OpenVibe.AI: the run\'s effort and advisor are forwarded on every turn', async () => {
+        const forwardEnv = { ...env, OPENVIBE_AI_URL: api.url, OPENVIBE_AI_TOKEN: 'ov-task-token' };
+        const forward = createHarness({ env: forwardEnv, store: createStore({ env: forwardEnv }) });
+        api.set([{ content: 'done' }]);
+        const events = await collect(forward.run({ prompt: 'x', agent: 'openvibe-ai', cwd: work, permission: 'read', handoff: false, effort: 'low', advisor: { model: 'deepseek/deepseek-v4-pro' } }));
+        assert.strictEqual(events.find((e) => e.type === 'result').is_error, false);
+        assert.strictEqual(api.requests[0].body.effort, 'low');
+        assert.deepStrictEqual(api.requests[0].body.advisor, { model: 'deepseek/deepseek-v4-pro' });
+        assert.strictEqual(api.requests[0].body.model, 'openvibe');
+        api.set([{ content: 'done' }]);
+        await collect(forward.run({ prompt: 'x', agent: 'openvibe-ai', cwd: work, permission: 'read', handoff: false, advisor: true }));
+        assert.strictEqual(api.requests[0].body.advisor, true);
+        assert.ok(!('effort' in api.requests[0].body), 'no effort names no level');
+    });
+
     await check('an HTTP error ends the run with the server\'s message', async () => {
         api.set([{ status: 429, error: 'rate limited, slow down' }]);
         const events = await collect(h.run({ prompt: 'x', agent: 'openai-compatible', cwd: work, handoff: false }));
