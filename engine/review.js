@@ -95,7 +95,7 @@ function pickReviewer({ models = [], author = null } = {}) {
  * Quiet by default — the rules are the point: only what this diff introduces, at most three findings, no style, no
  * speculation, and an approval is an empty list rather than a "no issues" note.
  */
-function reviewPrompt({ patch = '', summary = '', tests = null, prior = [] } = {}) {
+function reviewPrompt({ patch = '', summary = '', tests = null, prior = [], reviewedHead = null, head = null } = {}) {
     const before = priorBrief(prior);
     return [
         'You are reviewing a change to a repository. Answer only with JSON:',
@@ -107,6 +107,7 @@ function reviewPrompt({ patch = '', summary = '', tests = null, prior = [] } = {
         'is wrong, "approved" with an empty findings list; never write a "no issues" finding or a comment.',
         '',
         before ? 'A previous review of an earlier revision raised the findings below. Treat them as the ledger: say in your\nsummary which are addressed, and report one again only when it still stands in this revision; then add only new\nissues this revision introduced. The ids stay stable across re-wrapping.\n' + before : '',
+        reviewedHead && head ? `This is an incremental re-review of ${reviewedHead}..${head}. The supplied diff is anchored on the last reviewed head; review only the changes in that range and reconcile the earlier findings above.` : '',
         summary ? 'What the change was asked to do:\n' + String(summary).slice(0, 4000) : '',
         tests ? 'The tests the author says pass:\n' + String(tests).slice(0, 2000) : '',
         '',
@@ -153,6 +154,8 @@ function readVerdict(text) {
  * @param {string} what.model the reviewer's model
  * @param {string} what.family the reviewer's family
  * @param {string} [what.patch] the diff
+ * @param {string} [what.reviewedHead] last commit already reviewed; when paired with head, patch is that incremental range
+ * @param {string} [what.head] current commit being reviewed
  * @param {string} [what.summary] what the change was for
  * @param {function} [what.fetchImpl] fetch, for a test
  * @returns {Promise<{ family: string, model: string, verdict: string, summary: string, resolved_model?: string, disclosure?: object }>} the verdict
@@ -166,12 +169,14 @@ async function reviewWithAi({
     summary = '',
     tests = null,
     prior = [],
+    reviewedHead = null,
+    head = null,
     fetchImpl = globalThis.fetch,
 } = {}) {
     if (!token) throw new Error('the review needs the task\'s token');
     if (!model) throw new Error('the review needs a model');
     const root = String(baseUrl).replace(/\/+$/, '');
-    const prompt = reviewPrompt({ patch, summary, tests, prior });
+    const prompt = reviewPrompt({ patch, summary, tests, prior, reviewedHead, head });
     const headers = { 'content-type': 'application/json', authorization: `Bearer ${token}` };
     let res = await fetchImpl(`${root}/chat/completions`, {
         method: 'POST', headers, body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] }),
@@ -206,6 +211,7 @@ async function reviewWithAi({
         family: familyOf(resolved) || family || familyOf(model) || null,
         model: resolved,
         requested_model: model,
+        ...(reviewedHead && head ? { reviewed_head: reviewedHead, head } : {}),
         ...(x && x.resolved_model ? { resolved_model: String(x.resolved_model) } : {}),
         ...(x ? { disclosure: x } : {}),
         ...(x && Number.isFinite(+x.cost_usd) ? { cost_usd: +x.cost_usd } : {}),
