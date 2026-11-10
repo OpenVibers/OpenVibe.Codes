@@ -9,15 +9,17 @@
  *
  * It clones `repo` (https only) into a scratch directory, runs the harness there with hand-offs, and prints one compact
  * JSON line per event on stdout (what the page shows live). The result goes to fd 3 (the Link's result channel), or as
- * a last `{ t: 'result_doc' }` line when fd 3 is not open: what the agents said, the changed files and the patch, and,
- * when `push` is asked and the machine holds GITHUB_TOKEN, the new branch it pushed (never the base branch) and its
- * pull request. Nothing here ever prints a token.
+ * a last `{ t: 'result_doc' }` line when fd 3 is not open: what the agents said, the changed files and the patch, the
+ * per-turn checkpoints (refs and the authored/imported turn diff, `checkpoints` in the document), and, when `push` is
+ * asked and the machine holds GITHUB_TOKEN, the new branch it pushed (never the base branch) and its pull request.
+ * Nothing here ever prints a token.
  */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 const { collectProof } = require('../engine/proof');
+const { createCheckpoints, toolPaths } = require('./checkpoints');
 
 const JOB_PROTOCOL = '1.0.0';
 /** The agents a conductor's turn may run on: every harness Codes offers. */
@@ -248,6 +250,8 @@ function parseArgs(raw, env = process.env) {
     } : null;
     return {
         kind, repo: repo ? repo.toString() : null, ref, prompt, permission, push,
+        // The task this job is an attempt of, when the server names it: the checkpoint refs carry it.
+        ...(typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? { taskId: a.task_id } : {}),
         ...(attached.length ? { attachments: attached } : {}),
         ...(limits ? { limits } : {}),
         ...(resume ? { resume } : {}),
@@ -782,11 +786,34 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             resume: job.resume || null,
             ...(adapterOptions ? { adapterOptions } : {}),
         });
+        // Per-turn checkpoints (Release 1, feat 11): the clone as the agent found it, then one ref per tool batch. They
+        // live in this clone only and are never pushed; the result carries the refs and the turn diffs so a review can
+        // see the agent's own work apart from what came from elsewhere. A checkpoint failure never fails the run.
+        let checkpoints = null;
+        if (job.kind === 'code') {
+            try {
+                checkpoints = createCheckpoints({ cwd: work, task: job.taskId || 'task', run: env.OPENVIBE_JOB_ID || run.runId });
+                checkpoints.capture('start');
+            } catch (e) {
+                say({ t: 'note', level: 'warning', text: `Checkpoints are off for this run: ${scrub(e.message)}` });
+                checkpoints = null;
+            }
+        }
         let last = null;
         // What the pictures may take of the result's room.
         const pictures = { left: MAX_RESULT_BYTES };
         for await (const e of run) {
             last = e;
+            // Before the tool batch the model just called runs, pin the tree: this is the checkpoint a failed repair
+            // returns to. The paths the batch names become the authored set of the next checkpoint's diff.
+            if (checkpoints && e.type === 'assistant' && ((e.message && e.message.content) || []).some((c) => c && c.type === 'tool_use')) {
+                try {
+                    checkpoints.authored(toolPaths(e));
+                    checkpoints.capture(`turn ${e._attempt || 1}`);
+                } catch (err) {
+                    say({ t: 'note', level: 'warning', text: `A checkpoint could not be written: ${scrub(err.message)}` });
+                }
+            }
             const c = compact(e, { pictures });
             for (const line of Array.isArray(c) ? c : c ? [c] : []) say(line);
             if (e.type === 'system' && e.subtype === 'init' && e.agent && !result.agents.includes(e.agent)) result.agents.push(e.agent);
@@ -806,6 +833,24 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         if (job.kind === 'conductor' && last && last.session_id) result.session = String(last.session_id).slice(0, 200);
         // A conductor works in the owner's own folder: its changes are theirs, not a patch for a pull request.
         Object.assign(result, job.kind === 'code' ? await changes(work) : { files: [], patch: '', patch_truncated: false });
+        if (checkpoints) {
+            try {
+                checkpoints.capture('final');
+                const turns = checkpoints.turns();
+                const baseline = checkpoints.entries[0];
+                const final = checkpoints.last();
+                result.checkpoints = {
+                    root: checkpoints.root,
+                    count: checkpoints.list().length,
+                    refs: checkpoints.list().slice(-20),
+                    // The turn diff: one row per turn, with the files the turn wrote split into authored and imported.
+                    turns: turns.slice(-20).map((t) => ({ ...t, files: t.files.slice(0, 20), truncated: t.files_total > 20 })),
+                    ...(baseline && final ? { turn_diff: checkpoints.diff(baseline, final) } : {}),
+                };
+            } catch (e) {
+                say({ t: 'note', level: 'warning', text: `The checkpoints could not be read back: ${scrub(e.message)}` });
+            }
+        }
         say({ t: 'step', text: result.files.length ? `${result.files.length} file${result.files.length === 1 ? '' : 's'} changed` : (job.kind === 'conductor' ? 'Turn done' : 'No files changed') });
         // The proof of the change: the tests it reaches, the pages it touched, the diff, and a second model's opinion.
         // It is collected here, in the clone the agent worked in, so the evidence is about this machine's work.

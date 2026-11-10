@@ -31,7 +31,7 @@ const rows = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
 
     await check('a manifest becomes one capability per field, and fits() reads it', () => {
         assert.deepStrictEqual(runtime.capabilities(runtime.forHarness('claude-code')), [
-            'harness:terminal-status-structured', 'harness:steering-resume', 'harness:checkpointing-none',
+            'harness:terminal-status-structured', 'harness:steering-resume', 'harness:checkpointing-git',
             'harness:subagents-native', 'harness:context-handoff-session', 'harness:enforcement-native',
         ]);
         assert.deepStrictEqual(runtime.requirements({ steering: 'resume', subagents: 'native' }), ['harness:steering-resume', 'harness:subagents-native']);
@@ -55,9 +55,9 @@ const rows = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
         for (const id of ['codex:codex-default', 'opencode:opencode-default', 'aider:aider-default', 'deepseek:deepseek-chat']) {
             assert.deepStrictEqual(r.candidates.find((c) => c.id === id), { id, included: false, reason: 'lacks harness:subagents-native' });
         }
-        const none = route({ task: 'edit', extra: { capabilities: ['harness:checkpointing-git'] }, harnesses, now: Date.now() });
-        assert.strictEqual(none.selected, null, 'no harness declares checkpointing yet');
-        assert.ok(none.candidates.every((c) => c.reason === 'lacks harness:checkpointing-git'));
+        const git = route({ task: 'edit', extra: { capabilities: ['harness:checkpointing-git'] }, harnesses, now: Date.now() });
+        assert.ok(git.selected, 'checkpointing is declared by every catalog harness');
+        assert.ok(git.candidates.every((c) => c.included), 'a job can checkpoint any harness');
     });
 
     await check('the tier router skips a ladder rung its manifest cannot meet', () => {

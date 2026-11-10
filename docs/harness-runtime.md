@@ -35,19 +35,20 @@ nothing, and is excluded only when a requirement is set.
 
 | harness | terminal_status | steering | checkpointing | subagents | context_handoff | enforcement |
 |---|---|---|---|---|---|---|
-| `claude-code` | structured | resume | none | native | session | native |
-| `claude-other` | structured | resume | none | native | session | native |
-| `codex` | structured | resume | none | none | session | native |
-| `opencode` | structured | resume | none | none | session | client-boundary |
-| `command-code` | structured | resume | none | none | session | client-boundary |
-| `aider` | parsed | none | none | none | none | client-boundary |
-| `minimax-code` | structured | resume | none | none | session | native |
-| `deepseek` | structured | resume | none | none | session | client-boundary |
-| `openvibe-ai` | structured | resume | none | none | session | client-boundary |
-| `openai-compatible` | structured | resume | none | none | session | client-boundary |
+| `claude-code` | structured | resume | git | native | session | native |
+| `claude-other` | structured | resume | git | native | session | native |
+| `codex` | structured | resume | git | none | session | native |
+| `opencode` | structured | resume | git | none | session | client-boundary |
+| `command-code` | structured | resume | git | none | session | client-boundary |
+| `aider` | parsed | none | git | none | none | client-boundary |
+| `minimax-code` | structured | resume | git | none | session | native |
+| `deepseek` | structured | resume | git | none | session | client-boundary |
+| `openvibe-ai` | structured | resume | git | none | session | client-boundary |
+| `openai-compatible` | structured | resume | git | none | session | client-boundary |
 
-`checkpointing` flips to `git` on every row when the per-turn checkpoint refs land (`harness/job.js`): the manifest is
-the runtime's declaration, so it must not claim a checkpoint before one exists.
+`checkpointing` is `git` on every row: a job pins its clone to `refs/codes/checkpoints/<task>/<run>/<n>` per turn
+(`harness/job.js`, `harness/checkpoints.js`) and can restore the last good one; the refs are the run's own and are
+never pushed.
 
 ## Using it
 
