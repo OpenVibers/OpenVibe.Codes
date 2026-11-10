@@ -131,7 +131,8 @@ function createPrBindings({ store, tasks, outbox = null, config = {}, log = cons
         }));
         let actorRef = null;
         if (parent.actor_ref) { try { const p = typeof parent.actor_ref === 'string' ? JSON.parse(parent.actor_ref) : parent.actor_ref; if (p && typeof p === 'object') actorRef = p; } catch { actorRef = null; } }
-        const task = await tasks.start({ subject: parent.subject, project: parent.project_id, args, via: parent.via, key: null, actorRef });
+        // The follow-up belongs to the same ticket on the same machine: the pin travels with it.
+        const task = await tasks.start({ subject: parent.subject, project: parent.project_id, args, via: parent.via, key: null, actorRef, pin: parent.pin || null });
         await db.exec(`UPDATE pr_bindings SET task_id = $2, fix_count = fix_count + 1, last_wake_at = $3, last_wake_reason = $4, updated_at = $3 WHERE id = $1`,
             [binding.id, task.id, store.now(), evidence.slice(0, 120)]);
         await emit('codes.pr.followup', parent.subject,

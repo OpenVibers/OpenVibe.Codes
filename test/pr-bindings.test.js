@@ -49,8 +49,8 @@ const merged = () => ghEvent('github.pr.updated', SUBJECT, { repo: 'openvibers/o
     let nextJob = 1;
     const run = {
         enabled: true,
-        async submit({ subject, project, args }) {
-            submissions.push({ subject, project, args });
+        async submit({ subject, project, args, node }) {
+            submissions.push({ subject, project, args, node: node || null });
             return { id: `job_01J8Z3Q4R5S6T7V8W9X0Y1Z2J${nextJob++}`, state: 'queued' };
         },
         async read() { throw new Error('not used'); },
@@ -145,8 +145,10 @@ const merged = () => ghEvent('github.pr.updated', SUBJECT, { repo: 'openvibers/o
         });
 
         await check('a conflict wakes the fix binding with the evidence', async () => {
-            // A fresh ticket on another PR, so the fix cap of #999 does not apply.
-            const other = await t.ctx.tasks.start({ subject: ada.subject, project: PROJECT, args: parseArgs(JSON.stringify({ repo: REPO, prompt: 'Another typo', permission: 'edit', push: { pull_request: true } })) });
+            // A fresh ticket on another PR, so the fix cap of #999 does not apply; pinned, so the follow-up
+            // stays on the ticket's machine.
+            const pin = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2D1';
+            const other = await t.ctx.tasks.start({ subject: ada.subject, project: PROJECT, args: parseArgs(JSON.stringify({ repo: REPO, prompt: 'Another typo', permission: 'edit', push: { pull_request: true } })), pin });
             await t.ctx.tasks.applyEvent(await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [other.id]), {
                 state: 'succeeded',
                 job: { ...terminalJob(), result: { ...terminalJob().result, push: { pushed: true, branch: 'al5-other', pull_request: 'https://github.com/OpenVibers/OpenVibe.Codes/pull/1000' } } },
@@ -158,6 +160,7 @@ const merged = () => ghEvent('github.pr.updated', SUBJECT, { repo: 'openvibers/o
             assert.strictEqual(r.json().outcome, 'woke', r.text);
             assert.strictEqual(submissions.length, before + 1);
             assert.match(submissions[submissions.length - 1].args.prompt, /mergeable_state "dirty"/);
+            assert.strictEqual(submissions[submissions.length - 1].node, pin, 'the follow-up stays on the ticket’s machine');
         });
 
         await check('a merged PR ends the binding', async () => {
