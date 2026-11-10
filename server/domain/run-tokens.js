@@ -51,6 +51,11 @@ function aiInternal(config) {
     return String((config.ai && (config.ai.internalUrl || config.ai.url)) || 'https://ai.openvibe.services').replace(/\/+$/, '');
 }
 
+/** The Exchange's compatible API: where the deepseek harness sends its turns (openvibe-sdk/exchange). */
+function exchangeBase(config) {
+    return String((config.exchange && config.exchange.url) || 'https://api.openvibe.exchange').replace(/\/+$/, '');
+}
+
 /**
  * The environment a harness of this kind gets: where to send its requests, the token to send, and (when the person
  * has a key for that provider) the header that says which key.
@@ -72,7 +77,14 @@ function envFor({ config, harness, token, provider, ownKey }) {
         env.OPENAI_CUSTOM_HEADERS = credential;
         env.OPENVIBE_CODES_HEADERS = JSON.stringify({ 'x-openvibe-credential': provider });
     }
-    if (harness === 'deepseek') { env.DEEPSEEK_BASE_URL = `${base}/v1`; env.DEEPSEEK_API_KEY = token; }
+    if (harness === 'deepseek') {
+        // The default path: the Exchange's compatible API through the SDK's Exchange client, the run token as the
+        // person's Exchange key. When the request names the person's own DeepSeek key (ownKey), that key rides the
+        // x-openvibe-credential header, which the Exchange client cannot add: that attempt keeps the AI path below.
+        if (!ownKey) { env.OPENVIBE_EXCHANGE_URL = exchangeBase(config); env.OPENVIBE_EXCHANGE_KEY = token; }
+        // A harness older than the Exchange client still reads these names; it sends the same token to OpenVibe.AI.
+        env.DEEPSEEK_BASE_URL = `${base}/v1`; env.DEEPSEEK_API_KEY = token;
+    }
     if (harness === 'openvibe-ai') { env.OPENVIBE_AI_URL = `${base}/v1`; env.OPENVIBE_AI_TOKEN = token; }
     if (harness === 'openai-compatible') { env.OPENVIBE_CODES_BASE_URL = `${base}/v1`; env.OPENVIBE_CODES_API_KEY = token; }
     return env;

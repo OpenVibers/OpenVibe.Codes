@@ -54,9 +54,11 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
   openvibe-codes mcp                          the Codes MCP tools for a Claude Code session: tasks, the fleet,
                                               shipping status, and the conductor's approvals (stdio JSON-RPC)
 
-Environment: DEEPSEEK_API_KEY · OPENVIBE_CODES_BASE_URL, OPENVIBE_CODES_MODEL, OPENVIBE_CODES_API_KEY
-(your own OpenAI-compatible server) · OPENVIBE_CODES_HOME (where runs are kept) · OPENVIBE_TOKEN (your
-Network token, for 'task') and OPENVIBE_CODES_URL (the server task talks to).
+Environment: OPENVIBE_EXCHANGE_KEY (your Exchange key; the deepseek agent calls OpenVibe.Exchange by
+default) · DEEPSEEK_API_KEY, OPENVIBE_CODES_DEEPSEEK_DIRECT=1 (your own DeepSeek key on a self-hosted run) ·
+OPENVIBE_CODES_BASE_URL, OPENVIBE_CODES_MODEL, OPENVIBE_CODES_API_KEY (your own OpenAI-compatible server) ·
+OPENVIBE_CODES_HOME (where runs are kept) · OPENVIBE_TOKEN (your Network token, for 'task') and
+OPENVIBE_CODES_URL (the server task talks to).
 Guide: https://openvibe.codes/start`;
 
 let agentMode = false;   // --for-agent: the final error handler answers in the same envelope

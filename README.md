@@ -65,7 +65,7 @@ More: [docs/cli.md](docs/cli.md).
 | OpenCode | `opencode run --format json` | `opencode` on PATH |
 | Command Code | `cmd --print --output-format json` | `cmd` on PATH |
 | Aider | `aider --message` | `aider` on PATH |
-| DeepSeek | the harness's own agent loop ([harness/adapters/api.js](harness/adapters/api.js)) | `DEEPSEEK_API_KEY` |
+| DeepSeek | the harness's own tool loop, through OpenVibe.Exchange's compatible API with the SDK's Exchange client ([harness/adapters/api.js](harness/adapters/api.js), `openvibe-sdk/exchange`) | `OPENVIBE_EXCHANGE_KEY` (an Exchange key from openvibe.exchange; a person's or the service's) or a Codes run token; `OPENVIBE_EXCHANGE_URL` overrides the endpoint. The direct DeepSeek API is used only for a self-hosted run: `OPENVIBE_CODES_DEEPSEEK_DIRECT=1` and your own `DEEPSEEK_API_KEY` (with `DEEPSEEK_BASE_URL` for another compatible server) |
 | OpenVibe.AI | the same loop against AI's `/v1/chat/completions`; each answer reports its cost | `OPENVIBE_APP_ID` + `OPENVIBE_APP_SECRET` (an app with `ai.app.run`; tokens are fetched and refreshed), or `OPENVIBE_AI_TOKEN`. App runs on AI's router use free capacity without tools, so name your project's own provider: `OPENVIBE_AI_SECRET` (a project secret granted to `ai` for reveal to the provider's origin), `OPENVIBE_AI_PROVIDER_URL` (default `https://api.openai.com/v1`), `OPENVIBE_AI_PROVIDER_MODEL`. The key stays in OpenVibe.Network, never on the machine |
 | Your own model | the same loop against any OpenAI-compatible server | `OPENVIBE_CODES_BASE_URL`, `OPENVIBE_CODES_MODEL`, optional `OPENVIBE_CODES_API_KEY` |
 
