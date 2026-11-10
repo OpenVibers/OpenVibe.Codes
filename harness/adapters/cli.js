@@ -63,7 +63,7 @@ const claudeCode = {
         const mode = o.permissionMode || { read: 'plan', edit: 'acceptEdits', full: 'bypassPermissions' }[t.permission] || 'plan';
         const args = ['-p', t.prompt, '--output-format', 'stream-json', '--verbose', '--permission-mode', mode];
         if (t.model) args.push('--model', t.model);
-        if (t.effort) args.push('--effort', effortFor('claude-code', t.effort));
+        { const effort = effortFor('claude-code', t.effort); if (effort) args.push('--effort', effort); }
         if (t.resume) args.push('--resume', t.resume);
         if (t.maxTurns) args.push('--max-turns', String(t.maxTurns));
         // MCP servers this session may use (the conductor's Codes tools): a config file, and the tools it may call
@@ -97,7 +97,7 @@ const codex = {
             ? ['exec', 'resume', t.resume, '--json', '--skip-git-repo-check']
             : ['exec', '--json', '--skip-git-repo-check', '-C', t.cwd, '-s', sandbox];
         if (t.model) args.push('-m', t.model);
-        if (t.effort) args.push('-c', `model_reasoning_effort="${effortFor('codex', t.effort)}"`);
+        { const effort = effortFor('codex', t.effort); if (effort) args.push('-c', `model_reasoning_effort="${effort}"`); }
         // An MCP server this session may use (the conductor's Codes tools, when Codex takes a conductor's turn): its
         // command and arguments as config overrides, TOML values. Nothing secret rides here: the launcher holds the token.
         const mcp = t.options && t.options.mcpServer;
@@ -215,7 +215,7 @@ const commandCode = {
         const args = [`--print=${t.prompt}`, '--output-format', 'json', '--skip-onboarding', '--no-auto-update', '-t'];
         if (unattended(t)) args.push('--yolo');
         if (t.model) args.push('-m', t.model);
-        if (t.effort) args.push('--effort', effortFor('command-code', t.effort));
+        { const effort = effortFor('command-code', t.effort); if (effort) args.push('--effort', effort); }
         if (t.resume) args.push('--resume', t.resume);
         if (t.maxTurns) args.push('--max-turns', String(t.maxTurns));
         const startedAt = Date.now();
@@ -254,7 +254,7 @@ const aider = {
         if (t.permission === 'edit' && !t.sandboxed) args.push('--no-suggest-shell-commands');
         if (t.permission === 'read') args.push('--dry-run');
         if (t.model) args.push('--model', t.model);
-        if (t.effort) args.push('--reasoning-effort', effortFor('aider', t.effort));
+        { const effort = effortFor('aider', t.effort); if (effort) args.push('--reasoning-effort', effort); }
         const startedAt = Date.now();
         const lines = [];
         let started = false;

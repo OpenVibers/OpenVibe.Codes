@@ -55,6 +55,14 @@ const ALL = ['off', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 
         assert.equal(stepUp('medium', EFFORTS.cc), 'high');
         assert.equal(stepUp('max', EFFORTS.cc), 'max');
         assert.equal(stepUp('medium', EFFORTS.cx), 'high');
+        assert.equal(stepUp('auto', EFFORTS.cx), 'high', 'an unknown level retries from medium, not from the bottom');
+        assert.equal(stepUp(null, EFFORTS.cx), 'high');
+    });
+
+    await check('auto is no setting: the harness default applies', () => {
+        assert.equal(fitEffort('cc', 'auto'), null);
+        assert.equal(fitEffort('cx', 'auto'), null);
+        assert.equal(fitEffort('oc', 'auto'), null);
     });
 
     await check('a blocked model is replaced by one the harness still lists', () => {

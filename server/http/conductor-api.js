@@ -225,9 +225,11 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
         const agent = wanted;
         if (agent && !harnesses.list().some((h) => h.id === agent)) return problem(req, res, 422, 'codes.agent_unknown', `agent is one of GET /api/v1/harnesses, and not an Anthropic one`);
         if (typeof b.repo !== 'string' || !/^https:\/\//.test(b.repo)) return problem(req, res, 422, 'codes.task_invalid', 'a sub-task needs the repository it works in (https://…)');
+        const effort = b.effort == null || b.effort === '' ? null : String(b.effort);
+        if (effort != null && !['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) return problem(req, res, 422, 'codes.effort_invalid', 'effort is auto, low, medium, high, xhigh or max');
         let args;
         try {
-            args = parseArgs(JSON.stringify({ repo: b.repo, ref: b.ref || null, prompt, ...(agent ? { agent } : {}), ...(model ? { model } : {}), permission: 'edit' }));
+            args = parseArgs(JSON.stringify({ repo: b.repo, ref: b.ref || null, prompt, ...(agent ? { agent } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), permission: 'edit' }));
         } catch (e) {
             return problem(req, res, 422, 'codes.task_invalid', e.message);
         }

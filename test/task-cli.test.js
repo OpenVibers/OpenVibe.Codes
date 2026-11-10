@@ -102,6 +102,20 @@ function taskDoc(over = {}) {
             assert.match(s.body.prompt, /tier: hard\s*$/);
         });
 
+        await check('start and continue carry --effort; a level that is none is exit 2', async () => {
+            const brief = path.join(dir, 'brief.md');
+            const r = await run(['start', '--repo', 'acme/thing', '--file', brief, '--name', 'c6-effort', '--effort', 'low']);
+            assert.strictEqual(r.code, 0, r.err + r.out);
+            assert.strictEqual(last().body.effort, 'low');
+            const c = await run(['continue', ID, '--effort', 'max']);
+            assert.strictEqual(c.code, 0, c.err + c.out);
+            assert.strictEqual(last().body.effort, 'max');
+            assert.strictEqual(last().path, `/api/v1/tasks/${ID}/continue`);
+            const bad = await run(['start', '--repo', 'acme/thing', '--file', brief, '--effort', 'ludicrous']);
+            assert.strictEqual(bad.code, 2);
+            assert.match(bad.err + bad.out, /--effort is auto, low, medium, high, xhigh or max/);
+        });
+
         await check('start twice with one --name answers the first task', async () => {
             const brief = path.join(dir, 'brief.md');
             const r = await run(['start', '--repo', 'https://github.com/acme/thing', '--file', brief, '--name', 'c6-run']);
