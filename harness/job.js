@@ -140,7 +140,7 @@ const ENV_NAMES = new Set([
     'DEEPSEEK_BASE_URL', 'DEEPSEEK_API_KEY',
     'OPENVIBE_AI_URL', 'OPENVIBE_AI_TOKEN',
     // The Exchange's compatible API (Codes C3's run token, or a person's Exchange key): the deepseek harness's default.
-    'OPENVIBE_EXCHANGE_URL', 'OPENVIBE_EXCHANGE_KEY', 'OPENVIBE_EXCHANGE_SERVICE_KEY',
+    'OPENVIBE_EXCHANGE_URL', 'OPENVIBE_EXCHANGE_KEY', 'OPENVIBE_EXCHANGE_SERVICE_KEY', 'OPENVIBE_EXCHANGE_MODEL',
     'OPENVIBE_CODES_BASE_URL', 'OPENVIBE_CODES_API_KEY',
     'OPENVIBE_CODES_MODEL', 'OPENVIBE_CODES_HEADERS',
     // A repository on OpenVibe Git: the person's credential line for its host. The local root lets a session on the

@@ -9,7 +9,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createHarness, exchangeKeyOf, platformHost } = require('../harness');
+const { createHarness, exchangeKeyOf, exchangeModelOf, platformHost } = require('../harness');
 const { createStore } = require('../harness/sessions');
 const { check, done } = require('./helpers/boot');
 
@@ -65,12 +65,20 @@ const collect = async (run) => { const out = []; for await (const e of run) out.
         assert.strictEqual(api.requests.length, 2, 'the tool loop ran both turns');
         assert.strictEqual(api.requests[0].url, 'https://api.openvibe.exchange/v1/chat/completions');
         assert.strictEqual(api.requests[0].headers.authorization, `Bearer ${EXCHANGE_KEY}`);
-        assert.strictEqual(api.requests[0].body.model, 'deepseek-chat', 'the same model id');
+        assert.strictEqual(api.requests[0].body.model, 'deepseek/deepseek-flash', 'the Exchange\'s id for the same DeepSeek model');
         assert.ok(api.requests[0].body.tools.some((t) => t.function.name === 'read_file'), 'the same tools');
         assert.ok(api.requests[1].body.messages.some((m) => m.role === 'tool' && m.content.includes('const name = 1;')), 'the tool result went back to the model');
         assert.strictEqual(r.receipt_id, 'rcpt_test', 'the Exchange receipt is on the result');
         assert.strictEqual(r.total_cost_usd, 0.00084, 'the reported costs are summed');
         assert.deepStrictEqual([r.usage.input_tokens, r.usage.cache_read_input_tokens, r.usage.output_tokens], [1200, 800, 200]);
+    });
+
+    await check('the agent\'s model ids map to the Exchange\'s catalog ids, and an Exchange id is not mapped again', () => {
+        assert.strictEqual(exchangeModelOf('deepseek-chat'), 'deepseek/deepseek-flash');
+        assert.strictEqual(exchangeModelOf('deepseek-reasoner'), 'deepseek/deepseek-v4-pro');
+        assert.strictEqual(exchangeModelOf('deepseek/deepseek-v4-pro'), 'deepseek/deepseek-v4-pro');
+        assert.strictEqual(exchangeModelOf('openvibe'), 'openvibe');
+        assert.strictEqual(exchangeModelOf('deepseek-chat', { OPENVIBE_EXCHANGE_MODEL: 'openvibe/auto' }), 'openvibe/auto');
     });
 
     await check('a service Exchange key is the fallback, and the Exchange URL can be pointed elsewhere', async () => {

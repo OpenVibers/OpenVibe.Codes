@@ -344,7 +344,8 @@ function refusalOf(name, status, body, model) {
 /**
  * apiAgent({ id, name, baseUrl, keyEnv, model, priceIn, priceOut, token, exchange, available }) → an adapter.
  * exchange: { baseUrl, key } or { baseUrl, token(env, fetch) } → every turn goes through OpenVibe.Exchange's
- * compatible API with the SDK's Exchange client, instead of the direct fetch. available(env) answers the catalog's
+ * compatible API with the SDK's Exchange client, instead of the direct fetch. mapModel(model, env) names the model
+ * the transport should ask for (the Exchange has its own catalog ids for the same models). available(env) answers the catalog's
  * "can this run here, and why not" for an adapter whose credentials are resolved by the caller.
  * extra(env) → fields added to every request body (OpenVibe.AI's x_openvibe.provider: the project's own provider).
  * token(env, fetch) → a bearer, asked before every request (OpenVibe.AI takes a five-minute Network token, refreshed by
@@ -361,7 +362,7 @@ function apiAgent(spec) {
             const doFetch = ctx.fetch || globalThis.fetch;
             const base = String(t.baseUrl || spec.baseUrl || (spec.exchange && spec.exchange.baseUrl) || '').replace(/\/+$/, '');
             const key = spec.keyEnv ? env[spec.keyEnv] : (t.apiKey || '');
-            const model = t.model || spec.model;
+            const model = spec.mapModel ? spec.mapModel(t.model || spec.model, env) : (t.model || spec.model);
             const level = LEVELS[t.permission] || 1;
             // Tools in a fixed name order, and the system message above never carries the task: the request prefix a
             // provider caches (system + tools) is byte-identical from one task to the next, and only the prompt differs.

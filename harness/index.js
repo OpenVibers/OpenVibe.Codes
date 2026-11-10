@@ -94,6 +94,19 @@ function exchangeKeyOf(env) {
  * A bare hosted run token at OpenVibe.AI (DEEPSEEK_BASE_URL there, DEEPSEEK_API_KEY = run token) goes through
  * Exchange: api.openvibe.exchange speaks the same compatible API and takes the same person's token.
  */
+/** The Exchange's catalog ids for the models the deepseek agent names (deepseek-chat is DeepSeek's own alias). */
+const EXCHANGE_MODELS = { 'deepseek-chat': 'deepseek/deepseek-flash', 'deepseek-reasoner': 'deepseek/deepseek-v4-pro' };
+/** A model the Exchange names itself (a catalog id or a dynamic alias) goes through as it is. */
+const EXCHANGE_NAME = /^(openvibe(\/|$)|@preset\/)/;
+
+/** The model the Exchange should run: its own id for the agent's model, a catalog id as given, a dynamic alias as given. */
+function exchangeModelOf(model, env) {
+    const named = String((env && env.OPENVIBE_EXCHANGE_MODEL) || model || '').trim();
+    if (EXCHANGE_NAME.test(named) || named.includes('/')) return named;
+    if (EXCHANGE_MODELS[named]) return EXCHANGE_MODELS[named];
+    return `deepseek/${named || 'deepseek-flash'}`;
+}
+
 function deepseekAdapter(env) {
     const ownKey = env.DEEPSEEK_API_KEY;
     const ownBase = trimSlash(env.DEEPSEEK_BASE_URL);
@@ -109,6 +122,9 @@ function deepseekAdapter(env) {
         return apiAgent({
             id: 'deepseek', name: 'DeepSeek', model: 'deepseek-chat',
             exchange: { baseUrl, ...exchange },
+            // The same DeepSeek model under the Exchange's own catalog id (deepseek/deepseek-flash is DeepSeek's
+            // V4.1 Flash, the model deepseek-chat names today); OPENVIBE_EXCHANGE_MODEL overrides it.
+            mapModel: exchangeModelOf,
             priceIn: 0.00027, priceOut: 0.0011,
             available: () => ({ available: true, where: baseUrl }),
         });
@@ -334,4 +350,4 @@ function createHarness({ env = process.env, fetch: fetchImpl = globalThis.fetch,
     return { agents, route, run, store, adapters };
 }
 
-module.exports = { createHarness, adaptersFor, availability, handoffNote, onPath, exchangeKeyOf, deepseekAdapter, platformHost };
+module.exports = { createHarness, adaptersFor, availability, handoffNote, onPath, exchangeKeyOf, deepseekAdapter, exchangeModelOf, platformHost };
