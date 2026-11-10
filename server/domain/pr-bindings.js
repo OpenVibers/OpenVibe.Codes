@@ -31,10 +31,12 @@ const ROLES = new Set(['review', 'verify', 'fix']);
 const MAX_FIXES_PER_PR = 3;
 /** Check conclusions that wake a verify|fix binding (a cancelled run is usually superseded, not broken). */
 const RED_CONCLUSIONS = new Set(['failure', 'timed_out', 'action_required']);
-/** A person's comment with this first word ends the binding instead of waking it. */
-const STOP_RE = /^\s*stop\b/i;
+/** A person's comment that is only "stop" (or starts "stop:" / "stop —") ends the binding instead of waking it.
+ *  A sentence that happens to begin with the word ("stop the flaky retry loop") is a normal comment. */
+const STOP_RE = /^\s*stop\s*(?:[:—–-]\s*.*)?[.!]?\s*$/i;
 const MAX_PROMPT = 16000;
 const MAX_BODY = 4000;
+const MAX_EVIDENCE = 6000;
 
 const slug = (v) => (typeof v === 'string' ? v.toLowerCase() : null);
 const num = (v) => (Number.isInteger(v) && v > 0 ? v : null);
@@ -109,8 +111,11 @@ function createPrBindings({ store, tasks, outbox = null, config = {}, log = cons
     };
 
     /** The follow-up prompt: the failing evidence first, the original task after, the no-merge rule in both. */
-    function followupPrompt({ binding, parent, evidence, fixN }) {
-        const head = `Automatic follow-up ${fixN} of ${MAX_FIXES_PER_PR} for ${binding.repo} pull request #${binding.pr_number} (ticket task ${parent.id}).\n\nEvidence from the PR:\n${evidence}\n\nThe branch is ${binding.branch || '(the PR branch)'}: check it out, fix it there, and push the same branch again — no new branch, no new pull request, and never merge anything yourself.`;
+    function followupPrompt({ binding, parent, evidence, fixN, automatic = true }) {
+        const lead = automatic
+            ? `Automatic follow-up ${fixN} of ${MAX_FIXES_PER_PR}`
+            : 'Follow-up requested by a person';
+        const head = `${lead} for ${binding.repo} pull request #${binding.pr_number} (ticket task ${parent.id}).\n\nEvidence from the PR:\n${evidence}\n\nThe branch is ${binding.branch || '(the PR branch)'}: it is already checked out, fix it there, and push the same branch again — no new branch, no new pull request, and never merge anything yourself.`;
         const tail = `\n\nThe original task was:\n${typeof parent.prompt === 'string' ? parent.prompt : ''}`;
         return (head + tail).slice(0, MAX_PROMPT);
     }
@@ -119,38 +124,47 @@ function createPrBindings({ store, tasks, outbox = null, config = {}, log = cons
      * Start one follow-up Run job for the binding's ticket: same repo, the PR branch checked out and pushed
      * again (update, non-force), no new PR. The binding moves to the new task. Throws when Run refuses.
      */
-    async function startFollowup(binding, evidence) {
+    async function startFollowup(binding, evidence, { automatic = true } = {}) {
         const parent = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [binding.task_id]);
         if (!parent) throw new Error(`ticket task ${binding.task_id} is gone`);
         if (!binding.branch) throw new Error('the binding names no branch to push again');
         const fixes = await fixesForPr(binding.repo, binding.pr_number);
-        const prompt = followupPrompt({ binding, parent, evidence, fixN: fixes + 1 });
+        const prompt = followupPrompt({ binding, parent, evidence, fixN: fixes + 1, automatic });
+        // The worker's own harness session, when the task's last attempt recorded one: the follow-up continues the
+        // same conversation instead of re-reading the repository from nothing. A machine without it falls back to
+        // the prompt (harness/job.js treats an unknown resume as the agent's own error and hands off normally).
+        const last = await db.maybe('SELECT agent, session FROM codes_attempts WHERE task_id = $1 ORDER BY n DESC LIMIT 1', [parent.id]);
+        const agent = (last && last.agent) || parent.agent || null;
+        const resume = last && typeof last.session === 'string' && last.session ? last.session : null;
         const args = parseArgs(JSON.stringify({
-            repo: parent.repo, ref: binding.branch, prompt, agent: parent.agent || null,
+            repo: parent.repo, ref: binding.branch, prompt, agent,
+            permission: 'edit',
             push: { branch: binding.branch, pull_request: false, update: true },
+            ...(resume ? { resume } : {}),
         }));
         let actorRef = null;
         if (parent.actor_ref) { try { const p = typeof parent.actor_ref === 'string' ? JSON.parse(parent.actor_ref) : parent.actor_ref; if (p && typeof p === 'object') actorRef = p; } catch { actorRef = null; } }
         const task = await tasks.start({ subject: parent.subject, project: parent.project_id, args, via: parent.via, key: null, actorRef });
-        await db.exec(`UPDATE pr_bindings SET task_id = $2, fix_count = fix_count + 1, last_wake_at = $3, last_wake_reason = $4, updated_at = $3 WHERE id = $1`,
-            [binding.id, task.id, store.now(), evidence.slice(0, 120)]);
+        await db.exec(`UPDATE pr_bindings SET task_id = $2, fix_count = fix_count + $5, last_wake_at = $3, last_wake_reason = $4, updated_at = $3 WHERE id = $1`,
+            [binding.id, task.id, store.now(), evidence.slice(0, 120), automatic ? 1 : 0]);
         await emit('codes.pr.followup', parent.subject,
-            { task_id: task.id, parent_task_id: parent.id, repo: binding.repo, pr_number: binding.pr_number, fix_n: fixes + 1 });
+            { task_id: task.id, parent_task_id: parent.id, repo: binding.repo, pr_number: binding.pr_number, fix_n: fixes + 1, automatic });
         return task;
     }
 
     /** One wake across the PR's active bindings of the given roles. → { started, skipped } of task ids. */
-    async function wake(rows, { roles, evidence, reason, eventId }) {
+    async function wake(rows, { roles, evidence, reason, eventId, automatic = true }) {
         const started = [];
         const skipped = [];
         if (!enabled) return { started, skipped, disabled: true };
-        if (await fixesForPr(rows[0].repo, rows[0].pr_number) >= MAX_FIXES_PER_PR) return { started, skipped, capped: true };
+        // The cap bounds automatic fixes only: a person's comment is a new instruction and may start a manual one.
+        if (automatic && await fixesForPr(rows[0].repo, rows[0].pr_number) >= MAX_FIXES_PER_PR) return { started, skipped, capped: true };
         for (const b of rows) {
             if (!roles.has(b.role)) { skipped.push(b.task_id); continue; }
             const current = await db.maybe('SELECT id, state FROM run_tasks WHERE id = $1', [b.task_id]);
             if (current && !['succeeded', 'failed', 'cancelled', 'expired'].includes(current.state)) { skipped.push(b.task_id); continue; }
             try {
-                const task = await startFollowup(b, evidence);
+                const task = await startFollowup(b, evidence, { automatic });
                 started.push(task.id);
                 log.info(`[Codes] pr-follow ${b.repo}#${b.pr_number} woke ${task.id} (${reason}, ${eventId})`);
             } catch (e) {
@@ -182,9 +196,16 @@ function createPrBindings({ store, tasks, outbox = null, config = {}, log = cons
         if (event.event_type === 'github.check.completed') {
             if (!RED_CONCLUSIONS.has(payload.conclusion)) return { outcome: 'ignored:green', task_ids: rows.map((b) => b.task_id), followed_up: [] };
             if (!active.length) return { outcome: 'ignored:ended', task_ids: rows.map((b) => b.task_id), followed_up: [] };
-            const evidence = `check "${payload.check_name || 'ci'}" concluded "${payload.conclusion}"`
-                + `${payload.html_url ? ` (${payload.html_url})` : ''}${payload.head_sha ? ` at ${String(payload.head_sha).slice(0, 12)}` : ''}`
-                + ` — find why it failed and fix the branch.`;
+            const out = payload.output && typeof payload.output === 'object' ? payload.output : null;
+            const parts = [`check "${payload.check_name || 'ci'}" concluded "${payload.conclusion}"`
+                + `${payload.head_sha ? ` at ${String(payload.head_sha).slice(0, 12)}` : ''}`
+                + `${payload.html_url ? ` (${payload.html_url})` : ''}`];
+            if (out && out.title) parts.push(`title: ${String(out.title).slice(0, 500)}`);
+            if (out && out.summary) parts.push(`summary: ${String(out.summary).slice(0, 2000)}`);
+            if (out && out.text) parts.push(`log tail:\n${String(out.text).slice(0, 4000)}`);
+            if (payload.details_url) parts.push(`details: ${String(payload.details_url).slice(0, 500)}`);
+            parts.push('— find why it failed on this branch and fix it.');
+            const evidence = parts.join('\n').slice(0, MAX_EVIDENCE);
             const r = await wake(active, { roles: new Set(['verify', 'fix']), evidence, reason: 'red-check', eventId: event.event_id });
             if (r.disabled) return { outcome: 'ignored:follow_disabled', task_ids: active.map((b) => b.task_id), followed_up: [] };
             if (r.capped) return { outcome: 'ignored:max_fixes', task_ids: active.map((b) => b.task_id), followed_up: [] };
@@ -197,10 +218,16 @@ function createPrBindings({ store, tasks, outbox = null, config = {}, log = cons
                 await endAll(rows, reason);
                 return { outcome: `ended:${reason}`, task_ids: rows.map((b) => b.task_id), followed_up: [] };
             }
-            if (payload.mergeable_state === 'dirty') {
+            if (payload.mergeable_state === 'dirty' || payload.mergeable === false) {
                 if (!active.length) return { outcome: 'ignored:ended', task_ids: rows.map((b) => b.task_id), followed_up: [] };
-                const evidence = `the pull request reports mergeable_state "dirty"${payload.html_url ? ` (${payload.html_url})` : ''}`
-                    + ` — fetch the base, list the conflicted files, resolve them on the branch, and push it again.`;
+                const where = [payload.head_ref ? `branch ${payload.head_ref}` : null, payload.base ? `onto ${payload.base}` : null].filter(Boolean).join(' ');
+                const evidence = [`the pull request reports mergeable_state "${payload.mergeable_state || 'dirty'}"`
+                    + `${where ? ` (${where})` : ''}`
+                    + `${payload.changed_files ? `, ${payload.changed_files} file${payload.changed_files === 1 ? '' : 's'} changed` : ''}`
+                    + `${payload.html_url ? ` (${payload.html_url})` : ''}`,
+                    payload.files_url ? `the changed files: ${payload.files_url}` : null,
+                    '— fetch the base branch, run `git merge-tree` (or a local merge) to list the conflicted files, resolve them on this branch, and push it again.']
+                    .filter(Boolean).join('\n').slice(0, MAX_EVIDENCE);
                 const r = await wake(active, { roles: new Set(['fix']), evidence, reason: 'conflict', eventId: event.event_id });
                 if (r.disabled) return { outcome: 'ignored:follow_disabled', task_ids: active.map((b) => b.task_id), followed_up: [] };
                 if (r.capped) return { outcome: 'ignored:max_fixes', task_ids: active.map((b) => b.task_id), followed_up: [] };
@@ -227,8 +254,10 @@ function createPrBindings({ store, tasks, outbox = null, config = {}, log = cons
                 targets = [{ ...last, state: 'active' }];
                 reopened = true;
             }
-            const evidence = `${payload.author || 'someone'} commented on the pull request${payload.html_url ? ` (${payload.html_url})` : ''}:\n${body} — address it on the branch and push it again.`;
-            const r = await wake(targets, { roles: new Set(['review', 'fix']), evidence, reason: 'comment', eventId: event.event_id });
+            const where = payload.path ? ` on ${payload.path}${payload.line ? `:${payload.line}` : ''}` : '';
+            const evidence = `${payload.author || 'someone'} commented${where} on the pull request${payload.html_url ? ` (${payload.html_url})` : ''}:\n${body}\n— address it on the branch and push it again.`;
+            // A person's comment is manual: it can start a fix past the automatic cap.
+            const r = await wake(targets, { roles: new Set(['review', 'fix']), evidence, reason: 'comment', eventId: event.event_id, automatic: false });
             if (r.disabled) return { outcome: 'ignored:follow_disabled', task_ids: targets.map((b) => b.task_id), followed_up: [] };
             if (r.capped) return { outcome: 'ignored:max_fixes', task_ids: targets.map((b) => b.task_id), followed_up: [] };
             if (!r.started.length) return { outcome: 'ignored:fix_running', task_ids: targets.map((b) => b.task_id), followed_up: [] };

@@ -35,7 +35,16 @@ const ghEvent = (eventType, subjectId, payload) => ({
     subject: { type: 'pr', id: subjectId }, payload,
 });
 const SUBJECT = 'openvibers/openvibe.codes#999';
-const redCheck = () => ghEvent('github.check.completed', SUBJECT, { repo: 'openvibers/openvibe.codes', pr_number: 999, kind: 'check_run', conclusion: 'failure', check_name: 'codes-ci / tests', head_sha: 'abc123', html_url: 'https://github.com/OpenVibers/OpenVibe.Codes/actions/runs/111' });
+const redCheck = () => ghEvent('github.check.completed', SUBJECT, {
+    repo: 'openvibers/openvibe.codes', pr_number: 999, kind: 'check_run', conclusion: 'failure',
+    check_name: 'codes-ci / tests', head_sha: 'abc123',
+    html_url: 'https://github.com/OpenVibers/OpenVibe.Codes/actions/runs/111/job/222',
+    details_url: 'https://github.com/OpenVibers/OpenVibe.Codes/actions/runs/111',
+    output: {
+        title: '1 failing test', summary: 'test/pr-bindings.test.js failed on the branch',
+        text: 'not ok 3 - a red check wakes the worker once\n  AssertionError: expected 0 to equal 1\n# fail 1\n',
+    },
+});
 const greenCheck = () => ghEvent('github.check.completed', SUBJECT, { repo: 'openvibers/openvibe.codes', pr_number: 999, kind: 'check_run', conclusion: 'success', check_name: 'codes-ci / tests', head_sha: 'abc123', html_url: 'https://github.com/OpenVibers/OpenVibe.Codes/actions/runs/112' });
 const conflict = () => ghEvent('github.pr.updated', SUBJECT, { repo: 'openvibers/openvibe.codes', pr_number: 999, action: 'synchronize', merged: false, mergeable_state: 'dirty', head_sha: 'abc123', base: 'main', html_url: PR_URL });
 const personComment = (body) => ghEvent('github.pr.commented', SUBJECT, { repo: 'openvibers/openvibe.codes', pr_number: 999, author: 'owner-person', author_type: 'User', state: 'commented', body, html_url: `${PR_URL}#issuecomment-1` });
@@ -86,8 +95,10 @@ const merged = () => ghEvent('github.pr.updated', SUBJECT, { repo: 'openvibers/o
         });
 
         let parent;
-        await check('a red check wakes the worker once, with the evidence and no merge', async () => {
+        await check('a red check wakes the worker once, with the log tail and the same session, and no merge', async () => {
             parent = await db.maybe('SELECT * FROM run_tasks ORDER BY created_at DESC LIMIT 1');
+            // The worker's last attempt recorded its harness session; the follow-up continues that conversation.
+            await db.exec("UPDATE codes_attempts SET session = 'sess_pr_follow_1', agent = 'claude-code' WHERE task_id = $1", [parent.id]);
             const before = submissions.length;
             const r = await deliver(redCheck());
             assert.strictEqual(r.status, 200, r.text);
@@ -99,8 +110,12 @@ const merged = () => ghEvent('github.pr.updated', SUBJECT, { repo: 'openvibers/o
             assert.strictEqual(job.args.push.branch, BRANCH);
             assert.strictEqual(job.args.push.pull_request, false);
             assert.strictEqual(job.args.push.update, true);
+            assert.strictEqual(job.args.agent, 'claude-code');
+            assert.strictEqual(job.args.resume, 'sess_pr_follow_1');
             assert.match(job.args.prompt, /Automatic follow-up 1 of 3/);
             assert.match(job.args.prompt, /concluded "failure"/);
+            assert.match(job.args.prompt, /not ok 3 - a red check wakes the worker once/);
+            assert.match(job.args.prompt, /\/actions\/runs\/111/);
             assert.match(job.args.prompt, /never merge/);
             assert.ok(!/merge( |ing|d) /.test(job.args.prompt.replace('never merge', '')), 'the follow-up must not be told to merge');
             const b = await db.maybe('SELECT * FROM pr_bindings WHERE repo = $1 AND pr_number = $2 ORDER BY created_at ASC', ['openvibers/openvibe.codes', 999]);
@@ -130,6 +145,14 @@ const merged = () => ghEvent('github.pr.updated', SUBJECT, { repo: 'openvibers/o
             const r = await deliver(redCheck());
             assert.strictEqual(r.json().outcome, 'ignored:max_fixes', r.text);
             assert.strictEqual(submissions.length, before, 'the fourth red must not start a follow-up');
+
+            // But a person's comment is a new instruction: it may start a manual fix past the automatic cap.
+            const manual = await deliver(personComment('please fix the last failure by hand'));
+            assert.strictEqual(manual.json().outcome, 'woke', manual.text);
+            assert.strictEqual(submissions.length, before + 1);
+            assert.match(submissions[submissions.length - 1].args.prompt, /Follow-up requested by a person/);
+            const after = await db.maybe('SELECT fix_count, task_id FROM pr_bindings WHERE repo = $1 AND pr_number = $2 ORDER BY created_at ASC', ['openvibers/openvibe.codes', 999]);
+            assert.strictEqual(after.fix_count, 3, 'a manual fix does not count against the automatic cap');
         });
 
         await check('a green check changes nothing', async () => {
@@ -174,7 +197,7 @@ const merged = () => ghEvent('github.pr.updated', SUBJECT, { repo: 'openvibers/o
 
         await check('a person\'s "stop" ends the binding; a person\'s comment re-opens and wakes it', async () => {
             // Re-openable ticket on PR #1000 (one fix used, cap not reached).
-            const stop1000 = personComment('stop for now, I will finish this myself');
+            const stop1000 = personComment('stop — for now, I will finish this myself');
             stop1000.subject = { type: 'pr', id: 'openvibers/openvibe.codes#1000' };
             stop1000.payload = { ...stop1000.payload, pr_number: 1000 };
             const wake1000 = personComment('actually the test still fails, please fix it');
@@ -224,6 +247,11 @@ const merged = () => ghEvent('github.pr.updated', SUBJECT, { repo: 'openvibers/o
             assert.strictEqual(parsePrUrl('not a url'), null);
             assert.deepStrictEqual([...RED_CONCLUSIONS].sort(), ['action_required', 'failure', 'timed_out']);
             assert.strictEqual(MAX_FIXES_PER_PR, 3);
+            const { STOP_RE } = require('../server/domain/pr-bindings');
+            assert.ok(STOP_RE.test('stop'));
+            assert.ok(STOP_RE.test('Stop.'));
+            assert.ok(STOP_RE.test('stop — I will take this one from here'));
+            assert.ok(!STOP_RE.test('stop the flaky retry loop, it is noisy'));
             assert.throws(() => parseArgs(JSON.stringify({ repo: REPO, prompt: 'x', push: { branch: 'b', ref: undefined, pull_request: true, update: true } })), /never opens a new pull request/);
             assert.throws(() => parseArgs(JSON.stringify({ repo: REPO, ref: 'main', prompt: 'x', push: { branch: 'other', update: true } })), /branch === ref/);
             const ok = parseArgs(JSON.stringify({ repo: REPO, ref: 'b', prompt: 'x', push: { branch: 'b', update: true } }));
