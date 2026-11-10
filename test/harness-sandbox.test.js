@@ -70,6 +70,17 @@ const collect = async (run) => { const out = []; for await (const e of run) out.
             assert.ok(inBox.candidates.filter((c) => /^(opencode|command-code):/.test(c.id)).some((c) => c.included !== false), 'inside a sandbox they may be picked');
         });
 
+        await check('Claude Code carries the deny list, and full keeps only the push', async () => {
+            const after = (argv, flag) => argv[argv.indexOf(flag) + 1];
+            for (const adapter of [cli.claudeCode, cli.claudeOther]) {
+                const edit = after(await argvOf(adapter, { permission: 'edit' }), '--disallowedTools');
+                assert.ok(edit.includes('Bash(git push:*)'), 'a run never pushes');
+                assert.ok(edit.includes('Bash(git reset:*)') && edit.includes('Bash(rm -rf:*)'), 'reset and recursive rm ride along');
+                assert.ok(edit.includes('Read(.env*)'), 'no .env reads');
+                assert.strictEqual(after(await argvOf(adapter, { permission: 'full' }), '--disallowedTools'), 'Bash(git push:*)', 'full keeps only the push');
+            }
+        });
+
         await check('a run that names one for "edit" outside a sandbox is refused in words, and nothing starts', async () => {
             const events = await collect(harness().run({ prompt: 'tidy it', agent: 'opencode', permission: 'edit', cwd: dir, handoff: false }));
             const result = events.find((e) => e.type === 'result');

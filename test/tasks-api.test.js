@@ -80,6 +80,21 @@ const { boot, check, done } = require('./helpers/boot');
             assert.strictEqual(calls.filter((c) => c[0] === 'submit').length, 1, 'one job');
         });
 
+        await check('a task starts with the effort it asks for; a level that is none is 422', async () => {
+            const r = await call('POST', '/tasks', { body: { ...ask, idempotency_key: 'act_task_1:effort', effort: 'high' } });
+            assert.strictEqual(r.status, 201, JSON.stringify(r.json));
+            const submit = calls.at(-1)[1];
+            assert.strictEqual(submit.args.effort, 'high');
+            const attempt = await db.one('SELECT effort FROM codes_attempts WHERE task_id = $1 ORDER BY n', [r.json.task.id]);
+            assert.strictEqual(attempt.effort, 'high');
+            const auto = await call('POST', '/tasks', { body: { ...ask, idempotency_key: 'act_task_1:auto', effort: 'auto' } });
+            assert.strictEqual(auto.status, 201, JSON.stringify(auto.json));
+            assert.strictEqual(calls.at(-1)[1].args.effort, 'auto');
+            const bad = await call('POST', '/tasks', { body: { ...ask, idempotency_key: 'act_task_1:bad', effort: 'ludicrous' } });
+            assert.strictEqual(bad.status, 422);
+            assert.strictEqual(bad.json.code, 'codes.effort_invalid');
+        });
+
         await check('reading follows Run; the machine’s result is passed on only as codes.task@1 allows', async () => {
             state = 'succeeded';
             result = {

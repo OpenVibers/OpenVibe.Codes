@@ -120,6 +120,17 @@ async function fakeGitHub() {
             subTask = out.id;
         });
 
+        await check('codes_task_start: the effort it asks for reaches the sub-task', async () => {
+            const before = calls.length;
+            const out = await mcp.call('codes_task_start', { prompt: 'Fix the parser and add a test.', repo: 'octocat/Hello-World', agent: 'codex', effort: 'low' });
+            assert.ok(out.id, JSON.stringify(out));
+            assert.strictEqual(calls.length, before + 1);
+            assert.strictEqual(calls.at(-1)[1].args.effort, 'low');
+            assert.ok(!('note' in out), 'effort is a field now: no note about it');
+            const machine = await mcp.call('codes_task_start', { prompt: 'Fix the parser and add a test.', repo: 'octocat/Hello-World', agent: 'codex', machine: 'ada-laptop' });
+            assert.match(machine.note || '', /machine is not a field/);
+        });
+
         await check('codes_task_start: the rule, refused here and not sent', async () => {
             const anthropic = await mcp.call('codes_task_start', { prompt: 'x', repo, agent: 'claude-code' });
             assert.match(anthropic.error, /Anthropic/);

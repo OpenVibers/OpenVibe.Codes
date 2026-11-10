@@ -14,7 +14,7 @@ const path = require('path');
 const http = require('http');
 const { createHarness } = require('../harness');
 const { createStore } = require('../harness/sessions');
-const { adviceTranscript } = require('../harness/adapters/api');
+const { refusedCommand, runTool, adviceTranscript } = require('../harness/adapters/api');
 const { check, done } = require('./helpers/boot');
 
 /** A chat-completions server that answers from a script: each request gets the next scripted message. Advice calls
@@ -206,6 +206,52 @@ const toolResults = (events) => events.filter((e) => e.type === 'user').flatMap(
         assert.strictEqual(res[4].content, 'no matches', 'grep did not follow the linked directory');
         assert.ok(!res.some((c) => /SECRET=1|OUTSIDE-SECRET-KEY/.test(c.content)), 'nothing behind a link came back');
         assert.ok(!fs.existsSync(path.join(dir, 'outside-dir', 'planted.txt')), 'no write through the link');
+    });
+
+    await check('run_command refuses a push, a reset, a recursive rm and a .env path before anything spawns', async () => {
+        api.set([{ calls: [
+            ['run_command', { command: 'git push --force origin main; touch escaped.txt' }],
+            ['run_command', { command: 'npm test && git reset --hard HEAD' }],
+            ['run_command', { command: 'echo tidying; rm -rf src' }],
+            ['run_command', { command: 'cat .env' }],
+            ['run_command', { command: 'git --version' }],
+        ] }, { content: 'ok' }]);
+        const events = await collect(h.run({ prompt: 'push it', agent: 'openai-compatible', cwd: work, permission: 'full', handoff: false }));
+        const res = toolResults(events);
+        assert.strictEqual(res.length, 5);
+        assert.ok(res.slice(0, 4).every((c) => c.is_error), JSON.stringify(res.map((c) => c.content)));
+        assert.ok(/publishing is the person's step/.test(res[0].content), res[0].content);
+        assert.ok(/git reset is refused/.test(res[1].content), res[1].content);
+        assert.ok(/recursive rm is refused/.test(res[2].content), res[2].content);
+        assert.ok(/\.env files are not read/.test(res[3].content), res[3].content);
+        assert.ok(!res[4].is_error && /git version/.test(res[4].content), 'a plain git read still runs');
+        assert.ok(!fs.existsSync(path.join(work, 'escaped.txt')), 'the refused chain never spawned');
+        assert.ok(fs.existsSync(path.join(work, 'src', 'a.js')), 'the refused rm never ran');
+    });
+
+    await check('the refused shapes: chained, nested and prefixed commands, and what still runs', () => {
+        for (const c of ['git push', 'git push -f', 'echo ok;git reset', 'git stash list | git push', 'sudo git push',
+            'bash -c "git push origin x"', 'timeout 5 git push', 'rm -fr build', 'rm --recursive old',
+            'rm --force -r x', 'cat a/.env.local', 'grep SECRET .env', 'echo x > .env', 'cp a .env']) {
+            assert.ok(refusedCommand(c), `refused: ${c}`);
+        }
+        for (const c of ['pwd', 'npm test', 'git status', 'git log --oneline', 'rm note.txt', 'rm -f note.txt',
+            'git commit -m "push the button"', 'echo NODE_ENV=production', 'git stash list | grep reset', 'cat config.env']) {
+            assert.strictEqual(refusedCommand(c), null, `runs: ${c}`);
+        }
+        assert.strictEqual(refusedCommand(''), null);
+        assert.strictEqual(refusedCommand(null), null);
+    });
+
+    await check('one read answers at most 40 KB, and says where to continue', () => {
+        // At the tool itself: the loop's events clip to 4 KB, so the cap is only visible here.
+        fs.writeFileSync(path.join(work, 'big.txt'), `${'x'.repeat(999)}\n`.repeat(60));
+        const [body, isError] = runTool('read_file', { path: 'big.txt' }, work);
+        assert.strictEqual(isError, false);
+        assert.ok(body.length <= 40_100, `cut at 40 KB, was ${body.length}`);
+        assert.ok(/… \(cut: read with offset\/limit\)$/.test(body), 'the cut says where to continue');
+        const [small] = runTool('read_file', { path: 'src/a.js' }, work);
+        assert.ok(!/cut: read with/.test(small), 'a small file comes back whole');
     });
 
     await check('run_command exists only at the full level, and runs in the working directory', async () => {

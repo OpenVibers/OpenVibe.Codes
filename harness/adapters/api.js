@@ -7,11 +7,13 @@
  *
  *   list_dir, read_file, grep           every permission level
  *   write_file, edit_file               edit and full
- *   run_command                         full only (bash -lc in the working directory, two minutes, output clipped)
+ *   run_command                         full only (bash -lc in the working directory, two minutes, output clipped;
+ *                                       push, reset, recursive rm and .env paths refused before anything spawns)
  *   advise                              OpenVibe.AI only, when the run asked for an advisor (at most 3 asks)
  *
  * Every path is resolved inside the working directory: `..` out of it, an absolute path elsewhere, `.git/` writes and
- * `.env` files are refused. The conversation is kept in the session store so `resume` continues it.
+ * `.env` files are refused. One read answers at most 40 KB. The conversation is kept in the session store so `resume`
+ * continues it.
  */
 const fs = require('fs');
 const path = require('path');
@@ -34,6 +36,45 @@ const TOOL_DEFS = {
 const LEVELS = { read: 1, edit: 2, full: 3 };
 const SHOWN_AS = { list_dir: 'LS', read_file: 'Read', grep: 'Grep', write_file: 'Write', edit_file: 'Edit', run_command: 'Bash', advise: 'Advise' };
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage', '.cache']);
+
+/** What one read_file answer may hold: 40 KB, enforced here, not in the prompt. */
+const MAX_READ = 40_000;
+
+/**
+ * The shell a job may not run (the portal's deny list, enforced where the command would spawn).
+ *
+ * Every `;`, `&&`, `||`, `|` and `&` segment is checked from its first word (leading `sudo`/`command` skipped),
+ * so chaining a refusal after a harmless command does not dodge it; the same shapes are then matched anywhere in
+ * the whole command, so `bash -c "git push"` and `timeout 5 git push` do not dodge it either. A refusal names
+ * its rule, in the tool's answer, before anything spawns.
+ *
+ * @param {string} command the shell the model asked for
+ * @returns {string|null} why it is refused, or null when it may run
+ */
+function refusedCommand(command) {
+    const text = String(command == null ? '' : command);
+    const segments = text.split(/\s*(?:&&|\|\||[;|&\n])\s*/);
+    const head = (seg) => String(seg).replace(/^(?:sudo|command)\s+/i, '').trimStart();
+    const push = /^git\s+push\b/;
+    const reset = /^git\s+reset\b/;
+    const recRm = /^rm\s+(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)(?:\s|$)/;
+    const dotenv = /(?:^|[\s"'=([{\/-])(?:\S*\/)?\.env(?:\.[^\s"'/]*)?(?=[\s"'/)\]}]|$)/;
+    const whole = [
+        [/\bgit\s+push\b/, 'git push is refused: publishing is the person\'s step'],
+        [/\bgit\s+reset\b/, 'git reset is refused: it throws work away'],
+        [/\brm\b[^;|&\n]*?(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)(?:\s|$)/, 'a recursive rm is refused'],
+        [dotenv, '.env files are not read or written'],
+    ];
+    for (const seg of segments) {
+        const h = head(seg);
+        if (push.test(h)) return 'git push is refused: publishing is the person\'s step';
+        if (reset.test(h)) return 'git reset is refused: it throws work away';
+        if (recRm.test(h)) return 'a recursive rm is refused';
+        if (dotenv.test(seg)) return '.env files are not read or written';
+    }
+    for (const [re, why] of whole) if (re.test(text)) return why;
+    return null;
+}
 
 /**
  * Ask the run's advisor (a stronger model on OpenVibe.AI) for guidance mid-run. Offered only when the run
@@ -155,7 +196,7 @@ function runTool(name, args, cwd) {
         const from = Math.max(1, Number(a.offset) || 1);
         const to = Math.min(lines.length, from - 1 + Math.max(1, Number(a.limit) || 2000));
         const body = lines.slice(from - 1, to).map((l, i) => `${from + i}\t${l}`).join('\n');
-        return [body.length > 64_000 ? `${body.slice(0, 64_000)}\n… (cut: read with offset/limit)` : body, false];
+        return [body.length > MAX_READ ? `${body.slice(0, MAX_READ)}\n… (cut: read with offset/limit)` : body, false];
     }
     if (name === 'grep') {
         const base = inside(cwd, a.path);
@@ -398,6 +439,11 @@ function apiAgent(spec) {
                                 }
                             }
                             else if (name === 'run_command') {
+                                // The hard rules run before the shell does: a refusal is the tool's answer, and
+                                // nothing spawns.
+                                const refused = refusedCommand(args.command);
+                                if (refused) out = [refused, true];
+                                else {
                                 // The command's output reaches the stream as it comes (batched every 150 ms), so a
                                 // reader sees a long test run move instead of waiting for its end.
                                 const chunks = []; let wake = null; let finished = null;
@@ -410,6 +456,7 @@ function apiAgent(spec) {
                                 }
                                 if (chunks.length) yield ev.toolProgress(call.id, chunks.splice(0).join(''));
                                 out = finished;
+                                }
                             }
                             else { try { out = runTool(name, args, t.cwd); } catch (err) { out = [err.message, true]; } }
                             yield ev.toolResult(call.id, out[0], out[1]);
@@ -435,4 +482,4 @@ function apiAgent(spec) {
     return adapter;
 }
 
-module.exports = { apiAgent, refusalOf, extraHeaders, runTool, inside, adviceTranscript, TOOL_DEFS, SYSTEM };
+module.exports = { apiAgent, refusalOf, extraHeaders, runTool, inside, refusedCommand, adviceTranscript, TOOL_DEFS, SYSTEM };
