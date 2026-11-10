@@ -5,14 +5,15 @@
  * worker runs it in its sandbox as artifact `openvibe-codes@1.0.0`, JOB_PROTOCOL below). The job's input is one JSON
  * line on stdin:
  *
- *   { repo, ref?, prompt, agent?, model?, permission?: 'edit'|'full', push?: { branch?, pull_request? } }
+ *   { repo, ref?, prompt, agent?, model?, permission?: 'edit'|'full', push?: { branch?, pull_request?, update? } }
  *
  * It clones `repo` (https only) into a scratch directory, runs the harness there with hand-offs, and prints one compact
  * JSON line per event on stdout (what the page shows live). The result goes to fd 3 (the Link's result channel), or as
  * a last `{ t: 'result_doc' }` line when fd 3 is not open: what the agents said, the changed files and the patch, the
  * per-turn checkpoints (refs and the authored/imported turn diff, `checkpoints` in the document), and, when `push` is
  * asked and the machine holds GITHUB_TOKEN, the new branch it pushed (never the base branch) and its pull request.
- * Nothing here ever prints a token.
+ * A follow-up (AL5) sets push.update with branch === ref: the checked-out PR branch is committed and pushed again
+ * (never forced, no new PR) so the same pull request turns green. Nothing here ever prints a token.
  */
 const fs = require('fs');
 const os = require('os');
@@ -62,14 +63,16 @@ const PROTECTED = /^(main|master|trunk|dev|develop|development|staging|stage|pro
 
 /**
  * The branch a task may push: a new one. → { branch } or { refused }. `exists` is GitHub's answer for that name (true
- * when it already exists, null when GitHub could not be asked: refused too, never assumed new).
+ * when it already exists, null when GitHub could not be asked: refused too, never assumed new). A follow-up (AL5)
+ * passes update with branch === ref: the PR branch already exists and is pushed again, never forced.
  */
-function pushTarget(requested, base, { exists = false, now = Date.now() } = {}) {
+function pushTarget(requested, base, { exists = false, now = Date.now(), update = false } = {}) {
     const branch = requested || `openvibe-codes/${now.toString(36)}`;
-    if (branch === base) return { refused: 'a task never pushes to the branch it started from' };
+    if (branch === base && !update) return { refused: 'a task never pushes to the branch it started from' };
     if (PROTECTED.test(branch)) return { refused: `a task pushes only a new branch of its own, never ${branch}` };
     if (exists === null) return { refused: 'GitHub could not say whether the branch exists, so nothing was pushed' };
-    if (exists) return { refused: `${branch} already exists: a task pushes only a new branch` };
+    if (exists && !update) return { refused: `${branch} already exists: a task pushes only a new branch` };
+    if (update && !exists) return { refused: `${branch} is gone: nothing to update` };
     return { branch };
 }
 
@@ -237,9 +240,15 @@ function parseArgs(raw, env = process.env) {
     const push = a.push && typeof a.push === 'object' ? {
         branch: a.push.branch == null ? null : String(a.push.branch),
         pull_request: a.push.pull_request === true,
+        // Only a follow-up (AL5) sets update; a normal task's args keep their old shape.
+        ...(a.push.update === true ? { update: true } : {}),
     } : null;
     if (push && push.branch && (!BRANCH.test(push.branch) || push.branch.startsWith('-'))) throw new Error('push.branch must be a branch name');
     if (push && push.branch && PROTECTED.test(push.branch)) throw new Error(`push.branch must be a new branch of the task's own, never ${push.branch}`);
+    // A follow-up (AL5) pushes the checked-out PR branch again: it names the branch it cloned (branch === ref),
+    // never asks for a new pull request, and is never forced. Anything else with update is rejected.
+    if (push && push.update && push.pull_request) throw new Error('push.update never opens a new pull request');
+    if (push && push.update && (!push.branch || push.branch !== ref)) throw new Error('push.update needs branch === ref: a follow-up pushes the branch it cloned');
     // The session a resume continues: the job's own input, or RESUME in the environment (a task carried on in the
     // same conversation). It is a harness's session id, never a path and never a credential.
     const resumeIn = a.resume == null || a.resume === '' ? env.RESUME : a.resume;
@@ -621,19 +630,22 @@ async function pushBranch(dir, job, { env, fetchImpl, base }) {
         if (host && giteaHosts(env).has(host)) return pushForge(dir, job, { env, fetchImpl, base });
     }
     if (!token || !gh) return { pushed: false, reason: !gh ? 'push is for github.com repositories' : 'this machine has no GITHUB_TOKEN' };
-    const first = pushTarget(job.push.branch, base);
+    const update = job.push.update === true;
+    const first = pushTarget(job.push.branch, base, { update });
     if (first.refused) return { pushed: false, reason: first.refused };
     const branch = first.branch;
     const remoteUrl = `https://x-access-token:${token}@github.com/${gh.owner}/${gh.name}.git`;
     let exists = null;
     try { exists = (await git(['ls-remote', '--heads', remoteUrl, `refs/heads/${branch}`], { cwd: dir, timeout: 60_000 })).trim() !== ''; } catch { exists = null; }
-    const checked = pushTarget(branch, base, { exists });
+    const checked = pushTarget(branch, base, { exists, update });
     if (checked.refused) return { pushed: false, reason: checked.refused };
     const who = {
         GIT_AUTHOR_NAME: env.GIT_AUTHOR_NAME || 'OpenVibe.Codes', GIT_AUTHOR_EMAIL: env.GIT_AUTHOR_EMAIL || 'codes@openvibe.codes',
         GIT_COMMITTER_NAME: env.GIT_AUTHOR_NAME || 'OpenVibe.Codes', GIT_COMMITTER_EMAIL: env.GIT_AUTHOR_EMAIL || 'codes@openvibe.codes',
     };
-    await git(['checkout', '-b', branch], { cwd: dir });
+    // A follow-up is already on the PR branch it cloned (branch === ref === base): committing there and pushing
+    // (never forced, so a branch someone rewrote meanwhile is rejected, not overwritten).
+    if (branch !== base) await git(['checkout', '-b', branch], { cwd: dir });
     await git(['commit', '-m', job.prompt.split('\n')[0].slice(0, 72) || 'OpenVibe.Codes task'], { cwd: dir, env: who });
     await git(['push', remoteUrl, `HEAD:refs/heads/${branch}`], { cwd: dir, timeout: 180_000 });
     const out = { pushed: true, branch, branch_url: `https://github.com/${gh.owner}/${gh.name}/tree/${encodeURIComponent(branch)}` };

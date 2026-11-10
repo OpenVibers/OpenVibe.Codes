@@ -179,6 +179,10 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
      */
     let conductorTurns = conductor;
     const setConductor = (turns) => { conductorTurns = turns; };
+    // A ticket follows its pull request (AL5): wired by the app after both exist, because a follow-up is a task
+    // started here. A terminal task whose result pushed a PR binds it, in the same transaction.
+    let prBindings = null;
+    const attachBindings = (b) => { prBindings = b || null; };
     /** An attempt's state when it ended: a limit reached is a budget-stop, never a plain failure. */
     const ENDED = new Set(['done', 'failed', 'stopped', 'budget-stopped', 'interrupted']);
 
@@ -515,6 +519,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                         started_at: updated.started_at || null, machine: machineOf(next.job),
                     });
                 }
+            }
+            if (TERMINAL.has(updated.state) && prBindings) {
+                try { await prBindings.maybeBind(updated); } catch (e) { log.warn(`[Codes] pr-bind ${updated.id}: ${String((e && e.message) || e).slice(0, 200)}`); }
             }
             return updated;
         });
@@ -1215,7 +1222,7 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
 
     return {
         start, refresh, applyJob, applyEvent, recordState, afterEnd, continueTask, stopTask, proof: taskProof,
-        latestProject, present, who, attempts: attemptStore, setConductor, fundTurn,
+        latestProject, present, who, attempts: attemptStore, setConductor, attachBindings, fundTurn,
         setForge(f) { forge = f || null; },
     };
 }

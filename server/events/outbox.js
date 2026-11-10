@@ -21,6 +21,11 @@ const TOPICS = Object.freeze([
     'codes.task.queued', 'codes.task.running', 'codes.task.succeeded', 'codes.task.failed', 'codes.task.cancelled',
 ]);
 const TOPIC_SET = new Set(TOPICS);
+/** A ticket follows its pull request (AL5): bound, follow-up started, ended. Payloads are plain JSON; the
+ *  service manifest's eventsProduced stays the codes.task.* five (contracts.test.js), so these are the
+ *  portal's view, not a new contract. */
+const PR_TOPICS = Object.freeze(['codes.pr.bound', 'codes.pr.followup', 'codes.pr.ended']);
+const PR_TOPIC_SET = new Set(PR_TOPICS);
 const MAX_BACKOFF_MS = 5 * 60_000;
 // The envelope contract (events.event-envelope@1): the envelope Codes sends has to match it, or OpenVibe.Events
 // refuses the event with a 422 and the row is retried forever.
@@ -160,7 +165,23 @@ function createOutbox({ store, log = console }) {
         return eventId;
     }
 
-    return { emitTask, emitAgentStep, payloadOf, topicFor, groupOf };
+    /**
+     * A pr-follow event in the same outbox (the publisher needs no topic filter: it sends every unpublished
+     * row). subject is the ticket owner's usr_…; the payload names the ticket, the repo, the PR and the fix.
+     */
+    async function emitPr(topic, subject, payload) {
+        if (!PR_TOPIC_SET.has(topic) || !subject || !payload || typeof payload !== 'object') return null;
+        const eventId = ids.newId('event', store.now());
+        const at = store.iso();
+        await db.exec(
+            `INSERT INTO codes_outbox (event_id, topic, subject, payload, created_at, next_attempt_at)
+             VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz, $5::timestamptz)`,
+            [eventId, topic, subject, JSON.stringify(payload), at],
+        );
+        return eventId;
+    }
+
+    return { emitTask, emitAgentStep, emitPr, payloadOf, topicFor, groupOf, PR_TOPICS };
 }
 
 function createPublisher({ config, store, fetchImpl = globalThis.fetch, log = console, intervalMs = (config.events && config.events.intervalMs) || 5000 }) {
@@ -333,4 +354,4 @@ function createPublisher({ config, store, fetchImpl = globalThis.fetch, log = co
     };
 }
 
-module.exports = { createOutbox, createPublisher, TOPICS, TOPIC_SET, AGENT_TOPICS, agentStepOf, topicFor, groupOf, payloadOf, repoSlug, MAX_BACKOFF_MS, DEAD_AFTER_REFUSALS, DEAD_AFTER_ATTEMPTS };
+module.exports = { createOutbox, createPublisher, TOPICS, TOPIC_SET, PR_TOPICS, AGENT_TOPICS, agentStepOf, topicFor, groupOf, payloadOf, repoSlug, MAX_BACKOFF_MS, DEAD_AFTER_REFUSALS, DEAD_AFTER_ATTEMPTS };
