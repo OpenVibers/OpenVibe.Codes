@@ -69,7 +69,7 @@ function adaptersFor(env) {
         // OpenVibe.AI's OpenAI-compatible endpoint: its router picks the model, each answer reports its cost.
         // OPENVIBE_AI_SECRET names a project secret granted to ai (ADR-056): AI sends each request to the project's own
         // provider (OPENVIBE_AI_PROVIDER_URL, OPENVIBE_AI_PROVIDER_MODEL) with that key, revealed per request by Network.
-        'openvibe-ai': apiAgent({ id: 'openvibe-ai', name: 'OpenVibe.AI', baseUrl: env.OPENVIBE_AI_URL || 'https://ai.openvibe.services/v1', token: networkToken(), model: 'openvibe', extra: projectProvider }),
+        'openvibe-ai': apiAgent({ id: 'openvibe-ai', name: 'OpenVibe.AI', baseUrl: env.OPENVIBE_AI_URL || 'https://ai.openvibe.services/v1', token: networkToken(), model: 'openvibe', extra: projectProvider, advisorEndpoint: true }),
         'openai-compatible': apiAgent({ id: 'openai-compatible', name: 'Your own model', baseUrl: env.OPENVIBE_CODES_BASE_URL || 'http://127.0.0.1:8080/v1', keyEnv: 'OPENVIBE_CODES_API_KEY', model: env.OPENVIBE_CODES_MODEL || 'local' }),
     };
 }

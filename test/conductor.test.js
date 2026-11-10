@@ -223,6 +223,18 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1';
             assert.deepStrictEqual(plainShown.json().report, { path: 'report.md', bullets: ['Tidied.', 'All green.'], blocked: [], concerns: [], truncated: false });
         });
 
+        await check('a sub-task takes the effort it is given, and a level that is none is 422', async () => {
+            const asked = await post(`/api/v1/conductor/${taskId}/tasks`, { prompt: 'think hard', repo: 'https://github.com/octocat/Hello-World', effort: 'high' });
+            assert.strictEqual(asked.status, 201, asked.text);
+            assert.strictEqual(submits().at(-1)[1].args.effort, 'high');
+            const auto = await post(`/api/v1/conductor/${taskId}/tasks`, { prompt: 'think as usual', repo: 'https://github.com/octocat/Hello-World', effort: 'auto' });
+            assert.strictEqual(auto.status, 201, auto.text);
+            assert.strictEqual(submits().at(-1)[1].args.effort, 'auto');
+            const bad = await post(`/api/v1/conductor/${taskId}/tasks`, { prompt: 'think', repo: 'https://github.com/octocat/Hello-World', effort: 'ludicrous' });
+            assert.strictEqual(bad.status, 422, bad.text);
+            assert.strictEqual(bad.json().code, 'codes.effort_invalid');
+        });
+
         await check('the start form: a model list the login offers, and the folders the machine has worked in', async () => {
             const res = await get('/conductor');
             assert.strictEqual(res.status, 200);

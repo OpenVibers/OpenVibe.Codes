@@ -45,13 +45,13 @@ function build(ctx = {}) {
         if (ctx.extraDir) roots.push(ctx.extraDir);
         argv.push('resume', String(ctx.resume), '--json', '--skip-git-repo-check', '--all');
         if (ctx.model) argv.push('-m', ctx.model);
-        argv.push('-c', `model_reasoning_effort=${effort || 'medium'}`);
+        if (effort) argv.push('-c', `model_reasoning_effort=${effort}`);
         argv.push('-c', `sandbox_mode=${sandbox}`);
         argv.push('-c', `sandbox_workspace_write.writable_roots=${JSON.stringify(roots)}`);
     } else {
         argv.push('--json', '--skip-git-repo-check', '-C', ctx.cwd, '-s', sandbox);
         if (ctx.model) argv.push('-m', ctx.model);
-        argv.push('-c', `model_reasoning_effort=${effort || 'medium'}`);
+        if (effort) argv.push('-c', `model_reasoning_effort=${effort}`);
         if (ctx.permission === 'edit' && ctx.extraDir) argv.push('--add-dir', ctx.extraDir);
     }
     for (const kv of (ctx.config || [])) argv.push('-c', kv);

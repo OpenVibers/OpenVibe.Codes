@@ -27,8 +27,9 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
       --agent <id>                     skip routing: claude-code, claude-other, codex, opencode, command-code,
                                        aider, minimax-code, deepseek, openai-compatible
       --model <name>                   the first agent's model
-      --effort <level>                 reasoning effort for agents that take one (low|medium|high|max);
-                                       the OpenVibe.AI agent passes it to AI's run
+      --effort <level>                 reasoning effort for agents that take one (auto|low|medium|high|max);
+                                       auto is each agent's own default; OpenVibe.AI resolves it from its
+                                       role and task defaults, the CLIs take no flag
       --advisor                        let the OpenVibe.AI agent ask a stronger model for advice
                                        mid-run (at most 3 uses; AI puts each use on the run's receipt)
       --advisor-model <provider/model> the advisor model (default: AI's reviewer role, then its strongest)

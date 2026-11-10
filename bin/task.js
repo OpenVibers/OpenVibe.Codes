@@ -6,10 +6,10 @@
  * this machine: a task runs on one of your machines through OpenVibe.Run, and this client only talks to
  * https://openvibe.codes/api/v1/tasks (server/http/tasks-api.js).
  *
- *   openvibe-codes task start --repo owner/repo --file brief.md [--agent …] [--name …] [--tier …]
+ *   openvibe-codes task start --repo owner/repo --file brief.md [--agent …] [--name …] [--tier …] [--effort …]
  *   openvibe-codes task list [--state running|needs|done]
  *   openvibe-codes task show <id> [--follow]
- *   openvibe-codes task continue <id> [--note "…"] [--agent …]
+ *   openvibe-codes task continue <id> [--note "…"] [--agent …] [--effort …]
  *   openvibe-codes task stop <id>
  *
  * Who you are: a personal Network access token, from OPENVIBE_TOKEN or a file (~/.config/openvibe/token, mode 600),
@@ -44,10 +44,11 @@ const USAGE = `openvibe-codes task — coding tasks on OpenVibe.Codes, as you
       --file <path|->            the brief ("-" reads it from stdin)
       --name <n>                 a name for the task: starting it twice with one name answers the first task
       --tier basic|standard|hard the brief's tier (the engine forces it, as "tier: …" in the brief)
+      --effort auto|low|medium|high|xhigh|max   how hard it thinks (default: the agent's own)
       --permission review|edit|full   review: read-only (research, an audit, a review); edit (default); full
   openvibe-codes task list [--state running|needs|done] [--limit 20]
   openvibe-codes task show <id> [--follow]      --follow streams the task's events until its outcome
-  openvibe-codes task continue <id> [--note "…"] [--agent <agent>]
+  openvibe-codes task continue <id> [--note "…"] [--agent <agent>] [--effort <level>]
   openvibe-codes task stop <id>
 
   --json prints the API's answer as JSON instead of a readable log.
@@ -70,7 +71,7 @@ function parse(argv) {
         else if (a === '--help' || a === '-h') o.help = true;
         else if (a.startsWith('--')) {
             const k = a.slice(2);
-            if (!['repo', 'agent', 'machine', 'file', 'name', 'tier', 'state', 'permission', 'note', 'limit'].includes(k)) throw new UsageError(`unknown option --${k}`);
+            if (!['repo', 'agent', 'machine', 'file', 'name', 'tier', 'state', 'permission', 'note', 'limit', 'effort'].includes(k)) throw new UsageError(`unknown option --${k}`);
             const v = argv[++i];
             if (v === undefined || v.startsWith('--')) throw new UsageError(`--${k} needs a value`);
             o[k] = v;
@@ -261,6 +262,10 @@ async function cmdStart(o, c) {
         if (!/^[A-Za-z0-9_.:-]{4,120}$/.test(o.name)) throw new UsageError('--name: 4-120 letters, digits, "_", ".", ":" or "-" (it is the task\'s idempotency key)');
         body.idempotency_key = `cli:${o.name}`;
     }
+    if (o.effort) {
+        if (!['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(o.effort)) throw new UsageError('--effort is auto, low, medium, high, xhigh or max');
+        body.effort = o.effort;
+    }
     const answer = await call(c, 'POST', '/api/v1/tasks', body);
     if (o.json) { out(JSON.stringify(answer, null, 2)); return EXIT.ok; }
     const task = answer.task;
@@ -309,6 +314,10 @@ async function cmdContinue(o, c) {
     if (o.note) body.note = o.note;
     const agent = agentOf(o.agent);
     if (agent) body.agent = agent;
+    if (o.effort) {
+        if (!['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(o.effort)) throw new UsageError('--effort is auto, low, medium, high, xhigh or max');
+        body.effort = o.effort;
+    }
     const task = await call(c, 'POST', `/api/v1/tasks/${encodeURIComponent(id)}/continue`, body);
     if (o.json) { out(JSON.stringify(task, null, 2)); return EXIT.ok; }
     out(`carried on ${task.id} · ${stateOf(task)}`);

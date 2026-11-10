@@ -53,8 +53,19 @@ fs.writeFileSync(process.env.FAKE_RECORD, JSON.stringify({ argv: process.argv.sl
             assert.ok(!(await argvOf(cli.opencode, 'max')).some((a) => /effort/.test(a)), 'OpenCode');
         });
 
+        await check('auto is each CLI\'s own default: no flag, never the word auto', async () => {
+            assert.ok(!(await argvOf(cli.claudeCode, 'auto')).includes('--effort'), 'Claude Code');
+            const codex = await argvOf(cli.codex, 'auto');
+            assert.ok(!codex.some((a) => /reasoning_effort/.test(a)) && !codex.includes('auto'), `Codex: ${codex.join(' ')}`);
+            const cmd = await argvOf(cli.commandCode, 'auto');
+            assert.ok(!cmd.includes('--effort') && !cmd.includes('auto'), `Command Code: ${cmd.join(' ')}`);
+            const aider = await argvOf(cli.aider, 'auto');
+            assert.ok(!aider.includes('--reasoning-effort') && !aider.includes('auto'), `Aider: ${aider.join(' ')}`);
+        });
+
         await check('the job input keeps an effort on the ladder and drops anything else', () => {
             assert.strictEqual(parseArgs(JSON.stringify({ repo: 'https://github.com/a/b', prompt: 'x', effort: 'max' })).effort, 'max');
+            assert.strictEqual(parseArgs(JSON.stringify({ repo: 'https://github.com/a/b', prompt: 'x', effort: 'auto' })).effort, 'auto');
             assert.strictEqual(parseArgs(JSON.stringify({ repo: 'https://github.com/a/b', prompt: 'x', effort: 'ludicrous' })).effort, undefined);
             assert.strictEqual(parseArgs(JSON.stringify({ kind: 'conductor', folder: '/home/x', prompt: 'x', effort: 'low' })).effort, 'low');
         });

@@ -18,6 +18,7 @@ const { execFileSync } = require('child_process');
 const ev = require('../events');
 const { spawnAgent, exitReason } = require('../process');
 const { effortFor } = require('../../engine/adapters/base');
+const { DENIED: CLAUDE_DENIED } = require('../../engine/adapters/claude-code');
 
 /** A parser that reads JSON lines, hands each object to onEvent, and ends the run with exactly one result. */
 function jsonLines(agent, onEvent, onEnd) {
@@ -63,7 +64,7 @@ const claudeCode = {
         const mode = o.permissionMode || { read: 'plan', edit: 'acceptEdits', full: 'bypassPermissions' }[t.permission] || 'plan';
         const args = ['-p', t.prompt, '--output-format', 'stream-json', '--verbose', '--permission-mode', mode];
         if (t.model) args.push('--model', t.model);
-        if (t.effort) args.push('--effort', effortFor('claude-code', t.effort));
+        { const effort = effortFor('claude-code', t.effort); if (effort) args.push('--effort', effort); }
         if (t.resume) args.push('--resume', t.resume);
         if (t.maxTurns) args.push('--max-turns', String(t.maxTurns));
         // MCP servers this session may use (the conductor's Codes tools): a config file, and the tools it may call
@@ -71,8 +72,9 @@ const claudeCode = {
         if (o.mcpConfig) args.push('--mcp-config', o.mcpConfig);
         if (Array.isArray(o.allowedTools) && o.allowedTools.length) args.push('--allowedTools', o.allowedTools.join(' '));
         if (o.permissionPromptTool) args.push('--permission-prompt-tool', o.permissionPromptTool);
-        // Even unattended, a run never pushes: publishing is the person's step.
-        args.push('--disallowedTools', 'Bash(git push:*)');
+        // The portal's deny list rides along (no commits, resets, stashes, sudo, recursive rm, .env reads); even
+        // unattended, a run never pushes: publishing is the person's step, the one rule full keeps.
+        args.push('--disallowedTools', t.permission === 'full' ? 'Bash(git push:*)' : CLAUDE_DENIED.join(' '));
         const parser = jsonLines(claudeCode, (o, emit, st) => {
             if (o.type === 'system' && o.subtype === 'init') { st.sessionId = o.session_id; st.model = o.model; emit(ev.init(o.session_id, 'claude-code', o.model)); return; }
             if (o.type === 'result') { emit({ ...o, result: ev.scrub(o.result || '') }); return; }
@@ -97,7 +99,7 @@ const codex = {
             ? ['exec', 'resume', t.resume, '--json', '--skip-git-repo-check']
             : ['exec', '--json', '--skip-git-repo-check', '-C', t.cwd, '-s', sandbox];
         if (t.model) args.push('-m', t.model);
-        if (t.effort) args.push('-c', `model_reasoning_effort="${effortFor('codex', t.effort)}"`);
+        { const effort = effortFor('codex', t.effort); if (effort) args.push('-c', `model_reasoning_effort="${effort}"`); }
         // An MCP server this session may use (the conductor's Codes tools, when Codex takes a conductor's turn): its
         // command and arguments as config overrides, TOML values. Nothing secret rides here: the launcher holds the token.
         const mcp = t.options && t.options.mcpServer;
@@ -215,7 +217,7 @@ const commandCode = {
         const args = [`--print=${t.prompt}`, '--output-format', 'json', '--skip-onboarding', '--no-auto-update', '-t'];
         if (unattended(t)) args.push('--yolo');
         if (t.model) args.push('-m', t.model);
-        if (t.effort) args.push('--effort', effortFor('command-code', t.effort));
+        { const effort = effortFor('command-code', t.effort); if (effort) args.push('--effort', effort); }
         if (t.resume) args.push('--resume', t.resume);
         if (t.maxTurns) args.push('--max-turns', String(t.maxTurns));
         const startedAt = Date.now();
@@ -254,7 +256,7 @@ const aider = {
         if (t.permission === 'edit' && !t.sandboxed) args.push('--no-suggest-shell-commands');
         if (t.permission === 'read') args.push('--dry-run');
         if (t.model) args.push('--model', t.model);
-        if (t.effort) args.push('--reasoning-effort', effortFor('aider', t.effort));
+        { const effort = effortFor('aider', t.effort); if (effort) args.push('--reasoning-effort', effort); }
         const startedAt = Date.now();
         const lines = [];
         let started = false;
@@ -356,8 +358,9 @@ const claudeOther = {
             '--permission-mode', mode, '--exclude-dynamic-system-prompt-sections'];
         if (t.maxTurns) args.push('--max-turns', String(t.maxTurns));
         if (t.resume) args.push('--resume', String(t.resume));
-        // Even unattended, a run never pushes: publishing is the person's step.
-        args.push('--disallowedTools', 'Bash(git push:*)');
+        // The portal's deny list rides along (no commits, resets, stashes, sudo, recursive rm, .env reads); even
+        // unattended, a run never pushes: publishing is the person's step, the one rule full keeps.
+        args.push('--disallowedTools', t.permission === 'full' ? 'Bash(git push:*)' : CLAUDE_DENIED.join(' '));
         // The harness's environment (PATH finds the CLI), with the connection's own names on top: the endpoint, the
         // token and the model id. The key travels in the environment, never in argv: the process list of this machine
         // is readable.

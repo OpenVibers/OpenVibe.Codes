@@ -232,10 +232,12 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
         } catch (e) {
             return problem(req, res, e.status || 422, e.code || 'codes.task_invalid', e.message);
         }
+        const effort = b.effort == null || b.effort === '' ? null : String(b.effort);
+        if (effort != null && !['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) return problem(req, res, 422, 'codes.effort_invalid', 'effort is auto, low, medium, high, xhigh or max');
         let args;
         try {
             // The router reads the parent's own words; the report instruction joins the brief after it picks.
-            args = parseArgs(JSON.stringify({ repo: b.repo, ref: b.ref || null, prompt, ...(agent ? { agent } : {}), ...(model ? { model } : {}), permission: 'edit' }));
+            args = parseArgs(JSON.stringify({ repo: b.repo, ref: b.ref || null, prompt, ...(agent ? { agent } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), permission: 'edit' }));
         } catch (e) {
             return problem(req, res, 422, 'codes.task_invalid', e.message);
         }

@@ -54,12 +54,13 @@ function harnessOf(id) {
  * The nearest level the harness accepts for the wanted one (a tie goes up).
  *
  * @param {string} runner the harness
- * @param {string|null} effort the wanted level
+ * @param {string|null} effort the wanted level ('auto' is the harness's own default: no setting)
  * @returns {string|null} a level the harness accepts, or the wanted one when the harness has no effort setting
  */
 function fitEffort(runner, effort) {
+    if (!effort || effort === 'auto') return null;
     const list = EFFORTS[harnessOf(runner)] || [];
-    if (!effort || !list.length || list.includes(effort)) return effort;
+    if (!list.length || list.includes(effort)) return effort;
     const at = ORDER.indexOf(effort);
     if (at < 0) return effort;
     for (let d = 0; d < ORDER.length; d++) for (const i of [at + d, at - d]) if (list.includes(ORDER[i])) return ORDER[i];
@@ -76,7 +77,8 @@ function fitEffort(runner, effort) {
 function stepUp(effort, list) {
     const order = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
     const i = order.indexOf(effort || 'medium');
-    for (let j = i + 1; j < order.length; j++) if (!list || list.includes(order[j])) return order[j];
+    const start = i < 0 ? order.indexOf('medium') : i;
+    for (let j = start + 1; j < order.length; j++) if (!list || list.includes(order[j])) return order[j];
     return effort || null;
 }
 

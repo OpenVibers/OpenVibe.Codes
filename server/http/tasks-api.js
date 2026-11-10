@@ -193,6 +193,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         delete bodyForValidate.actor_task_id;
         delete bodyForValidate.actor_step_id;
         delete bodyForValidate.goal;
+        delete bodyForValidate.effort;
         const check = validate('codes.task-start-request@1', bodyForValidate);
         if (!check.valid) return problem(req, res, 422, 'codes.task_invalid', check.errors.map((e) => `${e.instancePath || 'body'} ${e.message}`).join('; ').slice(0, 500));
         let goal = null;
@@ -204,6 +205,11 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
             goal = { goal: g.goal.trim(), check: { kind: g.check.kind, value: g.check.value.trim() }, budget: limits, no_progress_limit: g.no_progress_limit || 3, proposal: null, evidence: null, verdict: null };
         }
         if (b.agent && !harnesses.list().some((a) => a.id === b.agent)) return problem(req, res, 422, 'codes.agent_unknown', 'agent is one of GET /api/v1/harnesses, or absent for the router to pick');
+        // The effort the task asks for (ai.effort@1 plus xhigh; auto is the harness default, resolved by AI's own
+        // role and task defaults on the AI path). The contract does not carry it yet, so like the goal above it is
+        // stripped before validation; when the contract is amended, pass it through instead.
+        const effort = b.effort == null || b.effort === '' ? null : String(b.effort);
+        if (effort != null && !['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) return problem(req, res, 422, 'codes.effort_invalid', 'effort is auto, low, medium, high, xhigh or max');
         const p = req.principal;
         const key = b.idempotency_key || null;
         if (key) {
@@ -214,6 +220,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         try {
             args = parseArgs(JSON.stringify({
                 repo: b.repo, ref: b.ref || null, prompt: b.prompt, agent: b.agent || null, permission: b.permission || 'edit', ...(goal ? { goal } : {}),
+                ...(effort ? { effort } : {}),
                 ...(b.push ? { push: { pull_request: b.pull_request === true } } : {}),
             }));
         } catch (e) {
@@ -354,7 +361,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         const note = typeof b.note === 'string' ? b.note.slice(0, 4000) : null;
         const agent = typeof b.agent === 'string' && b.agent ? b.agent : null;
         if (agent && !harnesses.list().some((a) => a.id === agent)) return problem(req, res, 422, 'codes.agent_unknown', 'agent is one of GET /api/v1/harnesses');
-        const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+        const EFFORTS = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'];
         const model = typeof b.model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:\/#-]{0,99}$/.test(b.model) ? b.model : null;
         const effort = EFFORTS.includes(b.effort) ? b.effort : null;
         const out = await taskStore.continueTask(row, { note: note || (typeof b.text === 'string' ? b.text.slice(0, 4000) : null), agent, model, effort });
