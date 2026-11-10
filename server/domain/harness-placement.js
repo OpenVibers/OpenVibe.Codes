@@ -6,6 +6,7 @@
  */
 const contracts = require('openvibe-contracts');
 const { place, optionKey } = require('openvibe-sdk/placement');
+const runtime = require('../../engine/runtime');
 
 // A catalog row without task_capabilities derives its task kinds from the capability booleans:
 // edit needs capabilities.edit === true, review needs capabilities.review === true.
@@ -34,6 +35,8 @@ function toOffer(harness, agent, opts = {}) {
     const caps = row.capabilities || {};
     const limits = row.limits || {};
     const tasks = row.task_capabilities || tasksFor(caps);
+    // What this harness can actually do at runtime (engine/runtime.js): the fidelity the router needs, as capabilities.
+    const fidelity = runtime.capabilities(runtime.forHarness(harness.id));
     const maxContextTokens = (agent.context_limits && agent.context_limits.input_tokens) ?? limits.max_context_tokens;
     const health = typeof opts.health === 'string' ? { status: opts.health } : opts.health || { status: 'up' };
     const offer = {
@@ -42,7 +45,7 @@ function toOffer(harness, agent, opts = {}) {
         provider: agent.provider || harness.provider,
         region: 'global',
         trust: opts.trust || 'external',
-        capabilities: [...tasks.map((task) => `task:${task}`), ...Object.keys(HARNESS_FLAGS).filter((name) => caps[name] === true).map((name) => HARNESS_FLAGS[name]), ...(caps.runtimes || []).map((runtime) => `runtime:${runtime}`)],
+        capabilities: [...tasks.map((task) => `task:${task}`), ...Object.keys(HARNESS_FLAGS).filter((name) => caps[name] === true).map((name) => HARNESS_FLAGS[name]), ...(caps.runtimes || []).map((kind) => `runtime:${kind}`), ...fidelity],
         capacity: { workers: { harness: limits.max_concurrent_runs } },
         health,
         pricing: { model: 'per-operation', unit: 'token', marginal_usd_per_unit: agent.price_per_1k_tokens.fresh_usd / 1000 },

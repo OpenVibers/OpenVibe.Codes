@@ -19,6 +19,7 @@
 const fs = require('fs');
 const path = require('path');
 const { fitEffort, stepUp, EFFORTS } = require('./effort');
+const runtime = require('./runtime');
 
 const LADDER = {
     // Chores: renames, docs, formatting, counting, simple checks — free and plan Flash models first.
@@ -242,13 +243,17 @@ function connected(runner, connections) {
  * @param {object} [ctx.ladder] the ladder to use (the portal's by default)
  * @param {object} [ctx.connections] the person's connections, per runner (Codes C3)
  * @param {object} [ctx.fleet] the fleet per runner: { [runner]: { signed_in, windows } } (Codes C9c)
+ * @param {string[]|object} [ctx.needs] runtime capabilities the task needs (engine/runtime.js), as names
+ *   (`['harness:steering-resume']`) or fields (`{ steering: 'resume' }`); a runner whose harness does not
+ *   declare one is skipped, never chosen and then found wanting
  * @returns {{runner: string, model: string|null, effort: string|null, tier: string, brief: string|null, why: string}|null}
  */
-function pick(prompt, { cfg, health, counts, models, runs, JOBS, name, ladder, connections, fleet } = {}) {
+function pick(prompt, { cfg, health, counts, models, runs, JOBS, name, ladder, connections, fleet, needs } = {}) {
     const c = classify(prompt, { JOBS, name });
     const rec = track(runs);
     const reliable = (r) => { const t = rec[r]; return !t || t.done + t.failed < 4 || t.done / (t.done + t.failed) >= 0.4; };
-    const usable = (r) => cfg.subagents[r] && cfg.subagents[r].enabled && (counts[r] || 0) < cfg.subagents[r].max && health[r] && health[r].state === 'ok' && reliable(r) && connected(r, connections) && roomFor(fleet, r);
+    const capable = (r) => runtime.fits(r, needs);
+    const usable = (r) => cfg.subagents[r] && cfg.subagents[r].enabled && (counts[r] || 0) < cfg.subagents[r].max && health[r] && health[r].state === 'ok' && reliable(r) && capable(r) && connected(r, connections) && roomFor(fleet, r);
     for (const [runner, model, wanted] of (ladder || LADDER)[c.tier]) {
         if (!usable(runner)) continue;
         // A model the runner no longer lists is skipped for that runner's default (lists refresh from each provider).
