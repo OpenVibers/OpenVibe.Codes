@@ -3,7 +3,9 @@
  * The API agent (harness/adapters/api.js) against a stand-in OpenAI-compatible server: the model's tool calls run inside
  * the working directory and the loop ends on an answer; usage and cost come from the API's own counts; the permission
  * level decides which tools exist; a path out of the working directory, a .env file or a .git write is refused; an HTTP
- * error ends the run with the server's message; resume continues the saved conversation.
+ * error ends the run with the server's message; resume continues the saved conversation. On OpenVibe.AI a run that
+ * asked for an advisor gets the advise tool: a bounded transcript and a question go to the run's advice route, the
+ * guidance feeds the loop, and the fourth ask is refused without another call.
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -12,18 +14,29 @@ const path = require('path');
 const http = require('http');
 const { createHarness } = require('../harness');
 const { createStore } = require('../harness/sessions');
-const { refusedCommand, runTool } = require('../harness/adapters/api');
+const { refusedCommand, runTool, adviceTranscript } = require('../harness/adapters/api');
 const { check, done } = require('./helpers/boot');
 
-/** A chat-completions server that answers from a script: each request gets the next scripted message. */
+/** A chat-completions server that answers from a script: each request gets the next scripted message. Advice calls
+ *  (POST /api/v1/runs/:id/advice) are recorded apart and answered from their own script. */
 async function mockApi() {
     const requests = [];
+    const advice = [];
     let script = [];
+    let adviceScript = [];
     const server = http.createServer((req, res) => {
         let body = '';
         req.on('data', (d) => { body += d; });
         req.on('end', () => {
             const parsed = JSON.parse(body || '{}');
+            if (req.method === 'POST' && /\/api\/v1\/runs\/.+\/advice$/.test(req.url || '')) {
+                advice.push({ url: req.url, auth: req.headers.authorization || null, body: parsed });
+                const step = adviceScript.length ? adviceScript.shift() : { advice: 'keep going' };
+                if (step.status) { res.writeHead(step.status, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: step.error, ...(step.code ? { code: step.code } : {}) } })); return; }
+                res.writeHead(201, { 'content-type': 'application/json' });
+                res.end(JSON.stringify({ run_id: 'run_9', use: advice.length, max_uses: 3, advice: step.advice }));
+                return;
+            }
             requests.push({ auth: req.headers.authorization || null, body: parsed });
             const step = script.shift();
             if (!step) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'done' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } })); return; }
@@ -33,7 +46,7 @@ async function mockApi() {
         });
     });
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
-    return { url: `http://127.0.0.1:${server.address().port}`, requests, set: (s) => { script = s; requests.length = 0; }, close: () => new Promise((r) => server.close(r)) };
+    return { url: `http://127.0.0.1:${server.address().port}`, requests, advice, set: (s) => { script = s; requests.length = 0; }, adviceSet: (s) => { adviceScript = s; advice.length = 0; }, close: () => new Promise((r) => server.close(r)) };
 }
 
 const collect = async (run) => { const out = []; for await (const e of run) out.push(e); return out; };
@@ -55,6 +68,10 @@ const toolResults = (events) => events.filter((e) => e.type === 'user').flatMap(
     fs.symlinkSync(path.join(dir, 'outside-dir'), path.join(work, 'dir-link'));
     const env = { PATH: '/nonexistent', OPENVIBE_CODES_HOME: path.join(dir, 'home'), OPENVIBE_CODES_BASE_URL: api.url, OPENVIBE_CODES_MODEL: 'tiny', OPENVIBE_CODES_API_KEY: 'k-123' };
     const h = createHarness({ env, store: createStore({ env }) });
+    // The same stand-in as OpenVibe.AI: the advice route hangs off the chat base without its /v1.
+    const aiEnv = { ...env, OPENVIBE_AI_URL: api.url, OPENVIBE_AI_TOKEN: 'ov-task-token' };
+    const ai = createHarness({ env: aiEnv, store: createStore({ env: aiEnv }) });
+    const toolNames = (req) => req.body.tools.map((t) => t.function.name);
 
     await check('the model\'s tool calls run in the working directory and the loop ends on its answer', async () => {
         api.set([
@@ -280,6 +297,83 @@ const toolResults = (events) => events.filter((e) => e.type === 'user').flatMap(
         const r = events.find((e) => e.type === 'result');
         assert.strictEqual(r.is_error, true);
         assert.match(r.result, /HTTP 429: rate limited/);
+    });
+
+    await check('advise is offered only on OpenVibe.AI when the run asked for an advisor', async () => {
+        api.set([{ content: 'done' }]);
+        await collect(ai.run({ prompt: 'x', agent: 'openvibe-ai', cwd: work, permission: 'read', handoff: false, advisor: true }));
+        assert.ok(toolNames(api.requests[0]).includes('advise'), 'asked on OpenVibe.AI');
+        api.set([{ content: 'done' }]);
+        await collect(ai.run({ prompt: 'x', agent: 'openvibe-ai', cwd: work, permission: 'read', handoff: false }));
+        assert.ok(!toolNames(api.requests[0]).includes('advise'), 'off unless asked');
+        api.set([{ content: 'done' }]);
+        await collect(h.run({ prompt: 'x', agent: 'openai-compatible', cwd: work, permission: 'read', handoff: false, advisor: true }));
+        assert.ok(!toolNames(api.requests[0]).includes('advise'), 'another API path has no advice endpoint');
+    });
+
+    await check('advise sends the bounded transcript and the question; the guidance feeds the loop', async () => {
+        api.set([
+            { calls: [['read_file', { path: 'src/a.js' }], ['advise', { question: 'is the parser done?' }]], x: { run_id: 'run_9' } },
+            { content: 'done' },
+        ]);
+        api.adviceSet([{ advice: 'check the parser first' }]);
+        const events = await collect(ai.run({ prompt: 'fix the parser', agent: 'openvibe-ai', cwd: work, permission: 'read', handoff: false, advisor: true }));
+        assert.strictEqual(api.advice.length, 1);
+        const call = api.advice[0];
+        assert.ok(call.url.endsWith('/api/v1/runs/run_9/advice'), call.url);
+        assert.strictEqual(call.auth, 'Bearer ov-task-token', 'the advice call carries the run token');
+        assert.strictEqual(call.body.question, 'is the parser done?');
+        assert.ok(!('model' in call.body), 'no model named, none sent');
+        const t = call.body.transcript;
+        assert.ok(Array.isArray(t) && t.length >= 3, 'system, task and the turn so far');
+        assert.ok(t.every((m) => ['system', 'user', 'assistant', 'tool'].includes(m.role) && typeof m.content === 'string' && m.content.trim()), 'text only, roles AI accepts');
+        assert.ok(t.reduce((n, m) => n + m.content.length, 0) <= 80_000, 'bounded');
+        assert.strictEqual(t[0].role, 'system');
+        assert.ok(t.some((m) => m.role === 'user' && m.content === 'fix the parser'), 'the task rides along');
+        assert.ok(t.some((m) => m.role === 'assistant' && /called: Read/.test(m.content)), 'the tool call reads as a line');
+        const res = toolResults(events);
+        assert.ok(res.some((c) => !c.is_error && /check the parser first/.test(c.content) && /\(advice 1 of 3\)/.test(c.content)), JSON.stringify(res.map((c) => c.content)));
+        const fed = api.requests[1].body.messages.find((m) => m.role === 'tool' && /check the parser first/.test(m.content));
+        assert.ok(fed, 'the guidance feeds the next turn');
+    });
+
+    await check('the fourth ask is refused in the loop, without another HTTP call', async () => {
+        api.set([{ calls: [['advise', { question: 'one' }], ['advise', { question: 'two' }], ['advise', { question: 'three' }], ['advise', { question: 'four' }]], x: { run_id: 'run_9' } }, { content: 'done' }]);
+        api.adviceSet([{ advice: 'a' }, { advice: 'b' }, { advice: 'c' }]);
+        const events = await collect(ai.run({ prompt: 'x', agent: 'openvibe-ai', cwd: work, permission: 'read', handoff: false, advisor: true }));
+        assert.strictEqual(api.advice.length, 3);
+        const res = toolResults(events);
+        assert.ok(res.slice(0, 3).every((c) => !c.is_error));
+        assert.ok(res[3].is_error && /asked 3 times/.test(res[3].content), res[3].content);
+    });
+
+    await check('an exhausted advisor and a missing run id end in words, not a crash', async () => {
+        api.set([{ calls: [['advise', { question: 'any?' }]], x: { run_id: 'run_9' } }, { content: 'done' }]);
+        api.adviceSet([{ status: 409, error: 'used up', code: 'advisor.exhausted' }]);
+        const spent = await collect(ai.run({ prompt: 'x', agent: 'openvibe-ai', cwd: work, permission: 'read', handoff: false, advisor: true }));
+        assert.ok(toolResults(spent).some((c) => c.is_error && /no calls left/.test(c.content)));
+        api.set([{ calls: [['advise', { question: 'any?' }]] }, { content: 'done' }]);
+        api.adviceSet([]);
+        const norun = await collect(ai.run({ prompt: 'x', agent: 'openvibe-ai', cwd: work, permission: 'read', handoff: false, advisor: true }));
+        assert.ok(toolResults(norun).some((c) => c.is_error && /ask again after the next answer/.test(c.content)));
+        assert.strictEqual(api.advice.length, 0, 'no run id, no call');
+    });
+
+    await check('the advice transcript: text only, bounded, the task always first', () => {
+        const messages = [{ role: 'system', content: 'be careful' }, { role: 'user', content: 'the task' }];
+        for (let i = 0; i < 100; i++) {
+            messages.push({ role: 'assistant', content: '', tool_calls: [{ id: `c${i}`, function: { name: 'read_file', arguments: JSON.stringify({ path: `f${i}.js`, pad: 'y'.repeat(5000) }) } }] });
+            messages.push({ role: 'tool', tool_call_id: `c${i}`, content: `file ${i}\n${'z'.repeat(5000)}` });
+        }
+        messages.push({ role: 'assistant', content: '   ' }, { role: 'user', content: '' }, { role: 'bogus', content: 'x' });
+        const t = adviceTranscript(messages);
+        assert.ok(t.length <= 50, `${t.length} messages`);
+        assert.ok(t.reduce((n, m) => n + m.content.length, 0) <= 80_000, 'bounded');
+        assert.ok(t.every((m) => ['system', 'user', 'assistant', 'tool'].includes(m.role) && m.content.trim()), 'text only');
+        assert.strictEqual(t[0].content, 'be careful');
+        assert.strictEqual(t[1].content, 'the task', 'the task rides first even past the budget');
+        assert.ok(t.some((m) => /called: Read/.test(m.content)), 'tool calls read as lines');
+        assert.deepStrictEqual(adviceTranscript([]), [{ role: 'user', content: 'the executor asked for advice but has no transcript yet' }]);
     });
 
     await check('resume continues the saved conversation', async () => {

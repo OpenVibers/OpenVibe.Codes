@@ -9,6 +9,7 @@
  *   write_file, edit_file               edit and full
  *   run_command                         full only (bash -lc in the working directory, two minutes, output clipped;
  *                                       push, reset, recursive rm and .env paths refused before anything spawns)
+ *   advise                              OpenVibe.AI only, when the run asked for an advisor (at most 3 asks)
  *
  * Every path is resolved inside the working directory: `..` out of it, an absolute path elsewhere, `.git/` writes and
  * `.env` files are refused. One read answers at most 40 KB. The conversation is kept in the session store so `resume`
@@ -33,7 +34,7 @@ const TOOL_DEFS = {
     run_command: { level: 'full', description: 'Run a shell command in the working directory (two-minute limit).', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } },
 };
 const LEVELS = { read: 1, edit: 2, full: 3 };
-const SHOWN_AS = { list_dir: 'LS', read_file: 'Read', grep: 'Grep', write_file: 'Write', edit_file: 'Edit', run_command: 'Bash' };
+const SHOWN_AS = { list_dir: 'LS', read_file: 'Read', grep: 'Grep', write_file: 'Write', edit_file: 'Edit', run_command: 'Bash', advise: 'Advise' };
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage', '.cache']);
 
 /** What one read_file answer may hold: 40 KB, enforced here, not in the prompt. */
@@ -74,6 +75,76 @@ function refusedCommand(command) {
     for (const [re, why] of whole) if (re.test(text)) return why;
     return null;
 }
+
+/**
+ * Ask the run's advisor (a stronger model on OpenVibe.AI) for guidance mid-run. Offered only when the run
+ * asked for an advisor and only on the OpenVibe.AI adapter: the other API paths have no advice endpoint.
+ */
+const ADVISE = { level: 'read', description: 'Ask the stronger advisor model for guidance with the transcript so far (at most 3 asks per run). Say what you are stuck on or about to do.', parameters: { type: 'object', properties: { question: { type: 'string' } }, required: [] } };
+/** The loop's own advice budget: AI caps uses per run, and every turn is its own run, so this is the real one. */
+const MAX_ADVICE = 3;
+/** What one advice call may carry of the transcript: 50 messages, 60 KB, inside AI's 200/300 KB. */
+const ADVICE_MAX_MESSAGES = 50;
+const ADVICE_MAX_CHARS = 60_000;
+
+/**
+ * The transcript an advice call sends: text only, roles AI accepts, the newest window inside the budget with
+ * the system message and the task (the first user turn) always first. Tool calls become `called: …` lines —
+ * the advisor sees what ran, not the calls' shapes.
+ */
+function adviceTranscript(messages, { maxMessages = ADVICE_MAX_MESSAGES, maxChars = ADVICE_MAX_CHARS } = {}) {
+    const flat = [];
+    for (const m of messages || []) {
+        if (!m || typeof m !== 'object') continue;
+        if (m.role === 'system') {
+            const c = String(m.content == null ? '' : m.content).trim();
+            if (c) flat.push({ role: 'system', content: c.slice(0, 20000) });
+            continue;
+        }
+        if (m.role === 'tool') {
+            const c = String(m.content == null ? '' : m.content).trim();
+            if (c) flat.push({ role: 'tool', content: c.slice(0, 20000) });
+            continue;
+        }
+        if (m.role === 'assistant') {
+            const parts = [];
+            const c = String(m.content || '').trim();
+            if (c) parts.push(c.slice(0, 20000));
+            const calls = Array.isArray(m.tool_calls) ? m.tool_calls : [];
+            if (calls.length) {
+                parts.push(`called: ${calls.map((t) => {
+                    const fn = (t && t.function) || {};
+                    const a = String(fn.arguments || '');
+                    return `${SHOWN_AS[fn.name] || fn.name || 'tool'}(${a.length > 300 ? `${a.slice(0, 300)}…` : a})`;
+                }).join(', ')}`);
+            }
+            if (parts.length) flat.push({ role: 'assistant', content: parts.join('\n\n').slice(0, 20000) });
+            continue;
+        }
+        if (m.role === 'user') {
+            const c = String(m.content == null ? '' : m.content).trim();
+            if (c) flat.push({ role: 'user', content: c.slice(0, 20000) });
+        }
+    }
+    const system = flat.filter((m) => m.role === 'system');
+    const rest = flat.filter((m) => m.role !== 'system');
+    const firstUser = rest.find((m) => m.role === 'user');
+    const head = [...system];
+    if (firstUser) head.push(firstUser);
+    const room = Math.max(0, maxChars - head.reduce((n, m) => n + m.content.length, 0));
+    const tail = [];
+    let chars = 0;
+    for (let i = rest.length - 1; i >= 0 && tail.length < Math.max(0, maxMessages - head.length) && chars < room; i--) {
+        if (rest[i] === firstUser) continue;
+        chars += rest[i].content.length;
+        tail.unshift(rest[i]);
+    }
+    const out = [...head, ...tail].slice(0, Math.max(1, maxMessages));
+    return out.length ? out : [{ role: 'user', content: 'the executor asked for advice but has no transcript yet' }];
+}
+
+/** The API root the advice route hangs off: the chat base without its trailing /v1. */
+function adviceRoot(base) { return String(base || '').replace(/\/v1$/, ''); }
 
 /**
  * The real path of abs, with any part that does not exist yet kept as written; null when a component is
@@ -166,6 +237,33 @@ function runTool(name, args, cwd) {
     return [`unknown tool ${name}`, true];
 }
 
+/**
+ * One advice call against the latest turn's run: the bounded transcript and the model's question go to
+ * POST /api/v1/runs/:id/advice, and the stronger model's guidance (at most 100 words) comes back. AI records
+ * the use on the run's receipt with its cost; this loop's own count is the per-task budget.
+ *
+ * @returns {Promise<[string, boolean, boolean]>} the answer, whether it failed, and whether to stop asking
+ */
+async function askAdvice({ doFetch, base, env, bearer, runId, transcript, question, model }) {
+    let res;
+    try {
+        res = await doFetch(`${adviceRoot(base)}/api/v1/runs/${encodeURIComponent(runId)}/advice`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...extraHeaders(env) },
+            body: JSON.stringify({ transcript, ...(question ? { question } : {}), ...(model ? { model } : {}) }),
+        });
+    } catch (err) {
+        return [`the advisor could not be reached: ${err.message}`, true, false];
+    }
+    const body = await res.json().catch(() => null);
+    if (res.status === 201 && body && typeof body.advice === 'string' && body.advice.trim()) return [body.advice.trim(), false, false];
+    const code = String((body && ((body.error && body.error.code) || body.code)) || '');
+    const detail = String((body && ((body.error && (body.error.message || body.error.detail)) || body.detail)) || '').slice(0, 300);
+    if (res.status === 409 || code === 'advisor.exhausted') return ['the advisor has no calls left on this run: work with what it said', true, true];
+    if (res.status === 403 || code === 'advisor.not_enabled') return ['this run did not ask for an advisor', true, true];
+    return [`the advisor answered HTTP ${res.status}${code ? ` (${code})` : ''}${detail ? `: ${detail}` : ''}`, true, false];
+}
+
 /** run_command, asynchronously (the only tool that waits on something else); onChunk(text) hears its output as it comes. */
 function runCommand(command, cwd, signal, onChunk) {
     return new Promise((resolve) => {
@@ -245,7 +343,11 @@ function apiAgent(spec) {
             const level = LEVELS[t.permission] || 1;
             // Tools in a fixed name order, and the system message above never carries the task: the request prefix a
             // provider caches (system + tools) is byte-identical from one task to the next, and only the prompt differs.
-            const tools = Object.entries(TOOL_DEFS).filter(([, d]) => LEVELS[d.level] <= level)
+            // advise joins the list only when the run asked for an advisor (off unless asked) and this adapter is
+            // OpenVibe.AI's: the other API paths have no advice endpoint. It stays for every turn, asked out or not,
+            // so the prefix stays stable; past its budget it answers a refusal instead of calling.
+            const defs = spec.advisorEndpoint === true && t.advisor ? { ...TOOL_DEFS, advise: ADVISE } : TOOL_DEFS;
+            const tools = Object.entries(defs).filter(([, d]) => LEVELS[d.level] <= level)
                 .sort(([a], [b]) => a.localeCompare(b))
                 .map(([name, d]) => ({ type: 'function', function: { name, description: d.description, parameters: d.parameters } }));
             const sessionId = t.resume || `api_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -268,6 +370,9 @@ function apiAgent(spec) {
                 // The model AI says ran, and its route disclosure (x_openvibe), recorded on the run's result.
                 let resolvedModel = null;
                 let disclosure = null;
+                // The latest turn's AI run, advise asks against; and the advice spent on this task.
+                let adviceRunId = null;
+                let adviceUsed = 0;
                 try {
                     while (turns < maxTurns && !cancelled) {
                         turns++;
@@ -286,8 +391,10 @@ function apiAgent(spec) {
                         const x = body && body.x_openvibe && typeof body.x_openvibe === 'object' ? body.x_openvibe : null;
                         if (x) {
                             if (x.resolved_model) resolvedModel = String(x.resolved_model);
+                            if (x.run_id) adviceRunId = String(x.run_id);
                             disclosure = { ...(disclosure || {}), ...x };
                         }
+                        if (!adviceRunId && body && typeof body.id === 'string' && body.id.startsWith('chatcmpl-')) adviceRunId = body.id.slice('chatcmpl-'.length);
                         if (!res.ok || !body || !Array.isArray(body.choices) || !body.choices[0]) {
                             // An exact id AI refused (ai.model_not_found / ai.model_unavailable) is its own answer:
                             // it is reported as it is, and this loop never asks for a different model instead.
@@ -310,9 +417,27 @@ function apiAgent(spec) {
                             try { args = JSON.parse((call.function && call.function.arguments) || '{}'); } catch { /* answered as an error below */ }
                             yield ev.toolUse(call.id, SHOWN_AS[name] || name, shownInput(name, args), resolvedModel || model);
                             let out;
-                            const def = TOOL_DEFS[name];
+                            const def = defs[name];
                             if (!def) out = [`unknown tool ${name}`, true];
                             else if (LEVELS[def.level] > level) out = [`${name} needs the ${def.level} permission level`, true];
+                            else if (name === 'advise') {
+                                // Capped at 3 asks, against the latest turn's run: the transcript goes bounded,
+                                // the guidance feeds this loop, and AI puts each use on the run's receipt.
+                                if (adviceUsed >= MAX_ADVICE) out = ['the advisor has been asked 3 times on this run: work with what it said', true];
+                                else if (!adviceRunId) out = ['the advisor has no run to ask against yet: carry on, and ask again after the next answer', true];
+                                else {
+                                    const question = typeof args.question === 'string' ? args.question.trim().slice(0, 4000) : '';
+                                    const advisorModel = t.advisor && typeof t.advisor === 'object' && typeof t.advisor.model === 'string' ? t.advisor.model : null;
+                                    try {
+                                        const b = spec.token ? await spec.token(env, doFetch) : key;
+                                        const [text, failed, exhausted] = await askAdvice({ doFetch, base, env, bearer: b, runId: adviceRunId, transcript: adviceTranscript(messages), question, model: advisorModel });
+                                        if (failed) { if (exhausted) adviceUsed = MAX_ADVICE; out = [text, true]; }
+                                        else { adviceUsed++; out = [`${text}\n\n(advice ${adviceUsed} of ${MAX_ADVICE})`, false]; }
+                                    } catch (err) {
+                                        out = [`the advisor could not be reached: ${err.message}`, true];
+                                    }
+                                }
+                            }
                             else if (name === 'run_command') {
                                 // The hard rules run before the shell does: a refusal is the tool's answer, and
                                 // nothing spawns.
@@ -357,4 +482,4 @@ function apiAgent(spec) {
     return adapter;
 }
 
-module.exports = { apiAgent, refusalOf, extraHeaders, runTool, inside, refusedCommand, TOOL_DEFS, SYSTEM };
+module.exports = { apiAgent, refusalOf, extraHeaders, runTool, inside, refusedCommand, adviceTranscript, TOOL_DEFS, SYSTEM };
