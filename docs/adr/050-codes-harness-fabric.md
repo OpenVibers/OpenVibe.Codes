@@ -82,7 +82,10 @@ first `docs/adr/` — the plan (§8) lists **ADR-050 Codes Harness Fabric** amon
    (`app.js:79-80`), never a runtime surprise.
 3. **One harness × agent pair is one `platform.resource-offer@1` of `kind: harness`** with the catalog row as its
    `platform.harness-offer@1` `detail` (`harness-placement.js:31-58`). Offers carry `task:<kind>`, `harness:<flag>` and
-   `runtime:<class>` capabilities; a row that declares no runtime declares none (no default is synthesized).
+   `runtime:<class>` capabilities; a row that declares no runtime declares none (no default is synthesized). They also
+   carry one `harness:<field>-<value>` capability per field of the runtime capability manifest
+   (`engine/runtime.js`, `docs/harness-runtime.md`) — terminal status, steering, checkpointing, subagents, context
+   handoff and enforcement — so the router routes on the harness's declared behavior, never on a provider name.
 4. **The read surface is `GET /api/v1/harnesses` and `POST /api/v1/harnesses/route`, plus the read-only docs page.**
    These are additive and public-read; they expose the catalog and the placement decision with reasons and candidates
    (`api.js:61-81`). Nothing in this surface launches a harness, streams a run, meters usage or resumes a session.

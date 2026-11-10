@@ -40,7 +40,9 @@ function priced(row, freshUsd) {
             provider: 'example',
             region: 'global',
             trust: 'partner',
-            capabilities: ['task:edit', 'harness:host-access', 'harness:mcp', 'harness:resume', 'harness:edit', 'harness:tools', 'runtime:code'],
+            capabilities: ['task:edit', 'harness:host-access', 'harness:mcp', 'harness:resume', 'harness:edit', 'harness:tools', 'runtime:code',
+                'harness:terminal-status-structured', 'harness:steering-resume', 'harness:checkpointing-none',
+                'harness:subagents-none', 'harness:context-handoff-session', 'harness:enforcement-client-boundary'],
             capacity: { workers: { harness: 2 } },
             health: { status: 'degraded' },
             pricing: { model: 'per-operation', unit: 'token', marginal_usd_per_unit: 0.003 / 1000 },
@@ -52,7 +54,9 @@ function priced(row, freshUsd) {
         const deepseek = rows.find((row) => row.id === 'deepseek');
         const offer = toOffer(deepseek, deepseek.agents[0]);
         assert.strictEqual(offer.offer_id, 'deepseek:deepseek-chat');
-        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:review', 'harness:host-access', 'harness:resume', 'harness:edit', 'harness:review', 'harness:tools']);
+        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:review', 'harness:host-access', 'harness:resume', 'harness:edit', 'harness:review', 'harness:tools',
+            'harness:terminal-status-structured', 'harness:steering-resume', 'harness:checkpointing-none',
+            'harness:subagents-none', 'harness:context-handoff-session', 'harness:enforcement-client-boundary']);
         assert.strictEqual(offer.trust, 'external');
         assert.deepStrictEqual(offer.health, { status: 'up' });
         assert.strictEqual('latency_ms' in offer, false);
@@ -73,7 +77,9 @@ function priced(row, freshUsd) {
         }
         const browsing = { ...rows[0], task_capabilities: ['edit', 'browse'] };
         const offer = toOffer(browsing, browsing.agents[0], { now });
-        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:browse', 'harness:host-access', 'harness:mcp', 'harness:long-autonomy', 'harness:resume', 'harness:edit', 'harness:review', 'harness:tools', 'harness:vision', 'runtime:code']);
+        assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:browse', 'harness:host-access', 'harness:mcp', 'harness:long-autonomy', 'harness:resume', 'harness:edit', 'harness:review', 'harness:tools', 'harness:vision', 'runtime:code',
+            'harness:terminal-status-structured', 'harness:steering-resume', 'harness:checkpointing-none',
+            'harness:subagents-native', 'harness:context-handoff-session', 'harness:enforcement-native']);
         assert.ok(contracts.validate('platform.resource-offer@1', JSON.parse(JSON.stringify(offer))).valid);
     });
 

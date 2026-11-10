@@ -52,6 +52,22 @@ shared Know store's own `recall()` (the portal's `know/lessons.js`; on a Link it
 
 Each CLI: installed, signed in, and the limit windows it can read. Nothing else: no key, no token, no account name.
 
+### `runtime.js` — what each harness can actually do
+
+The runtime capability manifest: terminal-status quality, steering, checkpointing, subagent lifecycle, context
+handoff and where the permission boundary is enforced, per harness, as data. Every offer carries the fields as
+`harness:<field>-<value>` capabilities (`server/domain/harness-placement.js`), so a task requires what it needs and
+the router excludes the rest with a reason instead of a provider-name check. `pick()` also takes `needs` and skips a
+ladder rung whose harness does not declare it. `[docs/harness-runtime.md](../docs/harness-runtime.md)` has the table.
+
+```js
+const runtime = require('./engine/runtime');
+
+runtime.fits('cm', { subagents: 'native' });   // true
+runtime.fits('mm', { subagents: 'native' });   // false: MiniMax Code declares no subagents
+runtime.capabilities(runtime.forHarness('codex'));
+```
+
 ### `router.js` — what kind of task is this, and which runner may take it
 
 A brief is classified into one of five tiers (`basic`, `research`, `standard`, `hard`, `design`); a line `tier: hard`
