@@ -18,6 +18,7 @@ const { execFileSync } = require('child_process');
 const ev = require('../events');
 const { spawnAgent, exitReason } = require('../process');
 const { effortFor } = require('../../engine/adapters/base');
+const { DENIED: CLAUDE_DENIED } = require('../../engine/adapters/claude-code');
 
 /** A parser that reads JSON lines, hands each object to onEvent, and ends the run with exactly one result. */
 function jsonLines(agent, onEvent, onEnd) {
@@ -71,8 +72,9 @@ const claudeCode = {
         if (o.mcpConfig) args.push('--mcp-config', o.mcpConfig);
         if (Array.isArray(o.allowedTools) && o.allowedTools.length) args.push('--allowedTools', o.allowedTools.join(' '));
         if (o.permissionPromptTool) args.push('--permission-prompt-tool', o.permissionPromptTool);
-        // Even unattended, a run never pushes: publishing is the person's step.
-        args.push('--disallowedTools', 'Bash(git push:*)');
+        // The portal's deny list rides along (no commits, resets, stashes, sudo, recursive rm, .env reads); even
+        // unattended, a run never pushes: publishing is the person's step, the one rule full keeps.
+        args.push('--disallowedTools', t.permission === 'full' ? 'Bash(git push:*)' : CLAUDE_DENIED.join(' '));
         const parser = jsonLines(claudeCode, (o, emit, st) => {
             if (o.type === 'system' && o.subtype === 'init') { st.sessionId = o.session_id; st.model = o.model; emit(ev.init(o.session_id, 'claude-code', o.model)); return; }
             if (o.type === 'result') { emit({ ...o, result: ev.scrub(o.result || '') }); return; }
@@ -356,8 +358,9 @@ const claudeOther = {
             '--permission-mode', mode, '--exclude-dynamic-system-prompt-sections'];
         if (t.maxTurns) args.push('--max-turns', String(t.maxTurns));
         if (t.resume) args.push('--resume', String(t.resume));
-        // Even unattended, a run never pushes: publishing is the person's step.
-        args.push('--disallowedTools', 'Bash(git push:*)');
+        // The portal's deny list rides along (no commits, resets, stashes, sudo, recursive rm, .env reads); even
+        // unattended, a run never pushes: publishing is the person's step, the one rule full keeps.
+        args.push('--disallowedTools', t.permission === 'full' ? 'Bash(git push:*)' : CLAUDE_DENIED.join(' '));
         // The harness's environment (PATH finds the CLI), with the connection's own names on top: the endpoint, the
         // token and the model id. The key travels in the environment, never in argv: the process list of this machine
         // is readable.
