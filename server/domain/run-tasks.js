@@ -588,9 +588,13 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         }
         // The job gets the files and the lines naming them, after the knowledge recall so it is in the same prompt;
         // the task row keeps the person's own words, so the page's "The brief" does not repeat the paths.
-        const jobArgs = claims.length
-            ? { ...runArgs, attachments: [...(Array.isArray(runArgs.attachments) ? runArgs.attachments : []), ...fileArgs(claims, turnId)], prompt: withFiles(runArgs.prompt, claims, turnId) }
-            : runArgs;
+        const jobArgs = {
+            ...(claims.length
+                ? { ...runArgs, attachments: [...(Array.isArray(runArgs.attachments) ? runArgs.attachments : []), ...fileArgs(claims, turnId)], prompt: withFiles(runArgs.prompt, claims, turnId) }
+                : runArgs),
+            // The harness's per-turn checkpoint refs name the task they belong to: refs/codes/checkpoints/<task>/<run>/<n>
+            task_id: id,
+        };
         const actorRefValue = actorRef && typeof actorRef === 'object' && !Array.isArray(actorRef) ? JSON.stringify(actorRef) : null;
         // Placement A1: the task's kind, its harness, and why the placer put it there. The person's rules, Bench priors
         // and learned counts are read once here; the placement itself is pure. A task whose task kind is review is

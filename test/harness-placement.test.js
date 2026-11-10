@@ -41,7 +41,7 @@ function priced(row, freshUsd) {
             region: 'global',
             trust: 'partner',
             capabilities: ['task:edit', 'harness:host-access', 'harness:mcp', 'harness:resume', 'harness:edit', 'harness:tools', 'runtime:code',
-                'harness:terminal-status-structured', 'harness:steering-resume', 'harness:checkpointing-none',
+                'harness:terminal-status-structured', 'harness:steering-resume', 'harness:checkpointing-git',
                 'harness:subagents-none', 'harness:context-handoff-session', 'harness:enforcement-client-boundary'],
             capacity: { workers: { harness: 2 } },
             health: { status: 'degraded' },
@@ -55,7 +55,7 @@ function priced(row, freshUsd) {
         const offer = toOffer(deepseek, deepseek.agents[0]);
         assert.strictEqual(offer.offer_id, 'deepseek:deepseek-chat');
         assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:review', 'harness:host-access', 'harness:resume', 'harness:edit', 'harness:review', 'harness:tools',
-            'harness:terminal-status-structured', 'harness:steering-resume', 'harness:checkpointing-none',
+            'harness:terminal-status-structured', 'harness:steering-resume', 'harness:checkpointing-git',
             'harness:subagents-none', 'harness:context-handoff-session', 'harness:enforcement-client-boundary']);
         assert.strictEqual(offer.trust, 'external');
         assert.deepStrictEqual(offer.health, { status: 'up' });
@@ -78,7 +78,7 @@ function priced(row, freshUsd) {
         const browsing = { ...rows[0], task_capabilities: ['edit', 'browse'] };
         const offer = toOffer(browsing, browsing.agents[0], { now });
         assert.deepStrictEqual(offer.capabilities, ['task:edit', 'task:browse', 'harness:host-access', 'harness:mcp', 'harness:long-autonomy', 'harness:resume', 'harness:edit', 'harness:review', 'harness:tools', 'harness:vision', 'runtime:code',
-            'harness:terminal-status-structured', 'harness:steering-resume', 'harness:checkpointing-none',
+            'harness:terminal-status-structured', 'harness:steering-resume', 'harness:checkpointing-git',
             'harness:subagents-native', 'harness:context-handoff-session', 'harness:enforcement-native']);
         assert.ok(contracts.validate('platform.resource-offer@1', JSON.parse(JSON.stringify(offer))).valid);
     });

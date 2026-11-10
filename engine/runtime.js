@@ -65,48 +65,49 @@ const CAPABILITY = Object.freeze({
  *
  * Grounded in each adapter (harness/adapters/cli.js, harness/adapters/api.js) and its CLI's flags, not in its name:
  * every CLI here ends with a result line except Aider (its prose is parsed); every CLI with `--resume`/`--session`/`-s`
- * continues its session; Claude Code alone exposes subagents as tools. `checkpointing` is `none` until the per-turn
- * checkpoint refs land: this manifest is the runtime's declaration, so it must not claim one early.
+ * continues its session; Claude Code alone exposes subagents as tools. `checkpointing` is `git` for every harness:
+ * the job pins its clone to `refs/codes/checkpoints/<task>/<run>/<n>` per turn (harness/checkpoints.js), whatever the
+ * harness.
  */
 const MANIFEST = Object.freeze({
     'claude-code': Object.freeze({
-        terminal_status: 'structured', steering: 'resume', checkpointing: 'none',
+        terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'native', context_handoff: 'session', enforcement: 'native',
     }),
     'claude-other': Object.freeze({
-        terminal_status: 'structured', steering: 'resume', checkpointing: 'none',
+        terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'native', context_handoff: 'session', enforcement: 'native',
     }),
     codex: Object.freeze({
-        terminal_status: 'structured', steering: 'resume', checkpointing: 'none',
+        terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'none', context_handoff: 'session', enforcement: 'native',
     }),
     opencode: Object.freeze({
-        terminal_status: 'structured', steering: 'resume', checkpointing: 'none',
+        terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'none', context_handoff: 'session', enforcement: 'client-boundary',
     }),
     'command-code': Object.freeze({
-        terminal_status: 'structured', steering: 'resume', checkpointing: 'none',
+        terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'none', context_handoff: 'session', enforcement: 'client-boundary',
     }),
     aider: Object.freeze({
-        terminal_status: 'parsed', steering: 'none', checkpointing: 'none',
+        terminal_status: 'parsed', steering: 'none', checkpointing: 'git',
         subagents: 'none', context_handoff: 'none', enforcement: 'client-boundary',
     }),
     'minimax-code': Object.freeze({
-        terminal_status: 'structured', steering: 'resume', checkpointing: 'none',
+        terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'none', context_handoff: 'session', enforcement: 'native',
     }),
     deepseek: Object.freeze({
-        terminal_status: 'structured', steering: 'resume', checkpointing: 'none',
+        terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'none', context_handoff: 'session', enforcement: 'client-boundary',
     }),
     'openvibe-ai': Object.freeze({
-        terminal_status: 'structured', steering: 'resume', checkpointing: 'none',
+        terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'none', context_handoff: 'session', enforcement: 'client-boundary',
     }),
     'openai-compatible': Object.freeze({
-        terminal_status: 'structured', steering: 'resume', checkpointing: 'none',
+        terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'none', context_handoff: 'session', enforcement: 'client-boundary',
     }),
 });
