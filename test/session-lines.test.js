@@ -80,7 +80,11 @@ function frame(type, seq, data) {
             const page = await replay('1');
             assert.strictEqual(page.status, 200, page.text);
             assert.strictEqual(page.json().source, 'session');
+            assert.strictEqual(page.json().task_id, TASK('1'));
             assert.strictEqual(page.json().lines.length, 6);
+            const contract = page.json().lines.filter(line => ['step','tool','tool_result','done'].includes(line.kind));
+            assert.deepStrictEqual(contract.map(line => line.body.t), ['step','tool','tool_result','done']);
+            assert.ok(contract.every(line => Number.isSafeInteger(line.seq) && line.seq > 0 && line.body && typeof line.body === 'object'));
         });
 
         await check('a reconnect that replays the stream does not duplicate a line', async () => {
