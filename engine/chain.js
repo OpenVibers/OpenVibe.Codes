@@ -433,7 +433,18 @@ function settledParent(runs, end) {
 function step(runs, end, opts = {}) {
     if (!end) return { action: 'none', why: 'there are no attempts' };
     if (end.status === 'running' || end.status === 'queued') return { action: 'wait', why: 'the task is still running' };
-    if (end.status === 'done' && end.goal && end.goal.verdict && end.goal.verdict.status === 'rejected') return { action: 'continue', why: end.goal.verdict.reason || 'the verifier rejected the completion proposal' };
+    // AL1: a worker's "done" is a proposal, not an outcome. Nothing is done until an independent verifier accepted the
+    // goal's evidence; a rejection (or a verdict that could not be made) goes back to the same session.
+    if (end.status === 'done' && end.goal) {
+        const verdict = end.goal.verdict || null;
+        if (!verdict || verdict.status !== 'accepted') {
+            return {
+                action: 'continue',
+                session: facts(end).session,
+                why: (verdict && verdict.reason) || 'the goal has no independent acceptance yet',
+            };
+        }
+    }
     if (end.status === 'done') return { action: 'done', why: 'the task finished' };
     const why = end.reason || reason(end.error);
     if (why === 'stopped') return { action: 'stop', why: 'the task was stopped on purpose' };

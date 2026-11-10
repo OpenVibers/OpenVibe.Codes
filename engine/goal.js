@@ -36,7 +36,9 @@ async function verify({ goal, check, proposal, evidence, checkOutput, callVerifi
         const verdict = String(doc && doc.verdict || '').toLowerCase();
         return { status: verdict === 'accept' ? 'accepted' : 'rejected', reason: String(doc && doc.reason || 'The verifier did not return a valid acceptance verdict.').slice(0, 4000), check_output: boundedEvidence(checkOutput) };
     } catch (error) {
-        return { status: 'rejected', reason: error && error.name === 'AbortError' ? 'The independent verifier timed out.' : 'The independent verifier failed to produce a verdict.', check_output: boundedEvidence(checkOutput) };
+        // The verifier did not run: that is not the worker's failure and it is not an acceptance. A `failed` verdict
+        // leaves the task waiting on a person instead of looping the worker against an unavailable model.
+        return { status: 'failed', reason: error && error.name === 'AbortError' ? 'The independent verifier timed out.' : 'The independent verifier failed to produce a verdict.', check_output: boundedEvidence(checkOutput) };
     } finally { clearTimeout(timer); }
 }
 

@@ -20,6 +20,8 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { collectProof } = require('../engine/proof');
 const { createCheckpoints, toolPaths } = require('./checkpoints');
+const { runCheck } = require('./goal-check');
+const { boundedEvidence } = require('../engine/goal');
 
 const JOB_PROTOCOL = '1.0.0';
 /** The agents a conductor's turn may run on: every harness Codes offers. */
@@ -248,6 +250,18 @@ function parseArgs(raw, env = process.env) {
         tokens: Number.isFinite(Number(a.limits.tokens)) && Number(a.limits.tokens) > 0 ? Math.min(1000000, Number(a.limits.tokens)) : null,
         usd: Number.isFinite(Number(a.limits.usd)) && Number(a.limits.usd) > 0 ? Math.min(100, Number(a.limits.usd)) : null,
     } : null;
+    // AL1: a task's goal and its typed check. The harness runs the check itself, in the clone, after the worker's
+    // turn; the model never supplies the exit code. Unknown or malformed goals are dropped, never guessed at.
+    const rawGoal = a.goal && typeof a.goal === 'object' && !Array.isArray(a.goal) ? a.goal : null;
+    const goalCheck = rawGoal && rawGoal.check && typeof rawGoal.check === 'object' ? rawGoal.check : null;
+    const goal = rawGoal && typeof rawGoal.goal === 'string' && rawGoal.goal.trim()
+        && goalCheck && ['command', 'url', 'rubric'].includes(goalCheck.kind) && typeof goalCheck.value === 'string' && goalCheck.value.trim()
+        ? {
+            goal: rawGoal.goal.trim().slice(0, 4000),
+            check: { kind: goalCheck.kind, value: goalCheck.value.trim().slice(0, 4000) },
+            budget: rawGoal.budget && typeof rawGoal.budget === 'object' && !Array.isArray(rawGoal.budget) ? rawGoal.budget : {},
+            no_progress_limit: Number.isInteger(rawGoal.no_progress_limit) ? rawGoal.no_progress_limit : 3,
+        } : null;
     return {
         kind, repo: repo ? repo.toString() : null, ref, prompt, permission, push,
         // The task this job is an attempt of, when the server names it: the checkpoint refs carry it.
@@ -265,6 +279,7 @@ function parseArgs(raw, env = process.env) {
         ...(typeof a.knowledge === 'string' && a.knowledge.trim() ? { knowledge: a.knowledge.trim().slice(0, 4000) } : {}),
         // The conversation's work so far (Codes L31 CH4): applied to the clone before the agent starts.
         ...(typeof a.base_patch === 'string' && a.base_patch.trim() && a.base_patch.length <= MAX_PATCH ? { base_patch: a.base_patch } : {}),
+        ...(goal ? { goal } : {}),
     };
 }
 
@@ -829,6 +844,7 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         if (last && last.disclosure && typeof last.disclosure === 'object') result.disclosure = last.disclosure;
         const usage = last && last.usage && typeof last.usage === 'object' ? last.usage : {};
         result.tokens = Number(last && (last.total_tokens || last.tokens)) || (Number(usage.input_tokens) || 0) + (Number(usage.output_tokens) || 0);
+        if (last && Number.isFinite(Number(last.turns))) result.turns = Number(last.turns);
         // The session the next message resumes: a conductor's turn ends, its conversation does not.
         if (job.kind === 'conductor' && last && last.session_id) result.session = String(last.session_id).slice(0, 200);
         // A conductor works in the owner's own folder: its changes are theirs, not a patch for a pull request.
@@ -868,6 +884,33 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             } catch (e) {
                 say({ t: 'note', level: 'warning', text: `The proof could not be collected: ${scrub(e.message)}` });
                 result.proof = { items: [], outcome: null };
+            }
+        }
+        // The goal's own check (AL1): the machine runs it in the clone, after the worker's turn, and the result carries
+        // the output as evidence. It never decides alone: the independent verifier reads the evidence server-side.
+        if (job.goal && job.kind === 'code') {
+            say({ t: 'step', text: 'Running the goal check' });
+            try {
+                const checked = await runCheck(job.goal.check, { cwd: work, fetchImpl });
+                const evidence = boundedEvidence(JSON.stringify({
+                    check: { kind: checked.kind, value: checked.value, ok: checked.ok, exit_code: checked.exit_code, status: checked.status, output: checked.output },
+                    summary: answer.slice(0, 4000),
+                    files: result.files.slice(0, 200).map((f) => ({ path: f.path, added: f.added, removed: f.removed })),
+                    proof: result.proof ? result.proof.items.map((i) => ({ kind: i.kind, label: i.label, ok: i.ok, skipped: !!i.skipped, summary: i.summary })) : null,
+                }));
+                result.goal = {
+                    goal: job.goal.goal,
+                    check: job.goal.check,
+                    proposal: answer.slice(0, 4000),
+                    check_output: checked.output,
+                    evidence,
+                    checked: { ok: checked.ok, exit_code: checked.exit_code == null ? null : checked.exit_code, status: checked.status == null ? null : checked.status, at: checked.at },
+                };
+                say({ t: 'note', level: checked.ok === false ? 'warning' : 'info', text: `The goal check ${checked.ok === true ? 'passed' : checked.ok === false ? 'did not pass' : 'is for the verifier'}: ${checked.kind} ${checked.value.slice(0, 300)}` });
+                if (checked.output) say({ t: 'note', level: 'info', text: `Check output: ${checked.output.slice(-2000)}` });
+            } catch (e) {
+                result.goal = { goal: job.goal.goal, check: job.goal.check, proposal: answer.slice(0, 4000), check_output: '', evidence: '', error: scrub(e.message) };
+                say({ t: 'note', level: 'warning', text: `The goal check could not run: ${scrub(e.message)}` });
             }
         }
         if (job.push && result.ok && result.files.length) {

@@ -168,8 +168,13 @@ function load(env = process.env) {
         know: { lessons: String(env.CODES_KNOW_LESSONS || env.OPENVIBE_CODES_LESSONS || '').trim() },
         // The task's timeline (stage C2): how many automatic continues one task may have before it needs a person.
         task: { maxContinues: Math.max(0, int(env.CODES_TASK_MAX_CONTINUES, 2)) },
-        // Goal and independent-verification flow stays opt-in until task creation and persistence are wired end to end.
-        goals: { enabled: env.CODES_GOALS_ENABLED === '1' },
+        // Goal and independent-verification flow (AL1) stays opt-in: a task without a goal behaves exactly as before.
+        // The verifier is a cheap fast model on OpenVibe.AI; CODES_GOALS_MODEL may name another rung.
+        goals: {
+            enabled: env.CODES_GOALS_ENABLED === '1',
+            model: env.CODES_GOALS_MODEL || 'deepseek-chat',
+            timeoutMs: Math.max(1000, int(env.CODES_GOALS_TIMEOUT_MS, 120000)),
+        },
         // The conductor (Codes C9b): one long Claude Code session on the person's own machine. A turn's wall time (the
         // session may work through a plan), and the harness a sub-task gets when the conductor names none (never an
         // Anthropic one: the conductor is the only Anthropic session).

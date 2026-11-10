@@ -81,13 +81,25 @@ function createMeApi({ config, store, sso, run, harnesses, userSettings = null, 
         if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to start a task');
         if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site JSON posts are refused');
         const b = req.body || {};
-        const check = validate('codes.task-start-request@1', b);
+        // AL1: a goal and its typed check are optional. The goal is validated here (it is not part of the closed start
+        // request while the switch is off) and travels to the harness, which runs the check in the task's workspace.
+        let goal = null;
+        if (b.goal != null) {
+            if (!config.goals.enabled) return problem(req, res, 409, 'codes.goals_disabled', 'goal tasks are disabled');
+            const g = b.goal, limits = g && typeof g === 'object' && !Array.isArray(g) ? (g.budget || {}) : {};
+            if (!g || typeof g !== 'object' || Array.isArray(g) || typeof g.goal !== 'string' || !g.goal.trim() || g.goal.length > 4000 || !g.check || !['command', 'url', 'rubric'].includes(g.check.kind) || typeof g.check.value !== 'string' || !g.check.value.trim() || g.check.value.length > 4000) return problem(req, res, 422, 'codes.goal_invalid', 'goal requires a condition and a typed check');
+            if (!limits || typeof limits !== 'object' || Array.isArray(limits) || Object.entries(limits).some(([k, v]) => !['tokens', 'turns', 'active_minutes'].includes(k) || !Number.isInteger(v) || v < 1) || (g.no_progress_limit != null && (!Number.isInteger(g.no_progress_limit) || g.no_progress_limit < 1 || g.no_progress_limit > 20))) return problem(req, res, 422, 'codes.goal_invalid', 'goal budgets and no-progress limit must be positive bounded integers');
+            goal = { goal: g.goal.trim(), check: { kind: g.check.kind, value: g.check.value.trim() }, budget: limits, no_progress_limit: g.no_progress_limit || 3, proposal: null, evidence: null, verdict: null };
+        }
+        const bodyForValidate = { ...b };
+        delete bodyForValidate.goal;
+        const check = validate('codes.task-start-request@1', bodyForValidate);
         if (!check.valid) return problem(req, res, 422, 'codes.task_invalid', check.errors.map((e) => `${e.instancePath || 'body'} ${e.message}`).join('; ').slice(0, 500));
         if (b.agent && !harnesses.list().some((a) => a.id === b.agent)) return problem(req, res, 422, 'codes.agent_unknown', 'agent is one of GET /api/v1/harnesses, or absent for the router to pick');
         let args;
         try {
             args = parseArgs(JSON.stringify({
-                repo: b.repo, ref: b.ref || null, prompt: b.prompt, agent: b.agent || null, permission: b.permission || 'edit',
+                repo: b.repo, ref: b.ref || null, prompt: b.prompt, agent: b.agent || null, permission: b.permission || 'edit', ...(goal ? { goal } : {}),
                 ...(b.push ? { push: { pull_request: b.pull_request === true } } : {}),
             }));
         } catch (e) {
