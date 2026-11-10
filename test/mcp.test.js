@@ -113,7 +113,8 @@ async function fakeGitHub() {
             const submit = calls.at(-1)[1];
             assert.strictEqual(submit.args.agent, 'codex');
             assert.strictEqual(submit.args.model, 'gpt-5');
-            assert.strictEqual(submit.args.prompt, 'Fix the parser and add a test.');
+            assert.ok(submit.args.prompt.startsWith('Fix the parser and add a test.\n\n'), 'the brief comes first');
+            assert.match(submit.args.prompt, /write your full output to report\.md/, 'the default report instruction rides along');
             const row = await rowOf(out.id);
             assert.strictEqual(row.kind, 'code');
             assert.strictEqual(row.project_id, (await rowOf(conductorId)).project_id, 'the conductor\'s own project');
@@ -180,6 +181,17 @@ async function fakeGitHub() {
             assert.strictEqual(out.outcome, 'stopped');
             const row = await rowOf(started.id);
             assert.strictEqual(row.state, 'cancelled');
+        });
+
+        await check('codes_task_start names the report path; codes_task_show hands back the shaped return', async () => {
+            const started = await mcp.call('codes_task_start', { prompt: 'write the notes', repo, agent: 'codex', report_path: 'notes/work.md' });
+            assert.ok(started.id, JSON.stringify(started));
+            assert.match(calls.at(-1)[1].args.prompt, /write your full output to notes\/work\.md/);
+            const row = await rowOf(started.id);
+            const updated = await t.ctx.tasks.applyEvent(row, { state: 'succeeded', job: { id: row.job_id, state: 'succeeded', result: { ok: true, summary: '- notes written\nBLOCKED: none' } } });
+            await t.ctx.tasks.afterEnd(updated.id);
+            const out = await mcp.call('codes_task_show', { id: started.id });
+            assert.deepStrictEqual(out.report, { path: 'notes/work.md', bullets: ['notes written'], blocked: ['none'], concerns: [], truncated: false });
         });
 
         await check('codes_fleet: each coding CLI on this machine, and its windows', async () => {

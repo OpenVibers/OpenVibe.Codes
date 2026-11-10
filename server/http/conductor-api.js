@@ -31,6 +31,7 @@ const express = require('express');
 const { http } = require('openvibe-contracts');
 const { asyncRouter } = require('./router');
 const { parseArgs } = require('../../harness/job');
+const childReport = require('../domain/child-report');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -225,15 +226,22 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
         const agent = wanted;
         if (agent && !harnesses.list().some((h) => h.id === agent)) return problem(req, res, 422, 'codes.agent_unknown', `agent is one of GET /api/v1/harnesses, and not an Anthropic one`);
         if (typeof b.repo !== 'string' || !/^https:\/\//.test(b.repo)) return problem(req, res, 422, 'codes.task_invalid', 'a sub-task needs the repository it works in (https://…)');
+        let reportPath;
+        try {
+            reportPath = childReport.checkPath(b.report_path);
+        } catch (e) {
+            return problem(req, res, e.status || 422, e.code || 'codes.task_invalid', e.message);
+        }
         const effort = b.effort == null || b.effort === '' ? null : String(b.effort);
         if (effort != null && !['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) return problem(req, res, 422, 'codes.effort_invalid', 'effort is auto, low, medium, high, xhigh or max');
         let args;
         try {
+            // The router reads the parent's own words; the report instruction joins the brief after it picks.
             args = parseArgs(JSON.stringify({ repo: b.repo, ref: b.ref || null, prompt, ...(agent ? { agent } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), permission: 'edit' }));
         } catch (e) {
             return problem(req, res, 422, 'codes.task_invalid', e.message);
         }
-        const task = await tasks.start({ subject: req.person.subject, project: row.project_id, args, via: 'conductor', key: null, actorRef: { conductor: { task_id: row.id } } });
+        const task = await tasks.start({ subject: req.person.subject, project: row.project_id, args, via: 'conductor', key: null, actorRef: { conductor: { task_id: row.id, report_path: reportPath } } });
         log.info(`[Codes] conductor ${row.id} started sub-task ${task.id} on ${agent || 'auto'}`);
         return res.status(201).json({ task: { ...tasks.present(task), outcome: { state: task.outcome || null, note: task.outcome_note || null } } });
     });
