@@ -218,6 +218,23 @@ failureError('{"type":"result","is_error":true,"result":"API Error: usage limit 
 // 'API Error: usage limit reached'
 ```
 
+### `finding.js` — one finding, and the evidence bar it must meet
+
+The `agent.finding@1` shape (OpenVibe.Contracts), validated here because Codes is the producer. The verdict is the
+evidence bar, not the severity: `confirmed` needs the split severity (likelihood, impact, overall never above impact)
+and a confidence with its reason; `needs_validation` is a lead with a claimed cause, exact blockers and a local or
+deployment plan, and no severity; `rejected` carries its reason. `findingId(file, text)` is the stable identity from the
+repository-relative file and the whitespace-normalised, lowercased text, so re-wrapping keeps the id.
+
+```js
+const { findingId, validate, isLead } = require('./engine/finding');
+
+findingId('server/x.js', 'The  cache NEVER expires');   // 'server/x.js:the cache never expires'
+validate({ verdict: 'confirmed', /* … */ });
+// { valid: false, errors: ['a confirmed finding needs severity', …] }
+isLead({ verdict: 'needs_validation' });                // true
+```
+
 ## Tests
 
 `test/engine-*.test.js` in the Codes repo, run by the repo's own runner (`npm test`).

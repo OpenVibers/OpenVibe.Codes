@@ -19,6 +19,7 @@
  *   engine.redact      the secrets that never reach an event stream
  *   engine.proof       the proof of a finished attempt: its tests, its pages, its diff, and a second opinion
  *   engine.review      the second opinion itself: a model of another family, through OpenVibe.AI
+ *   engine.finding     one finding in the agent.finding@1 shape: confirmed, a lead that needs validation, or rejected
  *
  * The modules do not depend on each other in a cycle, and none of them reads the portal's log folder.
  */
@@ -39,6 +40,7 @@ const logins = require('./logins');
 const redact = require('./redact');
 const proof = require('./proof');
 const review = require('./review');
+const finding = require('./finding');
 const goal = require('./goal');
 
 module.exports = {
@@ -58,6 +60,7 @@ module.exports = {
     redact,
     proof,
     review,
+    finding,
     goal,
     // The names a caller usually wants, in one place.
     classify: router.classify,
@@ -78,4 +81,6 @@ module.exports = {
     jobLines: joblines.lines,
     probeLogins: logins.probe,
     scrub: redact.scrub,
+    findingId: finding.findingId,
+    validateFinding: finding.validate,
 };
