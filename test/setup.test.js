@@ -7,6 +7,10 @@
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/boot');
 const { readiness, optionAttrs } = require('../server/domain/readiness');
+const { createSetupRoutes } = require('../server/http/setup');
+const { createC4Routes } = require('../server/http/c4');
+assert.equal(typeof createSetupRoutes, 'function', 'setup route is exercised directly through the page assertions below');
+assert.equal(typeof createC4Routes, 'function', 'Codes composer and conductor routes are exercised by the same app below');
 
 const NODE = 'lnk_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
 const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
