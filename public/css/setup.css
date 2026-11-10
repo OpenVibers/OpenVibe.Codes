@@ -62,4 +62,3 @@
   .c4-setup-agent-help{padding-left:0}
   .c4-setup-actions>.c4-button,.c4-setup-actions>.c4-opill{flex:1 1 auto;justify-content:center}
 }
-@media (prefers-reduced-motion:reduce){.c4-setup-bar>span{transition:none}}

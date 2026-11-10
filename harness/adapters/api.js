@@ -234,7 +234,11 @@ function apiAgent(spec) {
                         const res = await doFetch(`${base}/chat/completions`, {
                             method: 'POST',
                             headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...extraHeaders(env) },
-                            body: JSON.stringify({ ...(spec.extra ? spec.extra(env) : {}), model, messages, tools, tool_choice: 'auto' }),
+                            body: JSON.stringify({ ...(spec.extra ? spec.extra(env) : {}), model, messages, tools, tool_choice: 'auto',
+                                // Codes L31/AI AL3: the reasoning level the caller asked for, and the option to ask
+                                // the AI router's advisor for guidance. AI ignores both when its own request does not
+                                // support them; a harness that has no setting never sees them.
+                                ...(t.effort ? { effort: t.effort } : {}), ...(t.advisor ? { advisor: t.advisor } : {}) }),
                             signal: controller.signal,
                         });
                         const body = await res.json().catch(() => null);
