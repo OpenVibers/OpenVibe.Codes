@@ -180,7 +180,7 @@ function parseArgs(raw, env = process.env) {
     let a;
     try { a = JSON.parse(String(raw || '').trim() || '{}'); } catch { throw new Error('the job input is not JSON'); }
     if (!a || typeof a !== 'object' || Array.isArray(a)) throw new Error('the job input must be an object');
-    const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+    const EFFORTS = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'];
     const effort = EFFORTS.includes(a.effort) ? a.effort : null;
     // AL3: a job may ask the OpenVibe.AI agent for an advisor; the caps and the model choice belong to AI.
     const advisor = a.advisor === true ? true

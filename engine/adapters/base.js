@@ -76,12 +76,13 @@ const EFFORT_LEVELS = {
  * harness, never handed over as it came.
  *
  * @param {string} id the harness
- * @param {string|null} effort the wanted level
+ * @param {string|null} effort the wanted level ('auto' is the harness's own default: no setting)
  * @returns {string|null} a level the harness accepts
  */
 function effortFor(id, effort) {
+    if (!effort || effort === 'auto') return null;
     const levels = EFFORT_LEVELS[id] || [];
-    if (!effort || !levels.length) return effort;
+    if (!levels.length) return effort;
     if (levels.includes(effort)) return effort;
     // The nearest level this harness accepts (a tie goes up), over the portal's own ordering.
     const at = ORDER.indexOf(effort);

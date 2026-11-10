@@ -216,8 +216,19 @@ function dry(adapter, ctx = {}) {
         assert.equal(effortFor('claude-code', 'medium'), 'medium');
         assert.equal(effortFor('opencode', 'medium'), 'medium', 'OpenCode takes no effort setting');
         assert.equal(effortFor('codex', null), null);
+        assert.equal(effortFor('codex', 'auto'), null, 'auto is the harness default: no setting');
         // And the adapter's own argv carries the fitted level.
         assert.ok(dry(commandCode, { effort: 'medium' }).argv.includes('high'));
+    });
+
+    await check('no effort, no effort setting: nothing is hardcoded', () => {
+        const fresh = dry(codex, { permission: 'edit', cwd: '/tmp/work' });
+        assert.ok(!fresh.argv.some((a) => /model_reasoning_effort/.test(a)), `Codex: ${fresh.argv.join(' ')}`);
+        const resumed = dry(codex, { resume: 'thread-7', permission: 'edit', cwd: '/tmp/work' });
+        assert.ok(!resumed.argv.some((a) => /model_reasoning_effort/.test(a)), `Codex resume: ${resumed.argv.join(' ')}`);
+        const cmd = dry(commandCode, { permission: 'edit', maxTurns: 150 });
+        assert.ok(!cmd.argv.includes('--effort'), `Command Code: ${cmd.argv.join(' ')}`);
+        assert.ok(!dry(commandCode, { effort: 'auto' }).argv.includes('--effort'), 'auto takes no flag either');
     });
 
     await check('each feed reads its harness into the one transcript shape', () => {

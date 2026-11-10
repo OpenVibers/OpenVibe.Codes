@@ -756,7 +756,7 @@ function createChatRoutes(ctx) {
         if (!who) return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}?error=${encodeURIComponent('Choose who carries on from the list.')}`);
         // The same agent with another model carries on; another agent takes over.
         const agent = who.agent && who.agent !== row.agent ? who.agent : null;
-        const effort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(b.effort) ? b.effort : null;
+        const effort = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(b.effort) ? b.effort : null;
         let ids = [];
         try {
             ids = await attachmentIds(req);

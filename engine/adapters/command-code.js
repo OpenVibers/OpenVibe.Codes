@@ -41,7 +41,7 @@ function build(ctx = {}) {
     if (ctx.resume) argv.push('--resume', String(ctx.resume));
     if (ctx.permission === 'full') argv.push('--yolo');
     if (ctx.model) argv.push('-m', ctx.model);
-    argv.push('--effort', effort || 'high');
+    if (effort) argv.push('--effort', effort);
     argv.push('--config', 'compact-mode=fast');
     argv.push('--output-format', 'json');
     argv.push('--max-turns', turnCap(ctx.maxTurns));

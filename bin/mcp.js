@@ -70,6 +70,7 @@ const TOOLS = [
                 agent: { type: 'string', description: 'codex, opencode, command-code, deepseek, aider: never claude-code or claude-other' },
                 model: { type: 'string', description: 'The model for that agent (never an Anthropic one)' },
                 ref: { type: 'string', description: 'A branch or tag to start from' },
+                effort: { type: 'string', description: 'How hard it thinks: auto, low, medium, high, xhigh or max' },
             },
             required: ['prompt', 'repo'],
             additionalProperties: true,
@@ -135,13 +136,15 @@ async function startTask(args) {
     if (agent && /^(claude-code|claude-other|claude|cm)$/i.test(agent)) return failed('the conductor may start sub-tasks on any agent except an Anthropic one: that session is the conductor itself');
     if (model && /(^|[^a-z])(claude|opus|sonnet|haiku|anthropic)([^a-z]|$)/i.test(model)) return failed('the conductor may start sub-tasks on any agent except an Anthropic model: that session is the conductor itself');
     const c = auth();
+    const effort = typeof args.effort === 'string' && ['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(args.effort) ? args.effort : null;
     const answer = await call(c, 'POST', `/api/v1/conductor/${encodeURIComponent(task)}/tasks`, {
         prompt, repo, ...(agent ? { agent } : {}), ...(model ? { model } : {}), ...(args.ref ? { ref: String(args.ref).slice(0, 100) } : {}),
+        ...(effort ? { effort } : {}),
     });
     const t = answer.task || {};
     return text({
         id: t.id, state: t.state, agent: t.agent, model: model || null, repo: t.repo, url: t.url,
-        ...(args.machine || args.effort ? { note: 'machine and effort are not fields of a Codes task yet: Run places it on one of the owner\'s machines, and the agent\'s own effort applies' } : {}),
+        ...(args.machine ? { note: 'machine is not a field of a Codes task yet: Run places it on one of the owner\'s machines' } : {}),
     });
 }
 
