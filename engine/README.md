@@ -251,6 +251,22 @@ validate({ verdict: 'confirmed', /* … */ });
 isLead({ verdict: 'needs_validation' });                // true
 ```
 
+### `findings.js` — a review that remembers what it already said
+
+The review's ledger across revisions. `parse(text)` reads the findings of a JSON answer (or the older numbered
+`VERDICT: FIX` bullets); `merge(prior, current)` reconciles them into ACTIVE/RESOLVED records and counts what was
+addressed, reappeared, is still open and is new; `priorBrief(records)` is the compact block a re-review prompt gets;
+`lifecycleLine()` is the one line a person reads. The resolved set is capped, and an approval is an empty list — no
+synthetic "no issues" finding.
+
+```js
+const { fromReview, priorBrief, lifecycleLine } = require('./engine/findings');
+
+const first = fromReview('{"verdict":"changes_requested","findings":[{"file":"a.js","line":1,"text":"it races"}]}');
+const again = fromReview('{"verdict":"approved","findings":[]}', first.findings);
+// again.line = 'Findings: 1 addressed, 0 reappeared, 0 still open, 0 new'
+```
+
 ## Tests
 
 `test/engine-*.test.js` in the Codes repo, run by the repo's own runner (`npm test`).

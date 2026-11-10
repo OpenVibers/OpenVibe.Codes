@@ -275,7 +275,7 @@ function runTokenOf(jobEnv = {}) {
  * says so rather than pretending one happened.
  */
 function reviewAdapter({ env = {}, jobEnv = {}, fetchImpl = globalThis.fetch, baseUrl, models = [] } = {}) {
-    return async function review({ patch = '', summary = '', tests = null, model = null, family = null } = {}) {
+    return async function review({ patch = '', summary = '', tests = null, model = null, family = null, prior = [] } = {}) {
         // The token the attempt's own harness carries: only the job's own input, under the name C3 gave that harness.
         // The machine's own OPENVIBE_AI_TOKEN names its owner, not this task's person, so it is never spent here.
         const token = runTokenOf(jobEnv);
@@ -292,7 +292,7 @@ function reviewAdapter({ env = {}, jobEnv = {}, fetchImpl = globalThis.fetch, ba
         }
         return await reviewWithAi({
             baseUrl: baseUrl || aiRoot(jobEnv) || env.OPENVIBE_AI_URL || 'https://ai.openvibe.services/v1',
-            token, model: chosen, family: familyOf(chosen), patch, summary, tests, fetchImpl,
+            token, model: chosen, family: familyOf(chosen), patch, summary, tests, prior, fetchImpl,
         });
     };
 }
