@@ -573,6 +573,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             else refusal = attemptStore.whyNoAgent(f);
         }
         const runArgs = { ...args, agent, model };
+        if (runArgs.goal) runArgs.prompt = `${runArgs.prompt}\n\nGoal: ${runArgs.goal.goal}\nCheck (${runArgs.goal.check.kind}): ${runArgs.goal.check.value}\nWork toward this outcome, show the check output as evidence, and propose completion when ready. The independent verifier decides whether the task is accepted.`;
         // Know K5: the lessons and facts earlier runs learned, in the prompt this run's harness gets. A store that
         // cannot be read is skipped, never an error: a run must not fail because the memory is unavailable. The
         // project the run belongs to also scopes the team rows it may read.
@@ -609,9 +610,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const placementKind = placed ? `harness.${taskKind}` : null;
         let inserted;
         await store.tx(async () => {
-            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, pin, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $17) RETURNING *`,
-            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, pin, at]);
+            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, pin, goal, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $17::jsonb, $18, $18) RETURNING *`,
+            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, pin, runArgs.goal ? JSON.stringify(runArgs.goal) : null, at]);
             if (claims.length) await filesStore.link(subject, claims, { taskId: id, attemptN: 1, messageId: turnId });
             await taskOutbox.emitTask(inserted, null);
             return inserted;
@@ -1055,6 +1056,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             id: row.id, state: STATES.has(row.state) ? row.state : 'failed', repo: String(row.repo).slice(0, 300), ref: row.ref || null,
             agent: row.agent || null, url: `${config.baseUrl}/run/tasks/${row.id}`, created_at: iso(row.created_at), updated_at: iso(row.updated_at),
             error: row.error ? String(row.error).slice(0, 1000) : null, result,
+            ...(row.goal ? { goal: asObject(row.goal), goal_verdict: asObject(row.goal_verdict) || null } : {}),
         });
     }
 
