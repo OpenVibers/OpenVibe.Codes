@@ -45,20 +45,16 @@ const TASK3 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAX';
             assert.ok(!home.text.includes('<option value="' + NODE + '">Desk'), 'the chat offers no machine it could not honour');
         });
 
-        await check('the machine picker is in the order of use, on Home and on Settings', async () => {
+        await check('Settings mounts the Link machine picker with the saved default', async () => {
             // The Desk ran the work; the Laptop never did, and Network lists the Laptop first.
             await db.exec(`INSERT INTO codes_attempts (id, task_id, n, agent, machine, state, started_at, finished_at, created_at)
                 VALUES ('att_01ARZ3NDEKTSV4RRFFQ69G5FAC',$1,2,'codex',$2,'done', now() - interval '2 hours', now() - interval '2 hours', now() - interval '2 hours')`, [TASK2, NODE]);
             await t.ctx.userSettings.save(ada.subject, { default_machine: OTHER });
-            for (const page of ['/settings']) {
-                const shown = await t.get(page, { as: ada });
-                assert.strictEqual(shown.status, 200);
-                const desk = shown.text.indexOf(`<option value="${NODE}">Desk`);
-                const laptop = shown.text.indexOf(`<option value="${OTHER}"`);
-                assert.ok(desk > -1 && laptop > -1, `${page} offers both machines`);
-                assert.ok(desk < laptop, `${page} shows the machine used last first`);
-                assert.ok(shown.text.includes('Laptop · your default'), `${page} marks the saved default`);
-            }
+            const shown = await t.get('/settings', { as: ada });
+            assert.strictEqual(shown.status, 200);
+            assert.ok(shown.text.includes('data-ov-machines') && shown.text.includes('data-name="default_machine"'), 'Settings mounts the shared picker');
+            assert.ok(shown.text.includes(`data-value="${OTHER}"`), 'the saved default is the initial selection');
+            assert.ok(!shown.text.includes(`<option value="${NODE}"`), 'Settings does not render its own machine list');
         });
 
         await check('the composer remembers the machine and agent a person picks, then opens Run&rsquo;s form', async () => {
