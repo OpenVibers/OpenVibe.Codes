@@ -157,6 +157,10 @@ async function createApp(opts = {}) {
         fetchImpl: fetchImpl || globalThis.fetch, fleet, userSettings, harnesses, attachments,
     });
     tasks.setConductor(ctx.conductor);
+    // A ticket follows its pull request (AL5): bindings need tasks (a follow-up is a task), and tasks need
+    // bindings (a terminal result with a PR binds it) — wired to each other here, not in a constructor.
+    ctx.prBindings = require('./domain/pr-bindings').createPrBindings({ store, tasks, outbox, config, log });
+    tasks.attachBindings(ctx.prBindings);
 
     const app = express();
     aiCatalogConfig.mount(app);
@@ -233,7 +237,7 @@ async function createApp(opts = {}) {
         const accountSend = opts.accountSend || (config.oauth.clientSecret
             ? createNetworkSender({ networkInternalUrl: config.networkInternalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret, fetch: fetchImpl || globalThis.fetch })
             : null);
-        const consumer = createEventsConsumer({ config, store, tasks, run, accountData, accountSend, log });
+        const consumer = createEventsConsumer({ config, store, tasks, run, accountData, accountSend, bindings: ctx.prBindings, log });
         ctx.accountData = accountData;
         ctx.eventsConsumer = consumer;
         ctx.publisher = createPublisher({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
