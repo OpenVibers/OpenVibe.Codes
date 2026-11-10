@@ -93,6 +93,18 @@ const carried = (parent, name, at) => ({
         assert.equal(out.attempts.length, 2);
     });
 
+    await check('a goal completion proposal is not done until its independent verdict accepts it', () => {
+        const base = { key: 'cc:goal', runner: 'cc', name: 'goal', runnerName: 'Command Code', status: 'done', updated: now,
+            goal: { goal: 'file exists', check: { kind: 'command', value: 'test -f file' }, proposal: 'finished', evidence: 'test output', verdict: { status: 'accepted', reason: 'check passed', check_output: 'exit 0' } } };
+        const accepted = chain.outcome([base]);
+        assert.equal(accepted.state, 'done');
+        assert.equal(accepted.goal.verdict.status, 'accepted');
+        const rejected = chain.outcome([{ ...base, goal: { ...base.goal, verdict: { status: 'rejected', reason: 'check failed', check_output: 'exit 1' } } }]);
+        assert.equal(rejected.state, 'running');
+        assert.equal(rejected.step.action, 'continue');
+        assert.equal(rejected.step.why, 'check failed');
+    });
+
     await check('a limit hands the task to another runner', () => {
         const cfg = { subagents: { cc: { enabled: true, max: 2 }, mm: { enabled: true, max: 2 } }, fallback: { order: ['cc', 'mm'] } };
         const ctx = { cfg, health: { cc: { state: 'ok' }, mm: { state: 'ok' } }, counts: {}, models: {}, runners: ['cc', 'mm'] };

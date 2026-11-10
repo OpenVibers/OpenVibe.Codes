@@ -433,6 +433,7 @@ function settledParent(runs, end) {
 function step(runs, end, opts = {}) {
     if (!end) return { action: 'none', why: 'there are no attempts' };
     if (end.status === 'running' || end.status === 'queued') return { action: 'wait', why: 'the task is still running' };
+    if (end.status === 'done' && end.goal && end.goal.verdict && end.goal.verdict.status === 'rejected') return { action: 'continue', why: end.goal.verdict.reason || 'the verifier rejected the completion proposal' };
     if (end.status === 'done') return { action: 'done', why: 'the task finished' };
     const why = end.reason || reason(end.error);
     if (why === 'stopped') return { action: 'stop', why: 'the task was stopped on purpose' };
@@ -495,7 +496,10 @@ function step(runs, end, opts = {}) {
 function outcome(attempts, opts = {}) {
     const runs = annotate(attempts);
     const end = chainEnd(runs);
-    const state = !end ? 'none' : end.status === 'done' ? 'done' : end.status === 'budget-stopped' ? 'budget-stopped'
+    const goal = end && end.goal ? end.goal : null;
+    const verdict = goal && goal.verdict ? goal.verdict : null;
+    const goalDone = !goal || (verdict && verdict.status === 'accepted');
+    const state = !end ? 'none' : end.status === 'done' && goalDone ? 'done' : end.status === 'done' && verdict && verdict.status === 'rejected' ? 'running' : end.status === 'budget-stopped' ? 'budget-stopped'
         : end.status === 'failed' || end.status === 'interrupted' ? 'failed' : end.status;
     return {
         state,
@@ -504,6 +508,9 @@ function outcome(attempts, opts = {}) {
         attempt: end ? (end.attempt || 1) : 0,
         path: (end && end.resolved && end.resolved.path) || [],
         end: end ? { key: end.key, runner: end.runner, name: end.name, status: end.status } : null,
+        goal: goal ? { goal: goal.goal, check: goal.check, budget: goal.budget || null, no_progress_limit: goal.no_progress_limit || null,
+            proposal: goal.proposal || null, evidence: goal.evidence || null,
+            verdict: verdict ? { status: verdict.status, reason: verdict.reason, check_output: verdict.check_output || null } : null } : null,
         step: step(runs, end, opts),
         attempts: runs,
     };
