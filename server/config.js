@@ -86,6 +86,9 @@ function load(env = process.env) {
             // (and the harnesses' requests) with the second.
             scope: 'ai.credential.manage ai.run.create',
         },
+        // OpenVibe.Exchange's compatible API: the deepseek harness's default path (openvibe-sdk/exchange). The run
+        // token names the person; the Exchange speaks the same chat-completions API and the same model ids.
+        exchange: { url: trim(env.CODES_EXCHANGE_URL || 'https://api.openvibe.exchange') },
         // AI Exchange P9: OpenVibe.AI's real model catalog (GET /v1/models) in the pickers. Off by default; with the
         // flag on, AI's own AI_MODEL_CATALOG still decides whether it answers more than the legacy `openvibe` model,
         // and Codes keeps today's picker until it does. The answer is cached for about five minutes.
@@ -100,8 +103,9 @@ function load(env = process.env) {
             // The harness env variable names a job may set (harness/job.js): the model APIs' own names, nothing else.
             envNames: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_CUSTOM_HEADERS', 'OPENAI_BASE_URL',
                 'OPENAI_API_KEY', 'OPENAI_CUSTOM_HEADERS', 'DEEPSEEK_BASE_URL', 'DEEPSEEK_API_KEY', 'OPENVIBE_AI_URL',
-                'OPENVIBE_AI_TOKEN', 'OPENVIBE_CODES_BASE_URL', 'OPENVIBE_CODES_API_KEY', 'OPENVIBE_CODES_MODEL',
-                'OPENVIBE_CODES_HEADERS'],
+                'OPENVIBE_AI_TOKEN', 'OPENVIBE_EXCHANGE_URL', 'OPENVIBE_EXCHANGE_KEY', 'OPENVIBE_EXCHANGE_SERVICE_KEY',
+                'OPENVIBE_EXCHANGE_MODEL',
+                'OPENVIBE_CODES_BASE_URL', 'OPENVIBE_CODES_API_KEY', 'OPENVIBE_CODES_MODEL', 'OPENVIBE_CODES_HEADERS'],
         },
         bench: {
             url: trim(env.CODES_BENCH_URL || 'https://bench.openvibe.services'),

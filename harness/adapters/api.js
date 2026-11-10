@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { createExchangeClient } = require('openvibe-sdk/exchange');
 const ev = require('../events');
 
 const SYSTEM = `You are a careful coding agent working in a repository on the user's machine. Use the tools to look before
@@ -310,6 +311,23 @@ function extraHeaders(env) {
 }
 
 /**
+ * One turn through OpenVibe.Exchange's compatible API, using the SDK's Exchange client: the same Chat Completions body
+ * and tool loop as the direct path, with the Exchange's key, timeout and receipt. `key` is the person's or the
+ * service's Exchange key; `token(env, fetch)` names one minted for the request instead (a Network token).
+ */
+async function exchangeTurn(spec, { env, doFetch, payload, signal }) {
+    const key = spec.exchange.token ? await spec.exchange.token(env, doFetch) : spec.exchange.key;
+    if (!key) throw Object.assign(new Error('no Exchange key is connected'), { code: 'exchange.no_key' });
+    const client = createExchangeClient({
+        developerKey: String(key),
+        baseUrl: String(spec.exchange.baseUrl || 'https://api.openvibe.exchange').replace(/\/+$/, ''),
+        fetchImpl: doFetch,
+        timeoutMs: 120_000,
+    });
+    return await client.chat(payload, { signal });
+}
+
+/**
  * The API's refusal in the person's words. An exact id AI refused keeps its own code (ai.model_not_found,
  * ai.model_unavailable): the reason a chosen model did not run is shown as that, never as a different model's answer.
  */
@@ -324,7 +342,11 @@ function refusalOf(name, status, body, model) {
 }
 
 /**
- * apiAgent({ id, name, baseUrl, keyEnv, model, priceIn, priceOut, token }) → an adapter.
+ * apiAgent({ id, name, baseUrl, keyEnv, model, priceIn, priceOut, token, exchange, available }) → an adapter.
+ * exchange: { baseUrl, key } or { baseUrl, token(env, fetch) } → every turn goes through OpenVibe.Exchange's
+ * compatible API with the SDK's Exchange client, instead of the direct fetch. mapModel(model, env) names the model
+ * the transport should ask for (the Exchange has its own catalog ids for the same models). available(env) answers the catalog's
+ * "can this run here, and why not" for an adapter whose credentials are resolved by the caller.
  * extra(env) → fields added to every request body (OpenVibe.AI's x_openvibe.provider: the project's own provider).
  * token(env, fetch) → a bearer, asked before every request (OpenVibe.AI takes a five-minute Network token, refreshed by
  * the function); without it the key is keyEnv's value. When the API reports each answer's cost (OpenVibe.AI's
@@ -333,13 +355,14 @@ function refusalOf(name, status, body, model) {
  */
 function apiAgent(spec) {
     const adapter = {
-        id: spec.id, name: spec.name, kind: 'api', baseUrl: spec.baseUrl, keyEnv: spec.keyEnv || null, defaultModel: spec.model,
+        id: spec.id, name: spec.name, kind: 'api', baseUrl: spec.exchange ? spec.exchange.baseUrl : spec.baseUrl, keyEnv: spec.keyEnv || null, defaultModel: spec.model,
+        ...(spec.available ? { available: spec.available } : {}),
         start(t, ctx = {}) {
             const env = ctx.env || process.env;
             const doFetch = ctx.fetch || globalThis.fetch;
-            const base = String(t.baseUrl || spec.baseUrl).replace(/\/+$/, '');
+            const base = String(t.baseUrl || spec.baseUrl || (spec.exchange && spec.exchange.baseUrl) || '').replace(/\/+$/, '');
             const key = spec.keyEnv ? env[spec.keyEnv] : (t.apiKey || '');
-            const model = t.model || spec.model;
+            const model = spec.mapModel ? spec.mapModel(t.model || spec.model, env) : (t.model || spec.model);
             const level = LEVELS[t.permission] || 1;
             // Tools in a fixed name order, and the system message above never carries the task: the request prefix a
             // provider caches (system + tools) is byte-identical from one task to the next, and only the prompt differs.
@@ -370,35 +393,57 @@ function apiAgent(spec) {
                 // The model AI says ran, and its route disclosure (x_openvibe), recorded on the run's result.
                 let resolvedModel = null;
                 let disclosure = null;
-                // The latest turn's AI run, advise asks against; and the advice spent on this task.
+                // The latest turn's AI run, advise asks against; the advice spent on this task; and the Exchange's
+                // receipt for the answer (x_openvibe.receipt_id), carried on the result for the check and the page.
                 let adviceRunId = null;
+                let receiptId = null;
                 let adviceUsed = 0;
                 try {
                     while (turns < maxTurns && !cancelled) {
                         turns++;
-                        const bearer = spec.token ? await spec.token(env, doFetch) : key;
-                        const res = await doFetch(`${base}/chat/completions`, {
-                            method: 'POST',
-                            headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...extraHeaders(env) },
-                            body: JSON.stringify({ ...(spec.extra ? spec.extra(env) : {}), model, messages, tools, tool_choice: 'auto',
-                                // Codes L31/AI AL3: the reasoning level the caller asked for, and the option to ask
-                                // the AI router's advisor for guidance. AI ignores both when its own request does not
-                                // support them; a harness that has no setting never sees them.
-                                ...(t.effort ? { effort: t.effort } : {}), ...(t.advisor ? { advisor: t.advisor } : {}) }),
-                            signal: controller.signal,
-                        });
-                        const body = await res.json().catch(() => null);
+                        const payload = { ...(spec.extra ? spec.extra(env) : {}), model, messages, tools, tool_choice: 'auto',
+                            // Codes L31/AI AL3: the reasoning level the caller asked for, and the option to ask
+                            // the AI router's advisor for guidance. AI ignores both when its own request does not
+                            // support them; a harness that has no setting never sees them.
+                            ...(t.effort ? { effort: t.effort } : {}), ...(t.advisor ? { advisor: t.advisor } : {}) };
+                        let body;
+                        let res = null;
+                        if (spec.exchange) {
+                            // The default path: the Exchange's compatible API through the SDK's Exchange client (the
+                            // person's or the service's Exchange key), with the same tool loop as before.
+                            try {
+                                body = await exchangeTurn(spec, { env, doFetch, payload, signal: controller.signal });
+                            } catch (err) {
+                                failure = err.status
+                                    ? `${spec.name} was refused by the Exchange (HTTP ${err.status}${err.code ? `, ${err.code}` : ''}): ${err.message}`
+                                    : `${spec.name} could not reach the Exchange: ${err.message}`;
+                                yield ev.error(failure);
+                                break;
+                            }
+                        } else {
+                            const bearer = spec.token ? await spec.token(env, doFetch) : key;
+                            res = await doFetch(`${base}/chat/completions`, {
+                                method: 'POST',
+                                headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...extraHeaders(env) },
+                                body: JSON.stringify(payload),
+                                signal: controller.signal,
+                            });
+                            body = await res.json().catch(() => null);
+                        }
                         const x = body && body.x_openvibe && typeof body.x_openvibe === 'object' ? body.x_openvibe : null;
                         if (x) {
                             if (x.resolved_model) resolvedModel = String(x.resolved_model);
                             if (x.run_id) adviceRunId = String(x.run_id);
+                            if (x.receipt_id) receiptId = String(x.receipt_id);
                             disclosure = { ...(disclosure || {}), ...x };
                         }
                         if (!adviceRunId && body && typeof body.id === 'string' && body.id.startsWith('chatcmpl-')) adviceRunId = body.id.slice('chatcmpl-'.length);
-                        if (!res.ok || !body || !Array.isArray(body.choices) || !body.choices[0]) {
+                        if ((res && !res.ok) || !body || !Array.isArray(body.choices) || !body.choices[0]) {
                             // An exact id AI refused (ai.model_not_found / ai.model_unavailable) is its own answer:
                             // it is reported as it is, and this loop never asks for a different model instead.
-                            failure = refusalOf(spec.name, res.status, body, model);
+                            failure = spec.exchange
+                                ? `${spec.name} answered without a completion${body && body.error ? `: ${String((body.error && (body.error.message || body.error)) || body.error).slice(0, 300)}` : ''}`
+                                : refusalOf(spec.name, res.status, body, model);
                             yield ev.error(failure);
                             break;
                         }
@@ -472,6 +517,7 @@ function apiAgent(spec) {
                 const cost = reported.any ? reported.usd : (u.input * (spec.priceIn || 0) + u.output * (spec.priceOut || 0)) / 1000;
                 yield ev.result({ ok: !failure && !cancelled, text: failure || lastText, sessionId, model: resolvedModel || model, startedAt, turns, costUsd: cost,
                     ...(resolvedModel ? { resolved_model: resolvedModel } : {}),
+                    ...(receiptId ? { receipt_id: receiptId } : {}),
                     ...(disclosure ? { disclosure } : {}),
                     usage: ev.usage({ input: u.input - u.cacheRead, output: u.output, cacheRead: u.cacheRead }) });
             }());
@@ -482,4 +528,4 @@ function apiAgent(spec) {
     return adapter;
 }
 
-module.exports = { apiAgent, refusalOf, extraHeaders, runTool, inside, refusedCommand, adviceTranscript, TOOL_DEFS, SYSTEM };
+module.exports = { apiAgent, exchangeTurn, refusalOf, extraHeaders, runTool, inside, refusedCommand, adviceTranscript, TOOL_DEFS, SYSTEM };

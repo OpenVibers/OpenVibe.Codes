@@ -53,6 +53,88 @@ function projectProvider(env) {
     return { x_openvibe: { provider: { base_url: env.OPENVIBE_AI_PROVIDER_URL || 'https://api.openai.com/v1', model: env.OPENVIBE_AI_PROVIDER_MODEL || 'gpt-5-mini', secret: env.OPENVIBE_AI_SECRET } } };
 }
 
+/** The Exchange's compatible API. The SDK's Exchange client adds /v1/chat/completions to this origin. */
+const EXCHANGE_URL = 'https://api.openvibe.exchange';
+
+const trimSlash = (s) => String(s || '').replace(/\/+$/, '');
+const yes = (v) => /^(1|true|yes|on)$/i.test(String(v == null ? '' : v).trim());
+
+/** Is this address OpenVibe's own (the Exchange, or OpenVibe.AI behind it)? The direct DeepSeek path never names it. */
+function platformHost(value) {
+    try {
+        const host = new URL(String(value)).hostname.toLowerCase();
+        return ['openvibe.ai', 'openvibe.services', 'openvibe.exchange'].some((name) => host === name || host.endsWith(`.${name}`));
+    } catch { return false; }
+}
+
+/**
+ * The Exchange key the deepseek agent sends with: the person's own Exchange key first, then the service's, then a
+ * Network token minted from the app's client credentials (the way the openvibe-ai harness gets its bearer). A hosted
+ * run's older environment (a Codes run token at AI as DEEPSEEK_BASE_URL/DEEPSEEK_API_KEY) is accepted as the person's
+ * key too, unless the request names one of their own provider keys with OPENVIBE_CODES_HEADERS (that key rides a
+ * header the SDK's Exchange client cannot add, so that run keeps the AI path).
+ */
+function exchangeKeyOf(env) {
+    if (env.OPENVIBE_EXCHANGE_KEY) return { key: env.OPENVIBE_EXCHANGE_KEY };
+    if (env.OPENVIBE_EXCHANGE_SERVICE_KEY) return { key: env.OPENVIBE_EXCHANGE_SERVICE_KEY };
+    if (env.OPENVIBE_APP_ID && env.OPENVIBE_APP_SECRET) return { token: networkToken() };
+    if (env.DEEPSEEK_API_KEY && platformHost(env.DEEPSEEK_BASE_URL) && !env.OPENVIBE_CODES_HEADERS) return { key: env.DEEPSEEK_API_KEY };
+    return null;
+}
+
+/**
+ * The deepseek harness: OpenVibe.Exchange's compatible API by default, through the SDK's Exchange client, with the
+ * same model id and tool loop. The direct DeepSeek API stays only for an operator's own key on a self-hosted run:
+ *
+ *   - OPENVIBE_CODES_DEEPSEEK_DIRECT=1 with DEEPSEEK_API_KEY → always direct (their own key, their own endpoint);
+ *   - DEEPSEEK_API_KEY with no Exchange key and no DEEPSEEK_BASE_URL (or a non-OpenVibe one) → direct, the old
+ *     behaviour for a machine that runs DeepSeek with its own key;
+ *   - a request naming the person's own provider key (OPENVIBE_CODES_HEADERS) → direct to the platform address,
+ *     because that credential header cannot ride the Exchange client.
+ * A bare hosted run token at OpenVibe.AI (DEEPSEEK_BASE_URL there, DEEPSEEK_API_KEY = run token) goes through
+ * Exchange: api.openvibe.exchange speaks the same compatible API and takes the same person's token.
+ */
+/** The Exchange's catalog ids for the models the deepseek agent names (deepseek-chat is DeepSeek's own alias). */
+const EXCHANGE_MODELS = { 'deepseek-chat': 'deepseek/deepseek-flash', 'deepseek-reasoner': 'deepseek/deepseek-v4-pro' };
+/** A model the Exchange names itself (a catalog id or a dynamic alias) goes through as it is. */
+const EXCHANGE_NAME = /^(openvibe(\/|$)|@preset\/)/;
+
+/** The model the Exchange should run: its own id for the agent's model, a catalog id as given, a dynamic alias as given. */
+function exchangeModelOf(model, env) {
+    const named = String((env && env.OPENVIBE_EXCHANGE_MODEL) || model || '').trim();
+    if (EXCHANGE_NAME.test(named) || named.includes('/')) return named;
+    if (EXCHANGE_MODELS[named]) return EXCHANGE_MODELS[named];
+    return `deepseek/${named || 'deepseek-flash'}`;
+}
+
+function deepseekAdapter(env) {
+    const ownKey = env.DEEPSEEK_API_KEY;
+    const ownBase = trimSlash(env.DEEPSEEK_BASE_URL);
+    const forced = yes(env.OPENVIBE_CODES_DEEPSEEK_DIRECT);
+    const ownCredential = Boolean(env.OPENVIBE_CODES_HEADERS);
+    const exchange = ownCredential && !env.OPENVIBE_EXCHANGE_KEY && !env.OPENVIBE_EXCHANGE_SERVICE_KEY ? null : exchangeKeyOf(env);
+    const direct = ownKey && (forced || ownCredential || (!exchange && (ownBase ? !platformHost(ownBase) : true)));
+    if (direct) {
+        return apiAgent({ id: 'deepseek', name: 'DeepSeek', baseUrl: ownBase || 'https://api.deepseek.com', keyEnv: 'DEEPSEEK_API_KEY', model: 'deepseek-chat', priceIn: 0.00027, priceOut: 0.0011 });
+    }
+    if (exchange) {
+        const baseUrl = trimSlash(env.OPENVIBE_EXCHANGE_URL) || EXCHANGE_URL;
+        return apiAgent({
+            id: 'deepseek', name: 'DeepSeek', model: 'deepseek-chat',
+            exchange: { baseUrl, ...exchange },
+            // The same DeepSeek model under the Exchange's own catalog id (deepseek/deepseek-flash is DeepSeek's
+            // V4.1 Flash, the model deepseek-chat names today); OPENVIBE_EXCHANGE_MODEL overrides it.
+            mapModel: exchangeModelOf,
+            priceIn: 0.00027, priceOut: 0.0011,
+            available: () => ({ available: true, where: baseUrl }),
+        });
+    }
+    return apiAgent({
+        id: 'deepseek', name: 'DeepSeek', model: 'deepseek-chat', priceIn: 0.00027, priceOut: 0.0011,
+        available: () => ({ available: false, reason: 'set OPENVIBE_EXCHANGE_KEY (an Exchange key from openvibe.exchange) for the default path, or DEEPSEEK_API_KEY and OPENVIBE_CODES_DEEPSEEK_DIRECT=1 for your own DeepSeek key' }),
+    });
+}
+
 /** The adapter for each catalog harness (the catalog row's id). */
 function adaptersFor(env) {
     return {
@@ -65,7 +147,7 @@ function adaptersFor(env) {
         opencode: cli.opencode,
         'command-code': cli.commandCode,
         aider: cli.aider,
-        deepseek: apiAgent({ id: 'deepseek', name: 'DeepSeek', baseUrl: env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com', keyEnv: 'DEEPSEEK_API_KEY', model: 'deepseek-chat', priceIn: 0.00027, priceOut: 0.0011 }),
+        deepseek: deepseekAdapter(env),
         // OpenVibe.AI's OpenAI-compatible endpoint: its router picks the model, each answer reports its cost.
         // OPENVIBE_AI_SECRET names a project secret granted to ai (ADR-056): AI sends each request to the project's own
         // provider (OPENVIBE_AI_PROVIDER_URL, OPENVIBE_AI_PROVIDER_MODEL) with that key, revealed per request by Network.
@@ -98,6 +180,7 @@ function availability(adapter, env) {
         if (adapter.version) { const v = adapter.version(env); if (v) out.version = v; }
         return out;
     }
+    if (typeof adapter.available === 'function') return adapter.available(env);
     if (adapter.id === 'openvibe-ai') return env.OPENVIBE_AI_TOKEN || (env.OPENVIBE_APP_ID && env.OPENVIBE_APP_SECRET) ? { available: true, where: adapter.baseUrl } : { available: false, reason: 'set OPENVIBE_APP_ID and OPENVIBE_APP_SECRET (an app of your project on openvibe.services with ai.app.run)' };
     if (adapter.id === 'openai-compatible') return env.OPENVIBE_CODES_BASE_URL ? { available: true, where: env.OPENVIBE_CODES_BASE_URL } : { available: false, reason: 'set OPENVIBE_CODES_BASE_URL (and OPENVIBE_CODES_MODEL) to your server' };
     return env[adapter.keyEnv] ? { available: true, where: adapter.baseUrl } : { available: false, reason: `set ${adapter.keyEnv}` };
@@ -267,4 +350,4 @@ function createHarness({ env = process.env, fetch: fetchImpl = globalThis.fetch,
     return { agents, route, run, store, adapters };
 }
 
-module.exports = { createHarness, adaptersFor, availability, handoffNote, onPath };
+module.exports = { createHarness, adaptersFor, availability, handoffNote, onPath, exchangeKeyOf, deepseekAdapter, exchangeModelOf, platformHost };
