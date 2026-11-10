@@ -29,6 +29,15 @@ const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 /** The task's outcome in the words a person reads. */
 const OUTCOME_TEXT = { done: 'Done', unfinished: "Didn't finish", stopped: 'Stopped by you' };
+/** AL1's honest end states, in the same words. A task without a goal keeps the outcome above. */
+const END_STATE_TEXT = {
+    ready: 'Ready', waiting: 'Waiting', blocked: 'Blocked', failed: 'Failed', dropped: 'Dropped by you', stopped_by_budget: 'Stopped by budget',
+};
+const asObject = (v) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+    if (typeof v === 'string') { try { const p = JSON.parse(v); return p && typeof p === 'object' && !Array.isArray(p) ? p : null; } catch { return null; } }
+    return null;
+};
 
 /** A repository URL as a heading: the host small, then owner/name, which may break after a slash but never mid-word. */
 function repoName(url) {
@@ -246,6 +255,20 @@ ${typeof d.duration_ms === 'number' ? html`<p class="muted">${Math.round(d.durat
 </section>`;
     }
 
+    /** A goal task's own record (AL1): the condition, its typed check, the check's output and the verifier's verdict. */
+    function goalHtml(row) {
+        const goal = asObject(row.goal);
+        if (!goal) return '';
+        const verdict = asObject(row.goal_verdict) || asObject(goal.verdict);
+        return html`<section class="run-goal" data-goal>
+<h2>The goal and its check</h2>
+<p data-goal-text>${goal.goal || ''}</p>
+<p class="muted">Check (${goal.check && goal.check.kind}): <code>${goal.check && goal.check.value}</code></p>
+${verdict ? html`<p data-goal-verdict data-status="${verdict.status}"><b>${verdict.status}</b>${verdict.reason ? ` · ${verdict.reason}` : ''}${verdict.model ? html` <span class="muted">(${verdict.model})</span>` : ''}</p>` : html`<p class="muted">No independent verdict yet.</p>`}
+${verdict && verdict.check_output ? html`<h3>The check's output</h3><pre tabindex="0" class="run-goal-output" data-goal-check-output>${verdict.check_output}</pre>` : ''}
+</section>`;
+    }
+
     /** The task's timeline: every attempt and why it happened. The data-* hooks are for the design of stage C4. */
     async function timelineHtml(row) {
         const attempts = await taskStore.attempts.list(row.id);
@@ -253,10 +276,11 @@ ${typeof d.duration_ms === 'number' ? html`<p class="muted">${Math.round(d.durat
         // The outcome in plain words: the label, and the note beside it — unless the note already says it
         // ("Done with proof: …" says "Done" already, so it is not said twice).
         const note = row.outcome_note || '';
-        const label = row.outcome ? (OUTCOME_TEXT[row.outcome] || row.outcome) : '';
+        const endState = row.end_state || null;
+        const label = endState ? (END_STATE_TEXT[endState] || endState) : (row.outcome ? (OUTCOME_TEXT[row.outcome] || row.outcome) : '');
         const says = !!label && note.toLowerCase().startsWith(label.toLowerCase());
-        const outcome = row.outcome
-            ? html`<p class="run-outcome" data-outcome="${row.outcome}"><b>${says ? note : [label, note].filter(Boolean).join(' ')}</b></p>`
+        const outcome = (endState || row.outcome)
+            ? html`<p class="run-outcome" data-outcome="${endState || row.outcome}"${endState ? raw(' data-end-state') : ''}><b>${says ? note : [label, note].filter(Boolean).join(' ')}</b></p>`
             : '';
         return html`<section class="run-timeline" data-timeline data-attempts="${attempts.length}">
 <h2>The attempts</h2>
@@ -317,6 +341,7 @@ ${i.summary ? html`<p class="run-proof-summary" data-proof-summary>${i.summary}<
 ${mine ? shareButton(row) : html`<p class="muted">This task was shared with you. Only its owner can change it.</p>`}
 <pre tabindex="0" class="run-prompt">${row.prompt}</pre>
 ${await timelineHtml(row)}
+${goalHtml(row)}
 ${await proofHtml(row)}
 ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events" data-title="${title}" aria-live="polite"><h2>Live</h2><ol class="run-log" data-log></ol></section>
 ${mine ? html`<form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : ''}` : html`${session}${resultHtml(row, { session: !!(lines && lines.length) })}`}`;

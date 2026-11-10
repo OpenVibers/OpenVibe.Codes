@@ -15,7 +15,11 @@
  * backoff; it is off without EVENTS_URL/CODES_EVENTS_SECRET/the OAuth client secret, under CODES_DRILL, or when
  * CODES_EVENTS_SUBSCRIBE=0.
  *
- *   const consumer = createEventsConsumer({ config, store, tasks, run, accountData, accountSend, log });
+ *   github.check.completed | github.pr.updated | github.pr.commented
+ *                         GitHub webhooks through OpenVibe.Events (AL5): routed to the pr-bindings (server/domain/
+ *                         pr-bindings.js), which wake the bound ticket's worker. The inbox dedupes redeliveries.
+ *
+ *   const consumer = createEventsConsumer({ config, store, tasks, run, accountData, accountSend, bindings, log });
  *   app.use('/internal/events', consumer.router);
  */
 const express = require('express');
@@ -27,7 +31,9 @@ const { TERMINAL, STATES } = require('./domain/run-tasks');
 const RUN_TOPICS = Object.freeze([
     'run.job.queued', 'run.job.started', 'run.job.succeeded', 'run.job.failed', 'run.job.cancelled', 'run.job.expired',
 ]);
-const TOPICS = Object.freeze([...RUN_TOPICS, ...accountDataLib.TOPICS]);
+/** GitHub through OpenVibe.Events (AL5): one envelope per pull request (server/github.js there). */
+const GITHUB_TOPICS = Object.freeze(['github.check.completed', 'github.pr.updated', 'github.pr.commented']);
+const TOPICS = Object.freeze([...RUN_TOPICS, ...accountDataLib.TOPICS, ...GITHUB_TOPICS]);
 const EVENT_ID_RE = /^evt_[0-9A-HJKMNP-TV-Z]{26}$/;
 const JOB_RE = /^job_[0-9A-HJKMNP-TV-Z]{26}$/;
 const STATE_OF_TOPIC = {
@@ -42,7 +48,7 @@ function errorText(error) {
     return null;
 }
 
-function createEventsConsumer({ config, store, tasks, run, accountData, accountSend = null, log = console, now = store.now }) {
+function createEventsConsumer({ config, store, tasks, run, accountData, accountSend = null, bindings = null, log = console, now = store.now }) {
     const db = store.db;
     const secrets = (config.events && config.events.secrets ? config.events.secrets : []).filter((x) => typeof x === 'string' && x.length >= 32);
     const stats = { received: 0, applied: 0, duplicates: 0, ignored: 0, refused: 0, failed: 0, last_at: null };
@@ -128,6 +134,39 @@ function createEventsConsumer({ config, store, tasks, run, accountData, accountS
             return res.json({ event_id: event.event_id, outcome });
         }
 
+        if (GITHUB_TOPICS.includes(event.event_type)) {
+            // A ticket follows its pull request (AL5). The inbox claims the id first: a redelivery answers
+            // duplicate, and the wake below runs once.
+            const seen = await db.maybe('SELECT task_id, outcome FROM codes_events_inbox WHERE event_id = $1', [event.event_id]);
+            if (seen) { stats.duplicates++; return res.json({ event_id: event.event_id, duplicate: true, outcome: null }); }
+            if (!bindings) {
+                const result = await ignore(event, 'ignored:no_bindings');
+                if (result.duplicate) stats.duplicates++; else stats.ignored++;
+                return res.json({ event_id: event.event_id, duplicate: result.duplicate, outcome: result.outcome });
+            }
+            let result;
+            try {
+                result = await store.tx(async () => {
+                    const inserted = await db.maybe(
+                        `INSERT INTO codes_events_inbox (event_id, event_type, task_id, outcome, processed_at)
+                         VALUES ($1, $2, NULL, 'wake', $3::timestamptz) ON CONFLICT (event_id) DO NOTHING RETURNING event_id`,
+                        [event.event_id, event.event_type, store.iso()],
+                    );
+                    if (!inserted) return { duplicate: true, outcome: null, task_ids: [], followed_up: [] };
+                    const r = await bindings.handleGithubEvent(event);
+                    await db.exec('UPDATE codes_events_inbox SET outcome = $2 WHERE event_id = $1', [event.event_id, r.outcome]);
+                    return { duplicate: false, ...r };
+                });
+            } catch (err) {
+                stats.failed++;
+                log.error(`[Codes] github event ${event.event_id} (${event.event_type}) failed:`, err.message);
+                return problem(503, 'codes.event_failed', 'processing failed; it will be retried');
+            }
+            if (result.duplicate) { stats.duplicates++; return res.json({ event_id: event.event_id, duplicate: true, outcome: null }); }
+            if (String(result.outcome).startsWith('ignored:')) stats.ignored++; else stats.applied++;
+            return res.json({ event_id: event.event_id, duplicate: false, outcome: result.outcome, ...(result.followed_up && result.followed_up.length ? { task_ids: result.followed_up } : {}) });
+        }
+
         if (!RUN_TOPICS.includes(event.event_type)) {
             const result = await ignore(event, 'ignored:type');
             if (result.duplicate) stats.duplicates++; else stats.ignored++;
@@ -145,7 +184,7 @@ function createEventsConsumer({ config, store, tasks, run, accountData, accountS
         return res.json({ event_id: event.event_id, duplicate: false, outcome: result.outcome, ...(result.task_id ? { task_id: result.task_id } : {}) });
     });
 
-    return { router, topics: TOPICS, runTopics: RUN_TOPICS, stats: () => ({ ...stats, enabled: secrets.length > 0 }) };
+    return { router, topics: TOPICS, runTopics: RUN_TOPICS, githubTopics: GITHUB_TOPICS, stats: () => ({ ...stats, enabled: secrets.length > 0 }) };
 }
 
 /** Create any missing subscription for `topics` at Events (idempotent; retried in the background at boot). */
@@ -206,4 +245,4 @@ function startSubscriptions(opts = {}) {
     return { topics, endpoint, stop() { stopped = true; if (timer) clearTimeout(timer); timer = null; } };
 }
 
-module.exports = { createEventsConsumer, startSubscriptions, RUN_TOPICS, TOPICS, EVENT_ID_RE };
+module.exports = { createEventsConsumer, startSubscriptions, RUN_TOPICS, GITHUB_TOPICS, TOPICS, EVENT_ID_RE };

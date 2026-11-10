@@ -137,7 +137,7 @@ async function createApp(opts = {}) {
     const sharing = opts.sharing || createSharing({ db: store.db, config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The skills hub (Compute plan §5, E6): versioned skills, rules and MCP servers, shared through the same SDK.
     const skills = opts.skills || createSkills({ store, sharing, log });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, attachments, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, attachments, goalVerifier: opts.goalVerifier || null, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
     const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, attachments, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -157,6 +157,10 @@ async function createApp(opts = {}) {
         fetchImpl: fetchImpl || globalThis.fetch, fleet, userSettings, harnesses, attachments,
     });
     tasks.setConductor(ctx.conductor);
+    // A ticket follows its pull request (AL5): bindings need tasks (a follow-up is a task), and tasks need
+    // bindings (a terminal result with a PR binds it) — wired to each other here, not in a constructor.
+    ctx.prBindings = require('./domain/pr-bindings').createPrBindings({ store, tasks, outbox, config, log });
+    tasks.attachBindings(ctx.prBindings);
 
     const app = express();
     aiCatalogConfig.mount(app);
@@ -233,7 +237,7 @@ async function createApp(opts = {}) {
         const accountSend = opts.accountSend || (config.oauth.clientSecret
             ? createNetworkSender({ networkInternalUrl: config.networkInternalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret, fetch: fetchImpl || globalThis.fetch })
             : null);
-        const consumer = createEventsConsumer({ config, store, tasks, run, accountData, accountSend, log });
+        const consumer = createEventsConsumer({ config, store, tasks, run, accountData, accountSend, bindings: ctx.prBindings, log });
         ctx.accountData = accountData;
         ctx.eventsConsumer = consumer;
         ctx.publisher = createPublisher({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });

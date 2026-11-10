@@ -14,12 +14,17 @@
  *   familyOf(model)                 the family a model belongs to ('anthropic', 'openai', 'deepseek', …)
  *   authorFamily({ agent, model })  the family that wrote the change
  *   pickReviewer({ models, author }) a model of another family, or null when there is none
- *   reviewWithAi({ … })             the review as { family, verdict, summary }
+ *   reviewWithAi({ … })             the review as { family, verdict, summary, findings, lifecycle, lifecycle_line }
+ *   readReview(text)                { verdict, summary, findings } from JSON or from the words
  *
- * The verdict is 'approved' or 'changes_requested'. The model is asked for JSON; a model that answers in prose is
- * read by its words ('approved', 'looks good' → approved; 'changes', 'needs work' → changes_requested), because a
- * review that cannot be read is not a review.
+ * The verdict is 'approved' or 'changes_requested'. The model is asked for JSON with its findings; a model that answers
+ * in prose is read by its words ('approved', 'looks good' → approved; 'changes', 'needs work' → changes_requested),
+ * because a review that cannot be read is not a review. Quiet by default: only issues this diff introduces, at most
+ * three, no style, no speculation, and no synthetic "no issues" finding. Re-review is given the prior ledger so a
+ * finding is addressed, reappeared, still open or new rather than lost in a fresh paragraph.
  */
+
+const { MAX_FINDINGS, priorBrief, fromReview, lifecycleLine, parse: parseFindings } = require('./findings');
 
 /** The families this knows, by the model's own name. */
 const FAMILIES = [
@@ -85,14 +90,23 @@ function pickReviewer({ models = [], author = null } = {}) {
     return null;
 }
 
-/** The prompt the reviewer gets: the change, the tests it claims to pass, and what is being asked of it. */
-function reviewPrompt({ patch = '', summary = '', tests = null } = {}) {
+/**
+ * The prompt the reviewer gets: the change, what it was for, the tests, and the prior findings on a re-review.
+ * Quiet by default — the rules are the point: only what this diff introduces, at most three findings, no style, no
+ * speculation, and an approval is an empty list rather than a "no issues" note.
+ */
+function reviewPrompt({ patch = '', summary = '', tests = null, prior = [] } = {}) {
+    const before = priorBrief(prior);
     return [
         'You are reviewing a change to a repository. Answer only with JSON:',
-        '{"verdict":"approved"|"changes_requested","summary":"one paragraph, what you checked and what you found"}.',
-        'Answer "approved" when the change does what it says and holds together; "changes_requested" when it is wrong,',
-        'unsafe, or leaves the work unfinished. Be concrete: name the file and the line.',
+        `{"verdict":"approved"|"changes_requested","summary":"one sentence, what you checked","findings":[{"file":"path","line":12,"text":"what is wrong and the concrete fix","severity":"low"|"medium"|"high"|"critical"}]}`,
+        'Flag only issues this change introduces: a correctness bug, a security problem, a missing or broken test, or a',
+        `requirement the change leaves undone. At most ${MAX_FINDINGS} findings, worst first. No style nits, no "may be`,
+        'unsafe" without the path that reaches it, and no re-raising a design choice the change was asked to make. If a',
+        'high-impact point is plausible but not proven, say "uncertain" in its text and keep the severity low. If nothing',
+        'is wrong, "approved" with an empty findings list; never write a "no issues" finding or a comment.',
         '',
+        before ? 'A previous review of an earlier revision raised the findings below. Treat them as the ledger: say in your\nsummary which are addressed, and report one again only when it still stands in this revision; then add only new\nissues this revision introduced. The ids stay stable across re-wrapping.\n' + before : '',
         summary ? 'What the change was asked to do:\n' + String(summary).slice(0, 4000) : '',
         tests ? 'The tests the author says pass:\n' + String(tests).slice(0, 2000) : '',
         '',
@@ -100,23 +114,34 @@ function reviewPrompt({ patch = '', summary = '', tests = null } = {}) {
     ].filter(Boolean).join('\n');
 }
 
-/** The answer as JSON, or as the words in it. */
-function readVerdict(text) {
+/** The answer as JSON, or as the words in it, with the findings it raised (an empty list on approval). */
+function readReview(text) {
     const raw = String(text || '').trim();
-    if (!raw) return { verdict: 'changes_requested', summary: 'the reviewer said nothing' };
+    if (!raw) return { verdict: 'changes_requested', summary: 'the reviewer said nothing', findings: [] };
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}');
     if (start >= 0 && end > start) {
         try {
             const doc = JSON.parse(raw.slice(start, end + 1));
+            const findings = Array.isArray(doc.findings) ? doc.findings.map((f) => ({
+                file: String(f.file || '').trim(), line: Number.isInteger(f.line) ? f.line : null,
+                text: String(f.text || f.description || '').trim(), severity: f.severity || null,
+            })).filter((f) => f.file && f.text).slice(0, MAX_FINDINGS) : [];
             const verdict = String(doc.verdict || '').toLowerCase();
-            if (/approv|looks good|lgtm/.test(verdict)) return { verdict: 'approved', summary: String(doc.summary || raw).slice(0, 4000) };
-            if (/change|reject|not good/.test(verdict)) return { verdict: 'changes_requested', summary: String(doc.summary || raw).slice(0, 4000) };
-            if (doc.summary) return { verdict: 'changes_requested', summary: String(doc.summary).slice(0, 4000) };
+            if (/approv|looks good|lgtm/.test(verdict)) return { verdict: 'approved', summary: String(doc.summary || raw).slice(0, 4000), findings };
+            if (/change|reject|not good/.test(verdict)) return { verdict: 'changes_requested', summary: String(doc.summary || raw).slice(0, 4000), findings };
+            if (doc.summary) return { verdict: 'changes_requested', summary: String(doc.summary).slice(0, 4000), findings };
         } catch { /* not JSON: read the words */ }
     }
-    if (/\bapprov|looks good|looks fine|lgtm|no changes\b/i.test(raw)) return { verdict: 'approved', summary: raw.slice(0, 4000) };
-    return { verdict: 'changes_requested', summary: raw.slice(0, 4000) };
+    const findings = parseFindings(raw);
+    if (/\bapprov|looks good|looks fine|lgtm|no changes\b/i.test(raw)) return { verdict: 'approved', summary: raw.slice(0, 4000), findings };
+    return { verdict: 'changes_requested', summary: raw.slice(0, 4000), findings };
+}
+
+/** The verdict alone (the older callers). */
+function readVerdict(text) {
+    const read = readReview(text);
+    return { verdict: read.verdict, summary: read.summary };
 }
 
 /**
@@ -140,12 +165,13 @@ async function reviewWithAi({
     patch = '',
     summary = '',
     tests = null,
+    prior = [],
     fetchImpl = globalThis.fetch,
 } = {}) {
     if (!token) throw new Error('the review needs the task\'s token');
     if (!model) throw new Error('the review needs a model');
     const root = String(baseUrl).replace(/\/+$/, '');
-    const prompt = reviewPrompt({ patch, summary, tests });
+    const prompt = reviewPrompt({ patch, summary, tests, prior });
     const headers = { 'content-type': 'application/json', authorization: `Bearer ${token}` };
     let res = await fetchImpl(`${root}/chat/completions`, {
         method: 'POST', headers, body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] }),
@@ -170,7 +196,9 @@ async function reviewWithAi({
     const text = body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content
         ? body.choices[0].message.content
         : (body && body.content && Array.isArray(body.content) ? body.content.map((c) => c && c.text).filter(Boolean).join(' ') : '');
-    const verdict = readVerdict(text);
+    const read = readReview(text);
+    // A reviewer that said nothing reviewed nothing: its prior findings are kept, never silently marked addressed.
+    const ledger = String(text || '').trim() ? fromReview(text, prior) : { findings: Array.isArray(prior) ? prior : [], lifecycle: null, line: null };
     // The route disclosure (D3'): the model that actually ran, the deployment and the cost, inside x_openvibe.
     const x = body && body.x_openvibe && typeof body.x_openvibe === 'object' ? body.x_openvibe : null;
     const resolved = x && x.resolved_model ? String(x.resolved_model) : (body && body.model ? String(body.model) : model);
@@ -181,12 +209,16 @@ async function reviewWithAi({
         ...(x && x.resolved_model ? { resolved_model: String(x.resolved_model) } : {}),
         ...(x ? { disclosure: x } : {}),
         ...(x && Number.isFinite(+x.cost_usd) ? { cost_usd: +x.cost_usd } : {}),
-        verdict: verdict.verdict,
-        summary: verdict.summary,
+        verdict: read.verdict,
+        summary: read.summary,
+        // The persisted lifecycle: ACTIVE/RESOLVED records and the addressed/reappeared/still open/new line.
+        findings: ledger.findings,
+        lifecycle: ledger.lifecycle,
+        lifecycle_line: lifecycleLine(ledger.lifecycle),
     };
 }
 
 module.exports = {
     FAMILIES, HARNESS_FAMILY,
-    familyOf, authorFamily, pickReviewer, reviewPrompt, readVerdict, reviewWithAi,
+    familyOf, authorFamily, pickReviewer, reviewPrompt, readReview, readVerdict, reviewWithAi,
 };

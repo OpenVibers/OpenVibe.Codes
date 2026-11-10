@@ -52,6 +52,22 @@ shared Know store's own `recall()` (the portal's `know/lessons.js`; on a Link it
 
 Each CLI: installed, signed in, and the limit windows it can read. Nothing else: no key, no token, no account name.
 
+### `runtime.js` — what each harness can actually do
+
+The runtime capability manifest: terminal-status quality, steering, checkpointing, subagent lifecycle, context
+handoff and where the permission boundary is enforced, per harness, as data. Every offer carries the fields as
+`harness:<field>-<value>` capabilities (`server/domain/harness-placement.js`), so a task requires what it needs and
+the router excludes the rest with a reason instead of a provider-name check. `pick()` also takes `needs` and skips a
+ladder rung whose harness does not declare it. `[docs/harness-runtime.md](../docs/harness-runtime.md)` has the table.
+
+```js
+const runtime = require('./engine/runtime');
+
+runtime.fits('cm', { subagents: 'native' });   // true
+runtime.fits('mm', { subagents: 'native' });   // false: MiniMax Code declares no subagents
+runtime.capabilities(runtime.forHarness('codex'));
+```
+
 ### `router.js` — what kind of task is this, and which runner may take it
 
 A brief is classified into one of five tiers (`basic`, `research`, `standard`, `hard`, `design`); a line `tier: hard`
@@ -216,6 +232,39 @@ const { failureError } = require('./engine/runerror');
 
 failureError('{"type":"result","is_error":true,"result":"API Error: usage limit reached"}', '');
 // 'API Error: usage limit reached'
+```
+
+### `finding.js` — one finding, and the evidence bar it must meet
+
+The `agent.finding@1` shape (OpenVibe.Contracts), validated here because Codes is the producer. The verdict is the
+evidence bar, not the severity: `confirmed` needs the split severity (likelihood, impact, overall never above impact)
+and a confidence with its reason; `needs_validation` is a lead with a claimed cause, exact blockers and a local or
+deployment plan, and no severity; `rejected` carries its reason. `findingId(file, text)` is the stable identity from the
+repository-relative file and the whitespace-normalised, lowercased text, so re-wrapping keeps the id.
+
+```js
+const { findingId, validate, isLead } = require('./engine/finding');
+
+findingId('server/x.js', 'The  cache NEVER expires');   // 'server/x.js:the cache never expires'
+validate({ verdict: 'confirmed', /* … */ });
+// { valid: false, errors: ['a confirmed finding needs severity', …] }
+isLead({ verdict: 'needs_validation' });                // true
+```
+
+### `findings.js` — a review that remembers what it already said
+
+The review's ledger across revisions. `parse(text)` reads the findings of a JSON answer (or the older numbered
+`VERDICT: FIX` bullets); `merge(prior, current)` reconciles them into ACTIVE/RESOLVED records and counts what was
+addressed, reappeared, is still open and is new; `priorBrief(records)` is the compact block a re-review prompt gets;
+`lifecycleLine()` is the one line a person reads. The resolved set is capped, and an approval is an empty list — no
+synthetic "no issues" finding.
+
+```js
+const { fromReview, priorBrief, lifecycleLine } = require('./engine/findings');
+
+const first = fromReview('{"verdict":"changes_requested","findings":[{"file":"a.js","line":1,"text":"it races"}]}');
+const again = fromReview('{"verdict":"approved","findings":[]}', first.findings);
+// again.line = 'Findings: 1 addressed, 0 reappeared, 0 still open, 0 new'
 ```
 
 ## Tests

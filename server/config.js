@@ -127,6 +127,12 @@ function load(env = process.env) {
             deadAfterRefusals: Math.max(1, int(env.CODES_EVENTS_DEAD_AFTER_REFUSALS, 3)),
             deadAfterAttempts: Math.max(1, int(env.CODES_EVENTS_DEAD_AFTER_ATTEMPTS, 20)),
         },
+        // A ticket follows its pull request (AL5): a red check, a conflict or a review comment wakes the bound
+        // ticket's worker with a follow-up Run job, at most 3 automatic fixes per PR. Default off: set
+        // CODES_PR_FOLLOW_ENABLED=1 to let Codes start follow-ups on github.* deliveries.
+        prFollow: {
+            enabled: env.CODES_PR_FOLLOW_ENABLED === '1',
+        },
         // Session lines in PostgreSQL: no total cap; finished tasks keep theirs for this many days (default 90).
         sessions: {
             retentionDays: Math.max(1, int(env.CODES_SESSION_RETENTION_DAYS, 90)),
@@ -168,8 +174,13 @@ function load(env = process.env) {
         know: { lessons: String(env.CODES_KNOW_LESSONS || env.OPENVIBE_CODES_LESSONS || '').trim() },
         // The task's timeline (stage C2): how many automatic continues one task may have before it needs a person.
         task: { maxContinues: Math.max(0, int(env.CODES_TASK_MAX_CONTINUES, 2)) },
-        // Goal and independent-verification flow stays opt-in until task creation and persistence are wired end to end.
-        goals: { enabled: env.CODES_GOALS_ENABLED === '1' },
+        // Goal and independent-verification flow (AL1) stays opt-in: a task without a goal behaves exactly as before.
+        // The verifier is a cheap fast model on OpenVibe.AI; CODES_GOALS_MODEL may name another rung.
+        goals: {
+            enabled: env.CODES_GOALS_ENABLED === '1',
+            model: env.CODES_GOALS_MODEL || 'deepseek-chat',
+            timeoutMs: Math.max(1000, int(env.CODES_GOALS_TIMEOUT_MS, 120000)),
+        },
         // The conductor (Codes C9b): one long Claude Code session on the person's own machine. A turn's wall time (the
         // session may work through a plan), and the harness a sub-task gets when the conductor names none (never an
         // Anthropic one: the conductor is the only Anthropic session).

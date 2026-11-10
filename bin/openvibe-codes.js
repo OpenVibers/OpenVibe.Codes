@@ -10,12 +10,15 @@ const path = require('path');
 const { createHarness } = require('../harness');
 const { runJob, resultWriter, jobEnv } = require('../harness/job');
 const { task } = require('./task');
+const { skills } = require('./skills');
+const agentOut = require('./agent-output');
 const { createProofAdapters } = require('../harness/proof');
 const { version: VERSION } = require('../package.json');
 const { probe: probeLogins } = require('../engine/logins');
 
 const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your terminal
 
+  openvibe-codes skills [get|list|path] [name] the guide an agent reads, shipped with this binary
   openvibe-codes agents                       which agents this machine can run, and why not the others
   openvibe-codes logins                      the coding CLIs here: installed, signed in, and their limit windows
   openvibe-codes route [--task edit] [--need harness:resume,…]   which agent a task would go to, and why
@@ -38,6 +41,9 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
       --no-handoff                     stop at the first agent's result
       --attempts <n>                   at most this many agents in one run (default 3)
       --json                           the events as JSON lines instead of a readable log
+      --for-agent                      one compact JSON line per event with fixed fields (run, seq,
+                                       event, agent, session, ref, ok, error {code,retry,suggestion});
+                                       no ANSI, bounded text. The machine face of every command here.
   openvibe-codes runs                         the latest runs on this machine
   openvibe-codes show <run id> [--json]       one run's attempts and result (--json: every event)
   openvibe-codes resume <run id> "follow-up"  continue a run's last session with its agent
@@ -53,11 +59,14 @@ Environment: DEEPSEEK_API_KEY · OPENVIBE_CODES_BASE_URL, OPENVIBE_CODES_MODEL, 
 Network token, for 'task') and OPENVIBE_CODES_URL (the server task talks to).
 Guide: https://openvibe.codes/start`;
 
+let agentMode = false;   // --for-agent: the final error handler answers in the same envelope
+
 function parse(argv) {
     const opts = { _: [] };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--json') opts.json = true;
+        else if (a === '--for-agent') { opts.forAgent = true; agentMode = true; }
         else if (a === '--advisor') opts.advisor = true;
         else if (a === '--no-handoff') opts.handoff = false;
         else if (a === '--help' || a === '-h') opts.help = true;
@@ -111,12 +120,17 @@ async function main() {
     // The Codes MCP server (Codes C9b): a conductor's Claude Code session starts it with --mcp-config.
     if (cmd === 'mcp') return require('./mcp').mcp();
     const o = parse(rest);
+    if (cmd === 'skills') return skills(rest.filter((a) => a !== '--json'), { out, json: o.json });
     if (!cmd || cmd === 'help' || o.help || cmd === '--help' || cmd === '-h') { out(USAGE); return 0; }
     if (cmd === '--version' || cmd === '-v' || cmd === 'version') { out(VERSION); return 0; }
     const harness = createHarness();
 
     if (cmd === 'agents') {
         const list = harness.agents();
+        if (o.forAgent) {
+            for (const a of list) out(agentOut.line({ event: 'agent', id: a.id, name: a.name, available: !!a.available, reason: a.available ? undefined : a.reason }));
+            return 0;
+        }
         if (o.json) { out(JSON.stringify(list, null, 2)); return 0; }
         for (const a of list) out(`${a.available ? '✔' : '·'} ${a.id.padEnd(18)} ${a.name.padEnd(16)} ${a.available ? dim([a.where, a.version].filter(Boolean).join(' · ')) : dim(a.reason)}`);
         return 0;
@@ -125,6 +139,10 @@ async function main() {
         // What this machine has: each CLI, whether it is signed in, and the limit windows it can read. Nothing else:
         // no key, no token, no account name.
         const rows = probeLogins({ home: process.env.HOME });
+        if (o.forAgent) {
+            for (const r of rows) out(agentOut.line({ event: 'login', id: r.id, installed: !!r.installed, signed_in: !!r.signed_in, windows: r.windows || [] }));
+            return 0;
+        }
         if (o.json) { out(JSON.stringify(rows, null, 2)); return 0; }
         for (const r of rows) {
             const windows = r.windows.length ? r.windows.map((w) => `${w.name}${w.used != null ? ` ${w.used}/${w.limit}` : ''}${w.resets_at ? ` (resets ${w.resets_at})` : ''}`).join(', ') : '';
@@ -135,6 +153,7 @@ async function main() {
     if (cmd === 'route') {
         const requirements = o.need ? { capabilities: String(o.need).split(',').map((s) => s.trim()).filter(Boolean) } : {};
         const d = harness.route({ task: o.task || 'edit', requirements });
+        if (o.forAgent) { out(agentOut.line({ event: 'route', selected: d.selected || null, reasons: d.reasons || [], candidates: (d.candidates || []).map((c) => ({ id: c.id, included: !!c.included, reason: c.reason || undefined })) })); return d.selected ? 0 : 1; }
         if (o.json) { out(JSON.stringify(d, null, 2)); return 0; }
         out(d.selected ? `→ ${d.selected}` : '→ no agent here can take it');
         for (const r of d.reasons || []) out(dim(`  ${r}`));
@@ -148,16 +167,28 @@ async function main() {
         let cwd = path.resolve(o.cwd || process.cwd());
         if (cmd === 'resume') {
             const prev = harness.store.loadRun(o._[0]);
-            if (!prev) { out(`no run ${o._[0]} on this machine (openvibe-codes runs)`); return 1; }
+            if (!prev) {
+                if (o.forAgent) out(agentOut.errorLine('no_run', `no run ${o._[0]} on this machine`));
+                else out(`no run ${o._[0]} on this machine (openvibe-codes runs)`);
+                return 1;
+            }
             const last = [...(prev.attempts || [])].reverse().find((a) => a.session_id);
-            if (!last) { out('that run has no session to resume'); return 1; }
+            if (!last) {
+                if (o.forAgent) out(agentOut.errorLine('no_run', 'that run has no session to resume', { suggestion: 'start a new run instead: `openvibe-codes run --for-agent "<task>"`' }));
+                else out('that run has no session to resume');
+                return 1;
+            }
             resume = last.session_id; agent = last.agent; cwd = prev.cwd || cwd;
             prompt = o._.slice(1).join(' ');
         } else {
             prompt = o._.join(' ');
         }
         if (prompt === '-') prompt = await readStdin();
-        if (!prompt || !prompt.trim()) { out('what should the agent do? openvibe-codes run "…"'); return 1; }
+        if (!prompt || !prompt.trim()) {
+            if (o.forAgent) out(agentOut.errorLine('no_prompt', 'no task was given'));
+            else out('what should the agent do? openvibe-codes run "…"');
+            return 1;
+        }
         const controller = new AbortController();
         process.on('SIGINT', () => { controller.abort(); });
         const run = harness.run({
@@ -165,9 +196,15 @@ async function main() {
             permission: o.permission || 'edit', handoff: o.handoff !== false && !resume, maxAttempts: Number(o.attempts) || 3, signal: controller.signal,
             effort: o.effort || null, advisor: o.advisor ? (o['advisor-model'] ? { model: o['advisor-model'] } : true) : null,
         });
-        if (!o.json) out(dim(`run ${run.runId} · ${cwd}`));
+        if (!o.json && !o.forAgent) out(dim(`run ${run.runId} · ${cwd}`));
         let last = null;
-        for await (const e of run) { last = e; if (o.json) out(JSON.stringify(e)); else printEvent(e); }
+        let seq = 0;
+        for await (const e of run) {
+            last = e;
+            if (o.forAgent) { for (const l of agentOut.eventLines(run.runId, seq + 1, e)) { seq++; out(l); } }
+            else if (o.json) out(JSON.stringify(e));
+            else printEvent(e);
+        }
         return last && last.type === 'result' && !last.is_error ? 0 : 1;
     }
     if (cmd === 'job') {
@@ -195,6 +232,7 @@ async function main() {
     }
     if (cmd === 'runs') {
         const runs = harness.store.listRuns(Number(o.limit) || 20);
+        if (o.forAgent) { for (const r of runs) out(agentOut.runLine(r)); return 0; }
         if (o.json) { out(JSON.stringify(runs, null, 2)); return 0; }
         for (const r of runs) {
             const ok = r.result && !r.result.is_error;
@@ -204,15 +242,25 @@ async function main() {
     }
     if (cmd === 'show') {
         const r = harness.store.loadRun(o._[0]);
-        if (!r) { out(`no run ${o._[0]} on this machine`); return 1; }
+        if (!r) {
+            if (o.forAgent) out(agentOut.errorLine('no_run', `no run ${o._[0]} on this machine`));
+            else out(`no run ${o._[0]} on this machine`);
+            return 1;
+        }
+        if (o.forAgent) { for (const l of agentOut.showLines(r)) out(l); return r.result && !r.result.is_error ? 0 : 1; }
         if (o.json) { for (const e of harness.store.events(r.run_id)) out(JSON.stringify(e)); return 0; }
         out(`${r.run_id} · ${r.cwd} · ${r.permission}`);
         for (const a of r.attempts || []) out(`  ${a.ok ? '✔' : '✗'} ${a.agent}${a.session_id ? dim(` session ${a.session_id}`) : ''}${a.error ? ` — ${a.error}` : ''}`);
         if (r.result) out(r.result.result || '');
         return r.result && !r.result.is_error ? 0 : 1;
     }
+    if (o.forAgent) { out(agentOut.errorLine('usage', `unknown command or option: ${[cmd, ...rest].filter(Boolean).join(' ')}`)); return 1; }
     out(USAGE);
     return 1;
 }
 
-main().then((code) => process.exit(code), (err) => { process.stderr.write(`openvibe-codes: ${err.message}\n`); process.exit(1); });
+main().then((code) => process.exit(code), (err) => {
+    if (agentMode) process.stdout.write(`${agentOut.errorLine('internal', err && err.message)}\n`);
+    process.stderr.write(`openvibe-codes: ${err && err.message}\n`);
+    process.exit(1);
+});

@@ -5,19 +5,24 @@
  * worker runs it in its sandbox as artifact `openvibe-codes@1.0.0`, JOB_PROTOCOL below). The job's input is one JSON
  * line on stdin:
  *
- *   { repo, ref?, prompt, agent?, model?, permission?: 'edit'|'full', push?: { branch?, pull_request? } }
+ *   { repo, ref?, prompt, agent?, model?, permission?: 'edit'|'full', push?: { branch?, pull_request?, update? } }
  *
  * It clones `repo` (https only) into a scratch directory, runs the harness there with hand-offs, and prints one compact
  * JSON line per event on stdout (what the page shows live). The result goes to fd 3 (the Link's result channel), or as
- * a last `{ t: 'result_doc' }` line when fd 3 is not open: what the agents said, the changed files and the patch, and,
- * when `push` is asked and the machine holds GITHUB_TOKEN, the new branch it pushed (never the base branch) and its
- * pull request. Nothing here ever prints a token.
+ * a last `{ t: 'result_doc' }` line when fd 3 is not open: what the agents said, the changed files and the patch, the
+ * per-turn checkpoints (refs and the authored/imported turn diff, `checkpoints` in the document), and, when `push` is
+ * asked and the machine holds GITHUB_TOKEN, the new branch it pushed (never the base branch) and its pull request.
+ * A follow-up (AL5) sets push.update with branch === ref: the checked-out PR branch is committed and pushed again
+ * (never forced, no new PR) so the same pull request turns green. Nothing here ever prints a token.
  */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 const { collectProof } = require('../engine/proof');
+const { createCheckpoints, toolPaths } = require('./checkpoints');
+const { runCheck } = require('./goal-check');
+const { boundedEvidence } = require('../engine/goal');
 
 const JOB_PROTOCOL = '1.0.0';
 /** The agents a conductor's turn may run on: every harness Codes offers. */
@@ -58,14 +63,16 @@ const PROTECTED = /^(main|master|trunk|dev|develop|development|staging|stage|pro
 
 /**
  * The branch a task may push: a new one. → { branch } or { refused }. `exists` is GitHub's answer for that name (true
- * when it already exists, null when GitHub could not be asked: refused too, never assumed new).
+ * when it already exists, null when GitHub could not be asked: refused too, never assumed new). A follow-up (AL5)
+ * passes update with branch === ref: the PR branch already exists and is pushed again, never forced.
  */
-function pushTarget(requested, base, { exists = false, now = Date.now() } = {}) {
+function pushTarget(requested, base, { exists = false, now = Date.now(), update = false } = {}) {
     const branch = requested || `openvibe-codes/${now.toString(36)}`;
-    if (branch === base) return { refused: 'a task never pushes to the branch it started from' };
+    if (branch === base && !update) return { refused: 'a task never pushes to the branch it started from' };
     if (PROTECTED.test(branch)) return { refused: `a task pushes only a new branch of its own, never ${branch}` };
     if (exists === null) return { refused: 'GitHub could not say whether the branch exists, so nothing was pushed' };
-    if (exists) return { refused: `${branch} already exists: a task pushes only a new branch` };
+    if (exists && !update) return { refused: `${branch} already exists: a task pushes only a new branch` };
+    if (update && !exists) return { refused: `${branch} is gone: nothing to update` };
     return { branch };
 }
 
@@ -233,9 +240,15 @@ function parseArgs(raw, env = process.env) {
     const push = a.push && typeof a.push === 'object' ? {
         branch: a.push.branch == null ? null : String(a.push.branch),
         pull_request: a.push.pull_request === true,
+        // Only a follow-up (AL5) sets update; a normal task's args keep their old shape.
+        ...(a.push.update === true ? { update: true } : {}),
     } : null;
     if (push && push.branch && (!BRANCH.test(push.branch) || push.branch.startsWith('-'))) throw new Error('push.branch must be a branch name');
     if (push && push.branch && PROTECTED.test(push.branch)) throw new Error(`push.branch must be a new branch of the task's own, never ${push.branch}`);
+    // A follow-up (AL5) pushes the checked-out PR branch again: it names the branch it cloned (branch === ref),
+    // never asks for a new pull request, and is never forced. Anything else with update is rejected.
+    if (push && push.update && push.pull_request) throw new Error('push.update never opens a new pull request');
+    if (push && push.update && (!push.branch || push.branch !== ref)) throw new Error('push.update needs branch === ref: a follow-up pushes the branch it cloned');
     // The session a resume continues: the job's own input, or RESUME in the environment (a task carried on in the
     // same conversation). It is a harness's session id, never a path and never a credential.
     const resumeIn = a.resume == null || a.resume === '' ? env.RESUME : a.resume;
@@ -246,8 +259,22 @@ function parseArgs(raw, env = process.env) {
         tokens: Number.isFinite(Number(a.limits.tokens)) && Number(a.limits.tokens) > 0 ? Math.min(1000000, Number(a.limits.tokens)) : null,
         usd: Number.isFinite(Number(a.limits.usd)) && Number(a.limits.usd) > 0 ? Math.min(100, Number(a.limits.usd)) : null,
     } : null;
+    // AL1: a task's goal and its typed check. The harness runs the check itself, in the clone, after the worker's
+    // turn; the model never supplies the exit code. Unknown or malformed goals are dropped, never guessed at.
+    const rawGoal = a.goal && typeof a.goal === 'object' && !Array.isArray(a.goal) ? a.goal : null;
+    const goalCheck = rawGoal && rawGoal.check && typeof rawGoal.check === 'object' ? rawGoal.check : null;
+    const goal = rawGoal && typeof rawGoal.goal === 'string' && rawGoal.goal.trim()
+        && goalCheck && ['command', 'url', 'rubric'].includes(goalCheck.kind) && typeof goalCheck.value === 'string' && goalCheck.value.trim()
+        ? {
+            goal: rawGoal.goal.trim().slice(0, 4000),
+            check: { kind: goalCheck.kind, value: goalCheck.value.trim().slice(0, 4000) },
+            budget: rawGoal.budget && typeof rawGoal.budget === 'object' && !Array.isArray(rawGoal.budget) ? rawGoal.budget : {},
+            no_progress_limit: Number.isInteger(rawGoal.no_progress_limit) ? rawGoal.no_progress_limit : 3,
+        } : null;
     return {
         kind, repo: repo ? repo.toString() : null, ref, prompt, permission, push,
+        // The task this job is an attempt of, when the server names it: the checkpoint refs carry it.
+        ...(typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? { taskId: a.task_id } : {}),
         ...(attached.length ? { attachments: attached } : {}),
         ...(limits ? { limits } : {}),
         ...(resume ? { resume } : {}),
@@ -261,6 +288,7 @@ function parseArgs(raw, env = process.env) {
         ...(typeof a.knowledge === 'string' && a.knowledge.trim() ? { knowledge: a.knowledge.trim().slice(0, 4000) } : {}),
         // The conversation's work so far (Codes L31 CH4): applied to the clone before the agent starts.
         ...(typeof a.base_patch === 'string' && a.base_patch.trim() && a.base_patch.length <= MAX_PATCH ? { base_patch: a.base_patch } : {}),
+        ...(goal ? { goal } : {}),
     };
 }
 
@@ -602,19 +630,22 @@ async function pushBranch(dir, job, { env, fetchImpl, base }) {
         if (host && giteaHosts(env).has(host)) return pushForge(dir, job, { env, fetchImpl, base });
     }
     if (!token || !gh) return { pushed: false, reason: !gh ? 'push is for github.com repositories' : 'this machine has no GITHUB_TOKEN' };
-    const first = pushTarget(job.push.branch, base);
+    const update = job.push.update === true;
+    const first = pushTarget(job.push.branch, base, { update });
     if (first.refused) return { pushed: false, reason: first.refused };
     const branch = first.branch;
     const remoteUrl = `https://x-access-token:${token}@github.com/${gh.owner}/${gh.name}.git`;
     let exists = null;
     try { exists = (await git(['ls-remote', '--heads', remoteUrl, `refs/heads/${branch}`], { cwd: dir, timeout: 60_000 })).trim() !== ''; } catch { exists = null; }
-    const checked = pushTarget(branch, base, { exists });
+    const checked = pushTarget(branch, base, { exists, update });
     if (checked.refused) return { pushed: false, reason: checked.refused };
     const who = {
         GIT_AUTHOR_NAME: env.GIT_AUTHOR_NAME || 'OpenVibe.Codes', GIT_AUTHOR_EMAIL: env.GIT_AUTHOR_EMAIL || 'codes@openvibe.codes',
         GIT_COMMITTER_NAME: env.GIT_AUTHOR_NAME || 'OpenVibe.Codes', GIT_COMMITTER_EMAIL: env.GIT_AUTHOR_EMAIL || 'codes@openvibe.codes',
     };
-    await git(['checkout', '-b', branch], { cwd: dir });
+    // A follow-up is already on the PR branch it cloned (branch === ref === base): committing there and pushing
+    // (never forced, so a branch someone rewrote meanwhile is rejected, not overwritten).
+    if (branch !== base) await git(['checkout', '-b', branch], { cwd: dir });
     await git(['commit', '-m', job.prompt.split('\n')[0].slice(0, 72) || 'OpenVibe.Codes task'], { cwd: dir, env: who });
     await git(['push', remoteUrl, `HEAD:refs/heads/${branch}`], { cwd: dir, timeout: 180_000 });
     const out = { pushed: true, branch, branch_url: `https://github.com/${gh.owner}/${gh.name}/tree/${encodeURIComponent(branch)}` };
@@ -782,11 +813,34 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             resume: job.resume || null,
             ...(adapterOptions ? { adapterOptions } : {}),
         });
+        // Per-turn checkpoints (Release 1, feat 11): the clone as the agent found it, then one ref per tool batch. They
+        // live in this clone only and are never pushed; the result carries the refs and the turn diffs so a review can
+        // see the agent's own work apart from what came from elsewhere. A checkpoint failure never fails the run.
+        let checkpoints = null;
+        if (job.kind === 'code') {
+            try {
+                checkpoints = createCheckpoints({ cwd: work, task: job.taskId || 'task', run: env.OPENVIBE_JOB_ID || run.runId });
+                checkpoints.capture('start');
+            } catch (e) {
+                say({ t: 'note', level: 'warning', text: `Checkpoints are off for this run: ${scrub(e.message)}` });
+                checkpoints = null;
+            }
+        }
         let last = null;
         // What the pictures may take of the result's room.
         const pictures = { left: MAX_RESULT_BYTES };
         for await (const e of run) {
             last = e;
+            // Before the tool batch the model just called runs, pin the tree: this is the checkpoint a failed repair
+            // returns to. The paths the batch names become the authored set of the next checkpoint's diff.
+            if (checkpoints && e.type === 'assistant' && ((e.message && e.message.content) || []).some((c) => c && c.type === 'tool_use')) {
+                try {
+                    checkpoints.authored(toolPaths(e));
+                    checkpoints.capture(`turn ${e._attempt || 1}`);
+                } catch (err) {
+                    say({ t: 'note', level: 'warning', text: `A checkpoint could not be written: ${scrub(err.message)}` });
+                }
+            }
             const c = compact(e, { pictures });
             for (const line of Array.isArray(c) ? c : c ? [c] : []) say(line);
             if (e.type === 'system' && e.subtype === 'init' && e.agent && !result.agents.includes(e.agent)) result.agents.push(e.agent);
@@ -802,10 +856,29 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         if (last && last.disclosure && typeof last.disclosure === 'object') result.disclosure = last.disclosure;
         const usage = last && last.usage && typeof last.usage === 'object' ? last.usage : {};
         result.tokens = Number(last && (last.total_tokens || last.tokens)) || (Number(usage.input_tokens) || 0) + (Number(usage.output_tokens) || 0);
+        if (last && Number.isFinite(Number(last.turns))) result.turns = Number(last.turns);
         // The session the next message resumes: a conductor's turn ends, its conversation does not.
         if (job.kind === 'conductor' && last && last.session_id) result.session = String(last.session_id).slice(0, 200);
         // A conductor works in the owner's own folder: its changes are theirs, not a patch for a pull request.
         Object.assign(result, job.kind === 'code' ? await changes(work) : { files: [], patch: '', patch_truncated: false });
+        if (checkpoints) {
+            try {
+                checkpoints.capture('final');
+                const turns = checkpoints.turns();
+                const baseline = checkpoints.entries[0];
+                const final = checkpoints.last();
+                result.checkpoints = {
+                    root: checkpoints.root,
+                    count: checkpoints.list().length,
+                    refs: checkpoints.list().slice(-20),
+                    // The turn diff: one row per turn, with the files the turn wrote split into authored and imported.
+                    turns: turns.slice(-20).map((t) => ({ ...t, files: t.files.slice(0, 20), truncated: t.files_total > 20 })),
+                    ...(baseline && final ? { turn_diff: checkpoints.diff(baseline, final) } : {}),
+                };
+            } catch (e) {
+                say({ t: 'note', level: 'warning', text: `The checkpoints could not be read back: ${scrub(e.message)}` });
+            }
+        }
         say({ t: 'step', text: result.files.length ? `${result.files.length} file${result.files.length === 1 ? '' : 's'} changed` : (job.kind === 'conductor' ? 'Turn done' : 'No files changed') });
         // The proof of the change: the tests it reaches, the pages it touched, the diff, and a second model's opinion.
         // It is collected here, in the clone the agent worked in, so the evidence is about this machine's work.
@@ -819,10 +892,37 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                     author: { agent: job.agent, model: job.model },
                     emit: (item) => say({ t: 'proof', kind: item.kind, label: item.label, ok: item.ok, skipped: !!item.skipped, summary: item.summary, family: item.family || null, model: item.model || null }),
                 });
-                result.proof = { items: collected.items.map((i) => ({ kind: i.kind, label: i.label, ok: i.ok, skipped: !!i.skipped, summary: i.summary, family: i.family || null, model: i.model || null, requested_model: i.requested_model || null, detail: i.shots ? { shots: i.shots.map((s) => shotWithBytes(s, pictures)) } : (i.kind === 'diff' ? { files: i.files, stats: i.stats } : null) })), outcome: collected.outcome };
+                result.proof = { items: collected.items.map((i) => ({ kind: i.kind, label: i.label, ok: i.ok, skipped: !!i.skipped, summary: i.summary, family: i.family || null, model: i.model || null, requested_model: i.requested_model || null, detail: i.shots ? { shots: i.shots.map((s) => shotWithBytes(s, pictures)) } : (i.kind === 'diff' ? { files: i.files, stats: i.stats } : null) })), outcome: collected.outcome, review: collected.review || null };
             } catch (e) {
                 say({ t: 'note', level: 'warning', text: `The proof could not be collected: ${scrub(e.message)}` });
                 result.proof = { items: [], outcome: null };
+            }
+        }
+        // The goal's own check (AL1): the machine runs it in the clone, after the worker's turn, and the result carries
+        // the output as evidence. It never decides alone: the independent verifier reads the evidence server-side.
+        if (job.goal && job.kind === 'code') {
+            say({ t: 'step', text: 'Running the goal check' });
+            try {
+                const checked = await runCheck(job.goal.check, { cwd: work, fetchImpl });
+                const evidence = boundedEvidence(JSON.stringify({
+                    check: { kind: checked.kind, value: checked.value, ok: checked.ok, exit_code: checked.exit_code, status: checked.status, output: checked.output },
+                    summary: answer.slice(0, 4000),
+                    files: result.files.slice(0, 200).map((f) => ({ path: f.path, added: f.added, removed: f.removed })),
+                    proof: result.proof ? result.proof.items.map((i) => ({ kind: i.kind, label: i.label, ok: i.ok, skipped: !!i.skipped, summary: i.summary })) : null,
+                }));
+                result.goal = {
+                    goal: job.goal.goal,
+                    check: job.goal.check,
+                    proposal: answer.slice(0, 4000),
+                    check_output: checked.output,
+                    evidence,
+                    checked: { ok: checked.ok, exit_code: checked.exit_code == null ? null : checked.exit_code, status: checked.status == null ? null : checked.status, at: checked.at },
+                };
+                say({ t: 'note', level: checked.ok === false ? 'warning' : 'info', text: `The goal check ${checked.ok === true ? 'passed' : checked.ok === false ? 'did not pass' : 'is for the verifier'}: ${checked.kind} ${checked.value.slice(0, 300)}` });
+                if (checked.output) say({ t: 'note', level: 'info', text: `Check output: ${checked.output.slice(-2000)}` });
+            } catch (e) {
+                result.goal = { goal: job.goal.goal, check: job.goal.check, proposal: answer.slice(0, 4000), check_output: '', evidence: '', error: scrub(e.message) };
+                say({ t: 'note', level: 'warning', text: `The goal check could not run: ${scrub(e.message)}` });
             }
         }
         if (job.push && result.ok && result.files.length) {

@@ -41,6 +41,24 @@
             "type": "integer",
             "minimum": 0,
             "description": "The number of feed lines that were read."
+        },
+        "findings": {
+            "type": "array",
+            "description": "The structured findings of the task's review, in the agent.finding@1 shape (OpenVibe.Contracts): a confirmed finding carries severity and confidence; a needs_validation lead carries a claimed cause, exact blockers and a validation plan and no severity; a rejected claim carries its reason. Empty or absent when no review produced a record.",
+            "items": { "$ref": "#/$defs/finding" }
+        },
+        "review": {
+            "type": "object",
+            "description": "The persisted review ledger: its findings across revisions with a stable finding_id and an ACTIVE/RESOLVED state, the reconciliation counts, and the addressed/reappeared/still open/new line. A review that did not run is `unreviewed` with no findings, never a zero-finding approval.",
+            "additionalProperties": false,
+            "required": ["verdict", "findings", "lifecycle"],
+            "properties": {
+                "verdict": { "type": "string", "enum": ["approved", "changes_requested", "unreviewed"] },
+                "summary": { "type": "string", "maxLength": 4000 },
+                "findings": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/reviewFinding" } },
+                "lifecycle": { "$ref": "#/$defs/reviewLifecycle" },
+                "lifecycle_line": { "type": ["string", "null"] }
+            }
         }
     },
     "additionalProperties": true,
@@ -154,6 +172,136 @@
                 }
             },
             "additionalProperties": true
+        },
+        "finding": {
+            "type": "object",
+            "description": "One review finding (agent.finding@1): the verdict is the evidence bar; a needs_validation lead has no severity.",
+            "additionalProperties": false,
+            "required": ["verdict", "fingerprint", "title", "description", "trace", "evidence"],
+            "properties": {
+                "verdict": { "type": "string", "enum": ["confirmed", "needs_validation", "rejected"] },
+                "fingerprint": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Repository-relative file + whitespace-normalised, lowercased text; stable across re-wrapping." },
+                "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "description": { "type": "string", "minLength": 1, "maxLength": 4000 },
+                "trace": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/findingLocation" } },
+                "evidence": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/findingEvidence" } },
+                "severity": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["likelihood", "impact", "overall_severity"],
+                    "properties": {
+                        "likelihood": { "$ref": "#/$defs/findingLevel" },
+                        "impact": { "$ref": "#/$defs/findingLevel" },
+                        "overall_severity": { "$ref": "#/$defs/findingLevel" }
+                    }
+                },
+                "confidence": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["level", "reason"],
+                    "properties": {
+                        "level": { "type": "string", "enum": ["low", "medium", "high"] },
+                        "reason": { "type": "string", "minLength": 1, "maxLength": 1000 }
+                    }
+                },
+                "remediation": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["strategy"],
+                    "properties": {
+                        "strategy": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                        "code_changes": {
+                            "type": "array",
+                            "maxItems": 20,
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": ["file", "change"],
+                                "properties": {
+                                    "file": { "type": "string", "minLength": 1, "maxLength": 500 },
+                                    "change": { "type": "string", "minLength": 1, "maxLength": 1000 }
+                                }
+                            }
+                        }
+                    }
+                },
+                "claimed_root_cause": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                "blockers": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "type": "string", "minLength": 1, "maxLength": 500 } },
+                "validation_plan": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "local": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                        "deployment": { "type": "string", "minLength": 1, "maxLength": 2000 }
+                    },
+                    "anyOf": [ { "required": ["local"] }, { "required": ["deployment"] } ]
+                },
+                "reason": { "type": "string", "minLength": 1, "maxLength": 2000 }
+            },
+            "allOf": [
+                {
+                    "if": { "properties": { "verdict": { "const": "confirmed" } }, "required": ["verdict"] },
+                    "then": { "required": ["severity", "confidence"] }
+                },
+                {
+                    "if": { "properties": { "verdict": { "const": "needs_validation" } }, "required": ["verdict"] },
+                    "then": { "required": ["claimed_root_cause", "blockers", "validation_plan"], "not": { "required": ["severity"] } }
+                },
+                {
+                    "if": { "properties": { "verdict": { "const": "rejected" } }, "required": ["verdict"] },
+                    "then": { "required": ["reason"], "not": { "required": ["severity"] } }
+                }
+            ]
+        },
+        "findingLocation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file"],
+            "properties": {
+                "file": { "type": "string", "minLength": 1, "maxLength": 500 },
+                "line": { "type": "integer", "minimum": 1 },
+                "symbol": { "type": "string", "minLength": 1, "maxLength": 200 }
+            }
+        },
+        "findingEvidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "summary"],
+            "properties": {
+                "kind": { "type": "string", "enum": ["source", "command", "response", "screenshot", "log", "test"] },
+                "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+                "location": { "$ref": "#/$defs/findingLocation" },
+                "command": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                "output": { "type": "string", "minLength": 1, "maxLength": 4000 }
+            }
+        },
+        "findingLevel": {
+            "type": "string",
+            "enum": ["informational", "low", "medium", "high", "critical"]
+        },
+        "reviewFinding": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["finding_id", "file", "text", "state"],
+            "properties": {
+                "finding_id": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Repository-relative file + whitespace-normalised, lowercased text." },
+                "file": { "type": "string", "minLength": 1, "maxLength": 500 },
+                "line": { "type": ["integer", "null"], "minimum": 1 },
+                "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                "severity": { "type": ["string", "null"], "enum": ["low", "medium", "high", "critical", null] },
+                "state": { "type": "string", "enum": ["ACTIVE", "RESOLVED"] }
+            }
+        },
+        "reviewLifecycle": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["addressed", "reappeared", "still_open", "new"],
+            "properties": {
+                "addressed": { "type": "integer", "minimum": 0 },
+                "reappeared": { "type": "integer", "minimum": 0 },
+                "still_open": { "type": "integer", "minimum": 0 },
+                "new": { "type": "integer", "minimum": 0 }
+            }
         }
     }
 }

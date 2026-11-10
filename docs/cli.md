@@ -52,6 +52,33 @@ openvibe-codes task stop tsk_01J…
 `GET /api/v1/tasks/:id/events` and prints the session's lines, each attempt and why it happened, ending when the
 outcome is decided.
 
+## For an agent: `--for-agent` and `skills get`
+
+A supervising agent should not read the human log. `--for-agent` is the machine face of every command in this
+document that runs or reads a run: one compact JSON object per line, no ANSI and no pretty printing, with fixed
+fields — `run`, `seq`, `event`, `agent`, `session`, `ref`, `ok`, and on a failure `error: {code, retry,
+suggestion}`. Text is bounded to 400 characters; `--json` stays the full event stream for a person debugging.
+
+```bash
+openvibe-codes agents --for-agent                       # one line per harness, with why it cannot run
+openvibe-codes run --for-agent "rename getUser to findUser"
+openvibe-codes runs --for-agent
+openvibe-codes show <run id> --for-agent                # the header, each attempt, the result (not every event)
+openvibe-codes resume <run id> --for-agent "now add the test"
+```
+
+`retry` is true only when repeating the exact command is safe; an agent run is not idempotent, so a failed run is
+continued with `resume`. The closed set of error codes is in the guide the binary ships:
+
+```bash
+openvibe-codes skills list        # the guides inside this binary
+openvibe-codes skills get         # the openvibe-codes guide, Markdown, for the exact version you are running
+openvibe-codes skills path        # where the file is, for a host that loads files itself
+```
+
+The guide is version-matched by construction: it is in the package and its `{{version}}` line is replaced with the
+binary's own version, and a test keeps it and the CLI's flags in step.
+
 ## Exit codes
 
 | code | meaning |
