@@ -24,6 +24,11 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
       --agent <id>                     skip routing: claude-code, claude-other, codex, opencode, command-code,
                                        aider, minimax-code, deepseek, openai-compatible
       --model <name>                   the first agent's model
+      --effort <level>                 reasoning effort for agents that take one (low|medium|high|max);
+                                       the OpenVibe.AI agent passes it to AI's run
+      --advisor                        let the OpenVibe.AI agent ask a stronger model for advice
+                                       mid-run (at most 3 uses; AI puts each use on the run's receipt)
+      --advisor-model <provider/model> the advisor model (default: AI's reviewer role, then its strongest)
       --permission read|edit|full      read: look and answer; edit: change files (default);
                                        full: anything, unattended. OpenCode and Command Code have no
                                        edits-only mode: here they need full (on a paired machine's
@@ -52,6 +57,7 @@ function parse(argv) {
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--json') opts.json = true;
+        else if (a === '--advisor') opts.advisor = true;
         else if (a === '--no-handoff') opts.handoff = false;
         else if (a === '--help' || a === '-h') opts.help = true;
         else if (a.startsWith('--')) { const k = a.slice(2); opts[k] = argv[++i]; }
@@ -156,6 +162,7 @@ async function main() {
         const run = harness.run({
             prompt, task: o.task || (resume ? 'resume' : 'edit'), agent, model: o.model || null, cwd, resume,
             permission: o.permission || 'edit', handoff: o.handoff !== false && !resume, maxAttempts: Number(o.attempts) || 3, signal: controller.signal,
+            effort: o.effort || null, advisor: o.advisor ? (o['advisor-model'] ? { model: o['advisor-model'] } : true) : null,
         });
         if (!o.json) out(dim(`run ${run.runId} · ${cwd}`));
         let last = null;
