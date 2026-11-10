@@ -147,8 +147,8 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch-on{display:inline-flex;align-items:center;gap:4px;font-style:normal;font-weight:600;color:var(--ch-ok)}
 .ch-on::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
 /* The ideas rail, under the composer: it drifts sideways and stops under a pointer, the keyboard or its own pause.
-   Two copies make the loop seamless; the second is hidden from assistive tech and the keyboard. Calm motion (either
-   preference) makes it a still row that scrolls by hand. */
+   Two copies make the loop seamless; the second is hidden from assistive tech and the keyboard. Motion off
+   makes it a still row that scrolls by hand; Calm keeps the drift, slower. */
 .ch-spark{display:flex;align-items:center;gap:4px;max-width:780px;margin:12px auto 0}
 .ch-spark-view{flex:1;min-width:0;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent);mask-image:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent)}
 .ch-spark-track{display:flex;width:max-content;animation:ch-drift var(--ch-drift,80s) linear infinite}
@@ -162,10 +162,8 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch-spark-pause .ch-i{width:15px;height:15px}
 .ch-spark .ch-i-play,.ch-spark.is-paused .ch-i-pause{display:none}
 .ch-spark.is-paused .ch-i-play{display:block}
-@media (prefers-reduced-motion:reduce){.ch-spark-track{animation:none}.ch-spark-view{overflow-x:auto;scrollbar-width:none}.ch-spark-list[aria-hidden]{display:none}.ch-spark-pause{display:none}.ch-dot.is-busy{animation:none}}
-html[data-ov-motion=reduced] .ch-spark-track{animation:none}
-html[data-ov-motion=reduced] .ch-spark-view{overflow-x:auto;scrollbar-width:none}
-html[data-ov-motion=reduced] .ch-spark-list[aria-hidden],html[data-ov-motion=reduced] .ch-spark-pause{display:none}
+html[data-ov-motion=off] .ch-spark-view{overflow-x:auto;scrollbar-width:none}
+html[data-ov-motion=off] .ch-spark-list[aria-hidden],html[data-ov-motion=off] .ch-spark-pause{display:none}
 
 /* The workspace's other pages (Agents, Machines, Usage, Settings…) in the conversation's place: they keep their own
    heading, so the head above them is only the phone's way to the rail. */
@@ -224,7 +222,6 @@ html[data-ov-motion=reduced] .ch-spark-list[aria-hidden],html[data-ov-motion=red
 @media (max-width:520px){.ch-mode{padding:0 8px}.ch-mode:not(:has(input:checked)) .ch-mode-i{display:inline-grid}}
 .ch-hello h1>span{animation:ch-ask-in .28s cubic-bezier(.2,.9,.3,1) both}
 @keyframes ch-ask-in{from{opacity:0;transform:translateY(4px)}}
-@media (prefers-reduced-motion:reduce){.ch-hello h1>span{animation:none}}
 
 /* Motion (ask 40, 11-09, the owner: "more fluid… transitions… custom animations… resize"): one highlight slides between the
    three modes, each mode's own parts rise in as they appear, and the ideas cross-fade when their set changes. Calm keeps
@@ -242,4 +239,3 @@ transition:transform .34s cubic-bezier(.2,.9,.25,1.12),width .34s cubic-bezier(.
 @keyframes ch-fade{from{opacity:0}}
 html[data-ov-motion=reduced] .ch :is(.ch-for-new,.ch-for-openvibe,.ch-for-code){animation-name:ch-fade;animation-duration:.2s}
 html[data-ov-motion=reduced] .ch-modes.has-glide::before{transition-duration:.18s;transition-timing-function:ease}
-@media (prefers-reduced-motion:reduce){.ch :is(.ch-for-new,.ch-for-openvibe,.ch-for-code){animation-name:ch-fade;animation-duration:.15s}.ch-modes.has-glide::before{transition-duration:.12s}}
