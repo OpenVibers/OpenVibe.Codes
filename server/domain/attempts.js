@@ -190,7 +190,7 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
     }
 
     /** An attempt ended: its state, why, what it cost. */
-    async function end(id, { state = 'failed', reason = null, why = null, cost_usd = null, tokens = null, steps = null, session = null, model = null, machine = null, budget_hit = null, finished_at = null } = {}) {
+    async function end(id, { state = 'failed', reason = null, why = null, cost_usd = null, tokens = null, steps = null, turns = null, session = null, model = null, machine = null, budget_hit = null, finished_at = null } = {}) {
         return await db.one(
             `UPDATE codes_attempts SET state = $2,
                 reason = COALESCE($3, reason),
@@ -202,9 +202,10 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
                 model = COALESCE($9, model),
                 machine = COALESCE($10, machine),
                 budget_hit = COALESCE($11, budget_hit),
+                turns = COALESCE($13, turns),
                 finished_at = COALESCE($12::timestamptz, finished_at)
              WHERE id = $1 RETURNING *`,
-            [id, state, reason, why, cost_usd == null ? null : String(cost_usd), tokens, steps, session, model, machine, budget_hit, finished_at || store.iso()],
+            [id, state, reason, why, cost_usd == null ? null : String(cost_usd), tokens, steps, session, model, machine, budget_hit, finished_at || store.iso(), turns],
         );
     }
 
@@ -303,8 +304,8 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
         return null;
     }
 
-    /** One attempt as the engine sees it. */
-    function engineAttempt(a, all, facts = null) {
+    /** One attempt as the engine sees it. A task's goal travels on the attempt whose turn just ended. */
+    function engineAttempt(a, all, facts = null, goal = null) {
         const n = Number(a.n) || 1;
         const reason = a.reason && REASONS.includes(a.reason) ? a.reason : null;
         const next = all.find((x) => x.follow_up_of && x.follow_up_of === a.id);
@@ -327,6 +328,8 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
             prev: prev ? prev.id : null,
             parent: a.follow_up_of || null,
             stopped: a.state === 'stopped',
+            ...(goal ? { goal } : {}),
+            ...(Number.isFinite(Number(a.turns)) ? { turns: Number(a.turns) } : {}),
             budget: reason === 'budget' ? { hit: a.budget_hit || 'steps' } : undefined,
             wrapUp: a.kind === 'wrap-up',
             hung: reason === 'hung',
@@ -365,6 +368,18 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
         return `\n\n---\n## Continuation (written by openvibe.codes)\n\nAn earlier attempt${ending.agent ? ` on ${nameOf(ending.agent)}` : ''} ${words}. Keep the work it finished, do not redo it, and continue from where it stopped. If the task is already complete, check it and report that.\n`;
     }
 
+    /**
+     * The note a rejected goal's own session gets: the verifier's reason and the check's own output, so the worker
+     * repairs the actual failure rather than being told "not done" again.
+     */
+    function goalContinuationNote(verdict) {
+        const output = verdict && verdict.check_output ? String(verdict.check_output) : '';
+        return `\n\n---\n## The goal check did not pass (written by openvibe.codes)\n\n`
+            + `The independent verifier rejected the completion proposal: ${String((verdict && verdict.reason) || 'no reason was given').slice(0, 4000)}\n`
+            + (output ? `\nThe check's own output:\n\n\`\`\`\n${output.slice(-8000)}\n\`\`\`\n` : '')
+            + '\nKeep the work, do not redo it. Make the check pass, then propose completion again in this same conversation.\n';
+    }
+
     /** The note a new agent gets: what changed, what it said, where it stopped. */
     function handoverNote(ending, result, words) {
         const d = result && typeof result === 'object' ? result : {};
@@ -375,6 +390,18 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
             + `- said: ${summary || 'nothing'}\n`
             + `- stopped at: ${words}\n\n`
             + 'Keep the work it did, do not redo it, and finish the task.\n';
+    }
+
+    /** The task's goal, as the goal contract shaped it, when it belongs to this ending and has a verdict. */
+    function a_id_goal(task, ending) {
+        let goal = task && task.goal;
+        if (typeof goal === 'string') { try { goal = JSON.parse(goal); } catch { goal = null; } }
+        if (!goal || typeof goal !== 'object' || Array.isArray(goal)) return null;
+        let verdict = goal.verdict;
+        if (typeof verdict === 'string') { try { verdict = JSON.parse(verdict); } catch { verdict = null; } }
+        if (verdict && (typeof verdict !== 'object' || Array.isArray(verdict))) verdict = null;
+        if (verdict && verdict.attempt_id && ending && verdict.attempt_id !== ending.id) return null;
+        return goal;
     }
 
     /**
@@ -391,7 +418,10 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
         const ctx = routing(fleet);
         const upto = (attempts || []).filter((a) => Number(a.n) <= Number(ending.n));
         const facts = factsOf(result);
-        const engineAttempts = upto.map((a) => engineAttempt(a, upto, a.id === ending.id ? facts : null));
+        // The goal (AL1) belongs to the attempt that just ended: the engine reads its verdict, and only its verdict,
+        // before it may call a done attempt done. A verdict left by an earlier attempt never decides this one.
+        const endingGoal = a_id_goal(task, ending);
+        const engineAttempts = upto.map((a) => engineAttempt(a, upto, a.id === ending.id ? facts : null, a.id === ending.id ? endingGoal : null));
         const out = chain.outcome(engineAttempts, ctx);
         const step = out.step || { action: 'none' };
         const reason = ending.reason || out.reason || 'error';
@@ -419,6 +449,14 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
         if (step.action === 'continue') {
             if (continues >= maxContinues) {
                 return { outcome: 'unfinished', note: `the task was carried on ${continues} times already; it needs a person` };
+            }
+            const rejected = endingGoal && endingGoal.verdict && endingGoal.verdict.status === 'rejected' ? endingGoal.verdict : null;
+            if (rejected) {
+                return {
+                    kind: 'continue', agent: ending.agent, model: ending.model, session: step.session || ending.session || null,
+                    prompt: String(task.prompt || '') + goalContinuationNote(rejected),
+                    why: `the verifier rejected the completion proposal: ${rejected.reason}`,
+                };
             }
             return {
                 kind: 'continue', agent: ending.agent, model: ending.model, session: step.session || ending.session || null,

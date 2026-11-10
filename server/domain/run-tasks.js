@@ -138,16 +138,21 @@ function usageOf(result) {
             else if (!model && line.model) model = String(line.model);
         } else if (line.t === 'done' && line.resolved_model) model = String(line.resolved_model);
     }
+    const turns = Number.isFinite(Number(d.turns)) ? Number(d.turns) : (() => {
+        const done = log.filter((l) => l && l.t === 'done' && Number.isFinite(Number(l.turns))).slice(-1)[0];
+        return done ? Number(done.turns) : null;
+    })();
     return {
         cost_usd: typeof d.cost_usd === 'number' && Number.isFinite(d.cost_usd) ? d.cost_usd : null,
         tokens: tokens || null,
         steps: steps || null,
+        turns: turns || null,
         session: session || null,
         model: model || null,
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null, goalVerifier = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -158,6 +163,16 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     // The session report of a finished task (Agent Streams S3): Codes writes it to OpenVibe.Report when the task ends.
     const reportClient = report || require('../report').createReportClient({ config, log });
     const attemptStore = attempts || require('./attempts').createAttempts({ store, config, log });
+    // AL1's independent verifier: created lazily, only when goals are on and an ending actually needs it.
+    let goalVerifierClient = goalVerifier;
+    const verifierClient = () => {
+        if (!goalVerifierClient && config.goals && config.goals.enabled) {
+            try { goalVerifierClient = require('./goal-verifier').createGoalVerifier({ config, log }); } catch (e) { log.warn(`[Codes] goal verifier unavailable: ${e.message}`); }
+        }
+        return goalVerifierClient;
+    };
+    // One verification per ending, even when two events deliver the same ending.
+    const verifying = new Set();
     /**
      * The conductor's turns (server/domain/conductor.js). Wired by the app after both exist, because the conductor
      * starts Run jobs and this module is what applies their events: a constructor argument would be a cycle.
@@ -492,7 +507,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                         await attemptStore.end(attempt.id, {
                             state: hit ? 'budget-stopped' : (ATTEMPT_STATE[state] || 'failed'),
                             reason: hit ? 'budget' : why,
-                            cost_usd: usage.cost_usd, tokens: usage.tokens, steps: usage.steps, session: usage.session,
+                            cost_usd: usage.cost_usd, tokens: usage.tokens, steps: usage.steps, turns: usage.turns, session: usage.session,
                             model: usage.model, machine: machineOf(next.job),
                             budget_hit: hit,
                             finished_at: updated.finished_at || store.iso(),
@@ -658,7 +673,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             const why = e instanceof RunError ? `${e.code}: ${e.message}` : e.message;
             await attemptStore.end(first.attempt.id, { state: 'failed', reason: refusal ? 'refused' : 'error', finished_at: store.iso() });
             const failed = await store.tx(async () => {
-                const row = await db.one(`UPDATE run_tasks SET state = 'failed', error = $2, outcome = 'unfinished', outcome_note = $3, finished_at = $4::timestamptz, updated_at = $5
+                const row = await db.one(`UPDATE run_tasks SET state = 'failed', error = $2, outcome = 'unfinished', outcome_note = $3, end_state = CASE WHEN goal IS NOT NULL THEN 'failed' ELSE end_state END, finished_at = $4::timestamptz, updated_at = $5
                     WHERE id = $1 RETURNING *`, [id, why, `the task could not start: ${why}`, store.iso(), store.now()]);
                 await taskOutbox.emitTask(row, 'queued');
                 if (benchAttemptEnded && actorRef && asObject(actorRef).bench) {
@@ -747,6 +762,88 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     }
 
     /**
+     * What the goal's budgets say the task has spent (AL1): tokens, model turns and active minutes, summed over every
+     * attempt so far. Null while there is room left; the sentence a person reads when there is not.
+     */
+    function goalBudgetHit(attempts, goal, task) {
+        const budget = goal && goal.budget && typeof goal.budget === 'object' && !Array.isArray(goal.budget) ? goal.budget : {};
+        if (!Object.keys(budget).length) return null;
+        const tokens = (attempts || []).reduce((n, a) => n + (Number(a.tokens) || 0), 0);
+        if (budget.tokens && tokens >= Number(budget.tokens)) return `the task spent ${tokens} of its ${budget.tokens} tokens`;
+        const turns = (attempts || []).reduce((n, a) => n + (Number(a.turns) || 0), 0) || (attempts || []).length;
+        if (budget.turns && turns >= Number(budget.turns)) return `the task used ${turns} of its ${budget.turns} turns`;
+        let minutes = 0;
+        for (const a of attempts || []) {
+            // The clock starts when the attempt did: a row with no start time is not an hour of work, and an old
+            // wall-clock stamp is not this task's activity.
+            const started = a.started_at ? Date.parse(String(a.started_at)) : (a.created_at ? Date.parse(String(a.created_at)) : 0);
+            const finished = a.finished_at ? Date.parse(String(a.finished_at)) : 0;
+            if (started && finished > started) minutes += (finished - started) / 60000;
+        }
+        if (!minutes && task && task.started_at) minutes = Math.max(0, (store.now() - Date.parse(String(task.started_at))) / 60000);
+        if (budget.active_minutes && minutes >= Number(budget.active_minutes)) return `the task was active ${Math.round(minutes)} of its ${budget.active_minutes} minutes`;
+        return null;
+    }
+
+    /** The task ends with an honest end state (AL1): ready, waiting, blocked, failed, dropped or stopped by budget. */
+    async function finishGoal(row, { outcome, note, end_state }) {
+        const saved = await db.one(`UPDATE run_tasks SET outcome = $2, outcome_note = $3, end_state = $4, updated_at = $5
+            WHERE id = $1 RETURNING *`, [row.id, outcome, note, end_state, store.now()]);
+        await notifyOutcome(saved);
+        await recordPlacementOutcome(saved);
+        return saved;
+    }
+
+    /**
+     * The independent verification of one ending (AL1). The harness ran the typed check in the task's workspace; this
+     * sends its bounded output to a cheap model through OpenVibe.AI and keeps the reasoned verdict with the task.
+     * One verdict per ending: a redelivered ending returns the verdict already written.
+     */
+    async function verifyGoalEnding(row, ending, goal) {
+        const prior = asObject(goal.verdict);
+        if (prior && prior.attempt_id === ending.id) return { verdict: prior, goal, row };
+        const key = `${row.id}:${ending.id}`;
+        if (verifying.has(key)) return { verdict: prior, goal, row, skipped: true };
+        verifying.add(key);
+        try {
+            const result = asObject(row.result) || {};
+            const fromJob = asObject(result.goal) || {};
+            const checkOutput = String(fromJob.check_output || '').slice(0, 262144);
+            const proposal = String(fromJob.proposal || result.summary || '').slice(0, 4000);
+            const evidence = String(fromJob.evidence || '').slice(0, 262144);
+            let verdict;
+            if (!Object.keys(fromJob).length) {
+                verdict = { status: 'failed', reason: 'The harness did not run the goal check, so there is no evidence to verify.' };
+            } else if (fromJob.error) {
+                verdict = { status: 'failed', reason: `The goal check could not run: ${String(fromJob.error).slice(0, 500)}` };
+            } else {
+                const verifier = verifierClient();
+                verdict = verifier
+                    ? await verifier.verify({ goal: goal.goal, check: goal.check, proposal, evidence, checkOutput })
+                    : { status: 'failed', reason: 'No independent verifier is configured, so the task needs a person.' };
+            }
+            verdict = { ...verdict, attempt_id: ending.id, at: store.iso() };
+            // The no-progress limit: the same check output and reason twice in a row means the worker did not move.
+            const signature = `${verdict.status}
+${verdict.reason}
+${String(verdict.check_output || '').slice(0, 50000)}`;
+            const no_progress = verdict.status === 'rejected' && goal.last_rejection === signature ? (Number(goal.no_progress) || 0) + 1 : verdict.status === 'rejected' ? 1 : 0;
+            const merged = {
+                ...goal, proposal, check_output: checkOutput, verdict,
+                ...(verdict.status === 'rejected' ? { last_rejection: signature, no_progress } : {}),
+            };
+            const saved = await db.one('UPDATE run_tasks SET goal = $2::jsonb, goal_verdict = $3::jsonb, updated_at = $4 WHERE id = $1 RETURNING *',
+                [row.id, JSON.stringify(merged), JSON.stringify(verdict), store.now()]);
+            const limit = Math.max(1, Number(goal.no_progress_limit) || 3);
+            return {
+                verdict, goal: merged, row: saved, no_progress,
+                blocked: verdict.status === 'rejected' && no_progress >= limit,
+                budgetHit: verdict.status === 'rejected' ? goalBudgetHit(await attemptStore.list(row.id), merged, saved) : null,
+            };
+        } finally { verifying.delete(key); }
+    }
+
+    /**
      * An attempt ended: the engine decides what happens next (server/domain/attempts.js) and this carries the
      * decision out — a follow-up attempt, or the task's outcome in plain words.
      *
@@ -755,7 +852,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
      * carried one job on twice).
      */
     async function afterEnd(taskId) {
-        const row = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [taskId]);
+        let row = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [taskId]);
         if (!row) return null;
         if (!TERMINAL.has(row.state)) return row;
         if (row.outcome === 'stopped') return row;      // a person stopped it: nothing carries it on
@@ -778,6 +875,23 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const attempts = await attemptStore.list(row.id);
         const ending = attempts[attempts.length - 1];
         if (!ending || !ENDED.has(ending.state)) return row;
+        // AL1: a goal task's "done" is a completion proposal. The check already ran in the task's workspace; an
+        // independent verifier now accepts or rejects it, and the task cannot be ready without an acceptance.
+        const goal = asObject(row.goal);
+        if (goal && config.goals && config.goals.enabled && ending.state === 'done') {
+            const checked = await verifyGoalEnding(row, ending, goal);
+            if (checked.skipped) return row;
+            row = checked.row;
+            if (checked.verdict.status === 'failed') {
+                return await finishGoal(row, { outcome: 'unfinished', note: `waiting: ${checked.verdict.reason}`, end_state: 'waiting' });
+            }
+            if (checked.blocked) {
+                return await finishGoal(row, { outcome: 'unfinished', note: `blocked: the verifier rejected the completion ${checked.no_progress} times without progress: ${checked.verdict.reason}`, end_state: 'blocked' });
+            }
+            if (checked.budgetHit) {
+                return await finishGoal(row, { outcome: 'unfinished', note: `stopped by budget: ${checked.budgetHit}`, end_state: 'stopped_by_budget' });
+            }
+        }
         // Know K5: what this attempt taught (its Learned: lines, a failure, the command that failed, the commands the
         // repository uses) is stored before the next attempt is planned, so the next run can recall it. The capture is
         // idempotent per (subject, kind, text), so a redelivered ending adds no second row.
@@ -790,10 +904,23 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const collected = await recordProof(row, ending);
         const plan = await attemptStore.decide({ task: row, attempts, ending, result: row.result, fleet: await fleetFor(row.subject) });
         if (plan.outcome) {
-            // The outcome in plain words: what the engine decided, and what the proof says about it.
-            const outcome = taskProof.outcomeOf(collected, { state: plan.outcome, note: plan.note });
-            const saved = await db.one('UPDATE run_tasks SET outcome = $2, outcome_note = $3, updated_at = $4 WHERE id = $1 RETURNING *',
-                [row.id, outcome.state, outcome.note, store.now()]);
+            // The outcome in plain words: what the engine decided, and what the proof says about it. A goal task also
+            // carries its honest end state: ready only with an accepted verdict, stopped by budget when the budget ran out.
+            let outcome = taskProof.outcomeOf(collected, { state: plan.outcome, note: plan.note });
+            const savedGoal = asObject(row.goal);
+            const goalVerdict = goal && savedGoal ? asObject(savedGoal.verdict) : null;
+            // An accepted goal is done even when another proof item (a review, a screenshot) failed: the goal's own
+            // independent verdict is the outcome, and the failed item is said in the proof below it.
+            if (goal && plan.outcome === 'done' && goalVerdict && goalVerdict.status === 'accepted') outcome = { state: 'done', note: 'the task finished' };
+            const budgetEnd = ending.reason === 'budget' || /budget/i.test(String(outcome.note || ''));
+            const endState = goal
+                ? (plan.outcome === 'done' && goalVerdict && goalVerdict.status === 'accepted' ? 'ready'
+                    : budgetEnd ? 'stopped_by_budget'
+                        : plan.outcome === 'stopped' ? 'dropped'
+                            : plan.outcome === 'unfinished' ? 'waiting' : 'failed')
+                : null;
+            const saved = await db.one('UPDATE run_tasks SET outcome = $2, outcome_note = $3, end_state = $4, updated_at = $5 WHERE id = $1 RETURNING *',
+                [row.id, outcome.state, outcome.note, endState, store.now()]);
             await notifyOutcome(saved);
             await recordPlacementOutcome(saved);
             // Agent Streams S3: the finished task's report, from its proof. A report that cannot be written never
@@ -804,6 +931,11 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             return saved;
         }
         if (!plan.kind) return row;
+        // The goal's budgets are checked before the next turn starts: a spent budget ends the task here, with its reason.
+        if (goal) {
+            const hit = goalBudgetHit(attempts, asObject(row.goal) || goal, row);
+            if (hit) return await finishGoal(row, { outcome: 'unfinished', note: `stopped by budget: ${hit}`, end_state: 'stopped_by_budget' });
+        }
         const done = await startFollowUp(row, plan, ending);
         return done.row || row;
     }
@@ -853,7 +985,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     async function startFollowUp(row, plan, ending) {
         const left = await remainingBudget(row.id);
         if (left.exhausted) {
-            const stopped = await db.one(`UPDATE run_tasks SET outcome = 'unfinished', outcome_note = $2, updated_at = $3 WHERE id = $1 RETURNING *`,
+            const stopped = await db.one(`UPDATE run_tasks SET outcome = 'unfinished', outcome_note = $2,
+                end_state = CASE WHEN goal IS NOT NULL THEN 'stopped_by_budget' ELSE end_state END,
+                updated_at = $3 WHERE id = $1 RETURNING *`,
                 [row.id, budgetLeftNote(left), store.now()]);
             await recordPlacementOutcome(stopped);
             return { attempt: null, created: false, row: stopped, error: 'the task has no budget left' };
@@ -894,7 +1028,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         await attemptStore.bind(attempt.id, { job_id: job.id, state: 'queued' });
         const updated = await db.one(
             `UPDATE run_tasks SET job_id = $2, state = 'queued', outcome = NULL, outcome_note = NULL, error = NULL,
-                finished_at = NULL, updated_at = $3 WHERE id = $1 RETURNING *`,
+                end_state = NULL, finished_at = NULL, updated_at = $3 WHERE id = $1 RETURNING *`,
             [row.id, job.id, store.now()]);
         await taskOutbox.emitTask(updated, row.state);
         return { attempt, created: true, job, row: updated };
@@ -945,7 +1079,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         // of it, the attempt does not start and the task ends at its budget.
         const left = await remainingBudget(row.id);
         if (left.exhausted) {
-            const stopped = await db.one(`UPDATE run_tasks SET outcome = 'unfinished', outcome_note = $2, updated_at = $3 WHERE id = $1 RETURNING *`,
+            const stopped = await db.one(`UPDATE run_tasks SET outcome = 'unfinished', outcome_note = $2,
+                end_state = CASE WHEN goal IS NOT NULL THEN 'stopped_by_budget' ELSE end_state END,
+                updated_at = $3 WHERE id = $1 RETURNING *`,
                 [row.id, budgetLeftNote(left), store.now()]);
             await recordPlacementOutcome(stopped);
             return { error: 'the task has no budget left', row: stopped };
@@ -960,7 +1096,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             });
             attempt = made.attempt;
             if (claims.length) await filesStore.link(row.subject, claims, { taskId: row.id, attemptN: Number(attempt.n), messageId: turnId });
-            await db.one(`UPDATE run_tasks SET state = 'queued', outcome = NULL, outcome_note = NULL, error = NULL, job_id = NULL, finished_at = NULL, updated_at = $2 WHERE id = $1 RETURNING *`,
+            await db.one(`UPDATE run_tasks SET state = 'queued', outcome = NULL, outcome_note = NULL, error = NULL, end_state = NULL, job_id = NULL, finished_at = NULL, updated_at = $2 WHERE id = $1 RETURNING *`,
                 [row.id, store.now()]);
             return { row: current };
         });
@@ -1026,6 +1162,8 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             ...(row.push ? { push: { pull_request: !!row.pull_request } } : {}),
             ...(plan.session ? { resume: plan.session } : {}),
             ...(plan.attachments && plan.attachments.length ? { attachments: plan.attachments } : {}),
+            // AL1: every turn of a goal task runs the same check in the workspace it worked in.
+            ...(asObject(row.goal) ? { goal: asObject(row.goal) } : {}),
         }));
     }
 
@@ -1046,6 +1184,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             if (TERMINAL.has(current.state) && current.outcome) return { error: 'the task has already ended', row: current };
             const updated = await db.one(
                 `UPDATE run_tasks SET state = 'cancelled', outcome = 'stopped', outcome_note = $2,
+                    end_state = CASE WHEN goal IS NOT NULL THEN 'dropped' ELSE end_state END,
                     finished_at = COALESCE(finished_at, $3::timestamptz), updated_at = $4 WHERE id = $1 RETURNING *`,
                 [row.id, 'the task was stopped on purpose', store.iso(), store.now()]);
             await taskOutbox.emitTask(updated, current.state);
@@ -1063,11 +1202,13 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
 
     function present(row) {
         const result = TERMINAL.has(row.state) ? presentResult(asObject(row.result)) : undefined;
+        const goal = asObject(row.goal);
+        const verdict = asObject(row.goal_verdict) || (goal ? asObject(goal.verdict) : null);
         return drop({
             id: row.id, state: STATES.has(row.state) ? row.state : 'failed', repo: String(row.repo).slice(0, 300), ref: row.ref || null,
             agent: row.agent || null, url: `${config.baseUrl}/run/tasks/${row.id}`, created_at: iso(row.created_at), updated_at: iso(row.updated_at),
             error: row.error ? String(row.error).slice(0, 1000) : null, result,
-            ...(row.goal ? { goal: asObject(row.goal), goal_verdict: asObject(row.goal_verdict) || null } : {}),
+            ...(goal ? { goal: { ...goal, ...(verdict ? { verdict } : {}) } } : {}),
         });
     }
 

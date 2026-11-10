@@ -14,6 +14,9 @@ const goal = require('../engine/goal');
         assert.match(seen, /person’s own recorded input/);
         const invalid = await goal.verify({ goal: 'approved', check: {}, callVerifier: async () => 'maybe' });
         assert.equal(invalid.status, 'rejected');
+        // A verifier that did not run is neither an acceptance nor the worker's failure: the task waits on a person.
+        const failed = await goal.verify({ goal: 'file exists', check: { kind: 'command', value: 'test -f x' }, callVerifier: async () => { throw new Error('AI is down'); } });
+        assert.equal(failed.status, 'failed');
     });
     done();
 })();

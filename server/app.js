@@ -137,7 +137,7 @@ async function createApp(opts = {}) {
     const sharing = opts.sharing || createSharing({ db: store.db, config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The skills hub (Compute plan §5, E6): versioned skills, rules and MCP servers, shared through the same SDK.
     const skills = opts.skills || createSkills({ store, sharing, log });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, attachments, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, attachments, goalVerifier: opts.goalVerifier || null, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
     const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, attachments, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });

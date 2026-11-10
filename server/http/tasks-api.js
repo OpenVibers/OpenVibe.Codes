@@ -145,7 +145,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         return {
             ...taskStore.present(row),
             attempts: attempts.map((a) => taskStore.attempts.present(a)),
-            outcome: { state: row.outcome || null, note: row.outcome_note || null },
+            outcome: { state: row.end_state || row.outcome || null, note: row.outcome_note || null },
         };
     };
 
@@ -325,7 +325,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         if (state === 'needs') where.sql += " AND outcome = 'unfinished'";
         if (state === 'done') where.sql += " AND state IN ('succeeded', 'failed', 'cancelled', 'expired') AND outcome IS DISTINCT FROM 'unfinished'";
         const rows = await db.many(`SELECT * FROM run_tasks WHERE ${where.sql} ORDER BY created_at DESC LIMIT $${where.args.length + 1}`, [...where.args, limit]);
-        return res.json({ tasks: rows.map((row) => ({ ...taskStore.present(row), outcome: { state: row.outcome || null, note: row.outcome_note || null } })) });
+        return res.json({ tasks: rows.map((row) => ({ ...taskStore.present(row), outcome: { state: row.end_state || row.outcome || null, note: row.outcome_note || null } })) });
     });
 
     r.get('/tasks/:id', guardAny('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
