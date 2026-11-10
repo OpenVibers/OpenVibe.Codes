@@ -127,6 +127,12 @@ function load(env = process.env) {
             deadAfterRefusals: Math.max(1, int(env.CODES_EVENTS_DEAD_AFTER_REFUSALS, 3)),
             deadAfterAttempts: Math.max(1, int(env.CODES_EVENTS_DEAD_AFTER_ATTEMPTS, 20)),
         },
+        // A ticket follows its pull request (AL5): a red check, a conflict or a review comment wakes the bound
+        // ticket's worker with a follow-up Run job, at most 3 automatic fixes per PR. Default off: set
+        // CODES_PR_FOLLOW_ENABLED=1 to let Codes start follow-ups on github.* deliveries.
+        prFollow: {
+            enabled: env.CODES_PR_FOLLOW_ENABLED === '1',
+        },
         // Session lines in PostgreSQL: no total cap; finished tasks keep theirs for this many days (default 90).
         sessions: {
             retentionDays: Math.max(1, int(env.CODES_SESSION_RETENTION_DAYS, 90)),
