@@ -146,6 +146,8 @@ async function runAttempt(opts = {}) {
         sessionId: state.sessionId,
         model: st.model || opts.model || null,
         summary: ((st.events || []).find((e) => e.t === 'final') || {}).text || '',
+        // Preserve the exact, inspectable prompt composition with the run result for later review.
+        promptLayers: prompt.parts,
         usage: state.usage,
         cost: state.cost,
         steps: state.steps,
