@@ -296,7 +296,8 @@ async function collectProof({ cwd, files = [], adapters = {}, author = null, emi
                 await say({
                     kind: 'review', label: 'review', ok: verdict.verdict === 'approved', skipped: false,
                     family: verdict.family, model: verdict.model,
-                    summary: verdict.summary || (verdict.verdict === 'approved' ? 'approved' : 'changes requested'),
+                    summary: [verdict.summary || (verdict.verdict === 'approved' ? 'approved' : 'changes requested'), verdict.lifecycle_line]
+                        .filter(Boolean).join(' · '),
                 });
             }
         }

@@ -46,6 +46,19 @@
             "type": "array",
             "description": "The structured findings of the task's review, in the agent.finding@1 shape (OpenVibe.Contracts): a confirmed finding carries severity and confidence; a needs_validation lead carries a claimed cause, exact blockers and a validation plan and no severity; a rejected claim carries its reason. Empty or absent when no review produced a record.",
             "items": { "$ref": "#/$defs/finding" }
+        },
+        "review": {
+            "type": "object",
+            "description": "The persisted review ledger: its findings across revisions with a stable finding_id and an ACTIVE/RESOLVED state, the reconciliation counts, and the addressed/reappeared/still open/new line. A review that did not run is `unreviewed` with no findings, never a zero-finding approval.",
+            "additionalProperties": false,
+            "required": ["verdict", "findings", "lifecycle"],
+            "properties": {
+                "verdict": { "type": "string", "enum": ["approved", "changes_requested", "unreviewed"] },
+                "summary": { "type": "string", "maxLength": 4000 },
+                "findings": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/reviewFinding" } },
+                "lifecycle": { "$ref": "#/$defs/reviewLifecycle" },
+                "lifecycle_line": { "type": ["string", "null"] }
+            }
         }
     },
     "additionalProperties": true,
@@ -265,6 +278,30 @@
         "findingLevel": {
             "type": "string",
             "enum": ["informational", "low", "medium", "high", "critical"]
+        },
+        "reviewFinding": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["finding_id", "file", "text", "state"],
+            "properties": {
+                "finding_id": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Repository-relative file + whitespace-normalised, lowercased text." },
+                "file": { "type": "string", "minLength": 1, "maxLength": 500 },
+                "line": { "type": ["integer", "null"], "minimum": 1 },
+                "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                "severity": { "type": ["string", "null"], "enum": ["low", "medium", "high", "critical", null] },
+                "state": { "type": "string", "enum": ["ACTIVE", "RESOLVED"] }
+            }
+        },
+        "reviewLifecycle": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["addressed", "reappeared", "still_open", "new"],
+            "properties": {
+                "addressed": { "type": "integer", "minimum": 0 },
+                "reappeared": { "type": "integer", "minimum": 0 },
+                "still_open": { "type": "integer", "minimum": 0 },
+                "new": { "type": "integer", "minimum": 0 }
+            }
         }
     }
 }

@@ -9,7 +9,7 @@
  */
 const assert = require('assert');
 const {
-    familyOf, authorFamily, pickReviewer, reviewPrompt, readVerdict, reviewWithAi,
+    familyOf, authorFamily, pickReviewer, reviewPrompt, readReview, readVerdict, reviewWithAi,
 } = require('../engine/review');
 const { check, done } = require('./helpers/boot');
 
@@ -49,6 +49,41 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
             assert.ok(/approved/.test(prompt) && /changes_requested/.test(prompt), 'the verdict is asked for');
         });
 
+        await check('quiet by default: only this diff, at most three, no style, and a prior ledger on a re-review', () => {
+            const prompt = reviewPrompt({ patch: '+x', summary: 'add x' });
+            assert.match(prompt, /only issues this change introduces/i);
+            assert.match(prompt, /at most 3 findings/i);
+            assert.match(prompt, /No style nits/i);
+            assert.match(prompt, /empty findings list/i);
+            const prior = [{ finding_id: 'a.js:it races', file: 'a.js', line: 1, text: 'it races', state: 'ACTIVE', severity: 'high' }];
+            const again = reviewPrompt({ patch: '+y', prior });
+            assert.match(again, /previous review of an earlier revision/i);
+            assert.match(again, /a\.js:1 — it races \(id a\.js:it races\)/);
+        });
+
+        await check('findings are read from JSON findings and from the legacy numbered bullets', () => {
+            const doc = readReview('{"verdict":"changes_requested","summary":"one bug","findings":[{"file":"a.js","line":2,"text":"it races","severity":"high"}]}');
+            assert.deepEqual([doc.verdict, doc.findings.length, doc.findings[0].file], ['changes_requested', 1, 'a.js']);
+            const prose = readReview('VERDICT: FIX\n1. a.js:2 it races with the writer');
+            assert.equal(prose.findings.length, 1);
+            assert.equal(prose.findings[0].line, 2);
+            assert.deepEqual(readReview('{"verdict":"approved","summary":"ok","findings":[]}').findings, []);
+        });
+
+        await check('a re-review reconciles its findings and keeps a dead reviewer\'s ledger', async () => {
+            const prior = [{ finding_id: 'a.js:it races', file: 'a.js', line: 1, text: 'it races', state: 'ACTIVE', severity: 'high' }];
+            const approved = async () => ({ status: 200, ok: true, json: async () => ({ choices: [{ message: { content: '{"verdict":"approved","summary":"fixed","findings":[]}' } }] }) });
+            const fixed = await reviewWithAi({ token: 't', model: 'deepseek-chat', patch: '+x', prior, fetchImpl: approved });
+            assert.deepEqual(fixed.lifecycle, { addressed: 1, reappeared: 0, still_open: 0, new: 0 });
+            assert.strictEqual(fixed.lifecycle_line, 'Findings: 1 addressed, 0 reappeared, 0 still open, 0 new');
+            assert.strictEqual(fixed.findings[0].state, 'RESOLVED');
+            // A reviewer that says nothing reviewed nothing: the prior ledger stays ACTIVE, not silently addressed.
+            const silent = async () => ({ status: 200, ok: true, json: async () => ({ choices: [{ message: { content: '' } }] }) });
+            const kept = await reviewWithAi({ token: 't', model: 'deepseek-chat', patch: '+x', prior, fetchImpl: silent });
+            assert.strictEqual(kept.lifecycle, null);
+            assert.strictEqual(kept.findings[0].state, 'ACTIVE');
+        });
+
         await check('the review is one chat completion, with the token, read as a verdict', async () => {
             const calls = [];
             const fetchImpl = async (url, options) => { calls.push({ url, options }); return OK(); };
@@ -62,6 +97,7 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
             assert.strictEqual(JSON.parse(calls[0].options.body).model, 'deepseek-chat');
             assert.strictEqual(verdict.verdict, 'approved');
             assert.strictEqual(verdict.family, 'deepseek');
+            assert.deepEqual(verdict.findings, [], 'an approval is an empty findings list, not a "no issues" note');
         });
 
         await check('the review records the resolved model and cost from the API\'s disclosure', async () => {

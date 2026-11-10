@@ -819,7 +819,7 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                     author: { agent: job.agent, model: job.model },
                     emit: (item) => say({ t: 'proof', kind: item.kind, label: item.label, ok: item.ok, skipped: !!item.skipped, summary: item.summary, family: item.family || null, model: item.model || null }),
                 });
-                result.proof = { items: collected.items.map((i) => ({ kind: i.kind, label: i.label, ok: i.ok, skipped: !!i.skipped, summary: i.summary, family: i.family || null, model: i.model || null, requested_model: i.requested_model || null, detail: i.shots ? { shots: i.shots.map((s) => shotWithBytes(s, pictures)) } : (i.kind === 'diff' ? { files: i.files, stats: i.stats } : null) })), outcome: collected.outcome };
+                result.proof = { items: collected.items.map((i) => ({ kind: i.kind, label: i.label, ok: i.ok, skipped: !!i.skipped, summary: i.summary, family: i.family || null, model: i.model || null, requested_model: i.requested_model || null, detail: i.shots ? { shots: i.shots.map((s) => shotWithBytes(s, pictures)) } : (i.kind === 'diff' ? { files: i.files, stats: i.stats } : null) })), outcome: collected.outcome, review: collected.review || null };
             } catch (e) {
                 say({ t: 'note', level: 'warning', text: `The proof could not be collected: ${scrub(e.message)}` });
                 result.proof = { items: [], outcome: null };
