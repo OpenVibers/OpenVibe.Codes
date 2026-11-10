@@ -238,7 +238,8 @@ function parseArgs(raw, env = process.env) {
     const push = a.push && typeof a.push === 'object' ? {
         branch: a.push.branch == null ? null : String(a.push.branch),
         pull_request: a.push.pull_request === true,
-        update: a.push.update === true,
+        // A follow-up (AL5) only: present exactly when true, so every other job's args keep their shape.
+        ...(a.push.update === true ? { update: true } : {}),
     } : null;
     if (push && push.branch && (!BRANCH.test(push.branch) || push.branch.startsWith('-'))) throw new Error('push.branch must be a branch name');
     if (push && push.branch && PROTECTED.test(push.branch)) throw new Error(`push.branch must be a new branch of the task's own, never ${push.branch}`);
