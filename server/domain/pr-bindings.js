@@ -173,7 +173,10 @@ function createPrBindings({ store, tasks, outbox = null, config = {}, log = cons
         const repo = m[1];
         const number = Number(m[2]);
         const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
-        if (slug(payload.repo) !== repo || num(payload.pr_number) !== number) return { outcome: 'ignored:payload', task_ids: [], followed_up: [] };
+        // The subject is the routing key (a check fans out one envelope per PR, so its payload names no number);
+        // a payload that names another repo or PR is not ours.
+        if (payload.repo !== undefined && slug(payload.repo) !== repo) return { outcome: 'ignored:payload', task_ids: [], followed_up: [] };
+        if (payload.pr_number !== undefined && num(payload.pr_number) !== number) return { outcome: 'ignored:payload', task_ids: [], followed_up: [] };
         const rows = await forPr(repo, number);
         if (!rows.length) return { outcome: 'ignored:no_binding', task_ids: [], followed_up: [] };
         const active = rows.filter((b) => b.state === 'active');

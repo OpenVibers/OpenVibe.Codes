@@ -35,7 +35,9 @@ const ghEvent = (eventType, subjectId, payload) => ({
     subject: { type: 'pr', id: subjectId }, payload,
 });
 const SUBJECT = 'openvibers/openvibe.codes#999';
-const redCheck = () => ghEvent('github.check.completed', SUBJECT, { repo: 'openvibers/openvibe.codes', pr_number: 999, kind: 'check_run', conclusion: 'failure', check_name: 'codes-ci / tests', head_sha: 'abc123', html_url: 'https://github.com/OpenVibers/OpenVibe.Codes/actions/runs/111' });
+// The real ingress fans a check out one envelope per PR: the number lives in the subject, not the payload.
+const redCheck = () => ghEvent('github.check.completed', SUBJECT, { repo: 'openvibers/openvibe.codes', kind: 'check_run', conclusion: 'failure', check_name: 'codes-ci / tests', head_sha: 'abc123', html_url: 'https://github.com/OpenVibers/OpenVibe.Codes/actions/runs/111' });
+const wrongPr = () => ghEvent('github.check.completed', SUBJECT, { repo: 'openvibers/openvibe.codes', pr_number: 1000, kind: 'check_run', conclusion: 'failure', check_name: 'x', head_sha: 'abc123', html_url: 'https://example.com' });
 const greenCheck = () => ghEvent('github.check.completed', SUBJECT, { repo: 'openvibers/openvibe.codes', pr_number: 999, kind: 'check_run', conclusion: 'success', check_name: 'codes-ci / tests', head_sha: 'abc123', html_url: 'https://github.com/OpenVibers/OpenVibe.Codes/actions/runs/112' });
 const conflict = () => ghEvent('github.pr.updated', SUBJECT, { repo: 'openvibers/openvibe.codes', pr_number: 999, action: 'synchronize', merged: false, mergeable_state: 'dirty', head_sha: 'abc123', base: 'main', html_url: PR_URL });
 const personComment = (body) => ghEvent('github.pr.commented', SUBJECT, { repo: 'openvibers/openvibe.codes', pr_number: 999, author: 'owner-person', author_type: 'User', state: 'commented', body, html_url: `${PR_URL}#issuecomment-1` });
@@ -132,10 +134,13 @@ const merged = () => ghEvent('github.pr.updated', SUBJECT, { repo: 'openvibers/o
             assert.strictEqual(submissions.length, before, 'the fourth red must not start a follow-up');
         });
 
-        await check('a green check changes nothing', async () => {
+        await check('a green check changes nothing; a payload naming another PR is not ours', async () => {
             const before = submissions.length;
             const r = await deliver(greenCheck());
             assert.strictEqual(r.json().outcome, 'ignored:green', r.text);
+            assert.strictEqual(submissions.length, before);
+            const w = await deliver(wrongPr());
+            assert.strictEqual(w.json().outcome, 'ignored:payload', w.text);
             assert.strictEqual(submissions.length, before);
         });
 
