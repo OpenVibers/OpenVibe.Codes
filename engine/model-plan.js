@@ -83,6 +83,17 @@ function decision(response) {
     }
 }
 
+function confidenceOf(response) {
+    if (response?.confidence != null && Number.isFinite(Number(response.confidence))) return Number(response.confidence);
+    const text = String(response?.text || '');
+    try {
+        const parsed = JSON.parse(text);
+        if (parsed && Number.isFinite(Number(parsed.confidence))) return Number(parsed.confidence);
+    } catch { /* ordinary role summary */ }
+    const match = /(?:^|\n)confidence:\s*(0(?:\.\d+)?|1(?:\.0+)?)\b/i.exec(text);
+    return match ? Number(match[1]) : null;
+}
+
 /** The stub-friendly role engine. invoke is always the OpenVibe.AI path in the job adapter. */
 async function executePlan(value, { task, invoke, check, diff, onStep = () => {} }) {
     const plan = validatePlan(value);
@@ -130,12 +141,18 @@ async function executePlan(value, { task, invoke, check, diff, onStep = () => {}
     for (let rung = 0; rung < ladder.length; rung++) {
         const builder = role('builder');
         const model = ladder[rung];
-        const built = await call(builder, 'build', `Task: ${task}\n${previousPlan ? `Plan: ${previousPlan}\n` : ''}${rung ? `Escalation reason: ${reasons.at(-1)}\n` : ''}Implement the task and report what changed.`, model);
+        const built = await call(builder, 'build', `Task: ${task}\n${previousPlan ? `Plan: ${previousPlan}\n` : ''}${rung ? `Escalation reason: ${reasons.at(-1)}\n` : ''}Implement the task and report what changed.${plan.mode === 'escalate' ? ' End with a Confidence: 0..1 line.' : ''}`, model);
         answer = String(built.text || '');
         if (!built.ok) {
             reasons.push(built.run.outcome === 'refused' ? 'model refusal' : 'builder failed');
             if (rung + 1 < ladder.length) continue;
             return { ok: false, reason: reasons.at(-1), role_runs: runs, reasons };
+        }
+        const buildConfidence = confidenceOf(built);
+        if (plan.mode === 'escalate' && buildConfidence != null && buildConfidence < 0.5) {
+            reasons.push('low confidence');
+            if (rung + 1 < ladder.length) continue;
+            return { ok: false, reason: 'low confidence', role_runs: runs, reasons };
         }
         const changed = await diff();
         if (!changed) return { ok: false, reason: 'diff could not be read', role_runs: runs, reasons };

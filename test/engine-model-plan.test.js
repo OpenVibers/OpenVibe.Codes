@@ -65,5 +65,12 @@ assert.equal(fallback.fallbacks[0].reason, 'unavailable in AI registry');
     assert.equal(escalated.ok, true);
     assert.equal(escalated.reasons[0], 'model refusal');
     assert.deepEqual(escalated.role_runs.filter((r) => r.phase === 'build').map((r) => r.model), ['openvibe/economy', 'openvibe/auto']);
+    const uncertain = await executePlan({ mode: 'escalate', roles: [{ role: 'builder', model: 'auto', effort: 'low' }], ladder: ['openvibe/economy', 'openvibe/auto'], checks: { tests: true } }, {
+        task: 'fix a test',
+        invoke: async (call) => ({ ok: true, text: call.model === 'openvibe/economy' ? 'fixed\nConfidence: 0.3' : 'fixed\nConfidence: 0.9' }),
+        check: async (kind) => ({ kind, ok: true }), diff: async () => 'patch',
+    });
+    assert.equal(uncertain.ok, true);
+    assert.deepEqual(uncertain.reasons, ['low confidence']);
     console.log('model plans: validation, fallback, single, pair repair, council judge, escalation and repeat checks');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
