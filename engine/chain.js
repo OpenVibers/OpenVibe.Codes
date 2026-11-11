@@ -398,7 +398,7 @@ function detect(attempt = {}) {
  *
  * @param {object[]} attempts the attempts (annotated or not)
  * @param {object} [opts] what the caller knows: { cfg, health, counts, models, runners, tier }
- * @returns {object} { action, why, … } — action is one of wait, done, switch, continue, restart, wrap-up, stop, failed
+ * @returns {object} { action, why, … } — action is one of wait, done, switch, continue, restart, wrap-up, stop, attention, failed
  */
 function nextStep(attempts, opts = {}) {
     const runs = annotate(attempts);
@@ -432,6 +432,18 @@ function settledParent(runs, end) {
 /** The next step, given the chain's end. */
 function step(runs, end, opts = {}) {
     if (!end) return { action: 'none', why: 'there are no attempts' };
+    // An open question waits for the person, never fails the task: the answer resumes the same session, and
+    // authorised independent work may continue meanwhile. It comes first: a worker blocked on a person is waiting.
+    if (end.attention && end.attention.state === 'open') {
+        const session = (end.attention.session && String(end.attention.session)) || facts(end).session || null;
+        return {
+            action: 'attention',
+            ...(end.attention.id ? { attention: end.attention.id } : {}),
+            ...(end.attention.question ? { question: String(end.attention.question).slice(0, 500) } : {}),
+            ...(session ? { session } : {}),
+            why: 'the worker asked a question and waits for the answer; the answer resumes the same session',
+        };
+    }
     if (end.status === 'running' || end.status === 'queued') return { action: 'wait', why: 'the task is still running' };
     // AL1: a worker's "done" is a proposal, not an outcome. Nothing is done until an independent verifier accepted the
     // goal's evidence; a rejection (or a verdict that could not be made) goes back to the same session.
