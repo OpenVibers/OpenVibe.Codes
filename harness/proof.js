@@ -23,7 +23,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { execFile, spawn } = require('child_process');
-const { reviewWithAi, familyOf } = require('../engine/review');
+const { reviewTwoAxes, familyOf } = require('../engine/review');
 
 const MAX_OUTPUT = 8000;
 const MAX_PATCH = 200000;
@@ -274,7 +274,7 @@ function runTokenOf(jobEnv = {}) {
  * OPENAI_API_KEY is not Codes' to spend at OpenVibe.AI. Without a token there is no second opinion, and the adapter
  * says so rather than pretending one happened.
  */
-function reviewAdapter({ env = {}, jobEnv = {}, fetchImpl = globalThis.fetch, baseUrl, models = [] } = {}) {
+function reviewAdapter({ env = {}, jobEnv = {}, fetchImpl = globalThis.fetch, baseUrl, models = [], standards = '' } = {}) {
     return async function review({ patch = '', summary = '', tests = null, model = null, family = null, prior = [] } = {}) {
         // The token the attempt's own harness carries: only the job's own input, under the name C3 gave that harness.
         // The machine's own OPENVIBE_AI_TOKEN names its owner, not this task's person, so it is never spent here.
@@ -290,9 +290,9 @@ function reviewAdapter({ env = {}, jobEnv = {}, fetchImpl = globalThis.fetch, ba
             err.code = 'review.no_model';
             throw err;
         }
-        return await reviewWithAi({
+        return await reviewTwoAxes({
             baseUrl: baseUrl || aiRoot(jobEnv) || env.OPENVIBE_AI_URL || 'https://ai.openvibe.services/v1',
-            token, model: chosen, family: familyOf(chosen), patch, summary, tests, prior, fetchImpl,
+            token, model: chosen, family: familyOf(chosen), patch, summary, tests, prior, standards, fetchImpl,
         });
     };
 }
@@ -320,7 +320,8 @@ function createProofAdapters({ cwd, env = process.env, jobEnv = {}, fetchImpl = 
         run,
         diff: diffAdapter(run),
         screenshot: screenshotAdapter({ run, playwright: pw, chromePath: chrome, outDir: out, env, fetchImpl, startSiteFn }),
-        review: reviewAdapter({ env, jobEnv, fetchImpl, models: named }),
+        review: reviewAdapter({ env, jobEnv, fetchImpl, models: named,
+            standards: fs.existsSync(path.join(cwd, 'AGENTS.md')) ? fs.readFileSync(path.join(cwd, 'AGENTS.md'), 'utf8').slice(0, 8000) : '' }),
         models: named,
         env,
     };

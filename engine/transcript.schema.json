@@ -289,6 +289,7 @@
                 "line": { "type": ["integer", "null"], "minimum": 1 },
                 "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
                 "severity": { "type": ["string", "null"], "enum": ["low", "medium", "high", "critical", null] },
+                "axis": { "type": "string", "enum": ["standards", "spec"] },
                 "state": { "type": "string", "enum": ["ACTIVE", "RESOLVED"] }
             }
         },
