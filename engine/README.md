@@ -267,6 +267,27 @@ const again = fromReview('{"verdict":"approved","findings":[]}', first.findings)
 // again.line = 'Findings: 1 addressed, 0 reappeared, 0 still open, 0 new'
 ```
 
+### `skills.js` — metadata always, the procedure only when the task matches
+
+A skill is a folder with a `SKILL.md` under `.openvibe/skills`, `.claude/skills`, `.agents/skills` or `skills`. The
+frontmatter is small and deliberate: `name`, `description`, `invocation` (`model` or `user`), `when_to_use`,
+`references`, `scripts`. `index(root)` reads every skill and validates it — a 500-line body cap, the name against its
+folder, every `references/…` and `scripts/…` pointer really inside the folder — and a broken skill is reported, never
+prompted from. `brief(skills, { prompt })` always lists the metadata, loads the body only for a skill the task names or
+its when-to-use words match (at most three, 24,000 characters), and names the reference and script files instead of
+pasting them; a `user` skill waits for its name. The harness jobs opt in with `"skills": true` (or
+`CODES_SKILLS_LOADER=1`), so an existing prompt does not change.
+
+```js
+const skills = require('./engine/skills');
+
+const { skills: found } = skills.index(cwd);
+const { block } = skills.brief(found, { prompt: job.prompt, root: cwd });
+// '## Skills in this repository' + one metadata line per skill + the triggered bodies
+skills.load(found[0]);                         // the body, on demand
+skills.readReference(found[0], 'references/traps.md');
+```
+
 ## Tests
 
 `test/engine-*.test.js` in the Codes repo, run by the repo's own runner (`npm test`).
