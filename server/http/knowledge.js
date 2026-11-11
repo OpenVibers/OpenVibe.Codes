@@ -119,8 +119,8 @@ ${row.visibility === 'team' ? `<form method="post" action="/knowledge/${esc(row.
             : '<span class="c4-hint">No team to share with yet.</span>')}
 <details class="c4-more kn-delete"><summary>Delete</summary><div class="c4-more-body"><p class="kn-confirm">Delete this ${row.kind === 'fact' ? 'fact' : 'lesson'}? Runs stop recalling it, and it cannot be brought back.</p><form method="post" action="/knowledge/${esc(row.id)}/delete"><input type="hidden" name="tab" value="${esc(tab)}"><button class="c4-button c4-button-danger" type="submit">Delete it</button></form></div></details>
 </div>` : `<p class="kn-team-note">${row.visibility === 'team' ? 'Shared with your team.' : ''} Only ${mine ? 'you' : 'its owner'} can edit it.</p>`;
-        return `<article class="c4-card kn-row${row.pinned ? ' is-pinned' : ''}">
-<div class="kn-row-head">${pill(row.kind === 'fact' ? 'Fact' : 'Lesson')}${row.pinned ? pill('Pinned', 'pinned') : ''}${row.dream_status === 'unsupported' ? pill('Needs review') : ''}${shared}</div>
+        return `<article class="c4-card kn-row${row.pinned ? ' is-pinned' : ''}${row.dream_status === 'unsupported' ? ' is-review' : ''}">
+<div class="kn-row-head">${pill(row.kind === 'fact' ? 'Fact' : 'Lesson')}${row.pinned ? pill('Pinned', 'pinned') : ''}${row.dream_status === 'unsupported' ? pill('Needs review', 'bad') : ''}${shared}</div>
 <p class="kn-text">${esc(row.text)}</p>
 <p class="kn-meta">${esc(dayOf(row.last_seen_at))}${row.seen > 1 ? ` · seen ${row.seen} times` : ''}${row.redacted ? ' · secrets removed' : ''}${row.dream_status === 'unsupported' ? ' · not sent to the next run' : ''}</p>
 ${source}${actions}

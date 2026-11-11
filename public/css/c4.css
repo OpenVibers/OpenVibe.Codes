@@ -331,6 +331,9 @@
 .kn-row{padding:14px 16px;border-left:3px solid transparent}
 .kn-row.is-pinned{border-left-color:var(--c4-accent)}
 .kn-row-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:8px;min-width:0}
+/* A note the nightly tidy could not support is held back from the next run: an amber edge and an amber pill, so it is
+   found before it is trusted (Opus, 2026-11-11). */
+.kn-row.is-review{box-shadow:inset 3px 0 0 var(--c4-dot-bad)}
 .kn-repo{overflow-wrap:anywhere}
 .kn-text{margin:0 0 8px;font-size:14px;line-height:1.55;color:var(--c4-ink);overflow-wrap:anywhere;white-space:pre-wrap}
 .kn-meta{margin:0 0 4px;font-size:12px;color:var(--c4-muted)}
