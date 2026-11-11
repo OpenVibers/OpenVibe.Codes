@@ -227,6 +227,35 @@
         const label = root.querySelector('[data-live-label]');
         const live = root.dataset.c4Conductor === 'live';
         const url = root.dataset.c4ConductorStream;
+        const taskId = root.dataset.task;
+        if (taskId && window.OpenVibeAgentSession && window.EventSource) {
+            const runUrl = '/api/v1/runs/' + encodeURIComponent(taskId);
+            fetch(runUrl, { credentials: 'same-origin' }).then((r) => r.ok ? r.json() : null).then((run) => {
+                if (!run || !root.isConnected) return;
+                const host = document.createElement('div');
+                root.appendChild(host);
+                if (out) out.hidden = true;
+                if (label) label.hidden = true;
+                const form = document.querySelector('[data-c4-conductor-form]');
+                if (form) form.hidden = true;
+                const view = window.OpenVibeAgentSession.mount(host, {
+                    title: run.title || 'Conductor', status: run.status || 'running', follow: live, files: false,
+                    onSend: (text) => fetch('/api/v1/conductor/' + encodeURIComponent(taskId) + '/messages', {
+                        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text })
+                    }).then((r) => { if (!r.ok) throw new Error('The message could not be sent.'); window.location.reload(); })
+                });
+                const stream = new EventSource(runUrl + '/events');
+                ['RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR', 'STEP_STARTED', 'STEP_FINISHED', 'TEXT_MESSAGE_START',
+                    'TEXT_MESSAGE_CONTENT', 'TEXT_MESSAGE_END', 'TOOL_CALL_START', 'TOOL_CALL_ARGS', 'TOOL_CALL_END',
+                    'TOOL_CALL_RESULT', 'REASONING_START', 'REASONING_MESSAGE_START', 'REASONING_MESSAGE_CONTENT',
+                    'REASONING_MESSAGE_END', 'REASONING_END', 'REASONING_ENCRYPTED_VALUE', 'STATE_SNAPSHOT', 'STATE_DELTA',
+                    'ACTIVITY_SNAPSHOT', 'ACTIVITY_DELTA', 'CUSTOM'].forEach((type) => stream.addEventListener(type, (e) => {
+                    try { view.push(JSON.parse(e.data)); } catch { /* ignore one invalid event */ }
+                    if (type === 'RUN_FINISHED' || type === 'RUN_ERROR') stream.close();
+                }));
+                window.addEventListener('pagehide', () => stream.close(), { once: true });
+            }).catch(() => { /* the plain transcript and composer remain */ });
+        }
         if (!live || !window.EventSource || !url) return;   // between turns the lines are drawn on the server
         const stream = new EventSource(url);
         const textOf = (line) => {

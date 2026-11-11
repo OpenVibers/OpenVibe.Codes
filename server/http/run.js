@@ -338,7 +338,7 @@ ${i.summary ? html`<p class="run-proof-summary" data-proof-summary>${i.summary}<
         // after the end from codes_session_lines; a task from before this change falls back to the result's old log.
         const lines = live ? null : await sessionStore.linesForRow(row);
         const title = String(row.prompt || '').split('\n')[0].slice(0, 90);
-        const session = lines && lines.length ? html`<section class="run-session" data-session data-title="${title}" data-state="${row.state}"><h2>The session</h2><div data-session-view></div><script type="application/json" data-session-log>${raw(JSON.stringify(lines).replace(/</g, '\\u003c'))}</script></section>` : '';
+        const session = lines && lines.length ? html`<section class="run-session" data-session data-run-id="${row.id}" data-owner="${mine ? '1' : '0'}" data-title="${title}" data-state="${row.state}"><h2>The session</h2><div data-session-view></div><script type="application/json" data-session-log>${raw(JSON.stringify(lines).replace(/</g, '\\u003c'))}</script></section>` : '';
         const body = html`${shareHead ? raw(shareHead) : ''}<p class="crumbs"><a href="/run">Run locally</a></p>
 <h1 class="run-repo">${repoName(row.repo)}${row.ref ? html` <small>${row.ref}</small>` : ''}</h1>
 <p><span class="run-pill run-pill-${row.state}" data-state>${STATE_LABEL[row.state] || row.state}</span>${row.agent ? html` <span class="run-pill">${row.agent}</span>` : ''}</p>
@@ -347,7 +347,7 @@ ${mine ? shareButton(row) : html`<p class="muted">This task was shared with you.
 ${await timelineHtml(row)}
 ${goalHtml(row)}
 ${await proofHtml(row)}
-${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events" data-title="${title}" aria-live="polite"><h2>Live</h2><ol class="run-log" data-log></ol></section>
+${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events" data-run-id="${row.id}" data-owner="${mine ? '1' : '0'}" data-title="${title}" aria-live="polite"><h2>Live</h2><ol class="run-log" data-log></ol></section>
 ${mine ? html`<form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : ''}` : html`${session}${resultHtml(row, { session: !!(lines && lines.length) })}`}`;
         return page(req, res, { title: 'Task', body, sharedScripts: ['agent-session.js'] });
     });
