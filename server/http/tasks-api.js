@@ -228,7 +228,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         }
         const project = await taskStore.latestProject(p.subject);
         if (!project) {
-            return problem(req, res, 409, 'codes.no_project', `this person has not run a task on ${config.baseUrl}/run yet: a service's task runs in the project of their latest one there, on a machine of theirs (openvibe.link/machines)`);
+            return problem(req, res, 409, 'codes.no_project', `this person has not run a task on ${config.baseUrl}/run yet: a service's task runs in the project of their latest one there, on a machine of theirs (openvibe.my/#machines)`);
         }
         let row;
         try {

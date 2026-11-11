@@ -37,9 +37,11 @@ const BUDGETS = {
     'codes.task.start': { minute: 6, hour: 60 },
     // A file attached to a message (10 at most per message): a handful a minute, not a flood of 20 MB bodies.
     'codes.attachment.upload': { minute: 60, hour: 1000 },
-    // The Home picker's repository search asks GitHub, which allows an address few searches a minute. The person's
-    // own repositories come first and cost nothing; this bounds what they may spend on the rest.
-    'codes.repo.search': { minute: 6, hour: 60 },
+    // The repository dropdown (ask 348) types a query at a time: it asks the owner's sources, of which only GitHub
+    // spends a shared limit. The person's own repositories and OpenVibe Git cost nothing; this bounds a burst.
+    'codes.repo.search': { minute: 60, hour: 1200 },
+    // Making a repository on OpenVibe Git is a write on another service: a few a minute, not a script's burst.
+    'codes.repo.create': { minute: 3, hour: 20 },
     // An agent adds what it learned through the ov-know MCP; a run may add a handful, not a flood.
     'codes.knowledge.write': { minute: 30, hour: 600 },
     // The Dock's agent view controls (K-D3): Curtain now and End. The owner presses them now and then, never in a burst.

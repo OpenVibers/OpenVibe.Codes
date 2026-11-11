@@ -128,7 +128,7 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
             log.warn(`[Codes] conductor: ${machine} could not be pinned: ${String(e && e.message).slice(0, 200)}`);
             return { problem: { status: 503, code: 'conductor.machine_unpinned', detail: 'OpenVibe.Bot did not answer, so Codes cannot pin the conductor to that machine; a conductor runs where its folder is, never wherever' } };
         }
-        if (!hit) return { problem: { status: 422, code: 'conductor.machine_invalid', detail: 'that machine is not on openvibe.link/machines: add it there, so a conductor can run where its folder is' } };
+        if (!hit) return { problem: { status: 422, code: 'conductor.machine_invalid', detail: 'that machine is not paired at openvibe.my/#machines: add it there, so a conductor can run where its folder is' } };
         if (!hit.online) return { problem: { status: 409, code: 'conductor.machine_offline', detail: `${hit.name || 'that machine'} is offline: a conductor starts on the machine its folder is on` } };
         return { device: hit.device };
     }

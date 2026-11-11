@@ -37,7 +37,8 @@ function createGitRoutes(ctx) {
 
     r.get('/git', async (req, res, next) => {
         if (!viewer(req)) return next();
-        const head = header('OpenVibe Git', 'Your repositories on git.openvibe.codes, OpenVibe’s own code home. You sign in there with your OpenVibe account.');
+        const head = header('OpenVibe Git', 'Your repositories on git.openvibe.codes, OpenVibe’s own code home. You sign in there with your OpenVibe account.')
+            + (req.viewer.role === 'owner' ? '<p class="c4-sub"><a href="/admin/repo-sources">Where the repository field looks</a>, and the order it asks.</p>' : '');
         if (!forge || !forge.enabled) {
             return page(req, res, `${head}${flash(req)}<section class="c4-card"><div class="c4-card-head"><h2>OpenVibe Git is not connected yet</h2></div>
 <p class="c4-sub">You can already browse and clone every public repository at <a href="${esc(forge ? forge.publicUrl : 'https://git.openvibe.codes')}/">git.openvibe.codes</a>, and sign in there with OpenVibe. Making repositories from Codes opens when Codes can reach OpenVibe Git with its service token.</p></section>`);

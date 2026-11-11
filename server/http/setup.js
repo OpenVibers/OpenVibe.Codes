@@ -85,11 +85,11 @@ function createSetupRoutes(ctx, kit) {
         const sourceRows = sources.map((s) => `<li class="c4-row c4-row-flat"><span class="c4-row-dot${s.status === 'ready' ? ' c4-dot-ok' : ''}" aria-hidden="true"></span><span class="c4-row-label">${esc(s.name)}</span><span class="c4-row-note">${s.status === 'ready' ? 'Ready' : s.status === 'coming_soon' ? 'Coming soon' : 'Unavailable'}${s.price && s.price.amount_usd != null ? ` · $${esc(s.price.amount_usd)}/${esc(s.price.unit)}` : ''}${s.reason ? ` · ${esc(s.reason)}` : ''}</span></li>`).join('');
         const problem = d.machines.ok === false && d.machines.problem ? note(esc(d.machines.problem.detail || 'Your machines could not be read.'), 'bad') : '';
         const how = `<ol class="c4-setup-how">
-<li><b>Get a one-time code</b> on <a href="https://openvibe.link/add-computer?return_to=https%3A%2F%2Fopenvibe.codes%2Fsetup" rel="noopener">openvibe.link</a>. It lasts ten minutes.</li>
+<li><b>Get a one-time code</b> on <a href="https://openvibe.my/#machines" rel="noopener">openvibe.my</a>. It lasts ten minutes.</li>
 <li><b>Run the installer on that computer</b> and give it the code:${command('curl -fsSL https://openvibe.link/install | sh -s -- --worker', 'On the machine')}</li>
 <li><b>It pairs itself</b> and shows up here as Online. It runs your work and nobody else's.</li></ol>`;
         return `${problem}${d.compute.ok === false && d.compute.problem ? note(esc(d.compute.problem.detail), 'bad') : ''}<p class="c4-hint">Choose a place for your work. Link checks readiness before a task can start. Rentals need a live price and a spending limit.</p>${sourceRows ? `<ul class="c4-rows">${sourceRows}</ul>` : ''}${how}
-<div class="c4-setup-actions"><a class="c4-button${list.length ? ' c4-button-light' : ''}" href="https://openvibe.link/machines#pair">${list.length ? 'Manage machines' : 'I have a code'}</a><a class="c4-opill" href="/setup#step-machine">Check again</a></div>`;
+<div class="c4-setup-actions"><a class="c4-button${list.length ? ' c4-button-light' : ''}" href="https://openvibe.my/#machines">${list.length ? 'Manage machines' : 'I have a code'}</a><a class="c4-opill" href="/setup#step-machine">Check again</a></div>`;
     }
 
     function agentsBody(d) {

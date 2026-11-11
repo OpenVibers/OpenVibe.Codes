@@ -9,7 +9,8 @@
  *   POST /me/tasks              → { task: codes.task@1 } (201)
  *   GET  /me/tasks/:id          → codes.task@1
  *   POST /me/tasks/:id/cancel   → codes.task@1
- *   GET  /me/repos?q=…          → { repos: [{ full_name, url, … }] }: the Home picker's search (Codes C4b)
+ *   GET  /me/repos?q=&limit=    → { sections: [{ id, label, items }], create }: the repository dropdown (ask 348)
+ *   POST /repos { name, private } → { url, label }: a repository made on OpenVibe Git in the person's name
  *   GET  /me/settings           → { settings }: the person's choices, including who leads their tasks
  *   PUT  /me/settings           → { settings }: save any of them (a field left out keeps what it had)
  */
@@ -23,7 +24,7 @@ const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const DELEGABLE = new Set(['owner', 'admin']);
 
-function createMeApi({ config, store, sso, run, harnesses, userSettings = null, actorLimits, tasks = null, github = null, log = console }) {
+function createMeApi({ config, store, sso, run, harnesses, userSettings = null, actorLimits, tasks = null, github = null, repoPicker = null, forge = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
@@ -149,11 +150,40 @@ function createMeApi({ config, store, sso, run, harnesses, userSettings = null, 
      * public answer. Codes holds no GitHub account of a person, so the public search is what it can read; a GitHub that
      * does not answer is a `problem` beside the repositories Codes already knows, never an empty list pretending so.
      */
+    // The repository field's dropdown (ask 348): the owner's sources, merged in their order. A source that fails or
+    // takes too long is simply not there: the person sees the repositories Codes could reach, never an error.
     r.get('/me/repos', actorLimits.budget('codes.repo.search'), async (req, res) => {
         if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to search your repositories');
-        if (!github) return res.json({ q: String(req.query.q || ''), repos: [], problem: { status: 503, detail: 'the repository search is not available here' } });
-        const out = await github.search(req.viewer.subject, req.query.q, { limit: 8 });
-        return res.json({ q: out.q, repos: out.found, problem: out.problem });
+        const q = String(req.query.q || '').trim().slice(0, 100);
+        const limit = Math.min(20, Math.max(1, Number.parseInt(req.query.limit, 10) || 8));
+        const sections = repoPicker ? await repoPicker.sections({ viewer: req.viewer, q, limit }) : [];
+        const create = repoPicker ? repoPicker.create(req.viewer) : { allowed: false, host: 'git.openvibe.codes', owner: req.viewer.username || null };
+        return res.json({ q, sections, create });
+    });
+
+    // A new repository on OpenVibe Git, under the person signed in (their Network username is the Git namespace):
+    // ask 348's "Create …" row. The name is validated, the call is same-origin, and it counts as one of their writes.
+    r.post('/repos', actorLimits.budget('codes.repo.create'), json, async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to make a repository');
+        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site posts are refused');
+        if (!forge || !forge.enabled) return problem(req, res, 503, 'repo.git_off', 'OpenVibe Git is not open from Codes right now. Try again in a minute.');
+        const body = req.body || {};
+        const name = String(body.name || '').trim().toLowerCase();
+        try {
+            const made = await forge.createRepo(
+                { subject: req.viewer.subject, username: req.viewer.username || '' },
+                { name, isPrivate: body.private === true },
+            );
+            return res.status(201).json({ url: made.clone_url, label: made.full_name });
+        } catch (e) {
+            const status = Number(e && e.status) || 502;
+            if (status === 422) return problem(req, res, 422, 'repo.name_invalid', String(e.message || 'that repository name cannot be used'));
+            if (status === 409 && e.code === 'git.unlinked') return problem(req, res, 409, 'repo.no_username', 'Your OpenVibe account has no username yet, so a repository has no address. Choose one on your account page, then try again.');
+            if (status === 409) return problem(req, res, 409, 'repo.name_taken', String(e.message || 'you already have a repository with that name'));
+            if (status === 503) return problem(req, res, 503, 'repo.git_off', 'OpenVibe Git did not answer. Try again in a minute.');
+            log.warn(`[Codes] repository create refused: ${String((e && e.message) || e).slice(0, 160)}`);
+            return problem(req, res, 502, 'repo.create_failed', 'OpenVibe Git did not make the repository. Try again in a minute.');
+        }
     });
 
     r.get('/me/tasks/:id', actorLimits.reads('codes.read'), async (req, res) => {

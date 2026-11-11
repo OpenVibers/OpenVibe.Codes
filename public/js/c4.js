@@ -262,43 +262,6 @@
         });
         stream.addEventListener('end', () => { if (label) label.textContent = 'The turn ended.'; });
     });
-    // The repository picker: the person's own repositories first, then GitHub's public answer for what they type.
-    // Server-rendered options already hold the saved ones, so the field works with this script blocked.
-    document.querySelectorAll('[data-c4-repo-search]').forEach((input) => {
-        const list = document.getElementById(input.getAttribute('list'));
-        const status = input.closest('form')?.querySelector('[data-c4-repo-status]');
-        const url = input.dataset.c4RepoUrl;
-        if (!list || !url) return;
-        let timer = 0;
-        let seq = 0;
-        const say = (text, bad) => { if (status) { status.textContent = text; status.classList.toggle('is-bad', !!bad); } };
-        const search = async () => {
-            const q = input.value.trim();
-            if (q.length < 2 || /^https?:\/\//i.test(q)) { say(''); return; }
-            const mine = ++seq;
-            say('Searching your repositories…');
-            try {
-                const res = await fetch(`${url}?q=${encodeURIComponent(q)}`, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-                if (!res.ok) throw new Error(`search answered ${res.status}`);
-                const doc = await res.json();
-                if (mine !== seq) return;
-                list.textContent = '';
-                for (const repo of doc.repos || []) {
-                    const option = document.createElement('option');
-                    option.value = repo.url;
-                    option.label = repo.full_name + (repo.recent ? ' · used here' : '');
-                    list.append(option);
-                }
-                const found = (doc.repos || []).length;
-                if (doc.problem) say(doc.problem.detail || 'GitHub could not be searched', true);
-                else say(found ? `${found} repositor${found === 1 ? 'y' : 'ies'}; pick one or paste a URL.` : 'No repository matched. Paste its URL.');
-            } catch (e) {
-                if (mine === seq) say('Search is not available; paste the repository URL.', true);
-            }
-        };
-        input.addEventListener('input', () => {
-            window.clearTimeout(timer);
-            timer = window.setTimeout(search, 350);
-        });
-    });
+    // The repository field is a plain input: a full Git address always works, and the shared dropdown
+    // (data-ov-combo, openvibe-shared 4.202.0) enhances its search when it ships.
 })();

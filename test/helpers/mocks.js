@@ -64,14 +64,14 @@ async function startNetwork({ sandboxAudiences = ['openvibe.events', 'openvibe.m
 
     const problem = (json, status, code, detail) => json(status, { type: `https://openvibe.network/problems/${code}`, title: 'Error', status, code, detail, error: detail, request_id: `req_${crypto.randomBytes(6).toString('hex')}` }, { 'Content-Type': 'application/problem+json' });
 
-    function addUser(username, { role = 'user' } = {}) {
-        const u = { id: nextUserId++, subject: ids.newId('user'), username, display_name: username, role };
+    function addUser(username, { role = 'user', githubLogin = null } = {}) {
+        const u = { id: nextUserId++, subject: ids.newId('user'), username, display_name: username, role, github_login: githubLogin };
         st.users.set(u.id, u); st.byUsername.set(username, u);
         return u;
     }
     function userToken(u, { ttl = 3600, iat = null, audience = null } = {}) {
         const now = iat != null ? iat : Math.floor(Date.now() / 1000);
-        return signJwt({ iss: issuer, sub: u.id, subject_id: u.subject, username: u.username, display_name: u.display_name, role: u.role, aud: audience || ['openvibe.network'], iat: now, exp: now + ttl }, privatePem);
+        return signJwt({ iss: issuer, sub: u.id, subject_id: u.subject, username: u.username, display_name: u.display_name, role: u.role, ...(u.github_login ? { github_login: u.github_login } : {}), aud: audience || ['openvibe.network'], iat: now, exp: now + ttl }, privatePem);
     }
     /**
      * A Dock token exactly as Network mints one for the public client `companion`: the private `<network>/dock`

@@ -24,7 +24,7 @@ function structuredData(path, o, canonical) {
         { '@type': 'ListItem', name: o.title, item: canonical },
     ].map((item, i) => ({ ...item, position: i + 1 })) });
     const steps = path === '/run' ? [
-        ['Add your computer', 'Add your computer on openvibe.link/machines: one command, which installs OpenVibe Link with its job worker.'],
+        ['Add your computer', 'Pair your computer at openvibe.my/#machines: one command, which installs OpenVibe Link with its job worker.'],
         ['Describe the task', 'Sign in here and describe the task.'],
         ['Get the result', 'Your machine clones the repository, runs the agent and sends the result back.'],
     ] : path === '/start' ? [

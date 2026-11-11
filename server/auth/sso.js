@@ -101,6 +101,7 @@ function createSso({ config, keys, fetchImpl = globalThis.fetch, now = () => Dat
             username,
             displayName: typeof claims.display_name === 'string' ? claims.display_name.slice(0, 80) : (username || 'you'),
             role,
+            githubLogin: typeof claims.github_login === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(claims.github_login) ? claims.github_login : null,
             avatarUrl: typeof claims.avatar_url === 'string' && /^https:\/\/[^\s"'<>]{1,500}$/.test(claims.avatar_url) ? claims.avatar_url : null,
             profileColor: typeof claims.profile_color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(claims.profile_color) ? claims.profile_color : null,
             token,

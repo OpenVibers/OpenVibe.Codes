@@ -166,29 +166,10 @@
         const say = (msg, bad) => { if (status) { status.textContent = msg; status.classList.toggle('is-bad', !!bad); } };
         if (text) {
             startPage(app, form, text);
-            // The repository: a recent one is a tap away, and typing searches every repository the person can reach.
+            // The repository: a recent one is a tap away. A full Git address always works; the shared dropdown
+            // (data-ov-combo, openvibe-shared 4.202.0) enhances the field's search when it ships.
             const repo = $('[data-ch-repo]', form);
             app.querySelectorAll('[data-ch-saved-repo]').forEach((b) => b.addEventListener('click', () => { if (repo) { repo.value = b.dataset.chSavedRepo; if (!matchMedia('(pointer: coarse)').matches) text.focus(); } }));
-            if (repo && repo.dataset.chRepoUrl) {
-                const list = document.getElementById(repo.getAttribute('list'));
-                let timer = 0, seq = 0;
-                repo.addEventListener('input', () => {
-                    clearTimeout(timer);
-                    timer = setTimeout(async () => {
-                        const q = repo.value.trim();
-                        if (!list || q.length < 2 || /^https?:\/\//i.test(q)) return;
-                        const mine = ++seq;
-                        try {
-                            const res = await fetch(`${repo.dataset.chRepoUrl}?q=${encodeURIComponent(q)}`, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-                            if (!res.ok || mine !== seq) return;
-                            const doc = await res.json();
-                            if (mine !== seq) return;
-                            list.textContent = '';
-                            (doc.repos || []).forEach((r) => { const o = document.createElement('option'); o.value = r.url; o.label = r.full_name + (r.recent ? ' · used here' : ''); list.appendChild(o); });
-                        } catch { /* the typed URL still works */ }
-                    }, 250);
-                });
-            }
             // The keyboard hint only where Enter sends (a phone keyboard's return is a new line).
             if (status && !status.textContent && !matchMedia('(pointer: coarse)').matches) status.textContent = 'Enter sends · Shift+Enter for a new line';
             if ($('.ovt.is-start', app) && !matchMedia('(pointer: coarse)').matches) text.focus({ preventScroll: true });
