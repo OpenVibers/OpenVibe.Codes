@@ -270,7 +270,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         // Something new: OpenVibe AI builds it on openvibe.space, like the site's own handover. No Codes task is
         // started: the answer is where to press Build. Files ride with a task, never with a handover.
         if (mode === 'create') {
-            if (repoIn || named.length || uploaded.length) {
+            if (repoIn || named.length || uploaded.length || b.plan != null || b.preset != null) {
                 return problem(req, res, 422, 'codes.create_invalid', 'Something new starts in OpenVibe AI, where you can add the repository and the files there.');
             }
             return res.json({ id: null, url: start.spaceHref({ text }) });
@@ -327,6 +327,13 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
                 || (conductor ? await conductor.projectFor(token, p.subject) : null);
         } catch { project = null; }
         if (!project) return problem(req, res, 409, 'codes.no_project', 'Codes could not find or make a project for you on OpenVibe.Services: sign in again and retry.');
+        if (b.plan != null || b.preset != null) {
+            if (!modelPlans) return problem(req, res, 503, 'codes.model_plans_unavailable', 'model plans are unavailable');
+            try {
+                const selected = await modelPlans.select(p.subject, project, { plan: b.plan ?? null, preset: b.preset ?? null });
+                args = { ...args, plan: selected.plan, plan_source: selected.source, preset: selected.preset, model_fallbacks: selected.fallbacks };
+            } catch (e) { return problem(req, res, e.status || 500, e.code || 'codes.model_plan_invalid', e.message); }
+        }
         const jobInput = (repo, prompt) => JSON.stringify({ repo, prompt, permission: 'edit' });
         let firstRow = null;
         try {
@@ -335,7 +342,8 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
                 const names = targets.map((x) => x.repository.replace(/^OpenVibers\//, ''));
                 for (const [i, x] of targets.entries()) {
                     const note = `\n\n(This request spans ${names.join(', ')}. This task is the ${names[i]} part; the others are separate tasks. Change only what this repository needs, and keep the names and behaviour consistent with the other parts.)`;
-                    const each = parseArgs(jobInput(x.url, `${text}${note}`.slice(0, 16000)));
+                    const each = { ...parseArgs(jobInput(x.url, `${text}${note}`.slice(0, 16000))),
+                        ...(args.plan ? { plan: args.plan, plan_source: args.plan_source, preset: args.preset, model_fallbacks: args.model_fallbacks } : {}) };
                     const row = await taskStore.start({ subject: p.subject, project, args: each, attachmentIds: i === 0 ? ids : [], mode: 'openvibe' });
                     if (!firstRow) firstRow = row;
                 }
