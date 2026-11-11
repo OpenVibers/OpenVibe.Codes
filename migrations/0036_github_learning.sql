@@ -5,6 +5,9 @@ CREATE TABLE IF NOT EXISTS github_learning_settings (
   repos_per_day integer NOT NULL DEFAULT 5 CHECK (repos_per_day BETWEEN 1 AND 20),
   weekly_proposal boolean NOT NULL DEFAULT false,
   cost_cap numeric(10,4) NOT NULL DEFAULT 1 CHECK (cost_cap BETWEEN 0 AND 100),
+  owner_subject text,
+  weekly_due timestamptz NOT NULL DEFAULT now() + interval '7 days',
+  proposal_task_id text,
   next_due timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -23,6 +26,10 @@ CREATE TABLE IF NOT EXISTS github_learning_notes (
   stars integer NOT NULL DEFAULT 0,
   star_growth integer NOT NULL DEFAULT 0,
   summary text NOT NULL,
+  analysis text,
+  suggested_repo text,
+  suggested_change text,
+  analysis_cost numeric(10,6) NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (finding_date, full_name)
 );

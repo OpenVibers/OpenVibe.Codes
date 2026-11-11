@@ -145,7 +145,7 @@ async function createApp(opts = {}) {
     // person's own token opens them. Codes forwards the token and renders the answer; it never holds a note.
     ctx.memory = createMemory({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     ctx.github = opts.github || createGitHub({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
-    ctx.learning = require('./domain/github-learning').createGitHubLearning({ store, config, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log });
+    ctx.learning = require('./domain/github-learning').createGitHubLearning({ store, config, tasks, runTokens, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log });
     // OpenVibe Git through Codes' service token, acting for the person it names (server/domain/forge.js).
     ctx.forge = opts.forge || require('./domain/forge').createForge({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The repository field's dropdown (ask 348): the owner's sources, merged in their order.

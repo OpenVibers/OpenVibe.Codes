@@ -15,7 +15,7 @@ function createGitHubLearningRoutes(ctx) {
     page.get('/learn', async (req,res) => {
         if (!owner(req)) return deny(req,res);
         const notes = await learning.notes(100);
-        const body = `<main><h1>Learn</h1><p>Daily GitHub research findings, with license and observed star growth.</p>${notes.map(n=>`<article><h2><a href="${esc(n.url)}">${esc(n.full_name)}</a></h2><p>${esc(n.finding_date)} · ${esc(n.license || 'UNKNOWN')} · ${n.stars} stars · +${n.star_growth}</p><p>${esc(n.summary)}</p></article>`).join('') || '<p>No findings yet.</p>'}</main>`;
+        const body = `<main><h1>Learn</h1><p>Daily GitHub research findings, with license and observed star growth.</p>${notes.map(n=>`<article><h2><a href="${esc(n.url)}">${esc(n.full_name)}</a></h2><p>${esc(n.finding_date)} · ${esc(n.license || 'UNKNOWN')} · ${n.stars} stars · +${n.star_growth}</p><p>${esc(n.summary)}</p>${n.analysis ? `<p>${esc(n.analysis)}</p>` : ''}</article>`).join('') || '<p>No findings yet.</p>'}</main>`;
         return res.type('html').send(body);
     });
     page.get('/admin/github-learning', async (req,res) => {
@@ -30,7 +30,7 @@ function createGitHubLearningRoutes(ctx) {
         if (!topics.length) return res.status(422).type('text/plain').send('Add at least one valid GitHub topic.');
         const count = Math.max(1,Math.min(20,Number(req.body.repos_per_day)||5));
         const cap = Math.max(0,Math.min(100,Number(req.body.cost_cap)||0));
-        await ctx.store.db.exec(`INSERT INTO github_learning_settings(id,topics,repos_per_day,weekly_proposal,cost_cap) VALUES(1,$1::jsonb,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET topics=EXCLUDED.topics,repos_per_day=EXCLUDED.repos_per_day,weekly_proposal=EXCLUDED.weekly_proposal,cost_cap=EXCLUDED.cost_cap,updated_at=now()`, [JSON.stringify(topics),count,req.body.weekly_proposal==='on',cap]);
+        await ctx.store.db.exec(`INSERT INTO github_learning_settings(id,topics,repos_per_day,weekly_proposal,cost_cap,owner_subject) VALUES(1,$1::jsonb,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET topics=EXCLUDED.topics,repos_per_day=EXCLUDED.repos_per_day,weekly_proposal=EXCLUDED.weekly_proposal,cost_cap=EXCLUDED.cost_cap,owner_subject=EXCLUDED.owner_subject,updated_at=now()`, [JSON.stringify(topics),count,req.body.weekly_proposal==='on',cap,req.viewer.subject]);
         return res.redirect(303,'/admin/github-learning?saved=1');
     });
     api.get('/admin/github-learning', async (req,res) => {
@@ -43,7 +43,7 @@ function createGitHubLearningRoutes(ctx) {
         const b=req.body||{}; const topics=Array.isArray(b.topics)?b.topics.map(x=>String(x).trim().toLowerCase()).filter(x=>/^[a-z0-9][a-z0-9-]{0,49}$/.test(x)).slice(0,20):[];
         if(!topics.length) return res.status(422).json({error:'topics_required'});
         const count=Math.max(1,Math.min(20,Math.trunc(Number(b.repos_per_day)||5))), cap=Math.max(0,Math.min(100,Number(b.cost_cap)||0));
-        await ctx.store.db.exec(`INSERT INTO github_learning_settings(id,topics,repos_per_day,weekly_proposal,cost_cap) VALUES(1,$1::jsonb,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET topics=EXCLUDED.topics,repos_per_day=EXCLUDED.repos_per_day,weekly_proposal=EXCLUDED.weekly_proposal,cost_cap=EXCLUDED.cost_cap,updated_at=now()`,[JSON.stringify(topics),count,b.weekly_proposal===true,cap]);
+        await ctx.store.db.exec(`INSERT INTO github_learning_settings(id,topics,repos_per_day,weekly_proposal,cost_cap,owner_subject) VALUES(1,$1::jsonb,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET topics=EXCLUDED.topics,repos_per_day=EXCLUDED.repos_per_day,weekly_proposal=EXCLUDED.weekly_proposal,cost_cap=EXCLUDED.cost_cap,owner_subject=EXCLUDED.owner_subject,updated_at=now()`,[JSON.stringify(topics),count,b.weekly_proposal===true,cap,req.viewer.subject]);
         return res.json({settings:{topics,repos_per_day:count,weekly_proposal:b.weekly_proposal===true,cost_cap:cap}});
     });
     return {page,api};
