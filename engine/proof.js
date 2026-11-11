@@ -193,7 +193,7 @@ function routesOf(pages) {
  * @param {function} [what.emit] called with every item as it is collected
  * @returns {Promise<{ items: object[], outcome: object, review: object|null }>} the proof
  */
-async function collectProof({ cwd, files = [], adapters = {}, author = null, emit = null } = {}) {
+async function collectProof({ cwd, files = [], adapters = {}, author = null, spec = '', emit = null } = {}) {
     if (!cwd) throw new TypeError('proof needs the repo it is about');
     const run = adapters.run;
     if (typeof run !== 'function') throw new TypeError('proof needs a run adapter');
@@ -277,7 +277,7 @@ async function collectProof({ cwd, files = [], adapters = {}, author = null, emi
             try {
                 const tests = items.find((i) => i.kind === 'tests');
                 verdict = await adapters.review({
-                    patch, summary: (diff && diff.summary) || '',
+                    patch, summary: spec,
                     tests: tests ? tests.summary : null,
                     model: chosen.model, family: chosen.family,
                 });

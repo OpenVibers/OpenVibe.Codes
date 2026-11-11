@@ -9,7 +9,7 @@
  */
 const assert = require('assert');
 const {
-    familyOf, authorFamily, pickReviewer, reviewPrompt, readReview, readVerdict, reviewWithAi,
+    familyOf, authorFamily, pickReviewer, reviewPrompt, readReview, readVerdict, reviewWithAi, reviewTwoAxes,
 } = require('../engine/review');
 const { check, done } = require('./helpers/boot');
 
@@ -47,6 +47,25 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
             assert.ok(prompt.includes('add x'), 'what the change was for is in the prompt');
             assert.ok(prompt.includes('3 passed'), 'the tests are in the prompt');
             assert.ok(/approved/.test(prompt) && /changes_requested/.test(prompt), 'the verdict is asked for');
+        });
+
+        await check('standards and spec have separate contexts, and absent spec is not run', async () => {
+            const prompts = [];
+            const fetchImpl = async (_url, options) => {
+                prompts.push(JSON.parse(options.body).messages[0].content);
+                return OK();
+            };
+            const opts = { token: 'test-token', model: 'deepseek-chat', patch: '+x', summary: 'ticket requirement', standards: 'repository rule', fetchImpl };
+            const reviewed = await reviewTwoAxes(opts);
+            assert.strictEqual(reviewed.verdict, 'approved');
+            assert.strictEqual(prompts.length, 2);
+            assert.match(prompts[0], /repository rule/);
+            assert.ok(!prompts[0].includes('ticket requirement'));
+            assert.match(prompts[1], /ticket requirement/);
+            assert.ok(!prompts[1].includes('repository rule'));
+            const missing = await reviewTwoAxes({ ...opts, summary: '' });
+            assert.strictEqual(missing.axes.spec.verdict, 'not_run');
+            assert.strictEqual(prompts.length, 3);
         });
 
         await check('an incremental re-review names the reviewed and current heads', () => {

@@ -96,20 +96,23 @@ function pickReviewer({ models = [], author = null } = {}) {
  * Quiet by default — the rules are the point: only what this diff introduces, at most three findings, no style, no
  * speculation, and an approval is an empty list rather than a "no issues" note.
  */
-function reviewPrompt({ patch = '', summary = '', tests = null, prior = [], reviewedHead = null, head = null } = {}) {
+function reviewPrompt({ patch = '', summary = '', tests = null, prior = [], reviewedHead = null, head = null, axis = null, standards = '' } = {}) {
     const before = priorBrief(prior);
     return [
         'You are reviewing a change to a repository. Answer only with JSON:',
         `{"verdict":"approved"|"changes_requested","summary":"one sentence, what you checked","findings":[{"file":"path","line":12,"text":"what is wrong and the concrete fix","severity":"low"|"medium"|"high"|"critical"}]}`,
-        'Flag only issues this change introduces: a correctness bug, a security problem, a missing or broken test, or a',
-        `requirement the change leaves undone. At most ${MAX_FINDINGS} findings, worst first. No style nits, no "may be`,
+        axis === 'standards' ? 'Standards axis only: check the repository rules below and concrete code smells in the changed lines (duplication, misleading names, hidden side effects, tangled control flow). Do not judge whether the ticket was fulfilled.' : '',
+        axis === 'spec' ? 'Spec axis only: check the change against the ticket below. Do not judge repository conventions or general code smells.' : '',
+        axis === 'standards' && standards ? 'Repository rules:\n' + String(standards).slice(0, 8000) : '',
+        axis === 'standards' ? 'Flag only concrete violations introduced by this change, with a file, line and fix.' : 'Flag only issues this change introduces: a correctness bug, a security problem, a missing or broken test, or a requirement the change leaves undone.',
+        `At most ${MAX_FINDINGS} findings, worst first. No style nits, no "may be`,
         'unsafe" without the path that reaches it, and no re-raising a design choice the change was asked to make. If a',
         'high-impact point is plausible but not proven, say "uncertain" in its text and keep the severity low. If nothing',
         'is wrong, "approved" with an empty findings list; never write a "no issues" finding or a comment.',
         '',
         before ? 'A previous review of an earlier revision raised the findings below. Treat them as the ledger: say in your\nsummary which are addressed, and report one again only when it still stands in this revision; then add only new\nissues this revision introduced. The ids stay stable across re-wrapping.\n' + before : '',
         reviewedHead && head ? `This is an incremental re-review of ${reviewedHead}..${head}. The supplied diff is anchored on the last reviewed head; review only the changes in that range and reconcile the earlier findings above.` : '',
-        summary ? 'What the change was asked to do:\n' + String(summary).slice(0, 4000) : '',
+        axis !== 'standards' && summary ? 'What the change was asked to do:\n' + String(summary).slice(0, 4000) : '',
         tests ? 'The tests the author says pass:\n' + String(tests).slice(0, 2000) : '',
         '',
         'The diff:\n' + String(patch || '').slice(0, 120000),
@@ -172,12 +175,14 @@ async function reviewWithAi({
     prior = [],
     reviewedHead = null,
     head = null,
+    axis = null,
+    standards = '',
     fetchImpl = globalThis.fetch,
 } = {}) {
     if (!token) throw new Error('the review needs the task\'s token');
     if (!model) throw new Error('the review needs a model');
     const root = String(baseUrl).replace(/\/+$/, '');
-    const prompt = reviewPrompt({ patch, summary, tests, prior, reviewedHead, head });
+    const prompt = reviewPrompt({ patch, summary, tests, prior, reviewedHead, head, axis, standards });
     const headers = { 'content-type': 'application/json', authorization: `Bearer ${token}` };
     let res = await fetchImpl(`${root}/chat/completions`, {
         method: 'POST', headers, body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }] }),
@@ -217,7 +222,9 @@ async function reviewWithAi({
         ...(x ? { disclosure: x } : {}),
         ...(x && Number.isFinite(+x.cost_usd) ? { cost_usd: +x.cost_usd } : {}),
         verdict: read.verdict,
-        summary: read.summary,
+        summary: read.summary.trim().split(/\s+/).slice(0, 400).join(' '),
+        raw_findings: read.findings,
+        reviewed: !!String(text || '').trim(),
         // The persisted lifecycle: ACTIVE/RESOLVED records and the addressed/reappeared/still open/new line.
         findings: ledger.findings,
         lifecycle: ledger.lifecycle,
@@ -225,7 +232,40 @@ async function reviewWithAi({
     };
 }
 
+/** Separate model contexts. A missing ticket is recorded as not run, never as an approval. */
+async function reviewTwoAxes(options = {}) {
+    const spec = String(options.summary || '').trim();
+    const prior = Array.isArray(options.prior) ? options.prior : [];
+    const standards = await reviewWithAi({ ...options, axis: 'standards', summary: '', prior: prior.filter((f) => !f.axis || f.axis === 'standards') });
+    const specification = spec ? await reviewWithAi({ ...options, axis: 'spec', prior: prior.filter((f) => !f.axis || f.axis === 'spec') }) : null;
+    const { merge, lifecycleLine, parse } = require('./findings');
+    if (!standards.reviewed || (specification && !specification.reviewed)) return {
+        ...standards, verdict: 'changes_requested', summary: 'a reviewer said nothing',
+        axes: { standards: { verdict: standards.reviewed ? standards.verdict : 'not_run' }, spec: { verdict: specification ? (specification.reviewed ? specification.verdict : 'not_run') : 'not_run' } },
+        findings: prior, lifecycle: null, lifecycle_line: null,
+    };
+    const merged = merge(spec ? prior : prior.filter((f) => f.axis !== 'spec'), [
+        ...parse(JSON.stringify({ findings: standards.raw_findings.map((f) => ({ ...f, axis: 'standards' })) })),
+        ...(specification ? parse(JSON.stringify({ findings: specification.raw_findings.map((f) => ({ ...f, axis: 'spec' })) })) : []),
+    ].slice(0, MAX_FINDINGS));
+    if (!spec) merged.findings.push(...prior.filter((f) => f.axis === 'spec'));
+    const failed = standards.verdict !== 'approved' || (specification && specification.verdict !== 'approved');
+    return {
+        ...standards,
+        ...(specification ? { cost_usd: (standards.cost_usd || 0) + (specification.cost_usd || 0) } : {}),
+        verdict: failed ? 'changes_requested' : 'approved',
+        summary: `Standards: ${standards.summary}; Spec: ${specification ? specification.summary : 'not run (no ticket spec)'}`.slice(0, 4000),
+        axes: {
+            standards: { verdict: standards.verdict, summary: standards.summary },
+            spec: specification ? { verdict: specification.verdict, summary: specification.summary } : { verdict: 'not_run', summary: 'no ticket spec' },
+        },
+        findings: merged.findings,
+        lifecycle: merged.lifecycle,
+        lifecycle_line: lifecycleLine(merged.lifecycle),
+    };
+}
+
 module.exports = {
     FAMILIES, HARNESS_FAMILY,
-    familyOf, authorFamily, pickReviewer, reviewPrompt, readReview, readVerdict, reviewWithAi,
+    familyOf, authorFamily, pickReviewer, reviewPrompt, readReview, readVerdict, reviewWithAi, reviewTwoAxes,
 };

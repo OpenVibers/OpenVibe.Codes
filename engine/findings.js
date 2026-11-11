@@ -42,6 +42,7 @@ function record(item) {
         line,
         text: text.slice(0, 2000),
         severity,
+        ...(item.axis === 'standards' || item.axis === 'spec' ? { axis: item.axis } : {}),
         state: STATE.ACTIVE,
     };
 }
