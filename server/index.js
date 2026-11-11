@@ -8,6 +8,7 @@ const { createApp } = require('./app');
 const { gracefulStop, telemetry } = require('openvibe-sdk/service');
 const { createPgTelemetrySink, startTelemetryRetention } = require('openvibe-sdk/telemetry');
 const { startSubscriptions } = require('./events-consumer');
+const { every } = require('./utils/jobs');
 
 /**
  * The process stop (openvibe-sdk/service, docs/service.md's 5 s family): the HTTP drain runs
@@ -21,6 +22,7 @@ function createLifecycle({ server, ctx, exit, signals }) {
             () => { if (ctx.subscriptions) ctx.subscriptions.stop(); },
             () => { if (ctx.publisher) return ctx.publisher.stop(); return undefined; },
             () => { if (ctx.sessionRetention) ctx.sessionRetention.stop(); },
+            () => { if (ctx.githubLearningJob) ctx.githubLearningJob(); },
             () => ctx.keys.client.stop(),
             async () => { if (ctx.telemetryRetention) await ctx.telemetryRetention.stop(); await telemetry.stop(); },
             () => ctx.store.close(),
@@ -31,6 +33,8 @@ function createLifecycle({ server, ctx, exit, signals }) {
 async function start() {
     const { app, ctx } = await createApp();
     const { config } = ctx;
+    // GitHub research is due based: the first boot catches an overdue day, then checks once an hour.
+    ctx.githubLearningJob = every('codes-github-learning', 60 * 60_000, () => ctx.learning.runOnce(), { initialDelayMs: 10_000, jitterMs: 30_000, log: console });
 
     // Socket activation (2026-10-31): systemd's .socket unit holds the listener across restarts, so a deploy
     // queues requests in the kernel instead of answering 502. Without the socket unit, the usual listen.
