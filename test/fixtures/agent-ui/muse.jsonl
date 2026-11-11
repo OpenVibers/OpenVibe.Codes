@@ -1,0 +1,4 @@
+{"stream":{"kind":"session","id":"session-1"},"payload_type":"task.lifecycle.started","payload":{"task_id":"t1","event":{"task_id":"t1","task_kind":"tool.shell","arguments":{"command":"ls"}}}}
+{"payload_type":"tool.result","payload":{"call_id":"t1","tool_name":"shell","result":{"stdout":"a.txt"}}}
+{"payload_type":"run.output.delta","payload":{"text":"done"}}
+{"payload_type":"run.terminal.completed","payload":{"text":"done"}}

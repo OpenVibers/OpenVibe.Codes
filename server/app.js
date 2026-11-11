@@ -102,6 +102,7 @@ async function createApp(opts = {}) {
     const findTest = createOwnerInputTests({ ownerInputs, fetchImpl: opts.fetchImpl || globalThis.fetch });
     const aiCatalogConfig = await createAiCatalogConfig({ db: store.db, keys, config, env: opts.env || process.env, log, also: ownerInputs.stores, test: findTest });
     Object.defineProperty(config.aiCatalog, 'enabled', { enumerable: true, configurable: true, get: () => aiCatalogConfig.get('catalog') });
+    config.agentUiSetting = () => aiCatalogConfig.get('agentRuns');
     const sso = createSso({ config, keys, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log });
     // The harness catalog (server/data/harness-offers.json), read once: a bad seed row fails boot.
     const harnesses = createHarnesses();

@@ -28,13 +28,14 @@ const SCHEMA = {
     additionalProperties: false,
     required: ['catalog'],
     properties: {
+        agentRuns: { type: 'boolean', title: 'Agent run streams', 'x-group': 'Agent activity', 'x-env': 'CODES_AGENT_UI', description: 'Serve authorized AG-UI run snapshots and resumable events. Enable after the production check.' },
         catalog: {
             type: 'boolean', title: 'Offer every AI model in the pickers', 'x-group': 'AI Exchange', 'x-env': 'CODES_AI_CATALOG',
             description: 'When on, Codes reads OpenVibe.AI\'s model list (refreshed about every five minutes) and its pickers offer every model by name. Off (the default) keeps the single default entry.',
         },
     },
 };
-const DEFAULTS = Object.freeze({ catalog: false });
+const DEFAULTS = Object.freeze({ catalog: false, agentRuns: false });
 
 function bearer(req) {
     const h = String((req.headers && req.headers.authorization) || '');

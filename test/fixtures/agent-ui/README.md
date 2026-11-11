@@ -1,0 +1,1 @@
+Sanitized recorded protocol shapes: Claude Code, Codex and OpenCode from test/helpers/fake-agents.js; Muse session envelopes from the portal's test-mu.js / mu-feed.js (2026-11-10); DeepSeek Chat Completions from test/harness-exchange.test.js. IDs, paths and output are replaced with public test values. These are parser fixtures, not claims of fresh model runs.

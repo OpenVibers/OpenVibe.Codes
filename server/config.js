@@ -21,6 +21,7 @@ function load(env = process.env) {
 
     return {
         service: 'codes',
+        agentUi: bool(env.CODES_AGENT_UI),
         port,
         host: env.HOST || '127.0.0.1',
         nodeEnv,
@@ -100,6 +101,8 @@ function load(env = process.env) {
         // key and whose budget the run is. Two hours is the longest a coding attempt may run.
         runTokens: {
             ttlSeconds: Math.min(7200, Math.max(60, int(env.CODES_RUN_TOKEN_TTL_S, 7200))),
+            // Hosted CLI requests use Exchange by default after the production canary; set to 0 to roll back to AI.
+            cliExchange: env.CODES_CLI_EXCHANGE == null || bool(env.CODES_CLI_EXCHANGE),
             // The harness env variable names a job may set (harness/job.js): the model APIs' own names, nothing else.
             envNames: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_CUSTOM_HEADERS', 'OPENAI_BASE_URL',
                 'OPENAI_API_KEY', 'OPENAI_CUSTOM_HEADERS', 'DEEPSEEK_BASE_URL', 'DEEPSEEK_API_KEY', 'OPENVIBE_AI_URL',

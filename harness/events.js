@@ -42,7 +42,7 @@ const init = (sessionId, agent, model) => ({ type: 'system', subtype: 'init', se
 const text = (t, model, usage) => ({ type: 'assistant', message: { model: model || null, content: [{ type: 'text', text: scrub(t) }], ...(usage ? { usage } : {}) } });
 const toolUse = (id, name, input, model) => ({ type: 'assistant', message: { model: model || null, content: [{ type: 'tool_use', id: String(id), name, input: input || {} }] } });
 const toolProgress = (id, chunk) => ({ type: 'system', subtype: 'tool_progress', tool_use_id: String(id), text: clip(scrub(chunk), 4000) });
-const toolResult = (id, content, isError) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: String(id), content: clip(scrub(content), 4000), is_error: !!isError }] } });
+const toolResult = (id, content, isError) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: String(id), content: clip(scrub(content), 4000), full_output: scrub(content), is_error: !!isError }] } });
 const usageEvent = (agent, usage) => ({ type: 'system', subtype: 'usage', agent, usage });
 const warning = (t) => ({ type: 'system', subtype: 'warning', text: clip(scrub(t), 500) });
 const error = (t) => ({ type: 'system', subtype: 'error', text: clip(scrub(t), 500) });
