@@ -270,7 +270,7 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
 
     /** Add one row, or raise the one it repeats. → { row, created, redacted }. A fixed `key` names the row instead
      * of the text hash: the same key rewritten is the same row (the session summary), never a second one. */
-    async function remember({ subject, kind = 'lesson', text, repo = null, paths = [], sourceTask = null, sourceJob = null, sourceAgent = null, teamId = null, pinned = false, visibility = null, key = null } = {}) {
+    async function remember({ subject, kind = 'lesson', text, repo = null, paths = [], sourceTask = null, sourceJob = null, sourceAgent = null, teamId = null, pinned = false, visibility = null, key = null, replay = false } = {}) {
         const k = KINDS.includes(kind) ? kind : 'lesson';
         const fixed = key == null ? null : String(key).slice(0, 200).trim() || null;
         const cleaned = scrub(clean(text));
@@ -288,18 +288,20 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
                  dedupe_key, seen, pinned, redacted, created_at, updated_at, last_seen_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, 1, $13, $14, $15, $15, $15)
              ON CONFLICT (subject, kind, dedupe_key) WHERE dedupe_key IS NOT NULL
-             DO UPDATE SET seen = CASE WHEN EXCLUDED.source_task IS NOT NULL AND codes_knowledge.source_task = EXCLUDED.source_task
+             DO UPDATE SET seen = CASE WHEN $16::boolean THEN codes_knowledge.seen
+                                       WHEN EXCLUDED.source_task IS NOT NULL AND codes_knowledge.source_task = EXCLUDED.source_task
                                        THEN codes_knowledge.seen ELSE codes_knowledge.seen + 1 END,
-                           last_seen_at = EXCLUDED.last_seen_at,
-                           updated_at = EXCLUDED.updated_at,
-                           dream_status = 'active',
-                           source_task = COALESCE(EXCLUDED.source_task, codes_knowledge.source_task),
-                           source_job = COALESCE(EXCLUDED.source_job, codes_knowledge.source_job),
-                           source_agent = COALESCE(EXCLUDED.source_agent, codes_knowledge.source_agent)
+                           last_seen_at = CASE WHEN $16::boolean THEN codes_knowledge.last_seen_at ELSE EXCLUDED.last_seen_at END,
+                           updated_at = CASE WHEN $16::boolean THEN codes_knowledge.updated_at ELSE EXCLUDED.updated_at END,
+                           dream_status = CASE WHEN $16::boolean AND codes_knowledge.source_task IS DISTINCT FROM EXCLUDED.source_task
+                                               THEN codes_knowledge.dream_status ELSE 'active' END,
+                           source_task = CASE WHEN $16::boolean THEN codes_knowledge.source_task ELSE COALESCE(EXCLUDED.source_task, codes_knowledge.source_task) END,
+                           source_job = CASE WHEN $16::boolean THEN codes_knowledge.source_job ELSE COALESCE(EXCLUDED.source_job, codes_knowledge.source_job) END,
+                           source_agent = CASE WHEN $16::boolean THEN codes_knowledge.source_agent ELSE COALESCE(EXCLUDED.source_agent, codes_knowledge.source_agent) END
              RETURNING *, (xmax = 0) AS created`,
             [id, subject, share.team_id, share.visibility, k, cleaned.text, repository, JSON.stringify(allPaths),
                 sourceTask ? String(sourceTask) : null, sourceJob ? String(sourceJob) : null, sourceAgent ? String(sourceAgent) : null,
-                fixed || dedupeKey({ kind: k, text: cleaned.text, repo: repository }), !!pinned, cleaned.redacted, at],
+                fixed || dedupeKey({ kind: k, text: cleaned.text, repo: repository }), !!pinned, cleaned.redacted, at, !!replay],
         );
         return { row, created: !!row.created, redacted: cleaned.redacted };
     }
@@ -351,7 +353,7 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
      * What one finished run taught, captured idempotently: the agent's Learned: and Fact: lines, a failure with its
      * reason, the command that failed, and the commands the repository's runs use. Never the whole transcript.
      */
-    async function captureTask(row) {
+    async function captureTask(row, { replay = false } = {}) {
         if (!row || !row.id || !row.subject) return [];
         const result = row.result && typeof row.result === 'object' ? row.result : {};
         const logLines = Array.isArray(result.log) ? result.log : [];
@@ -399,10 +401,11 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
             try {
                 const saved = await remember({
                     subject: row.subject, kind: entry.kind, text: entry.text, repo, paths: pathsIn(entry.text),
-                    sourceTask: row.id, sourceJob: row.job_id || null, sourceAgent: agent,
+                    sourceTask: row.id, sourceJob: row.job_id || null, sourceAgent: agent, replay,
                 });
                 out.push(saved.row);
             } catch (e) {
+                if (replay && (!e || e.code !== 'knowledge.empty')) throw e;
                 if (!e || e.code !== 'knowledge.empty') log.warn(`[Codes] knowledge capture for ${row.id}: ${String((e && e.message) || e).slice(0, 160)}`);
             }
         }
@@ -451,7 +454,7 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
             const before = await db.many(`SELECT id FROM codes_knowledge
                 WHERE source_task = $1 AND subject = $2 AND pinned = false AND visibility = 'private'
                   AND updated_at = last_seen_at AND dedupe_key NOT LIKE 'summary:%'`, [task.id, task.subject]);
-            const supported = new Set((await captureTask(task)).map((row) => row.id));
+            const supported = new Set((await captureTask(task, { replay: true })).map((row) => row.id));
             for (const row of before) {
                 if (supported.has(row.id)) continue;
                 await db.exec(`UPDATE codes_knowledge SET dream_status = 'unsupported'

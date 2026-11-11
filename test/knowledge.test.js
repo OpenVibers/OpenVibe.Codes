@@ -268,7 +268,7 @@ function fakeHarness() {
 
         await check('the nightly dream rechecks captured rows against the saved transcript without repeating a lesson', async () => {
             const task = await startTask('Check the release tests.');
-            await end(task.id, 'succeeded', { ok: true, summary: 'Done.\n\nLearned:\n- npm test covers the release.', agents: ['codex'], log: [] });
+            await end(task.id, 'succeeded', { ok: true, summary: 'Done.\n\nLearned:\n- npm test covers the release.\n- The release uses CI.', agents: ['codex'], log: [] });
             const valid = (await knowledgeOf(ada.subject)).find((r) => r.source_task === task.id && /covers the release/.test(r.text));
             assert.ok(valid);
             const ghost = await t.ctx.knowledge.remember({ subject: ada.subject, kind: 'lesson',
@@ -288,6 +288,15 @@ function fakeHarness() {
             assert.strictEqual(manual.source_task, null, 'an owner edit becomes manual knowledge');
             assert.strictEqual(manual.dream_status, 'active');
             assert.strictEqual((await t.ctx.knowledge.dream()).skipped, true, 'the due check runs once a day');
+            const next = await startTask('Check the next release.');
+            await end(next.id, 'succeeded', { ok: true, summary: 'Done.\n\nLearned:\n- npm test covers the release.', agents: ['codex'], log: [] });
+            const repeated = await db.one('SELECT seen, source_task FROM codes_knowledge WHERE id = $1', [valid.id]);
+            assert.strictEqual(repeated.source_task, next.id);
+            assert.strictEqual(repeated.seen, valid.seen + 1, 'a new task is a second sighting');
+            await t.ctx.knowledge.dream({ force: true, limit: 100 });
+            const replayed = await db.one('SELECT seen, source_task FROM codes_knowledge WHERE id = $1', [valid.id]);
+            assert.strictEqual(replayed.seen, repeated.seen, 'replaying an older task does not inflate sightings');
+            assert.strictEqual(replayed.source_task, next.id, 'replay does not move attribution backwards');
         });
 
         await check('the person’s knowledge is exported with the account and erased with it', async () => {
