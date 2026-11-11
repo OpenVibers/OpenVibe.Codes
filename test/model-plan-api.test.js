@@ -68,6 +68,20 @@ const { PRESETS } = require('../engine/model-plan');
             assert.equal(page.status, 200);
             assert.match(page.text, /Save model plan/);
         });
+        await check('the Dock task shape forwards its plan or preset to the AI harness', async () => {
+            const request = { text: 'Fix the parser', mode: 'repo', repo: 'https://github.com/a/b' };
+            const chosen = await t.get('/api/v1/tasks', { as: ada, method: 'POST', json: { ...request, preset: 'Deep' } });
+            assert.equal(chosen.status, 201, chosen.text);
+            assert.equal(submitted.at(-1).args.plan.mode, 'pair');
+            assert.equal(submitted.at(-1).args.preset, 'Deep');
+            assert.equal(submitted.at(-1).args.plan_source, 'task');
+            const override = await t.get('/api/v1/tasks', { as: ada, method: 'POST', json: { ...request, plan: PRESETS.Fast } });
+            assert.equal(override.status, 201, override.text);
+            assert.equal(submitted.at(-1).args.plan.mode, 'single');
+            assert.equal(submitted.at(-1).args.plan_source, 'task');
+            const both = await t.get('/api/v1/tasks', { as: ada, method: 'POST', json: { ...request, plan: PRESETS.Fast, preset: 'Deep' } });
+            assert.equal(both.status, 422);
+        });
         await check('weekly admin page is owner-only and tuning requires its button', async () => {
             const other = await t.get('/admin/model-plans', { as: ada });
             assert.equal(other.status, 403);
