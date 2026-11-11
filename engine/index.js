@@ -12,7 +12,8 @@
  *   engine.runerror    what a failed run really said
  *   engine.adapters    every harness Codes can run, with the portal's argv and environment
  *   engine.jobrunner   one attempt of one harness, the way the portal runs one
- *   engine.prompt      the prompt every job gets (the rules, the lessons, the digest, the brief)
+ *   engine.prompt      the prompt every job gets (the rules, the lessons, the memory, the digest, the brief)
+ *   engine.memory      the small memory index: MEMORY.md always, topics by search
  *   engine.repomap     the repo digest a job gets instead of a directory tree
  *   engine.joblines    the lines a task's page shows while it runs
  *   engine.logins      what this machine has: each CLI, signed in or not, and its limit windows
@@ -37,6 +38,7 @@ const runerror = require('./runerror');
 const adapters = require('./adapters');
 const jobrunner = require('./jobrunner');
 const prompt = require('./prompt');
+const memory = require('./memory');
 const repomap = require('./repomap');
 const joblines = require('./joblines');
 const logins = require('./logins');
@@ -60,6 +62,7 @@ module.exports = {
     adapters,
     jobrunner,
     prompt,
+    memory,
     repomap,
     joblines,
     logins,
