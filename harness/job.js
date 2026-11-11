@@ -23,6 +23,7 @@ const { collectProof } = require('../engine/proof');
 const { createCheckpoints, toolPaths } = require('./checkpoints');
 const { runCheck } = require('./goal-check');
 const { boundedEvidence } = require('../engine/goal');
+const skills = require('../engine/skills');
 
 const JOB_PROTOCOL = '1.0.0';
 /** The agents a conductor's turn may run on: every harness Codes offers. */
@@ -289,6 +290,9 @@ function parseArgs(raw, env = process.env) {
         // Know K5: the lessons and facts earlier runs learned, from the server's own store and already a short block.
         // It is prepended to the prompt in runJob, so every harness (CLI or API) gets it the same way.
         ...(typeof a.knowledge === 'string' && a.knowledge.trim() ? { knowledge: a.knowledge.trim().slice(0, 4000) } : {}),
+        // The repository's own skills (Release 2, feat 9): metadata in the prompt, a body only when the task matches.
+        // Off unless the job asks (or CODES_SKILLS_LOADER=1): an existing prompt must not grow silently.
+        ...(a.skills === true || /^(1|true|on|yes)$/i.test(String(env.CODES_SKILLS_LOADER || '')) ? { skills: true } : {}),
         // The conversation's work so far (Codes L31 CH4): applied to the clone before the agent starts.
         ...(typeof a.base_patch === 'string' && a.base_patch.trim() && a.base_patch.length <= MAX_PATCH ? { base_patch: a.base_patch } : {}),
         ...(goal ? { goal } : {}),
@@ -672,10 +676,18 @@ async function pushBranch(dir, job, { env, fetchImpl, base }) {
  * a code task — the one line that lets the next run learn from this one. Every adapter takes the prompt as its brief,
  * so this is the same for a CLI harness and an API model.
  */
-function agentPrompt(job) {
+function agentPrompt(job, cwd = null) {
     const parts = [];
     if (job.knowledge) parts.push(job.knowledge);
     parts.push(job.prompt);
+    // Skills live in the checkout; discovery runs after the clone. A skill body is loaded only when the task names
+    // the skill or matches its when-to-use words, and references stay files the agent opens itself.
+    if (job.skills && cwd) {
+        try {
+            const loaded = skills.brief(skills.index(cwd).skills, { prompt: job.prompt, root: cwd });
+            if (loaded.block) parts.push(loaded.block);
+        } catch { /* an unreadable skills folder never fails the task */ }
+    }
     if (job.kind === 'code') {
         parts.push('---\n## Before you finish (OpenVibe.Codes Knowledge)\n\nEnd with a `Learned:` block of at most three lines: one fact the next agent on this repository should know, each with the file, command or URL that shows it. Leave it out when nothing was new.');
     }
@@ -805,7 +817,7 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             say({ t: 'step', text: 'Preparing an empty benchmark workspace' });
         }
         const run = harness.run({
-            prompt: agentPrompt(job), task: 'edit', agent: job.agent, model: job.model, effort: job.effort || null,
+            prompt: agentPrompt(job, work), task: 'edit', agent: job.agent, model: job.model, effort: job.effort || null,
             advisor: job.advisor || null, cwd: work,
             permission: job.permission, handoff: !job.agent, maxAttempts: job.kind === 'conductor' ? 1 : 3,
             // A job on the person's Node runs in its sandbox (own namespaces, a read-only root, no home folder, only
