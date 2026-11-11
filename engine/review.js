@@ -244,10 +244,14 @@ async function reviewTwoAxes(options = {}) {
         axes: { standards: { verdict: standards.reviewed ? standards.verdict : 'not_run' }, spec: { verdict: specification ? (specification.reviewed ? specification.verdict : 'not_run') : 'not_run' } },
         findings: prior, lifecycle: null, lifecycle_line: null,
     };
-    const merged = merge(spec ? prior : prior.filter((f) => f.axis !== 'spec'), [
-        ...parse(JSON.stringify({ findings: standards.raw_findings.map((f) => ({ ...f, axis: 'standards' })) })),
-        ...(specification ? parse(JSON.stringify({ findings: specification.raw_findings.map((f) => ({ ...f, axis: 'spec' })) })) : []),
-    ].slice(0, MAX_FINDINGS));
+    const standardFindings = parse(JSON.stringify({ findings: standards.raw_findings.map((f) => ({ ...f, axis: 'standards' })) }));
+    const specFindings = specification ? parse(JSON.stringify({ findings: specification.raw_findings.map((f) => ({ ...f, axis: 'spec' })) })) : [];
+    const current = [];
+    for (let i = 0; i < MAX_FINDINGS; i++) {
+        if (standardFindings[i]) current.push(standardFindings[i]);
+        if (specFindings[i]) current.push(specFindings[i]);
+    }
+    const merged = merge(spec ? prior : prior.filter((f) => f.axis !== 'spec'), current.slice(0, MAX_FINDINGS));
     if (!spec) merged.findings.push(...prior.filter((f) => f.axis === 'spec'));
     const failed = standards.verdict !== 'approved' || (specification && specification.verdict !== 'approved');
     return {

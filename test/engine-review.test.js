@@ -66,6 +66,17 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
             const missing = await reviewTwoAxes({ ...opts, summary: '' });
             assert.strictEqual(missing.axes.spec.verdict, 'not_run');
             assert.strictEqual(prompts.length, 3);
+            const findingsFetch = async (_url, options) => {
+                const isSpec = JSON.parse(options.body).messages[0].content.includes('Spec axis only');
+                const findings = isSpec ? [{ file: 'spec.js', line: 3, text: 'ticket case is missing' }] : [
+                    { file: 'a.js', line: 1, text: 'duplicated code' },
+                    { file: 'b.js', line: 2, text: 'hidden side effect' },
+                    { file: 'c.js', line: 4, text: 'misleading name' },
+                ];
+                return { status: 200, ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ verdict: 'changes_requested', summary: 'findings', findings }) } }] }) };
+            };
+            const withFindings = await reviewTwoAxes({ ...opts, fetchImpl: findingsFetch });
+            assert.deepEqual(withFindings.findings.map((f) => f.file), ['a.js', 'spec.js', 'b.js']);
         });
 
         await check('an incremental re-review names the reviewed and current heads', () => {
