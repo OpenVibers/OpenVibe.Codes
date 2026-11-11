@@ -18,3 +18,6 @@ HTTPS-only, deduplicated by URL and preserve structured titles. Existing histori
 
 The stream waits for final session backfill before closing. Each attempt has a separate immutable projection, so
 a continuation receives a new run ID and never appends events after the previous RUN_FINISHED.
+
+Grouping, one-line summaries and step status are carried in `metadata["ov.step"]`; the reserved `metadata.ov`
+contains the contract's title, kind, sources, attachments, cost, needs_you, product and ref fields.
