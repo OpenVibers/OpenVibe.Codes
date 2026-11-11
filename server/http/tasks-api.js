@@ -551,6 +551,29 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
     });
 
     /**
+     * A message to the task (ask 354): while an attempt is live the message waits for the next attempt (202, nothing
+     * lost — a Run job on the person's own machine cannot be interrupted mid-run); when nothing runs it carries the
+     * task on at once, like a continue with a note.
+     */
+    r.post('/tasks/:id/message', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        const row = await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
+        const b = req.body || {};
+        const text = typeof b.text === 'string' ? b.text : (typeof b.note === 'string' ? b.note : null);
+        const out = await taskStore.messageTask(row, { note: text });
+        if (out.error) {
+            const status = out.error === 'no such task' ? 404 : /needs words|at most/.test(out.error) ? 422 : 409;
+            return problem(req, res, status,
+                status === 404 ? 'codes.task_not_found' : status === 422 ? 'codes.message_invalid' : 'codes.task_conflict', out.error);
+        }
+        if (out.queued) {
+            return res.status(202).json({ queued: true, message: { id: out.message.id, n: out.message.n, text: out.message.text } });
+        }
+        log.info(`[Codes] task ${row.id} carried on by a message`);
+        return res.json(await timeline(out.row));
+    });
+
+    /**
      * The running attempt stops: the outcome is "stopped" and nothing carries it on. The owner (the Dock's shape)
      * gets { ok }; a service keeps the timeline its capability was built on. Another person's task is 404, never
      * a refusal that says it exists.
