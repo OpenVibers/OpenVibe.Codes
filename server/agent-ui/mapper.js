@@ -123,6 +123,26 @@ function createMapper(state, { clean = (x) => x, fallback = async () => null } =
             emit('STEP_FINISHED', { stepName: id }, { title: step.title, kind: step.kind, status: step.status, group: state.group });
             if (added.length) emit('CUSTOM', { name: 'ov.sources', value: added }, { sources: added });
             if (l.ok === false) state.group = null;
+        } else if (l.t === 'step' && l.role) {
+            state.group = null;
+            if (l.event === 'start') {
+                const id = `${state.id}:role:${source}`;
+                const step = { id, role: l.role, phase: l.phase || null, model: l.model || null, title: `${l.role}${l.phase ? ` · ${l.phase}` : ''}`, kind: 'agent', status: 'running', started_at: at };
+                state.steps.push(step);
+                emit('STEP_STARTED', { stepName: id }, { title: step.title, kind: step.kind, role: step.role, model: step.model, phase: step.phase });
+            } else if (l.event === 'end') {
+                const step = state.steps.slice().reverse().find((s) => s.role === l.role && s.phase === (l.phase || null) && s.status === 'running');
+                if (step) {
+                    step.status = ['approved', 'passed'].includes(l.outcome) ? 'done' : 'failed';
+                    step.ended_at = at;
+                    step.tokens = Number(l.tokens) || 0;
+                    step.cost_usd = Number(l.cost_usd) || 0;
+                    step.duration_ms = Number(l.duration_ms) || 0;
+                    emit('STEP_FINISHED', { stepName: step.id }, { title: step.title, kind: step.kind, role: step.role, model: step.model, phase: step.phase, status: step.status, outcome: l.outcome || null, tokens: step.tokens, cost_usd: step.cost_usd, duration_ms: step.duration_ms });
+                }
+            } else if (l.phase) {
+                emit('ACTIVITY_SNAPSHOT', { messageId: `${state.id}:check:${source}`, activityType: 'check', content: { text: oneLine(l.text) } }, { title: oneLine(l.text), kind: 'run', role: l.role, check: l.phase });
+            }
         } else if (l.t === 'plan') {
             state.group = null;
             state.plan = l.plan || [{ title: l.text || 'Plan', status: 'running' }];
