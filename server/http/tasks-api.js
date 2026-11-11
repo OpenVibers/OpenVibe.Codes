@@ -56,7 +56,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
     // The Dock's Code tab calls these from another OpenVibe site with the person's bearer token: an allowed origin
     // is reflected so the page may read the answer (server/http/openvibe-origins.js). Only the Dock's own two
     // routes: another router's preflight must fall through to its own answer.
-    r.use(corsOpenVibe({ methods: 'GET, POST, OPTIONS', paths: ['/tasks', /^\/tasks\/[^/]+\/stop$/] }));
+    r.use(corsOpenVibe({ methods: 'GET, POST, OPTIONS', paths: ['/tasks', /^\/tasks\/[^/]+\/stop$/, /^\/me\/agents\/[^/]+\/sheet$/] }));
     const benchTokens = config.oauth.clientSecret ? createServiceTokenClient({
         tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId,
         clientSecret: config.oauth.clientSecret, audience: 'openvibe.bench', scope: 'bench.run.publish',
@@ -190,6 +190,40 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         const agents = await fleet.agents(subject, harnesses);
         const latest = await fleet.latest(subject);
         return res.json({ ok: out.ok !== false, machines: latest.machines, agents, at: latest.at, ...(out.problem ? { problem: out.problem } : {}) });
+    });
+
+    // One read for a coding harness on the person's machines. Attempts, not the task's initial agent, decide
+    // attribution: a task may switch harnesses midway. Codes has no per-harness memory or schedule records.
+    r.get('/me/agents/:id/sheet', guardAny('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
+        if (!req.principal.owner) return problem(req, res, 403, 'codes.agent_owner_required', 'sign in as the owner to read this agent');
+        const id = String(req.params.id || '');
+        const offer = /^[a-z][a-z0-9-]{0,63}$/.test(id) && harnesses.list().find((item) => item.id === id);
+        if (!offer) return problem(req, res, 404, 'codes.agent_not_found', 'no such coding agent');
+        const fleetRows = fleet ? await fleet.agents(req.principal.subject, harnesses) : [];
+        const availability = fleetRows.find((row) => row.agent === id) || null;
+        const rows = await db.many(`SELECT a.id, a.task_id, a.n, a.state, a.why, a.reason, a.cost_usd,
+                a.machine, a.started_at, a.finished_at, a.created_at, t.prompt, t.repo, t.outcome, t.outcome_note
+            FROM codes_attempts a JOIN run_tasks t ON t.id = a.task_id
+            WHERE t.subject = $1 AND a.agent = $2 ORDER BY a.created_at DESC LIMIT 100`, [req.principal.subject, id]);
+        const work = rows.map((row) => ({
+            id: row.id, task_id: row.task_id, title: String(row.prompt || '').replace(/\s+/g, ' ').slice(0, 240),
+            what: row.why || null, result: row.outcome_note || row.reason || null, state: row.state,
+            outcome: row.outcome || null, cost_usd: row.cost_usd == null ? null : Number(row.cost_usd),
+            machine: row.machine || null, repo: row.repo || null, started_at: row.started_at || row.created_at,
+            finished_at: row.finished_at || null, url: `${config.baseUrl}/tasks/${row.task_id}`,
+        }));
+        const now = work.find((row) => ['queued', 'running'].includes(row.state)) || null;
+        const activity = Object.values(work.reduce((days, row) => {
+            const day = String(row.started_at).slice(0, 10);
+            (days[day] ||= { day, entries: [] }).entries.push({ task_id: row.task_id, what: row.what || row.title, result: row.result, outcome: row.outcome, cost_usd: row.cost_usd, url: row.url });
+            return days;
+        }, {}));
+        return res.set('Cache-Control', 'private, no-store').json({
+            agent: { id, name: offer.name, face: null, state: now ? 'working' : availability && availability.state || 'idle',
+                kind: 'coding harness', availability },
+            now, work, activity, asks: [], asks_empty: 'Requests to approve coding work will appear here when this agent needs you.',
+            computer: null, schedules: [], memory: [], identity: { provider: offer.provider || null, capabilities: offer.capabilities || {} },
+        });
     });
 
     /**
