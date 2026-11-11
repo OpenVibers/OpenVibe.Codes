@@ -71,6 +71,7 @@ const json = (findings, verdict = 'changes_requested') => JSON.stringify({ verdi
         const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'engine', 'transcript.schema.json'), 'utf8'));
         assert.deepEqual(schema.properties.review.required, ['verdict', 'findings', 'lifecycle']);
         assert.deepEqual(schema.$defs.reviewFinding.properties.state.enum, ['ACTIVE', 'RESOLVED']);
+        assert.deepEqual(schema.$defs.reviewFinding.properties.axis.enum, ['standards', 'spec']);
         assert.deepEqual(schema.$defs.reviewLifecycle.required, ['addressed', 'reappeared', 'still_open', 'new']);
     });
     done();
