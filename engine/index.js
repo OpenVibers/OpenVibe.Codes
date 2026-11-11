@@ -14,6 +14,7 @@
  *   engine.jobrunner   one attempt of one harness, the way the portal runs one
  *   engine.prompt      the prompt every job gets (the rules, the lessons, the memory, the digest, the brief)
  *   engine.memory      the small memory index: MEMORY.md always, topics by search
+ *   engine.ledger      the per-turn usage ledger and the pre-call cap gate
  *   engine.repomap     the repo digest a job gets instead of a directory tree
  *   engine.joblines    the lines a task's page shows while it runs
  *   engine.logins      what this machine has: each CLI, signed in or not, and its limit windows
@@ -39,6 +40,7 @@ const adapters = require('./adapters');
 const jobrunner = require('./jobrunner');
 const prompt = require('./prompt');
 const memory = require('./memory');
+const ledger = require('./ledger');
 const repomap = require('./repomap');
 const joblines = require('./joblines');
 const logins = require('./logins');
@@ -63,6 +65,7 @@ module.exports = {
     jobrunner,
     prompt,
     memory,
+    ledger,
     repomap,
     joblines,
     logins,
