@@ -344,6 +344,7 @@ await check('the Import tab walks through the three assistants and offers the pa
         assert.ok(res.text.includes('Show the prompt to paste'), 'the extraction prompt');
         assert.ok(res.text.includes('List everything you remember about me'), 'the prompt text');
         assert.ok(res.text.includes('name="file"') && res.text.includes('enctype="multipart/form-data"'), 'the zip form');
+        assert.ok(res.text.includes('data-memory-zip-picker') && res.text.includes('data-memory-zip-progress'), 'zip preview uses the shared picker and progress');
         assert.ok(res.text.includes('Preview the answer'), 'the paste form');
         assert.ok(res.text.includes('nothing is kept until you tick it'), 'the consent line');
         assert.ok(!res.text.includes('Note number 1'), 'no note text on the import tab');

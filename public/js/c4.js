@@ -181,44 +181,63 @@
             model.addEventListener('change', toggle);
         }
     });
-    // The conductor (Codes C9b): a message with images goes through the JSON API (the form alone sends the words), and
-    // the live turn's lines fill the transcript. When the turn ends the page reloads once, so the turn's answer and its
-    // state are the server's own words.
-    document.querySelectorAll('[data-c4-conductor-form]').forEach((node) => {
-        const form = node.closest('form');
-        const input = form.querySelector('[data-c4-images]');
+    // The conductor shares the upload picker; files use the existing multipart message route.
+    document.querySelectorAll('[data-c4-conductor-form]').forEach((form) => {
         const status = form.querySelector('[data-c4-message-status]');
-        if (!form || !input) return;
-        const say = (text, bad) => { if (status) { status.textContent = text; status.classList.toggle('is-bad', !!bad); } };
-        const asData = (file) => new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve({ name: file.name, mime: file.type, data: String(reader.result || '') });
-            reader.onerror = () => resolve(null);
-            reader.readAsDataURL(file);
+        const root = form.querySelector('[data-c4-upload]');
+        const meterRoot = form.querySelector('[data-c4-upload-progress]');
+        if (!root || !window.OVUpload) return;
+        const files = [];
+        const meter = OVUpload.progress(meterRoot);
+        const say = (message, bad) => { if (status) { status.textContent = message; status.classList.toggle('is-bad', !!bad); } };
+        const blocked = /\.(exe|dll|com|bat|cmd|msi|scr|ps1|sh|so|dylib|app|apk|deb|rpm|jar|bin|elf|vbs|wsf|hta)$/i;
+        const picker = OVUpload.picker(root, {
+            label: 'Attach files', multiple: true,
+            onFile: (file, row) => {
+                const total = files.reduce((n, item) => n + item.size, 0);
+                const problem = blocked.test(file.name) ? 'Programs cannot be attached.'
+                    : !file.size ? 'Choose a file that is not empty.'
+                    : file.size > 20 * 1048576 ? `${file.name} is over 20 MB.`
+                    : files.length >= 10 ? 'Choose at most 10 files.'
+                    : total + file.size > 50 * 1048576 ? 'The files are over 50 MB together.' : '';
+                if (problem) { row.dispatchEvent(new Event('remove')); row.remove(); say(problem, true); return; }
+                files.push(file); say(`${files.length} file${files.length === 1 ? '' : 's'} selected`);
+            },
+            onRemove: (file) => { const i = files.indexOf(file); if (i >= 0) files.splice(i, 1); say(files.length ? `${files.length} files selected` : ''); }
         });
         form.addEventListener('submit', async (event) => {
-            const files = Array.from(input.files || []).slice(0, 10);
-            if (files.length) return; // the form itself posts the files as multipart
             event.preventDefault();
             const button = form.querySelector('button[type="submit"]');
             if (button) button.disabled = true;
             say('Sending…');
+            if (files.length) {
+                const data = new FormData(form);
+                files.forEach((file) => data.append('files', file, file.name));
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', form.action);
+                xhr.withCredentials = true;
+                const total = files.reduce((n, file) => n + file.size, 0);
+                meter.update({ state: 'sending', done: 0, total });
+                xhr.upload.onprogress = (e) => { if (e.lengthComputable) meter.update({ state: 'sending', done: Math.min(total, e.loaded), total }); };
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 400) { meter.update({ state: 'done', done: total, total }); location.href = xhr.responseURL || form.action; return; }
+                    const message = 'The files could not be sent. Check their formats and try again.';
+                    meter.update({ state: 'failed', message }); say(message, true); if (button) button.disabled = false;
+                };
+                xhr.onerror = () => { const message = 'The connection stopped. Try again.'; meter.update({ state: 'failed', message }); say(message, true); if (button) button.disabled = false; };
+                xhr.send(data);
+                return;
+            }
             try {
-                const attachments = (await Promise.all(files.map(asData))).filter(Boolean);
                 const text = (form.querySelector('textarea[name="text"]') || {}).value || '';
-                const res = await fetch(node.dataset.conductorApi, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ text, attachments }),
+                const res = await fetch(form.dataset.conductorApi, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    credentials: 'same-origin', body: JSON.stringify({ text, attachments: [] }),
                 });
                 const doc = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(doc.detail || `the message was refused (${res.status})`);
                 window.location.reload();
-            } catch (e) {
-                say(String((e && e.message) || 'the message could not be sent'), true);
-                if (button) button.disabled = false;
-            }
+            } catch (e) { say(String((e && e.message) || 'the message could not be sent'), true); if (button) button.disabled = false; }
         });
     });
 

@@ -56,6 +56,8 @@ const { stepKind } = require('../server/http/chat');
             assert.ok(text.includes('data-ovt-panel-open aria-controls="ch-side"') && text.includes('<aside class="ovt-panel" id="ch-side"'), 'what it did is the panel');
             assert.ok(text.includes('1 file changed') && text.includes('<span class="ch-add">+3</span>'), 'how it ended: the files');
             assert.ok(text.includes(`action="/tasks/${MINE}/continue"`), 'the composer carries it on');
+            assert.ok(text.includes('data-ch-upload') && text.includes('ov-upload.js') && text.includes('ov-upload.css'), 'the shared file picker is loaded for the composer');
+            assert.ok(text.includes('20 MB each, 50 MB a message'), 'attachment limits are visible before upload');
             assert.ok(text.includes('aria-current="page"'), 'the rail marks the open conversation');
         });
 

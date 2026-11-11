@@ -434,15 +434,14 @@ function createChatRoutes(ctx) {
     // the owner's words for the limits the server holds (domain/attachments.js). The person's OpenVibe files live
     // on OpenVibe.Media, which names the library row until the shared files picker lands (composer-plumbing).
     const ATTACH_ACCEPT = 'image/*,text/*,application/pdf,application/zip,.pdf,.zip,.md,.markdown,.json,.js,.ts,.jsx,.tsx,.py,.css,.html,.xml,.yml,.yaml,.toml,.sql,.csv,.log,.txt';
-    const MEDIA_LIBRARY = (() => { try { const m = require('openvibe-contracts').services.get('media'); return (m && m.publicOrigin) || null; } catch { return null; } })();
     const ATTACH_NOTE = 'Files: up to 10, 20 MB each, 50 MB a message. Programs can\u2019t be attached.';
     /** The kit's composer with Codes' pickers in its tools, where the work runs under the bar, and its JSON route. */
     function composer({ action, api = '', placeholder, pickers = '', options = '', examples = [], live = false, stopAction = '', note = '', id = null, where = '', files = false, value = '' }) {
         return thread.composer({
             action, id, placeholder, label: placeholder, tools: pickers,
-            attach: files ? { menu: true, accept: ATTACH_ACCEPT, library: MEDIA_LIBRARY, name: 'files' } : null,
+            attach: null,
             options: options ? { html: options, label: 'Options' } : null, examples, value,
-            foot: `${files ? '<div class="ch-files" data-ch-files-list role="list" aria-live="polite"></div>' : ''}${where}`,
+            foot: `${files ? `<div data-ch-upload data-accept="${esc(ATTACH_ACCEPT)}"></div><noscript><label>Attach files<input type="file" name="files" accept="${esc(ATTACH_ACCEPT)}" multiple></label></noscript>` : ''}${where}`,
             note: files ? (note ? `${note} ${ATTACH_NOTE}` : ATTACH_NOTE) : note,
             attrs: { ...(api ? { 'data-ch-api': api } : {}), ...(files ? { enctype: 'multipart/form-data' } : {}) },
             busy: live, stopAction: live && stopAction ? stopAction : null, maxlength: 16000,
@@ -462,7 +461,7 @@ function createChatRoutes(ctx) {
             cls: page != null ? 'is-page' : '',
         });
         const body = `<div class="ch" data-chat${streamUrl ? ` data-ch-stream="${esc(streamUrl)}"` : ''}>${view}</div>`;
-        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css', 'thread.css', ...styles], sharedScripts: ['kit-web.js', 'ov-thread.js', ...sharedScripts], scripts: [...scripts, 'js/md.js', 'js/chat.js'], body: raw(body) });
+        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css', 'thread.css', 'ov-upload.css', ...styles], sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-upload.js', ...sharedScripts], scripts: [...scripts, 'js/md.js', 'js/chat.js'], body: raw(body) });
     }
 
     /** The panel: who worked on it, and where the work is. */

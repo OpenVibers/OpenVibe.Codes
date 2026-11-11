@@ -162,6 +162,7 @@ await check('the portable file downloads as an attachment, and an import goes ba
         assert.ok(page.text.includes('Download memory.json'), 'the export link');
         assert.ok(page.text.includes('Import a portable file'), 'the import form');
         assert.ok(page.text.includes('memory-import.js'), 'the file picker script');
+        assert.ok(page.text.includes('id="memory-import-picker"') && page.text.includes('ov-upload.js'), 'portable JSON uses the shared local picker');
 
         const file = await h.get('/memory/export', { as: user });
         assert.strictEqual(file.status, 200);

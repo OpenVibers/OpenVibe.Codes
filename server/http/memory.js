@@ -80,7 +80,7 @@ const MEMORY_TABS = [
 ];
 
 /** The share sheet and the gate are drawn by openvibe-shared (openvibe-shared 4.123.0); no inline script. */
-const SHARE_ASSETS = { styles: ['ov-share.css'], sharedScripts: ['ov-share.js'], scripts: ['js/memory-import.js'] };
+const SHARE_ASSETS = { styles: ['ov-share.css', 'ov-upload.css'], sharedScripts: ['ov-share.js', 'ov-upload.js'], scripts: ['js/memory-import.js'] };
 const SERVICES = ['mem0', 'letta', 'zep'];
 
 /** What the store's refusals say to a person. The words are ours: no note text ever reaches a flash. */
@@ -240,9 +240,10 @@ function createMemoryRoutes(ctx, kit) {
             + '<p class="c4-hint">' + esc(p.what) + '</p>'
             + '<ol class="c4-steps">' + (p.steps || []).map((step) => '<li>' + esc(step) + '</li>').join('') + '</ol>'
             + '<p class="c4-hint"><strong>What arrives:</strong> ' + esc(p.arrives) + '<br><strong>How long:</strong> ' + esc(p.time) + '</p>'
-            + '<form class="c4-form" method="post" action="/memory/import/preview" enctype="multipart/form-data">'
+            + '<form class="c4-form" method="post" action="/memory/import/preview" enctype="multipart/form-data" data-memory-zip-form>'
             + '<input type="hidden" name="provider" value="' + esc(p.id) + '">'
-            + '<label class="c4-file">Your export .zip <input type="file" name="file" accept=".zip,application/zip,application/x-zip-compressed" required></label>'
+            + '<div data-memory-zip-picker></div><noscript><label class="c4-file">Your export .zip <input type="file" name="file" accept=".zip,application/zip,application/x-zip-compressed" required></label></noscript>'
+            + '<p class="c4-hint">Choose a .zip export, up to 25 MB.</p><div data-memory-zip-progress></div><p role="alert" data-memory-zip-error hidden></p>'
             + '<button class="c4-button" type="submit">Preview ' + esc(p.name) + '</button>'
             + '</form></article>';
         const paste = '<section class="c4-card"><div class="c4-card-head"><h2>Any assistant: ask what it remembers</h2>'
@@ -575,7 +576,7 @@ function createMemoryRoutes(ctx, kit) {
             + '<section class="c4-card"><div class="c4-card-head"><h2>Import a portable file</h2></div>'
             + '<p class="c4-sub">Choose the file or paste its JSON. Notes that say the same thing as one you already have are merged, not copied.</p>'
             + '<form method="post" action="/memory/import"><input type="hidden" name="tab" value="export">'
-            + '<label class="c4-field"><span>File</span><input type="file" id="memory-import-file" accept="application/json,.json"></label>'
+            + '<div id="memory-import-picker"></div><p role="alert" id="memory-import-error" hidden></p>'
             + '<label class="c4-field"><span>Or paste the JSON</span><textarea id="memory-import-text" name="document" rows="8" spellcheck="false"></textarea></label>'
             + '<button class="c4-button" type="submit">Import</button></form>'
             + '<p class="c4-hint">A file over 25 MB is refused. Nothing is kept until you press Import.</p></section>';
