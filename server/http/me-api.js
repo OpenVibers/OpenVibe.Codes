@@ -97,7 +97,8 @@ function createMeApi({ config, store, sso, keys, run, harnesses, userSettings = 
 
     // The Dock's Code tab reads this from another OpenVibe site with the person's bearer token: an allowed origin
     // is reflected so the page may read the answer (server/http/openvibe-origins.js). Writes below stay same-site.
-    r.use(corsOpenVibe({ methods: 'GET, POST, OPTIONS' }));
+    // Only this router's own routes: another router's preflight must fall through to its own answer.
+    r.use(corsOpenVibe({ methods: 'GET, POST, OPTIONS', paths: ['/me/tasks'] }));
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
     /**

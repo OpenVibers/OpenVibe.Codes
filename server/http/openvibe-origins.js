@@ -27,9 +27,15 @@ function openVibeOrigins() {
     return out;
 }
 
-/** Reflect an allowed cross-site Origin so its page may read the answer; answer preflights outright. */
-function corsOpenVibe({ methods = 'GET, POST, OPTIONS', headers = 'authorization, content-type' } = {}) {
+/**
+ * Reflect an allowed cross-site Origin so its page may read the answer; answer preflights outright. `paths`
+ * scopes the middleware to the router's own routes (a string matches exactly or as a path segment prefix,
+ * a RegExp is tested as is): another router's preflight must fall through to its own answer, not end here.
+ */
+function corsOpenVibe({ methods = 'GET, POST, OPTIONS', headers = 'authorization, content-type', paths = null } = {}) {
+    const own = (p) => !paths || paths.some((w) => (w instanceof RegExp ? w.test(p) : p === w || p.startsWith(`${w}/`)));
     return (req, res, next) => {
+        if (!own(String(req.path || ''))) return next();
         const origin = String(req.get('origin') || '');
         if (origin && openVibeOrigins().has(origin)) {
             res.set('Access-Control-Allow-Origin', origin);

@@ -54,8 +54,9 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
     const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
     const json = express.json({ limit: '32kb' });
     // The Dock's Code tab calls these from another OpenVibe site with the person's bearer token: an allowed origin
-    // is reflected so the page may read the answer (server/http/openvibe-origins.js).
-    r.use(corsOpenVibe({ methods: 'GET, POST, OPTIONS' }));
+    // is reflected so the page may read the answer (server/http/openvibe-origins.js). Only the Dock's own two
+    // routes: another router's preflight must fall through to its own answer.
+    r.use(corsOpenVibe({ methods: 'GET, POST, OPTIONS', paths: ['/tasks', /^\/tasks\/[^/]+\/stop$/] }));
     const benchTokens = config.oauth.clientSecret ? createServiceTokenClient({
         tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId,
         clientSecret: config.oauth.clientSecret, audience: 'openvibe.bench', scope: 'bench.run.publish',

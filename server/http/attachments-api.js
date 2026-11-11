@@ -50,8 +50,8 @@ function createAttachmentsApi({ attachments, actorLimits, config, keys = null, l
     };
     const writeAllowed = async (req) => sameOrigin(req) || (await bearerSubject(req)) != null;
     // The Dock uploads from another OpenVibe site with the person's bearer token: an allowed origin is reflected
-    // so the page may read the answer (server/http/openvibe-origins.js).
-    r.use(corsOpenVibe({ methods: 'GET, POST, DELETE, OPTIONS' }));
+    // so the page may read the answer (server/http/openvibe-origins.js). Only this router's own routes.
+    r.use(corsOpenVibe({ methods: 'GET, POST, DELETE, OPTIONS', paths: ['/attachments'] }));
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
     r.post('/attachments', actorLimits.budget('codes.attachment.upload'), async (req, res) => {

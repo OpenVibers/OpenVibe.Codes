@@ -216,6 +216,14 @@ function assertSummary(s) {
             assert.ok(/value="new"[^>]*checked|checked[^>]*value="new"/.test(create.text), 'create reads as Create');
         });
 
+        await check('another router\u2019s preflight still ends at its own answer', async () => {
+            const pre = await fetch(`${t.base}/api/v1/me/agent-view`, {
+                method: 'OPTIONS', headers: { origin: 'https://openvibe.live' },
+            });
+            assert.strictEqual(pre.status, 204);
+            assert.strictEqual(pre.headers.get('access-control-allow-origin'), '*', 'agent-view keeps its own wildcard');
+        });
+
         await check('summarize maps rows to the contract: needs-you, old rows, titles', async () => {
             const base = { id: 'tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3', prompt: 'Fix it\n\nMore words.', repo: 'https://github.com/octocat/Hello-World', created_at: 1, updated_at: 2 };
             const [waiting] = summarize([{ ...base, state: 'running' }], { waitingIds: new Set([base.id]) });
