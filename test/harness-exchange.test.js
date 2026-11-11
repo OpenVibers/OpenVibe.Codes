@@ -11,6 +11,7 @@ const os = require('os');
 const path = require('path');
 const { createHarness, exchangeKeyOf, exchangeModelOf, platformHost } = require('../harness');
 const { createStore } = require('../harness/sessions');
+const { load: loadConfig } = require('../server/config');
 const { check, done } = require('./helpers/boot');
 
 /** A stand-in Exchange: records every request; fails the test if the direct DeepSeek host is called on the default path. */
@@ -118,6 +119,34 @@ const collect = async (run) => { const out = []; for await (const e of run) out.
         assert.strictEqual(own.OPENVIBE_EXCHANGE_KEY, undefined);
         assert.strictEqual(own.OPENVIBE_EXCHANGE_URL, undefined);
         assert.strictEqual(own.DEEPSEEK_API_KEY, 'run-token');
+    });
+
+    await check('hosted CLI run tokens use Exchange for both API shapes and retain the provider selection header', () => {
+        const { envFor } = require('../server/domain/run-tokens');
+        const config = loadConfig({ CODES_EXCHANGE_URL: 'https://api.openvibe.exchange' });
+        assert.strictEqual(config.runTokens.cliExchange, true);
+        for (const harness of ['claude-code', 'claude-other']) {
+            const env = envFor({ config, harness, token: 'run-token', provider: 'anthropic', ownKey: true });
+            assert.strictEqual(env.ANTHROPIC_BASE_URL, 'https://api.openvibe.exchange');
+            assert.strictEqual(env.ANTHROPIC_AUTH_TOKEN, 'run-token');
+            assert.strictEqual(env.ANTHROPIC_CUSTOM_HEADERS, 'x-openvibe-credential: anthropic');
+        }
+        for (const harness of ['codex', 'opencode', 'command-code', 'aider', 'minimax-code', 'muse']) {
+            const env = envFor({ config, harness, token: 'run-token', provider: 'openai', ownKey: true });
+            assert.strictEqual(env.OPENAI_BASE_URL, 'https://api.openvibe.exchange/v1');
+            assert.strictEqual(env.OPENAI_API_KEY, 'run-token');
+            assert.strictEqual(env.OPENAI_CUSTOM_HEADERS, 'x-openvibe-credential: openai');
+        }
+    });
+
+    await check('CODES_CLI_EXCHANGE=0 rolls hosted CLI requests back to OpenVibe.AI', () => {
+        const { envFor } = require('../server/domain/run-tokens');
+        const config = loadConfig({ CODES_CLI_EXCHANGE: '0' });
+        assert.strictEqual(config.runTokens.cliExchange, false);
+        const anthropic = envFor({ config, harness: 'claude-code', token: 'run-token', provider: 'anthropic', ownKey: false });
+        const openai = envFor({ config, harness: 'codex', token: 'run-token', provider: 'openai', ownKey: false });
+        assert.strictEqual(anthropic.ANTHROPIC_BASE_URL, 'https://ai.openvibe.services');
+        assert.strictEqual(openai.OPENAI_BASE_URL, 'https://ai.openvibe.services/v1');
     });
 
     await check('without an Exchange key or an own DeepSeek key the agent is unavailable, and the reason names both', () => {
