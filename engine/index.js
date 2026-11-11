@@ -21,6 +21,7 @@
  *   engine.review      the second opinion itself: a model of another family, through OpenVibe.AI
  *   engine.finding     one finding in the agent.finding@1 shape: confirmed, a lead that needs validation, or rejected
  *   engine.findings    a review's findings across revisions: stable ids, ACTIVE/RESOLVED and the lifecycle line
+ *   engine.verifier    a fresh verifier per confirmed record, with a refute prompt
  *
  * The modules do not depend on each other in a cycle, and none of them reads the portal's log folder.
  */
@@ -43,6 +44,7 @@ const proof = require('./proof');
 const review = require('./review');
 const finding = require('./finding');
 const findings = require('./findings');
+const verifier = require('./verifier');
 const goal = require('./goal');
 
 module.exports = {
@@ -64,6 +66,7 @@ module.exports = {
     review,
     finding,
     findings,
+    verifier,
     goal,
     // The names a caller usually wants, in one place.
     classify: router.classify,
