@@ -52,6 +52,7 @@ async function startNetworkStub() {
         await db.exec("INSERT INTO codes_task_proof (id, task_id, attempt_n, n, kind, label, ok) VALUES ($1, $2, 1, 1, 'tests', 'tests', true)", [`prf_${ids.ulid()}`, taskId]);
         await db.exec("INSERT INTO codes_run_tokens (id, task_id, subject, provider, jti, expires_at) VALUES ($1, $2, $3, 'openai', $4, now())", [`rtk_${ids.ulid()}`, taskId, subject, `jti_${ids.ulid()}`]);
         await db.exec("INSERT INTO codes_user_settings (subject, default_agent) VALUES ($1, 'codex')", [subject]);
+        await db.exec("INSERT INTO codes_model_plans (subject, scope, plan) VALUES ($1, 'account', '{\"mode\":\"single\"}'::jsonb)", [subject]);
         await db.exec("INSERT INTO codes_outbox (event_id, topic, subject, payload) VALUES ($1, 'codes.task.updated', $2, '{}'::jsonb)", [`evt_${ids.ulid()}`, subject]);
         await db.exec("INSERT INTO telemetry_samples (at, service, operation, subject) VALUES (now(), 'codes', 'task.start', $1)", [subject]);
         await db.exec("INSERT INTO codes_events_inbox (event_id, event_type, task_id) VALUES ($1, 'run.job.finished', $2)", [`evt_${ids.ulid()}`, taskId]);
@@ -99,7 +100,7 @@ async function startNetworkStub() {
             assert.strictEqual(file.content.length, 1);
             assert.strictEqual(file.content[0].prompt, 'Ada’s task');
             assert.deepStrictEqual(file.content[0].result, { ok: true });
-            for (const name of ['attempts.json', 'proof.json', 'settings.json', 'run-tokens.json']) {
+            for (const name of ['attempts.json', 'proof.json', 'settings.json', 'model-plans.json', 'run-tokens.json']) {
                 const f = part.body.files.find((x) => x.name === name);
                 assert.ok(f, `${name} is in the export`);
                 assert.strictEqual(f.content.length, 1, `${name} holds Ada’s row only`);
@@ -133,7 +134,7 @@ async function startNetworkStub() {
             for (const [table, key, who] of [
                 ['codes_attempts', 'task_id', [boTask]], ['codes_task_proof', 'task_id', [boTask]], ['codes_events_inbox', 'task_id', [boTask]],
                 ['codes_notices', 'task_id', [boTask]], ['codes_machine_fleet', 'subject', [bo]],
-                ['codes_run_tokens', 'subject', [bo]], ['codes_user_settings', 'subject', [bo]], ['codes_outbox', 'subject', [bo]],
+                ['codes_run_tokens', 'subject', [bo]], ['codes_user_settings', 'subject', [bo]], ['codes_model_plans', 'subject', [bo]], ['codes_outbox', 'subject', [bo]],
                 ['codes_knowledge', 'subject', [bo]],
             ]) {
                 const left = (await db.many(`SELECT ${key} FROM ${table}`)).map((r) => r[key]);

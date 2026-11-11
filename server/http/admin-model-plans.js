@@ -24,7 +24,7 @@ function createAdminModelPlans(ctx) {
     r.post('/admin/model-plans/tune', express.urlencoded({ extended: false, limit: '2kb' }), async (req, res) => {
         if (!owner(req)) return deny(req, res);
         if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
-        const changed = await ctx.modelPlans.tune(req.viewer.subject);
+        const changed = await ctx.modelPlans.tune();
         return res.redirect(303, `/admin/model-plans?tuned=${changed.length}`);
     });
     return r;

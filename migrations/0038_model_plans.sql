@@ -11,8 +11,7 @@ CREATE TABLE IF NOT EXISTS codes_model_plans (
 CREATE TABLE IF NOT EXISTS codes_model_preset_defaults (
     name text COLLATE "C" PRIMARY KEY,
     plan jsonb NOT NULL,
-    tuned_at timestamptz NOT NULL DEFAULT now(),
-    owner_subject text COLLATE "C" NOT NULL
+    tuned_at timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE run_tasks

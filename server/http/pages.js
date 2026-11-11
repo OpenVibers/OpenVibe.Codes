@@ -83,7 +83,7 @@ function createPageRoutes(ctx) {
     const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, ...o });
     const modelPlansPage = () => ({
         agent: true, index: true, cache: PUBLIC_CACHE, title: 'Model plans',
-        body: html`<article class="prose">${raw(markdown(fs.readFileSync(path.join(ROOT, 'docs/model-plans.md'), 'utf8')))}</article>`,
+        body: html`<h1>Model plans</h1><article class="prose">${raw(markdown(fs.readFileSync(path.join(ROOT, 'docs/model-plans.md'), 'utf8')))}</article>`,
     });
     r.get('/model-plans', (req, res) => page(req, res, modelPlansPage()));
     // OpenVibe Git's public repositories for the home (read in the background, never awaited here); tests set ctx.git.

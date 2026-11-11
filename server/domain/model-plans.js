@@ -59,11 +59,11 @@ function createModelPlans({ store, aiCatalog, config }) {
         const summary = weeklySummary(rows);
         return { ...summary, suggestions: tuningSuggestions(summary, await presets()) };
     }
-    async function tune(ownerSubject) {
+    async function tune() {
         const { suggestions } = await outcomes();
-        for (const item of suggestions) await db.exec(`INSERT INTO codes_model_preset_defaults (name, plan, owner_subject, tuned_at)
-            VALUES ($1, $2::jsonb, $3, now()) ON CONFLICT (name) DO UPDATE SET plan = EXCLUDED.plan,
-            owner_subject = EXCLUDED.owner_subject, tuned_at = now()`, [item.preset, JSON.stringify(item.plan), ownerSubject]);
+        for (const item of suggestions) await db.exec(`INSERT INTO codes_model_preset_defaults (name, plan, tuned_at)
+            VALUES ($1, $2::jsonb, now()) ON CONFLICT (name) DO UPDATE SET plan = EXCLUDED.plan,
+            tuned_at = now()`, [item.preset, JSON.stringify(item.plan)]);
         return suggestions;
     }
     return { get, put, select, presets, stored, enabled, outcomes, tune };
