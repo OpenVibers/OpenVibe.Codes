@@ -445,15 +445,15 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
         const tasks = await db.many(`SELECT t.id, t.subject, t.repo, t.job_id, t.agent, t.state, t.error,
                     t.result - 'patch' - 'files' AS result
                 FROM run_tasks t
-                WHERE t.id > $1 AND t.state IN ('succeeded', 'failed', 'cancelled', 'expired')
+                WHERE t.id > $1 AND t.result IS NOT NULL AND t.state IN ('succeeded', 'failed', 'cancelled', 'expired')
                   AND EXISTS (SELECT 1 FROM codes_knowledge k WHERE k.source_task = t.id AND k.subject = t.subject
-                              AND k.dedupe_key NOT LIKE 'summary:%')
+                              AND COALESCE(k.dedupe_key, '') NOT LIKE 'summary:%')
                 ORDER BY t.id LIMIT $2`, [state && state.cursor || '', batch]);
         let unsupported = 0;
         for (const task of tasks) {
             const before = await db.many(`SELECT id FROM codes_knowledge
                 WHERE source_task = $1 AND subject = $2 AND pinned = false AND visibility = 'private'
-                  AND updated_at = last_seen_at AND dedupe_key NOT LIKE 'summary:%'`, [task.id, task.subject]);
+                  AND updated_at = last_seen_at AND COALESCE(dedupe_key, '') NOT LIKE 'summary:%'`, [task.id, task.subject]);
             const supported = new Set((await captureTask(task, { replay: true })).map((row) => row.id));
             for (const row of before) {
                 if (supported.has(row.id)) continue;
