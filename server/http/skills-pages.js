@@ -41,7 +41,7 @@ function createSkillPageRoutes({ config, skills }) {
         try { return new URL(origin).origin === new URL(config.baseUrl).origin; } catch { return false; }
     };
     const form = express.urlencoded({ extended: false, limit: '200kb' });
-    const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, ...o });
+    const page = (req, res, o, status = 200) => res ? send(res, status, { viewer: req.viewer, config, path: req.originalUrl, ...o }) : o;
 
     const toolsText = (tools) => (tools && tools.length ? tools.map((t) => TOOL_LABELS[t] || t).join(', ') : 'every tool');
     const skillCard = (s, extra = '') => html`<li>
@@ -74,7 +74,7 @@ ${audience ? html`<div class="field"><label for="sk-audience">Who may read it</l
 <form class="stack" method="post" action="/skills/new">${formFields()}<button class="run-btn run-btn-primary" type="submit">Save version 1</button></form></section>`
             : html`<p><a class="run-btn" href="/auth/login?next=${encodeURIComponent('/skills')}">Sign in to publish and sync skills</a></p>`;
         return page(req, res, {
-            title: 'Skills: the hub for your agents',
+            title: 'Skills: the hub for your agents', agent: true, index: !kind && !q,
             description: 'Skills, rules and MCP servers kept per person and per project, versioned, and synced into Claude Code, Codex, OpenCode and Command Code on your machine.',
             crumbs: [{ label: 'Skills' }],
             body: html`<h1>Skills</h1>
@@ -111,7 +111,7 @@ ${skill.audience === 'people' ? html`<h3>Members</h3>${members.length ? html`<ul
 <form class="inline-form" method="post" action="/skills/${skill.id}/members"><label>Person <input name="subject" placeholder="usr_…" pattern="usr_[0-9A-HJKMNP-TV-Z]{26}" required></label><button class="run-btn" type="submit">Add</button></form>` : ''}
 </section>` : '';
         return page(req, res, {
-            title: skill.title,
+            title: skill.title, agent: skill.audience === 'public', index: skill.audience === 'public',
             description: skill.summary || `A ${KIND_LABELS[skill.kind]} on OpenVibe.Codes.`,
             crumbs: [{ label: 'Skills', href: '/skills' }, { label: skill.title }],
             body: html`${error ? notice(error, 'bad') : ''}
@@ -225,6 +225,15 @@ ${controls}`,
         }
     });
 
+    r.publicView = async (path) => {
+        const req = { viewer: { kind: 'anonymous' }, query: {}, params: {}, originalUrl: path };
+        if (path === '/skills') return galleryPage(req, null);
+        const match = /^\/skills\/([^/]+)$/.exec(path);
+        if (!match) return null;
+        req.params.id = match[1];
+        const skill = await skills.get(req.params.id, null);
+        return skill && skill.audience === 'public' ? detailPage(req, null) : null;
+    };
     return r;
 }
 

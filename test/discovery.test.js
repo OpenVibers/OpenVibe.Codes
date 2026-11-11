@@ -93,13 +93,72 @@ const PRIVATE = ['/projects', '/staff', '/auth/', '/oauth/test-callback'];
             assert.ok(!r.text.includes('https://openvibe.codes/api/'), 'api path in llms-full.txt');
         });
 
+        await check('every public page: unique bounded metadata, social cards, structured data and readable HTML', async () => {
+            const sitemap = await t.get('/sitemap.xml');
+            const llms = await t.get('/llms.txt');
+            const urls = [...sitemap.text.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1]);
+            const titles = new Set(), descriptions = new Set();
+            for (const url of urls) {
+                const path = new URL(url).pathname;
+                const r = await t.get(path);
+                assert.equal(r.status, 200, path);
+                const title = /<title>(.*?)<\/title>/.exec(r.text)[1];
+                const description = /<meta name="description" content="([^"]*)"/.exec(r.text)[1];
+                assert.ok(title.length <= 60 && !titles.has(title), `${path}: title ${title}`);
+                assert.ok(description.length <= 155 && !descriptions.has(description), `${path}: description ${description}`);
+                titles.add(title); descriptions.add(description);
+                assert.ok(r.text.includes(`rel="canonical" href="${url}"`), path);
+                assert.ok(!/name="robots" content="noindex/.test(r.text), path);
+                for (const key of ['og:title', 'og:description', 'og:image', 'twitter:card', 'twitter:image']) assert.ok(r.text.includes(`="${key}"`), `${path}: ${key}`);
+                assert.equal((r.text.match(/<h1\b/g) || []).length, 1, path);
+                const headings = [...r.text.matchAll(/<h([1-6])\b/g)].map(m => Number(m[1]));
+                headings.forEach((h, i) => { if (i) assert.ok(h <= headings[i - 1] + 1, `${path}: heading skips to h${h}`); });
+                for (const image of r.text.matchAll(/<img\b[^>]*>/g)) assert.match(image[0], /\balt="[^"]*"/, path);
+                const nodes = [...r.text.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map(m => JSON.parse(m[1]));
+                const types = nodes.map(n => n['@type']);
+                assert.ok(types.includes(path === '/' ? 'SoftwareApplication' : 'BreadcrumbList'), `${path}: ${types}`);
+                if (['/start', '/run'].includes(path)) assert.ok(types.includes('HowTo'), path);
+                assert.ok(!types.includes('FAQPage'), 'no FAQ is shown');
+                assert.ok(llms.text.includes(`](${url})`), `llms missing ${path}`);
+            }
+        });
+        await check('Markdown negotiation uses complete public text, including run and skills', async () => {
+            for (const [path, expected] of [['/start', 'Permission levels'], ['/run', 'Run coding agents locally, started from any browser'], ['/skills', 'The gallery']]) {
+                const r = await t.get(path, { headers: { Accept: 'text/markdown' } });
+                assert.equal(r.status, 200);
+                assert.match(r.headers.get('content-type'), /^text\/markdown/);
+                assert.ok(r.text.includes(expected), path);
+                assert.ok(!r.text.includes('<html'), path);
+            }
+            const full = await t.get('/llms-full.txt');
+            assert.ok(full.text.includes('Permission levels') && full.text.includes('Where runs are kept'));
+        });
+        await check('crawler rules protect private paths for search and AI crawlers', async () => {
+            const r = await t.get('/robots.txt');
+            // Shared repeats public Allow and private exclusions for its search/AI group.
+            assert.ok(r.text.includes('User-agent: *'));
+            const groups = r.text.split(/\n\s*\n/).filter(g => g.includes('User-agent:'));
+            for (const group of groups) {
+                assert.ok(group.includes('Allow: /'));
+                for (const path of ['/tasks', '/run/tasks', '/settings', '/auth/', '/api/']) assert.ok(group.includes(`Disallow: ${path}`));
+            }
+            for (const path of ['/tasks', '/run/tasks', '/settings', '/auth/', '/api/']) assert.ok(r.text.includes(`Disallow: ${path}`), path);
+            for (const name of ['Googlebot', 'Bingbot', 'GPTBot', 'OAI-SearchBot', 'ClaudeBot', 'Claude-SearchBot', 'PerplexityBot', 'Google-Extended', 'Applebot']) {
+                assert.ok(!r.text.includes(`User-agent: ${name}\nDisallow: /\n`), name);
+            }
+        });
+
         await check('home page: WebSite + the site\'s primary type, the same for every crawler', async () => {
             const r = await t.get('/');
             assert.strictEqual(r.status, 200);
             const blocks = [...r.text.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => JSON.parse(m[1]));
             const types = blocks.map((b) => b['@type']);
             assert.ok(types.includes('WebSite'), `no WebSite node: ${types}`);
-            assert.ok(types.includes('WebApplication'), `no primary-type node: ${types}`);
+            assert.ok(types.includes('SoftwareApplication'), `no primary-type node: ${types}`);
+            const app = blocks.find(b => b['@type'] === 'SoftwareApplication');
+            assert.equal(app.applicationCategory, 'DeveloperApplication');
+            assert.ok(app.operatingSystem);
+            assert.equal(app.offers.price, '0');
             const site = blocks.find((b) => b['@type'] === 'WebSite');
             assert.strictEqual(site.url, 'https://openvibe.codes');
             assert.strictEqual(site.name, 'OpenVibe.Codes');

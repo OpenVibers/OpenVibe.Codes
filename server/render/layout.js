@@ -25,7 +25,7 @@ const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public');
 // the navbar's More (Shared 4.22). Search is the navbar's magnifier and What shipped is the footer's.
 const NAV = [
     { label: 'Get started', href: '/start', icon: 'fa-play' },
-    { label: 'Run on your machine', href: '/run', icon: 'fa-microchip' },
+    { label: 'Run locally', href: '/run', icon: 'fa-microchip' },
     { label: 'Agents', href: '/harnesses', icon: 'fa-robot' },
     { label: 'Skills', href: '/skills', icon: 'fa-puzzle-piece' },
     { label: 'Improve OpenVibe', href: '/improve', icon: 'fa-code', more: true },
@@ -34,7 +34,7 @@ const NAV = [
 
 // The workspace's own sections (Codes C4c). The shared Frame owns the page's navigation (openvibe.design/patterns/
 // single-navbar), so on the workspace pages the Frame navbar's links ARE these sections and the page carries no
-// sidebar of its own. The product's own places (Get started, Run on your machine) move into More for a signed-in
+// sidebar of its own. The product's own places (Get started, Run locally) move into More for a signed-in
 // person, so a workspace page has one navigation and not two.
 const WORKSPACE_NAV = [
     { label: 'Home', href: '/', icon: 'fa-house' },
@@ -75,7 +75,11 @@ function renderPage(o) {
     const pathOnly = pathNow.split('?')[0];
     const c4Workspace = pathOnly === '/' || /^\/(tasks|conductor|approvals|agents|machines|memory|knowledge|usage|settings)(\/|$)/.test(pathOnly);
     const loginNext = encodeURIComponent(pathNow);
-    const canonical = `${o.config.baseUrl}${pathNow.split('?')[0]}`;
+    const canonical = `${o.config.baseUrl}${pathOnly}`;
+    if ((o.index || o.agent) && !signedIn) {
+        o = { ...o, ...require('../public-seo').metadata(pathOnly, o) };
+        o.jsonLd = require('../public-seo').structuredData(pathOnly, o, canonical);
+    }
     // One navigation per page. On the workspace pages a signed-in person's navbar carries the workspace sections, with
     // the current one active, and the product's own places fold into More; a visitor who is not signed in keeps the
     // product's links, because the sections hold the visitor's own work and a visitor has none yet.
@@ -119,7 +123,7 @@ function renderPage(o) {
     const scripts = (o.sharedScripts || []).map((name) => html`<script src="${ovServe.url(name)}" defer></script>`);
     if (String(o.body || '').includes('data-ov-machines')) scripts.push(raw('<script src="/shared/machines.js" defer></script>'));
     scripts.push(...(o.scripts || []).map((rel) => html`<script src="${asset(rel)}" defer></script>`));
-    return shell.page({
+    const document = shell.page({
         name: SITE_NAME,
         lang: 'en',
         // The workspace pages carry their own phone tab bar, so the page's bottom inset is theirs (C4c).
@@ -129,6 +133,8 @@ function renderPage(o) {
         siteName: SITE_NAME,
         description: o.description || 'The open coding-agent harness: Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API and your own models behind one router, and the way to improve OpenVibe itself.',
         canonical,
+        image: new URL(require('openvibe-shared/social').url('codes'), o.config.baseUrl).href,
+        imageAlt: 'OpenVibe Codes — coding agents',
         robots: o.index ? 'index, follow' : 'noindex, nofollow',
         // A page with a Markdown twin (o.agent) advertises it in the head and the Link header; the twin itself
         // is server/agent-pages.js.
@@ -163,6 +169,8 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>`,
     });
+    // Footer groups follow the page h1 independently of its final content heading.
+    return document.replace(/<footer\b[\s\S]*?<\/footer>/g, footer => footer.replace(/<(\/?)h3\b/g, '<$1h2'));
 }
 
 function render(v) { return require('./html').render(v); }
@@ -172,7 +180,8 @@ function send(res, status, o) {
     // A page rendered for a signed-in person names them in the account bar: never shared caches.
     const personal = o.viewer && o.viewer.kind === 'user';
     if (!res.get('Cache-Control')) res.set('Cache-Control', !personal && o.cache ? o.cache : cache.htmlHeaders({ private: true }));
-    res.set('Vary', 'Cookie');
+    res.vary('Cookie');
+    res.vary('Accept');
     if (o.agent) {
         const site = String(o.config.baseUrl).replace(/\/+$/, '');
         res.set('Link', require('openvibe-shared/agent-layer').linkHeaderTags(`${site}${String(o.path || '/').split('?')[0]}`, `${site}/llms.txt`).header);

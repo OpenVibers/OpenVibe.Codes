@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Run on your machine (server/http/run.js, plan T16): a guest is asked to sign in; a person with no project they may
+ * Run locally (server/http/run.js, plan T16): a guest is asked to sign in; a person with no project they may
  * run jobs in creates one; a task is checked like the job runner checks it, recorded, and started as an OpenVibe Run job
  * for that person in their project (the task id is the idempotency key); its page streams the job's lines through
  * Codes and then shows the summary, the changed files and the patch; another person never sees it; cancelling reaches
@@ -37,7 +37,7 @@ const { boot, check, done } = require('./helpers/boot');
     await check('a guest is told what it is and asked to sign in', async () => {
         const r = await t.get('/run');
         assert.strictEqual(r.status, 200);
-        assert.ok(r.text.includes('Run a coding task on your own machine') && r.text.includes('/auth/login?next=%2Frun') && r.text.includes('openvibe.link/machines'));
+        assert.ok(r.text.includes('Run coding agents locally, started from any browser') && r.text.includes('/auth/login?next=%2Frun') && r.text.includes('openvibe.link/machines'));
     });
 
     let project;

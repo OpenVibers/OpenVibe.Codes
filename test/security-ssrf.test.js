@@ -72,6 +72,7 @@ const INTERNAL = [`http://127.0.0.1:3000${PROBE}`, `http://2130706433${PROBE}`, 
             'server/report.js': 'OpenVibe.Report (OV_REPORT_INTERNAL_URL, configured) for the report of a finished task, and the Network token endpoint (OV_NETWORK_INTERNAL_URL, configured) for the Codes service token; the paths are fixed, no URL from a person',
             'server/owner-inputs-tests.js': 'the admin panel\'s Test button for the owner\'s keys, owner-only (codes.config.manage): fixed origins only (api.github.com/rate_limit, github.com/login/oauth/access_token, registry.npmjs.org/-/whoami) ; one read-only call each, never a URL from a person',
             'server/events/outbox.js': 'OpenVibe.Events publish (EVENTS_URL, configured) of fixed codes.task.* payloads; no URL from a person',
+            'server/data/public-updates.js': 'the configured Network base (config.networkUrl) public changelog feed at the fixed path /api/v1/changelog?service=codes&limit=50 for the /updates page; no URL from a person',
         };
         const root = path.join(__dirname, '..');
         const found = [];

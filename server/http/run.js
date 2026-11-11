@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Run on your machine (plan T16): a coding task started from any browser that runs on the person's own machine.
+ * Run locally (plan T16): a coding task started from any browser that runs on the person's own machine.
  *
  *   GET  /run                    the form, the person's projects and their recent tasks (a sign-in prompt for a guest)
  *   POST /run                    start one: a run_tasks row and an OpenVibe Run job for the person (server/domain/run-client.js)
@@ -44,6 +44,16 @@ function repoName(url) {
     const [host, ...path] = String(url).replace(/^https:\/\//, '').split('/');
     if (!path.length) return host;
     return html`<small class="run-host">${host}/</small>${path.map((part, i) => html`${i ? raw('/<wbr>') : ''}${part}`)}`;
+}
+
+function guestRunPage() {
+    return {
+                title: 'Run locally', index: true, agent: true,
+                body: html`<h1>Run coding agents locally, started from any browser</h1>
+<p class="lead">Start a task from any browser, your phone included, and your own computer does the work: the agents and keys you already have, in a sandbox, with nothing to host. You watch it live here and get the changes back as a patch, a branch or a pull request.</p>
+<ol class="run-steps"><li>Add your computer on <a href="${MACHINES_URL}">openvibe.link/machines</a>: one command, which installs OpenVibe Link with its job worker.</li><li>Sign in here and describe the task.</li><li>Your machine clones the repository, runs the agent and sends the result back.</li></ol>
+<p><a class="run-btn run-btn-primary" href="/auth/login?next=%2Frun">Sign in to start</a></p>`,
+            };
 }
 
 function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globalThis.fetch, log = console, tasks = null, sessions = null, keys = null, sharing = null }) {
@@ -144,20 +154,14 @@ ${error ? html`<p class="run-notice run-notice-error" role="alert">${error}</p>`
 
     async function runPage(req, res, { values, error, status = 200 } = {}) {
         if (!signedIn(req)) {
-            return page(req, res, {
-                title: 'Run on your machine', index: true,
-                body: html`<h1>Run a coding task on your own machine</h1>
-<p class="lead">Start a task from any browser, your phone included, and your own computer does the work: the agents and keys you already have, in a sandbox, with nothing to host. You watch it live here and get the changes back as a patch, a branch or a pull request.</p>
-<ol class="run-steps"><li>Add your computer on <a href="${MACHINES_URL}">openvibe.link/machines</a>: one command, which installs OpenVibe Link with its job worker.</li><li>Sign in here and describe the task.</li><li>Your machine clones the repository, runs the agent and sends the result back.</li></ol>
-<p><a class="run-btn run-btn-primary" href="/auth/login?next=%2Frun">Sign in to start</a></p>`,
-            });
+            return page(req, res, guestRunPage());
         }
         const [projects, recent] = await Promise.all([
             projectsOf(req, res),
             db.many('SELECT id, repo, prompt, state, created_at FROM run_tasks WHERE subject = $1 ORDER BY created_at DESC LIMIT 20', [req.viewer.subject]),
         ]);
         const defaults = sharing ? await defaultsHtml(req.viewer.subject) : '';
-        const body = html`<h1>Run on your machine</h1>
+        const body = html`<h1>Run locally</h1>
 <p class="lead">The task runs on a machine you added on <a href="${MACHINES_URL}">openvibe.link/machines</a>, in its job sandbox, with the agents and keys installed there. Nobody else's machine ever gets it.</p>
 ${defaults}
 ${projects.length ? formHtml({ projects, values, error }) : html`<form class="run-card" method="post" action="/run/project">
@@ -169,7 +173,7 @@ ${error ? html`<p class="run-notice run-notice-error" role="alert">${error}</p>`
 <button class="run-btn run-btn-primary" type="submit">Create the project</button></form>`}
 <h2>Your tasks</h2>
 ${tasksHtml(recent)}`;
-        return page(req, res, { title: 'Run on your machine', body }, status);
+        return page(req, res, { title: 'Run locally', body }, status);
     }
 
     r.get('/run', (req, res) => runPage(req, res, { values: { prompt: String(req.query.prompt || '').slice(0, 16000), repo: String(req.query.repo || '').slice(0, 2000), agent: String(req.query.agent || '').slice(0, 100) } }));
@@ -324,7 +328,7 @@ ${i.summary ? html`<p class="run-proof-summary" data-proof-summary>${i.summary}<
             if (!allowed) {
                 const audience = sharing ? await sharing.audienceOf(base.id).catch(() => null) : null;
                 if (audience === 'people') return gatePage(req, res, base.id);
-                return page(req, res, { title: 'Not found', index: false, body: html`<h1>Not found</h1><p>No such task. <a href="/run">Run on your machine</a></p>` }, 404);
+                return page(req, res, { title: 'Not found', index: false, body: html`<h1>Not found</h1><p>No such task. <a href="/run">Run locally</a></p>` }, 404);
             }
         }
         let row = base;
@@ -335,7 +339,7 @@ ${i.summary ? html`<p class="run-proof-summary" data-proof-summary>${i.summary}<
         const lines = live ? null : await sessionStore.linesForRow(row);
         const title = String(row.prompt || '').split('\n')[0].slice(0, 90);
         const session = lines && lines.length ? html`<section class="run-session" data-session data-title="${title}" data-state="${row.state}"><h2>The session</h2><div data-session-view></div><script type="application/json" data-session-log>${raw(JSON.stringify(lines).replace(/</g, '\\u003c'))}</script></section>` : '';
-        const body = html`${shareHead ? raw(shareHead) : ''}<p class="crumbs"><a href="/run">Run on your machine</a></p>
+        const body = html`${shareHead ? raw(shareHead) : ''}<p class="crumbs"><a href="/run">Run locally</a></p>
 <h1 class="run-repo">${repoName(row.repo)}${row.ref ? html` <small>${row.ref}</small>` : ''}</h1>
 <p><span class="run-pill run-pill-${row.state}" data-state>${STATE_LABEL[row.state] || row.state}</span>${row.agent ? html` <span class="run-pill">${row.agent}</span>` : ''}</p>
 ${mine ? shareButton(row) : html`<p class="muted">This task was shared with you. Only its owner can change it.</p>`}
@@ -445,4 +449,4 @@ ${mine ? html`<form method="post" action="/run/tasks/${row.id}/cancel"><button c
     return r;
 }
 
-module.exports = { createRunRoutes, STATE_LABEL, TERMINAL, esc };
+module.exports = { createRunRoutes, guestRunPage, STATE_LABEL, TERMINAL, esc };

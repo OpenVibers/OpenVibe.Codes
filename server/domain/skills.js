@@ -301,7 +301,11 @@ function createSkills({ store, sharing, log = console }) {
             .map((r) => ({ skill_id: r.skill_id, project: r.project, created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at) }));
     }
 
-    return { create, get, listVersions, gallery, mine, addVersion, rollback, setAudience, members, addMember, removeMember, assign, unassign, manifest, assignments };
+    async function publicPages() {
+        const rows = await db.many(`SELECT s.id, s.title, v.summary, s.updated_at ${FROM} WHERE sh.audience = 'public' ORDER BY s.id`);
+        return rows.map(s => ({ path: `/skills/${s.id}`, title: s.title, text: s.summary, lastmod: new Date(s.updated_at).toISOString().slice(0, 10) }));
+    }
+    return { publicPages, create, get, listVersions, gallery, mine, addVersion, rollback, setAudience, members, addMember, removeMember, assign, unassign, manifest, assignments };
 }
 
 module.exports = { createSkills, SkillError, KINDS, AUDIENCES, TOOLS, MAX_BODY, MAX_TITLE, MAX_SUMMARY };

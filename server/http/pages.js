@@ -104,7 +104,7 @@ Added test/date.test.js: three cases, all pass.
         const statusTable = table(['Piece', 'State'], [
             [html`<a href="/start">The harness on your machine</a> (<code>openvibe-codes</code>)`, `Live, ${VERSION}: runs a task on any of the eight agents with your CLIs and keys, streams one event format, keeps every run to show or resume.`],
             ['Hand-offs between agents', 'Live: a failed, rate-limited or silent agent hands the task to the next one with a note on what was done.'],
-            [html`<a href="/run">Run on your machine</a>: start a task in any browser, your phone included; your own computer runs it`, 'Live: add your machine on openvibe.link/machines (one command), then watch the task live here and get the patch, a branch or a pull request. It runs only on your own machines, in Link\'s job sandbox.'],
+            [html`<a href="/run">Run locally</a>: start a task in any browser, your phone included; your own computer runs it`, 'Live: add your machine on openvibe.link/machines (one command), then watch the task live here and get the patch, a branch or a pull request. It runs only on your own machines, in Link\'s job sandbox.'],
             [html`<a href="/harnesses">The agent catalog</a>`, 'Live: every harness and model with its capabilities, prices and limits.'],
             [html`<code>GET /api/v1/harnesses</code>, <code>POST /api/v1/harnesses/route</code>`, 'Live: public, no key needed; per-address and per-caller limits.'],
             [html`<a href="/improve">Improve OpenVibe</a>: a repository, a change on a branch with its test, a pull request that CI checks and a maintainer reviews`, 'Live: pick a repository, describe the change, and start a guided run on your machine.'],
@@ -119,7 +119,7 @@ Added test/date.test.js: three cases, all pass.
                 title: 'Code with', accent: 'any agent',
                 lede: 'One open harness for Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API and models you host yourself: send a coding task to the agent that fits it, hand it over when one gets stuck, and keep the whole run in one place. Then point it at OpenVibe itself.',
                 // Two, so they sit side by side on a phone; the agents are the next section.
-                actions: [{ label: 'Install the harness', href: '/start', primary: true }, { label: 'Run on your machine from the web', href: '/run' }],
+                actions: [{ label: 'Install the harness', href: '/start', primary: true }, { label: 'Run locally from the web', href: '/run' }],
                 note: `Open source (AGPL-3.0). Version ${VERSION} runs on your machine with the agents and keys you already have, from your terminal or started from this site in any browser; the list below says exactly what works.`,
                 aside: { html: `<pre tabindex="0" class="codes-hero-code"><code>${showcase.esc(snippet)}</code></pre>` },
             }))}
@@ -227,7 +227,7 @@ ${table(['Level', 'What the agent may do'], [
 <pre tabindex="0"><code>${fromCode}</code></pre>
 <p><code>harness.agents()</code>, <code>harness.route({ task })</code> and <code>harness.run({ prompt, cwd, agent, permission, handoff })</code> are what the command line uses. The router is the same one behind <a href="/api/v1/harnesses"><code>/api/v1/harnesses/route</code></a>.</p>
 <h2 id="next">What comes next</h2>
-<p>Tasks from the web already run on your own machine (<a href="/run">Run on your machine</a>). Next: a hosted runner on OpenVibe.Run workers for people who would rather not run agents themselves, with budgets; OpenVibe.Actor using Codes for its coding work; and <a href="/improve">Improve OpenVibe</a> as a guided run: pick a repository, describe the change, get a pull request.</p>`,
+<p>Tasks from the web already run on your own machine (<a href="/run">Run locally</a>). Next: a hosted runner on OpenVibe.Run workers for people who would rather not run agents themselves, with budgets; OpenVibe.Actor using Codes for its coding work; and <a href="/improve">Improve OpenVibe</a> as a guided run: pick a repository, describe the change, get a pull request.</p>`,
         };
     }
     r.get('/start', (req, res) => page(req, res, startPage()));
@@ -445,8 +445,14 @@ ${raw(kit.fold({ title: 'Clone it yourself', meta: 'git clone', body: `${kit.sni
 
     // ── Community documents and the update log ───────────────
     // What shipped on OpenVibe.Codes: the shared update log every OpenVibe site has.
-    const updatesPage = () => ({ agent: true, index: true, cache: PUBLIC_CACHE, title: 'What shipped on OpenVibe.Codes', body: raw(frame.updatesBody({ service: 'codes', siteName: 'OpenVibe.Codes' }) + `<script src="${ovServe.url('shipped.js')}" defer></script>`) });
-    r.get('/updates', (req, res) => page(req, res, updatesPage()));
+    const readUpdates = require('../data/public-updates').createPublicUpdates({ base: config.networkUrl, fetchImpl: ctx.publicFetch });
+    const updatesPage = async () => {
+        const entries = await readUpdates();
+        return { agent: true, index: true, cache: PUBLIC_CACHE, title: 'What shipped on OpenVibe.Codes',
+            body: html`${raw(frame.updatesBody({ service: 'codes', siteName: 'OpenVibe.Codes' }).replace(/<div data-ov-shipped=[\s\S]*?<\/div>/, ''))}
+${entries.length ? html`<ol>${entries.map(e => html`<li><a href="${e.url}">${e.subject}</a> <time datetime="${e.deployed_at}">${String(e.deployed_at || '').slice(0, 10)}</time></li>`)}</ol>` : html`<p>The update feed is temporarily unavailable. <a href="https://github.com/OpenVibers/OpenVibe.Codes/commits/main">Read the Codes commit history</a>.</p>`}` };
+    };
+    r.get('/updates', async (req, res) => page(req, res, await updatesPage()));
     const policyIndexPage = () => ({
         agent: true, index: true, cache: PUBLIC_CACHE, title: 'Community', crumbs: [{ label: 'Community' }],
         body: html`<h1>Community</h1>
@@ -474,7 +480,11 @@ ${g.draft ? notice(html`<strong>Draft — pending owner review.</strong> This is
     };
 
     // ── Discovery: robots.txt, sitemap.xml, llms.txt, llms-full.txt (http/discovery.js, openvibe-shared/seo) ──
-    r.use(createDiscoveryRoutes({ ...ctx, governance }));
+    const discovery = createDiscoveryRoutes({ ...ctx, governance, renderPublicPage: (path) => ctx.renderPublicPage(path),
+        updateDate: async () => (await readUpdates()).map(e => String(e.deployed_at || '').slice(0, 10)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().at(-1),
+    });
+    r.publicPages = discovery.publicPages;
+    r.use(discovery);
 
     return r;
 }
