@@ -128,7 +128,7 @@ const codex = {
                 if (!st.started.has(id)) { st.started.add(id); const [name, input] = CODEX_TOOL(item); emit(ev.toolUse(id, name, input, t.model)); }
                 if (e.type === 'item.completed') {
                     const failed = item.status === 'failed' || (item.exit_code != null && item.exit_code !== 0);
-                    const out = item.type === 'command_execution' ? `${item.aggregated_output || ''}${item.exit_code ? `\n(exit ${item.exit_code})` : ''}` : (item.error ? String(item.error.message || item.error) : 'done');
+                    const out = item.type === 'command_execution' ? `${item.aggregated_output || ''}${item.exit_code ? `\n(exit ${item.exit_code})` : ''}` : (item.error ? String(item.error.message || item.error) : JSON.stringify(item.result || item.results || item.sources || 'done'));
                     emit(ev.toolResult(id, out, failed));
                 }
             } else if (e.type === 'turn.completed') {
@@ -356,11 +356,7 @@ const muse = {
         const startedAt = Date.now();
         const parser = jsonLines(muse, (o, emit, st) => {
             st.startedAt = startedAt;
-            if (o.type === 'task.lifecycle.started') { st.sessionId = o.session_id || o.sessionId || null; emit(ev.init(st.sessionId, 'muse', t.model)); }
-            else if (o.type === 'run.output.delta') { const text = String(o.delta || o.text || ''); if (text) { st.lastText = (st.lastText || '') + text; emit(ev.text(text, t.model)); } }
-            else if (o.type === 'run.usage') st.usage = o.usage || o;
-            else if (o.type === 'run.terminal.failed') st.failed = String(o.error?.message || o.error || 'Muse run failed');
-            else if (o.type === 'run.terminal.completed') st.sessionId = o.session_id || o.sessionId || st.sessionId;
+            require('./muse-events').museEvent(o, emit, st, t.model);
         }, (info, emit, st) => {
             const ok = !st.failed && !!st.lastText && info.code === 0;
             emit(ev.result({ ok, text: ok ? st.lastText : (st.failed || exitReason(info, 'Muse Code')), sessionId: st.sessionId, model: t.model, startedAt, usage: st.usage }));

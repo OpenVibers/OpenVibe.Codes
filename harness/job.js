@@ -381,6 +381,7 @@ function compact(e, ctx) {
     if (e.type === 'assistant') {
         const out = [];
         for (const c of (e.message && e.message.content) || []) {
+            if ((c.type === 'thinking' || c.type === 'reasoning') && (c.thinking || c.text)) out.push({ t: 'think', text: clean(c.thinking || c.text), ...parent });
             if (c.type === 'text' && c.text) out.push({ t: 'text', text: clean(cut(c.text)), ...parent });
             if (c.type === 'tool_use') {
                 const i = c.input || {};
@@ -393,7 +394,7 @@ function compact(e, ctx) {
     if (e.type === 'user' && e.message && Array.isArray(e.message.content)) {
         return e.message.content.filter((c) => c && c.type === 'tool_result')
             .map((c) => {
-                const line = { t: 'tool_result', id: String(c.tool_use_id || ''), ok: !c.is_error, output: clean(cutTo(resultText(c.content), MAX_OUTPUT)), ...parent };
+                const line = { t: 'tool_result', id: String(c.tool_use_id || ''), ok: !c.is_error, output: clean(cutTo(resultText(c.content), MAX_OUTPUT)), full_output: clean(resultText(c.full_output == null ? c.content : c.full_output)), ...parent };
                 const pictures = imageAttachments(c.content, ctx && ctx.pictures);
                 if (pictures.length) line.attachments = pictures;
                 return line;

@@ -21,6 +21,7 @@ function load(env = process.env) {
 
     return {
         service: 'codes',
+        agentUi: bool(env.CODES_AGENT_UI),
         port,
         host: env.HOST || '127.0.0.1',
         nodeEnv,

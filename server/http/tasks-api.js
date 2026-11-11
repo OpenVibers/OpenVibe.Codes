@@ -476,6 +476,28 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         return await taskEvents.stream(req, res, row);
     });
 
+    const agentRuns = require('../agent-ui/codes').createCodesRuns({ store, fallback: require('../agent-ui/titles').createTitleFallback({ config, clean: require('../agent-ui/codes').clean }) });
+    r.get('/runs/:id', guardAny('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
+        const match = /^(tsk_[0-9A-HJKMNP-TV-Z]{26})(?:~([1-9][0-9]*))?$/.exec(req.params.id);
+        const attempt = match && match[2] ? Number(match[2]) : null;
+        if (match) req.params.id = match[1];
+        const task = await viewable(req);
+        const row = task && await agentRuns.resolve(task, attempt);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
+        if (!(config.agentUiSetting ? config.agentUiSetting() : config.agentUi)) return problem(req, res, 404, 'codes.runs_disabled', 'Run streams are disabled.');
+        return res.json(await agentRuns.snapshot(row));
+    });
+    r.get('/runs/:id/events', guardAny('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
+        const match = /^(tsk_[0-9A-HJKMNP-TV-Z]{26})(?:~([1-9][0-9]*))?$/.exec(req.params.id);
+        const attempt = match && match[2] ? Number(match[2]) : null;
+        if (match) req.params.id = match[1];
+        const task = await viewable(req);
+        const row = task && await agentRuns.resolve(task, attempt);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
+        if (!(config.agentUiSetting ? config.agentUiSetting() : config.agentUi)) return problem(req, res, 404, 'codes.runs_disabled', 'Run streams are disabled.');
+        return agentRuns.stream(req, res, row);
+    });
+
     /** The next attempt now: the owner carries the task on, or hands it to another agent. */
     r.post('/tasks/:id/continue', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
         const row = await mine(req);
