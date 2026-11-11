@@ -1,0 +1,1 @@
+{"search":{"items":[{"full_name":"example/agent","fork":false,"archived":false,"description":"Agent harness fixture","stargazers_count":42,"html_url":"https://github.com/example/agent","license":{"spdx_id":"MIT"}}]},"readme":"# Agent\n\n## Architecture\nFixture readme text.","contents":[{"type":"file","name":"package.json","download_url":"https://fixture/package.json"}]}

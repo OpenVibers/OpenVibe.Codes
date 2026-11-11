@@ -146,6 +146,7 @@ async function createApp(opts = {}) {
     // person's own token opens them. Codes forwards the token and renders the answer; it never holds a note.
     ctx.memory = createMemory({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     ctx.github = opts.github || createGitHub({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
+    ctx.learning = require('./domain/github-learning').createGitHubLearning({ store, config, tasks, runTokens, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log });
     // OpenVibe Git through Codes' service token, acting for the person it names (server/domain/forge.js).
     ctx.forge = opts.forge || require('./domain/forge').createForge({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The repository field's dropdown (ask 348): the owner's sources, merged in their order.
@@ -321,6 +322,8 @@ async function createApp(opts = {}) {
     // The owner's repository sources (ask 348): the dropdown's sources and their order.
     ctx.adminRepos = require('./http/admin-repos').createAdminRepos(ctx);
     app.use('/api/v1', ctx.adminRepos.api);
+    ctx.githubLearningRoutes = require('./http/github-learning').createGitHubLearningRoutes(ctx);
+    app.use('/api/v1', ctx.githubLearningRoutes.api);
     // The Dock's agent view (Dock K-D3, Agent Streams S1): the person's own desk stream with a view ticket minted here.
     app.use('/api/v1', createAgentView({ config, sso, actorLimits: ctx.actorLimits, log }));
     // Know K5: the person's own agents read and add workspace knowledge with their token (the ov-know MCP server).
@@ -363,6 +366,7 @@ async function createApp(opts = {}) {
     app.use(require('./http/chat').createChatRoutes(ctx));
     app.use(require('./http/git').createGitRoutes(ctx));   // after the chat app: it renders in ctx.chatShell
     app.use(ctx.adminRepos.page);
+    app.use(ctx.githubLearningRoutes.page);
     // C4 workspace pages sit before the legacy marketing pages and share the existing owner-scoped task store.
     c4Routes = require('./http/c4').createC4Routes(ctx);
     app.use(c4Routes);
