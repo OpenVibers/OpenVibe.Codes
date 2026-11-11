@@ -39,6 +39,12 @@ async function start() {
         console.log(`[Codes] ${config.nodeEnv} on http://${config.host}:${config.port} → ${config.baseUrl} (db ${ctx.store.db.store})`);
         console.log(`[Codes] ${ctx.harnesses.list().length} harnesses in the catalog; the developer console's addresses redirect to openvibe.services`);
     });
+    // Announce the public revision on deploy/start. Shared sends batches of 100, one second apart.
+    if (ctx.indexnow.enabled) ctx.publicPages().then(pages => {
+        ctx.indexnow.pingSoon(pages.map(p => p.path));
+        console.log(`[Codes] IndexNow queued ${pages.length} public URLs (100 per batch)`);
+    }).catch(() => console.warn('[Codes] IndexNow public-page enumeration failed'));
+    else console.log('[Codes] IndexNow disabled: no configured key');
     server.keepAliveTimeout = 65_000;
     // Request telemetry (openvibe-sdk/service, plan T1): one aggregated sample per route template, method and status
     // class each minute, stored in this service's telemetry_samples table; rows older than 14 days go daily.

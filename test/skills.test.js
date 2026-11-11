@@ -58,6 +58,20 @@ const { boot, check, done } = require('./helpers/boot');
             assert.strictEqual(anon.json().skill.audience, 'link');
         });
 
+        await check('discovery includes only public skills and Markdown never exposes private or link records', async () => {
+            for (const path of ['/sitemap.xml', '/llms.txt', '/llms-full.txt']) {
+                const result = await t.get(path);
+                assert.equal(result.status, 200, path);
+                assert.ok(result.text.includes(`/skills/${pub.id}`), path);
+                assert.ok(!result.text.includes(`/skills/${priv.id}`), path);
+                assert.ok(!result.text.includes(`/skills/${link.id}`), path);
+            }
+            const markdown = await t.get(`/skills/${pub.id}`, { headers: { Accept: 'text/markdown' } });
+            assert.match(markdown.headers.get('content-type'), /^text\/markdown/);
+            assert.ok(markdown.text.includes('Public ship'));
+            for (const skill of [priv, link]) assert.equal((await t.get(`/skills/${skill.id}.md`)).status, 404);
+        });
+
         await check('versions grow and a rollback copies the old body into a new version', async () => {
             const v2 = await api(`/api/v1/skills/${pub.id}/versions`, {
                 as: ada, method: 'POST', json: { body: skillBody('public-ship', 'The second version.'), summary: 'Second' },

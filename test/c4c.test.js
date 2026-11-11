@@ -35,7 +35,7 @@ const split = (links) => ({
             assert.strictEqual(page.status, 200);
             const { top, more } = split(navbarOf(page.text).links);
             assert.deepStrictEqual(top, [], 'the navbar carries no sections');
-            assert.ok(more.includes('Get started') && more.includes('Run on your machine'), 'only the product&rsquo;s places, in More');
+            assert.ok(more.includes('Get started') && more.includes('Run locally'), 'only the product&rsquo;s places, in More');
             assert.ok(page.text.includes('<aside class="ovk-sidebar" id="ch-rail"'), 'the rail is on the page');
             assert.ok(page.text.includes('<a class="ovk-sidebar-link is-here" href="/agents" aria-current="page">'), 'and marks the page the person is on, a row of the network&rsquo;s sidebar');
             assert.ok(!page.text.includes('c4-side') && !page.text.includes('c4-layout'), 'no other sidebar');
@@ -52,7 +52,7 @@ const split = (links) => ({
             const page = await t.get('/tasks');
             assert.strictEqual(page.status, 200);
             const { top, more } = split(navbarOf(page.text).links);
-            assert.ok(top.includes('Get started') && top.includes('Run on your machine'), 'the product&rsquo;s places are at the top');
+            assert.ok(top.includes('Get started') && top.includes('Run locally'), 'the product&rsquo;s places are at the top');
             assert.ok(!top.includes('Tasks'), 'and the workspace&rsquo;s sections are not');
             assert.ok(more.includes('Improve OpenVibe'), 'the rest folds into More');
         });
@@ -61,7 +61,7 @@ const split = (links) => ({
             const page = await t.get('/harnesses', { as: ada });
             assert.strictEqual(page.status, 200);
             const { top } = split(navbarOf(page.text).links);
-            assert.ok(top.includes('Get started') && top.includes('Run on your machine'), 'the product&rsquo;s places are at the top');
+            assert.ok(top.includes('Get started') && top.includes('Run locally'), 'the product&rsquo;s places are at the top');
             assert.ok(!top.includes('Machines'), 'and the workspace&rsquo;s sections are not');
         });
 

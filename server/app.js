@@ -163,6 +163,8 @@ async function createApp(opts = {}) {
     tasks.attachBindings(ctx.prBindings);
 
     const app = express();
+    ctx.indexnow = require('openvibe-shared/indexnow').createIndexNow({ host: config.baseUrl, key: (opts.env || process.env).INDEXNOW_KEY || '', log: (message) => log.warn(message) });
+    if (ctx.indexnow.enabled) app.use(ctx.indexnow.keyFile);
     aiCatalogConfig.mount(app);
     // GET /openapi.json (SEO-3): this service's public API as OpenAPI 3.1, generated from the contracts
     // (openvibe-contracts); the operations they mark internal-only are left out.
@@ -280,7 +282,7 @@ async function createApp(opts = {}) {
     }));
 
     // ── API ─────────────────────────────────────────────────
-    // Run on your machine (plan T16): coding tasks on the person's own machine, through OpenVibe Run, from the /run
+    // Run locally (plan T16): coding tasks on the person's own machine, through OpenVibe Run, from the /run
     // pages below or, for a first-party service acting for the person, from /api/v1/tasks (codes.task.*).
     // ── /api/v1/task/:id/share — the one Share sheet's API (openvibe-sdk/share) ──
     // GET/PUT .../share, .../share/requests, .../share/transfer[/accept|decline|cancel], GET /api/v1/share/people
@@ -328,22 +330,28 @@ async function createApp(opts = {}) {
 
     // ── Pages ───────────────────────────────────────────────
     app.use(rateLimit({ windowMs: 60_000, limit: Number(process.env.CODES_RATE_LIMIT_PER_MIN) || 300, standardHeaders: true, legacyHeaders: false }));   // per address; tests raise it
-    app.use(createSkillPageRoutes({ config, skills: ctx.skills }));
+    ctx.skillPages = createSkillPageRoutes({ config, skills: ctx.skills });
+    ctx.publicFetch = fetchImpl || globalThis.fetch;
     const pageRoutes = createPageRoutes(ctx);
+    ctx.publicPages = pageRoutes.publicPages;
     // The agent layer (openvibe-shared/agent-layer): /.well-known/agent.json and the Markdown twins of the public
     // pages. The pages themselves keep their own routes — a signed-in visitor's account bar and forms are theirs
     // — so only the manifest and twin requests reach this mount; the pages advertise the twin themselves.
     let c4Routes = null;   // created below, after the chat app's routes (the twin of / reads its front door)
     const agentLayer = express();
+    ctx.renderPublicPage = require('./agent-pages').createAgentPages(ctx, pageRoutes.publicViews, { home: () => c4Routes && c4Routes.visitorHome() }).renderPublicPage;
     require('openvibe-shared/agent-layer').mount(agentLayer, {
         descriptor: require('./agent-descriptor'),
-        render: require('./agent-pages').createAgentPages(ctx, pageRoutes.publicViews, { home: () => c4Routes && c4Routes.visitorHome() }).renderPublicPage,
+        render: ctx.renderPublicPage,
     });
     app.use((req, res, next) => {
         const twin = req.path.endsWith('.md') || req.query.format === 'markdown' || String(req.headers.accept || '').includes('text/markdown');
         if (req.path !== '/.well-known/agent.json' && !twin) return next();
         return agentLayer(req, res, next);
     });
+    app.use(ctx.skillPages);
+    app.get('/agents', (req, res, next) => req.viewer && req.viewer.kind === 'user' ? next() : res.vary('Cookie').set('Cache-Control', 'private, no-store').redirect(301, '/harnesses'));
+    app.get('/community', (_req, res) => res.redirect(301, '/policy'));
     // The chat app (L31 CH1) answers a signed-in person's / and /tasks/:id; everyone else falls through to C4.
     app.use(require('./http/chat').createChatRoutes(ctx));
     app.use(require('./http/git').createGitRoutes(ctx));   // after the chat app: it renders in ctx.chatShell

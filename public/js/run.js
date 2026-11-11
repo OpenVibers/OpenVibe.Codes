@@ -1,5 +1,5 @@
 /*
- * Run on your machine (server/http/run.js): the live lines of a running task and the colours of a finished patch.
+ * Run locally (server/http/run.js): the live lines of a running task and the colours of a finished patch.
  * With openvibe-shared/agent-session.js on the page (the task page loads it), the lines become the agents' session:
  * steps grouped, each step's command, change and output (live), helpers, hand-offs and the plan; a finished task's
  * page shows the session its result kept. Without it, the plain list below.
