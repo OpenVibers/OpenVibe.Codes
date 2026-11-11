@@ -159,7 +159,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
     const sessionLines = sessions || require('./session-lines').createSessionLines({ store, config, log, media: require('../media').createMedia({ config, log }) });
-    const taskOutbox = outbox || require('../events/outbox').createOutbox({ store, log });
+    const taskOutbox = outbox || require('../events/outbox').createOutbox({ store, log, baseUrl: config && config.baseUrl });
     // The proof of a finished task (stage C8): the tests, the pages, the diff and the second model's opinion.
     const taskProof = proof || require('./proof').createProof({ store, config, log });
     // The session report of a finished task (Agent Streams S3): Codes writes it to OpenVibe.Report when the task ends.
@@ -577,8 +577,11 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         return `${base.slice(0, Math.max(0, 16000 - section.length))}${section}`;
     }
 
-    async function start({ subject, project, args, via = null, key = null, actorRef = null, attachmentIds = [], messageId = null, pin = null }) {
+    async function start({ subject, project, args, via = null, key = null, actorRef = null, attachmentIds = [], messageId = null, pin = null, mode = null }) {
         if (pin && !/^dev_[0-9A-HJKMNP-TV-Z]{26}$/.test(pin)) throw new Error('the Link machine id is invalid');
+        // Where the request started (the Dock's Code tab, codes.task-summary@1 mode): openvibe or repo. Rows from
+        // before it, and tasks other callers start without naming one, read back by their repository.
+        const startMode = mode === 'openvibe' || mode === 'repo' ? mode : null;
         const id = store.newId('tsk');
         const at = store.now();
         const claims = await claimFiles(subject, attachmentIds);
@@ -644,9 +647,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const placementKind = placed ? `harness.${taskKind}` : null;
         let inserted;
         await store.tx(async () => {
-            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, pin, goal, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $17::jsonb, $18, $18) RETURNING *`,
-            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, pin, runArgs.goal ? JSON.stringify(runArgs.goal) : null, at]);
+            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, pin, goal, mode, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $17::jsonb, $18, $19, $19) RETURNING *`,
+            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, pin, runArgs.goal ? JSON.stringify(runArgs.goal) : null, startMode, at]);
             if (claims.length) await filesStore.link(subject, claims, { taskId: id, attemptN: 1, messageId: turnId });
             await taskOutbox.emitTask(inserted, null);
             return inserted;

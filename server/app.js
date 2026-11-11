@@ -107,7 +107,7 @@ async function createApp(opts = {}) {
     const harnesses = createHarnesses();
     // Sessions, the run.job.* consumer and the codes.task.* outbox share one store and one clock.
     const sessions = createSessionLines({ store, config, log, media: require('./media').createMedia({ config, log }) });
-    const outbox = createOutbox({ store, log });
+    const outbox = createOutbox({ store, log, baseUrl: config.baseUrl });
     const run = opts.run || createRunClient({ config, fetchImpl: fetchImpl || globalThis.fetch });
     // A person's own connections (Codes C3): their provider keys live in OpenVibe.AI, and their harnesses run with a
     // short-lived run token that names them.
@@ -307,10 +307,10 @@ async function createApp(opts = {}) {
     }
     app.use('/api/v1', createApi(ctx));
     app.use('/api/v1', createSkillsApi({ config, skills: ctx.skills, actorLimits: ctx.actorLimits, log }));
-    app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, fleet: ctx.fleet, actorLimits: ctx.actorLimits, sharing, log }));
+    app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, fleet: ctx.fleet, conductor: ctx.conductor, attachments: ctx.attachments, actorLimits: ctx.actorLimits, sharing, log }));
     // The composer's files: upload before send (with progress), or as the multipart form without JavaScript.
     app.use('/api/v1', createAttachmentsApi({ attachments: ctx.attachments, actorLimits: ctx.actorLimits, config, keys, log }));
-    app.use('/api/v1', createMeApi({ config, store, sso, run, harnesses, tasks, userSettings: ctx.userSettings, github: ctx.github, actorLimits: ctx.actorLimits, log }));
+    app.use('/api/v1', createMeApi({ config, store, sso, keys, run, harnesses, tasks, userSettings: ctx.userSettings, github: ctx.github, approvals: ctx.approvals, actorLimits: ctx.actorLimits, log }));
     // The Dock's agent view (Dock K-D3, Agent Streams S1): the person's own desk stream with a view ticket minted here.
     app.use('/api/v1', createAgentView({ config, sso, actorLimits: ctx.actorLimits, log }));
     // Know K5: the person's own agents read and add workspace knowledge with their token (the ov-know MCP server).

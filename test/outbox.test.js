@@ -56,14 +56,18 @@ const { createPublisher } = require('../server/events/outbox');
 
         await check('a task start writes its queued row in the change transaction, with the fixed evt_ id', async () => {
             const rows = await db.many('SELECT * FROM codes_outbox WHERE payload->>\'task_id\' = $1', [task.id]);
-            assert.strictEqual(rows.length, 1);
-            const row = rows[0];
+            assert.strictEqual(rows.length, 2, 'the per-state row and the Dock\u2019s codes.task.updated row');
+            const row = rows.find((x) => x.topic === 'codes.task.queued');
             assert.match(row.event_id, /^evt_[0-9A-HJKMNP-TV-Z]{26}$/);
-            assert.strictEqual(row.topic, 'codes.task.queued');
             assert.strictEqual(row.subject, ada.subject);
             assert.deepStrictEqual(Object.keys(row.payload).sort(), ['agent', 'cost_usd', 'error', 'files_changed', 'finished_at', 'repo', 'started_at', 'state', 'task_id']);
             assert.strictEqual(row.payload.repo, 'Octocat/Hello-World');
             assert.strictEqual(row.payload.state, 'queued');
+            const updated = rows.find((x) => x.topic === 'codes.task.updated');
+            assert.ok(updated, 'codes.task.updated is written on the state change');
+            assert.strictEqual(updated.subject, ada.subject);
+            assert.strictEqual(updated.payload.state, 'queued');
+            assert.strictEqual(updated.payload.url, `https://openvibe.codes/tasks/${task.id}`);
             const before = await db.value('SELECT COUNT(*)::int FROM codes_outbox');
             await assert.rejects(t.ctx.store.tx(async () => {
                 await t.ctx.outbox.emitTask({ ...task, state: 'succeeded', result: { ok: true } }, 'running');
@@ -72,17 +76,21 @@ const { createPublisher } = require('../server/events/outbox');
             assert.strictEqual(await db.value('SELECT COUNT(*)::int FROM codes_outbox'), before, 'the event is not written without the change');
         });
 
-        await check('a Run state change writes one row in the same transaction', async () => {
+        await check('a Run state change writes its rows in the same transaction', async () => {
             readState = 'succeeded';
             readResult = { ok: true, cost_usd: 0.02, files: [{ path: 'README', added: 1, removed: 1 }], log: [{ t: 'done', ok: true }] };
             const row = await db.one('SELECT * FROM run_tasks WHERE id = $1', [task.id]);
             const done_ = await t.ctx.tasks.refresh(row, { force: true });
             assert.strictEqual(done_.state, 'succeeded');
-            const rows = await db.many('SELECT topic, payload FROM codes_outbox WHERE payload->>\'task_id\' = $1 ORDER BY created_at, event_id', [task.id]);
-            assert.deepStrictEqual(rows.map((x) => x.topic), ['codes.task.queued', 'codes.task.succeeded']);
-            assert.strictEqual(rows[1].payload.state, 'succeeded');
-            assert.strictEqual(rows[1].payload.cost_usd, 0.02);
-            assert.strictEqual(rows[1].payload.files_changed, 1);
+            const rows = await db.many('SELECT topic, payload FROM codes_outbox WHERE payload->>\'task_id\' = $1', [task.id]);
+            assert.deepStrictEqual(rows.map((x) => x.topic).sort(), ['codes.task.queued', 'codes.task.succeeded', 'codes.task.updated', 'codes.task.updated'].sort());
+            const ended = rows.find((x) => x.topic === 'codes.task.succeeded');
+            assert.strictEqual(ended.payload.state, 'succeeded');
+            assert.strictEqual(ended.payload.cost_usd, 0.02);
+            assert.strictEqual(ended.payload.files_changed, 1);
+            const updates = rows.filter((x) => x.topic === 'codes.task.updated');
+            assert.deepStrictEqual(updates.map((x) => x.payload.state).sort(), ['queued', 'succeeded']);
+            assert.ok(updates.every((x) => x.payload.url === `https://openvibe.codes/tasks/${task.id}`), 'every updated row links the task');
         });
 
         await check('publishing sends each row once, with the fixed id and the proposal envelope', async () => {
@@ -115,7 +123,9 @@ const { createPublisher } = require('../server/events/outbox');
 
         await check('a failure records attempts/last_error, backs off, then retries the same id', async () => {
             const second = await t.ctx.tasks.start({ subject: ada.subject, project, args });
-            const row = await db.one('SELECT * FROM codes_outbox WHERE payload->>\'task_id\' = $1', [second.id]);
+            // Only the per-state row is due: the updated row waits its turn, so the failure below is deterministic.
+            await db.exec("UPDATE codes_outbox SET next_attempt_at = now() + interval '1 hour' WHERE payload->>'task_id' = $1 AND topic = 'codes.task.updated'", [second.id]);
+            const row = await db.one('SELECT * FROM codes_outbox WHERE payload->>\'task_id\' = $1 AND topic = \'codes.task.queued\'', [second.id]);
             failNext = 1;
             const failed = await t.ctx.publisher.runOnce();
             assert.strictEqual(failed.failed, 1);
@@ -132,17 +142,19 @@ const { createPublisher } = require('../server/events/outbox');
             assert.ok(after.published_at);
             assert.strictEqual(after.attempts, 1, 'the failed attempt stays recorded');
             assert.strictEqual(received.filter((x) => x.event_id === row.event_id).length, 1, 'one event under the fixed id');
+            await db.exec("UPDATE codes_outbox SET next_attempt_at = now() - interval '1 second' WHERE payload->>'task_id' = $1 AND topic = 'codes.task.updated'", [second.id]);
+            assert.strictEqual((await t.ctx.publisher.runOnce()).published, 1, 'the updated row follows');
         });
 
         await check('an event OpenVibe.Events refuses is dead after a fixed number of tries, not retried forever', async () => {
             const third = await t.ctx.tasks.start({ subject: ada.subject, project, args });
-            const row = await db.one('SELECT * FROM codes_outbox WHERE payload->>\'task_id\' = $1', [third.id]);
-            refuseNext = 3;
+            const row = await db.one('SELECT * FROM codes_outbox WHERE payload->>\'task_id\' = $1 AND topic = \'codes.task.queued\'', [third.id]);
+            refuseNext = 6;
             for (let tries = 0; tries < 3; tries++) {
-                await db.exec("UPDATE codes_outbox SET next_attempt_at = now() - interval '1 second' WHERE event_id = $1", [row.event_id]);
+                await db.exec("UPDATE codes_outbox SET next_attempt_at = now() - interval '1 second' WHERE payload->>'task_id' = $1", [third.id]);
                 const r = await t.ctx.publisher.runOnce();
-                assert.strictEqual(r.claimed, 1, 'the row is claimed');
-                assert.strictEqual(r.failed, 1, 'the refusal is a failure');
+                assert.strictEqual(r.claimed, 2, 'both rows are claimed');
+                assert.strictEqual(r.failed, 2, 'the refusals are failures');
             }
             const dead = await db.one('SELECT * FROM codes_outbox WHERE event_id = $1', [row.event_id]);
             assert.ok(dead.dead_at, 'the event is dead');
@@ -151,7 +163,7 @@ const { createPublisher } = require('../server/events/outbox');
             assert.strictEqual(dead.attempts, 3, 'it got the tries it was given');
             assert.match(dead.last_error, /events 422/);
             assert.strictEqual(await t.ctx.publisher.pending(), 0, 'a dead event is not pending');
-            assert.strictEqual(await t.ctx.publisher.dead(), 1);
+            assert.strictEqual(await t.ctx.publisher.dead(), 2, 'the per-state row and the updated row are both dead');
             await db.exec("UPDATE codes_outbox SET next_attempt_at = now() - interval '1 second' WHERE event_id = $1", [row.event_id]);
             assert.strictEqual((await t.ctx.publisher.runOnce()).claimed, 0, 'a dead event is never sent again');
             refuseNext = 0;
