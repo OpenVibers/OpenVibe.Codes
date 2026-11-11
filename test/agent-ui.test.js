@@ -31,7 +31,6 @@ const { clean } = require('../server/agent-ui/codes');
             { seq: 2, body: { t: 'tool_result', id: 'r1', output: 'summary', full_output: 'line\n'.repeat(15000) } },
             { seq: 3, body: { t: 'done', ok: true, text: 'Finished.' } },
         ]);
-        await lines.complete(id);
         await t.ctx.store.db.exec("UPDATE run_tasks SET via = 'service:actor' WHERE id = $1", [id]);
         await check('snapshot access matches tasks, full output persists, replay is exact', async () => {
             const snapshot = await t.get(`/api/v1/runs/${id}`, { as: owner });
@@ -59,6 +58,7 @@ const { clean } = require('../server/agent-ui/codes');
             assert.equal((await t.get(`/api/v1/runs/${id}`, { bearer: service, headers })).status, 200);
             const wrong = t.network.mintService('svc:chat', 'openvibe.codes', ['codes.task.read']);
             assert.equal((await t.get(`/api/v1/runs/${id}`, { bearer: wrong, headers })).status, 404);
+            await require('../server/sharing').createSharing({ db: t.ctx.store.db, config: t.config }).register({ subject: owner.subject }, id);
             const sharePath = `/api/v1/task/${id}/share`;
             const first = await t.get(sharePath, { as: owner, headers: { 'x-requested-with': 'ov-share' } });
             const saved = await t.get(sharePath, { as: owner, method: 'PUT', json: { audience: 'link' }, headers: { 'x-requested-with': 'ov-share', 'if-match': first.headers.get('etag') } });

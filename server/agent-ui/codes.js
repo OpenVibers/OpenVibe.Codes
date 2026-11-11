@@ -21,6 +21,13 @@ function createCodesRuns({ store, fallback }) {
             ok: attempt ? attempt.state === 'done' : row && row.state === 'succeeded', endedAt: row && row.updated_at };
     } });
     const resolve = async (row, n) => {
+        // Historical terminal tasks predate session_complete_at. Reconcile their saved log using the normal
+        // session writer; a recent completion is left to its running backfill to avoid closing ahead of it.
+        if (TERMINAL.has(row.state) && !row.session_complete_at && Date.now() - Number(row.updated_at) > 60000) {
+            const last = await store.db.maybe('SELECT n FROM codes_attempts WHERE task_id = $1 ORDER BY n DESC LIMIT 1', [row.id]);
+            const sessions = require('../domain/session-lines').createSessionLines({ store, config: {} });
+            await sessions.backfillAndComplete(row, row.result, last ? Number(last.n) : null);
+        }
         const attempt = n ? await store.db.maybe('SELECT n, created_at FROM codes_attempts WHERE task_id = $1 AND n = $2', [row.id, n])
             : await store.db.maybe('SELECT n, created_at FROM codes_attempts WHERE task_id = $1 ORDER BY n DESC LIMIT 1', [row.id]);
         if (n && !attempt) return null;
