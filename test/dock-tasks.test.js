@@ -204,7 +204,7 @@ function assertSummary(s) {
         await check('the home reads ?prompt=, ?mode= and ?repo= and prefills its composer', async () => {
             const plain = await t.get('/', { as: ada });
             assert.strictEqual(plain.status, 200);
-            assert.ok(plain.text.includes('data-ovt-attach'), 'the kit\u2019s attach menu');
+            assert.ok(plain.text.includes('data-ch-upload'), 'the shared upload picker');
             assert.ok(plain.text.includes('image/*'), 'images, text, code, PDF and zip');
             assert.ok(plain.text.includes('https://openvibe.media'), 'the person\u2019s OpenVibe files');
             assert.ok(plain.text.includes('Programs can\u2019t be attached'), 'the limits in the note');

@@ -434,6 +434,7 @@ function createChatRoutes(ctx) {
     // the owner's words for the limits the server holds (domain/attachments.js). The person's OpenVibe files live
     // on OpenVibe.Media, which names the library row until the shared files picker lands (composer-plumbing).
     const ATTACH_ACCEPT = 'image/*,text/*,application/pdf,application/zip,.pdf,.zip,.md,.markdown,.json,.js,.ts,.jsx,.tsx,.py,.css,.html,.xml,.yml,.yaml,.toml,.sql,.csv,.log,.txt';
+    const MEDIA_LIBRARY = (() => { try { const m = require('openvibe-contracts').services.get('media'); return (m && m.publicOrigin) || null; } catch { return null; } })();
     const ATTACH_NOTE = 'Files: up to 10, 20 MB each, 50 MB a message. Programs can\u2019t be attached.';
     /** The kit's composer with Codes' pickers in its tools, where the work runs under the bar, and its JSON route. */
     function composer({ action, api = '', placeholder, pickers = '', options = '', examples = [], live = false, stopAction = '', note = '', id = null, where = '', files = false, value = '' }) {
@@ -441,7 +442,7 @@ function createChatRoutes(ctx) {
             action, id, placeholder, label: placeholder, tools: pickers,
             attach: null,
             options: options ? { html: options, label: 'Options' } : null, examples, value,
-            foot: `${files ? `<div data-ch-upload data-accept="${esc(ATTACH_ACCEPT)}"></div><noscript><label>Attach files<input type="file" name="files" accept="${esc(ATTACH_ACCEPT)}" multiple></label></noscript>` : ''}${where}`,
+            foot: `${files ? `<div data-ch-upload data-accept="${esc(ATTACH_ACCEPT)}"></div>${MEDIA_LIBRARY ? `<a href="${esc(MEDIA_LIBRARY)}">From your OpenVibe files</a>` : ''}<noscript><label>Attach files<input type="file" name="files" accept="${esc(ATTACH_ACCEPT)}" multiple></label></noscript>` : ''}${where}`,
             note: files ? (note ? `${note} ${ATTACH_NOTE}` : ATTACH_NOTE) : note,
             attrs: { ...(api ? { 'data-ch-api': api } : {}), ...(files ? { enctype: 'multipart/form-data' } : {}) },
             busy: live, stopAction: live && stopAction ? stopAction : null, maxlength: 16000,
