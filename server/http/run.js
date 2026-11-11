@@ -17,6 +17,7 @@ const express = require('express');
 const { serviceAuth, capabilities, http } = require('openvibe-contracts');
 const { asyncRouter } = require('./router');
 const { send } = require('../render/layout');
+const kit = require('openvibe-shared/kit');
 const { html, raw, esc } = require('../render/html');
 
 const { parseArgs } = require('../../harness/job');
@@ -60,7 +61,7 @@ function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globa
     const r = asyncRouter();
     const db = store.db;
     const form = express.urlencoded({ extended: false, limit: '32kb' });
-    const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, scripts: ['js/run.js'], css: ['css/run.css'], ...o });
+    const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, scripts: ['js/run.js'], css: ['css/run.css'], styles: ['kit.css'], ...o });
     const signedIn = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
     const sameOrigin = (req) => {
         const origin = req.get('origin');
@@ -148,7 +149,7 @@ ${error ? html`<p class="run-notice run-notice-error" role="alert">${error}</p>`
     }
 
     function tasksHtml(rows) {
-        if (!rows.length) return html`<p class="muted">No tasks yet.</p>`;
+        if (!rows.length) return html`${raw(kit.empty({ icon: 'task', title: 'No tasks yet', text: 'Start one above and it appears here with its progress.', action: { href: '#run-form', label: 'Start a task', icon: 'plus' } }))}`;
         return html`<ul class="run-tasks">${rows.map((t) => html`<li><a href="/run/tasks/${t.id}"><span class="run-pill run-pill-${t.state}">${STATE_LABEL[t.state] || t.state}</span> <b>${repoName(t.repo)}</b> <span class="muted">${t.prompt.split('\n')[0].slice(0, 90)}</span></a></li>`)}</ul>`;
     }
 

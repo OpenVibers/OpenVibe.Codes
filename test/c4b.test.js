@@ -133,7 +133,7 @@ const TASK3 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAX';
             assert.ok(!page.text.includes('action="/agents/connections"'), 'no second place to add a key');
             t.network.state.selfKeys = [];
             const empty = await t.get('/agents', { as: ada });
-            assert.ok(empty.text.includes('No keys yet.') && empty.text.includes('Add one on Your AI'));
+            assert.ok(empty.text.includes('No keys yet') && empty.text.includes('Add one on Your AI'));
         });
 
         await check('Machine management leads to Link', async () => {
