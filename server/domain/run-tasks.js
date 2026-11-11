@@ -57,6 +57,18 @@ const asObject = (v) => {
     if (typeof v === 'string') { try { const p = JSON.parse(v); return p && typeof p === 'object' && !Array.isArray(p) ? p : null; } catch { return null; } }
     return null;
 };
+const asArray = (v) => {
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string') { try { const p = JSON.parse(v); return Array.isArray(p) ? p : null; } catch { return null; } }
+    return null;
+};
+const presentRoleRuns = (value) => (asArray(value) || []).slice(0, 30).map((run) => drop({
+    role: run.role, model: str(run.model, 200), effort: run.effort, outcome: run.outcome,
+    tokens: Number.isFinite(Number(run.tokens)) ? Math.max(0, Math.round(Number(run.tokens))) : 0,
+    cost_usd: Number.isFinite(Number(run.cost_usd)) ? Math.max(0, Number(run.cost_usd)) : 0,
+    duration_ms: Number.isFinite(Number(run.duration_ms)) ? Math.max(0, Math.round(Number(run.duration_ms))) : 0,
+    reason: str(run.reason, 1000),
+}));
 
 /** The job's result document (harness/job.js) as codes.task@1's `result`, or undefined. */
 function presentResult(d) {
@@ -154,7 +166,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null, goalVerifier = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null, modelPlans = null, goalVerifier = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -477,9 +489,11 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                     error = COALESCE($4, error),
                     started_at = COALESCE($5::timestamptz, started_at),
                     finished_at = COALESCE($6::timestamptz, finished_at),
-                    updated_at = $7
+                    updated_at = $7,
+                    model_plan = COALESCE($8::jsonb, model_plan),
+                    role_runs = COALESCE($9::jsonb, role_runs)
                  WHERE id = $1 RETURNING *`,
-                [current.id, state, result == null ? null : JSON.stringify(result), error, startedAt, finishedAt, store.now()],
+                [current.id, state, result == null ? null : JSON.stringify(result), error, startedAt, finishedAt, store.now(), result?.model_plan ? JSON.stringify(result.model_plan) : null, result?.role_runs ? JSON.stringify(result.role_runs) : null],
             );
             if (changed) await taskOutbox.emitTask(updated, current.state);
             // Every Run job is one attempt: the attempt of this job follows the job.
@@ -588,8 +602,13 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const turnId = claims.length ? (messageId || store.newId('msg')) : null;
         // A task with no agent named is `auto` (Codes C9c): the router reads the fleet — who is signed in, whose window
         // still has room — and the task is started on the agent it picks. Never a fixed agent, and never an Anthropic one.
-        let agent = args.agent || null;
-        let model = args.model || null;
+        if (modelPlans?.enabled() && !args.plan && args.kind !== 'bench') {
+            const selected = await modelPlans.select(subject, project);
+            args = { ...args, plan: selected.plan, plan_source: selected.source, preset: selected.preset, model_fallbacks: selected.fallbacks };
+        }
+        let agent = args.plan ? 'openvibe-ai' : args.agent || null;
+        let model = args.plan ? (args.plan.roles.find((role) => role.role === 'builder')?.model || 'auto') : args.model || null;
+        if (model === 'auto') model = 'openvibe/auto';
         let why = agent ? `the first try, with ${attemptStore.nameOf(agent)}` : 'the first try, with the agent that fits the task';
         // Nothing may take it: the task says why, and needs a person. It never starts on an agent without room.
         let refusal = null;
@@ -647,9 +666,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const placementKind = placed ? `harness.${taskKind}` : null;
         let inserted;
         await store.tx(async () => {
-            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, pin, goal, mode, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $17::jsonb, $18, $19, $19) RETURNING *`,
-            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, pin, runArgs.goal ? JSON.stringify(runArgs.goal) : null, startMode, at]);
+            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, pin, goal, mode, model_plan, plan_source, preset, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $17::jsonb, $18, $19::jsonb, $20, $21, $22, $22) RETURNING *`,
+            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, pin, runArgs.goal ? JSON.stringify(runArgs.goal) : null, startMode, runArgs.plan ? JSON.stringify(runArgs.plan) : null, runArgs.plan_source || null, runArgs.preset || null, at]);
             if (claims.length) await filesStore.link(subject, claims, { taskId: id, attemptN: 1, messageId: turnId });
             await taskOutbox.emitTask(inserted, null);
             return inserted;
@@ -1219,6 +1238,9 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
             id: row.id, state: STATES.has(row.state) ? row.state : 'failed', repo: String(row.repo).slice(0, 300), ref: row.ref || null,
             agent: row.agent || null, url: `${config.baseUrl}/run/tasks/${row.id}`, created_at: iso(row.created_at), updated_at: iso(row.updated_at),
             error: row.error ? String(row.error).slice(0, 1000) : null, result,
+            ...(row.model_plan ? { model_plan: asObject(row.model_plan) } : {}),
+            ...(row.preset ? { preset: row.preset } : {}),
+            ...(row.role_runs ? { role_runs: presentRoleRuns(row.role_runs) } : {}),
             ...(goal ? { goal: { ...goal, ...(verdict ? { verdict } : {}) } } : {}),
         });
     }

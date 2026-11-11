@@ -27,7 +27,7 @@ function modelsUrl(base) {
 function createAiCatalog({ config = {}, fetchImpl = globalThis.fetch, now = Date.now } = {}) {
     const setting = config.aiCatalog || {};
     // D11 owner settings: the switch may change live; the token is created whenever Codes has a client secret.
-    const enabledNow = () => setting.enabled === true;
+    const enabledNow = () => setting.enabled === true || config.modelPlans?.enabled === true;
     const base = String((config.ai && config.ai.url) || 'https://ai.openvibe.services').replace(/\/+$/, '');
     const url = modelsUrl(base);
     const ttlMs = setting.ttlMs == null ? DEFAULT_TTL_MS : Math.max(0, Number(setting.ttlMs) || 0);
@@ -62,8 +62,8 @@ function createAiCatalog({ config = {}, fetchImpl = globalThis.fetch, now = Date
     }
 
     /** The parsed catalog, cached about five minutes; null while the flag is off or AI does not answer with one. */
-    async function read() {
-        if (!enabledNow() || !tokens) return null;
+    async function read({ force = false } = {}) {
+        if ((!enabledNow() && !force) || !tokens) return null;
         if (cached && cached.until > now()) return cached.catalog;
         if (!inflight) {
             inflight = load().then((catalog) => {
@@ -75,8 +75,8 @@ function createAiCatalog({ config = {}, fetchImpl = globalThis.fetch, now = Date
     }
 
     /** The entries for a picker: aliases before exact ids, each with its price and availability; [] without a catalog. */
-    async function choices() {
-        return catalogChoices(await read());
+    async function choices(options = {}) {
+        return catalogChoices(await read(options));
     }
 
     return { get enabled() { return enabledNow(); }, url, read, choices };

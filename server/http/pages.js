@@ -81,6 +81,11 @@ function createPageRoutes(ctx) {
     const PUBLIC_CACHE = cache.htmlHeaders({ maxAge: 300 });
     const governance = loadGovernance();
     const page = (req, res, o, status = 200) => send(res, status, { viewer: req.viewer, config, path: req.originalUrl, ...o });
+    const modelPlansPage = () => ({
+        agent: true, index: true, cache: PUBLIC_CACHE, title: 'Model plans',
+        body: html`<article class="prose">${raw(markdown(fs.readFileSync(path.join(ROOT, 'docs/model-plans.md'), 'utf8')))}</article>`,
+    });
+    r.get('/model-plans', (req, res) => page(req, res, modelPlansPage()));
     // OpenVibe Git's public repositories for the home (read in the background, never awaited here); tests set ctx.git.
     const gitReader = home.createGitReader({ internalUrl: config.git.internalUrl, publicUrl: config.git.publicUrl, enabled: config.nodeEnv !== 'test' });
 
@@ -475,7 +480,7 @@ ${g.draft ? notice(html`<strong>Draft — pending owner review.</strong> This is
 
     // The public pages the agent layer's Markdown twins (server/agent-pages.js) render with the same builders.
     r.publicViews = {
-        home: homePage, start: startPage, harnesses: harnessesPage, improve: improvePage,
+        home: homePage, start: startPage, harnesses: harnessesPage, modelPlans: modelPlansPage, improve: improvePage,
         improveRepo: improveRepoPage, updates: updatesPage, policy: policyIndexPage,
         policyDoc: (slug) => { const g = governance.find((x) => x.slug === String(slug || '')); return g ? policyDocPage(g) : null; },
     };
