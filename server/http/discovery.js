@@ -33,6 +33,7 @@ const PAGE_TEXT = {
     '/run': ['Run locally', 'Start coding agents from any browser and run them on your own computer.'],
     '/start': ['Get started with the coding-agent harness', 'Install openvibe-codes; the agents it can use and what each needs; the commands, permission levels, hand-offs, the event format and using it from your own code.'],
     '/harnesses': ['The coding agents', 'Every harness the router can pick (Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code, DeepSeek, your own model) with its models, capabilities, prices and limits.'],
+    '/model-plans': ['Model plans', 'Single, pair, council and escalating plans for coding tasks, with model roles, checks, configuration and API.'],
     '/skills': ['The skills hub', 'Skills, rules and MCP servers kept per person and per project, versioned, shared through the four audiences, and synced into each coding tool on your own machine with a dry run and an undo.'],
     '/improve': ['Improve OpenVibe', 'How OpenVibe is built in the open: every repository, and the path from a change to a reviewed pull request.'],
     '/updates': ['What shipped on OpenVibe.Codes', 'This site\'s update log, from the network changelog feed.'],
@@ -70,6 +71,7 @@ function publicPages({ governance = [] }) {
         { path: '/run', changefreq: 'weekly', priority: 0.9 },
         { path: '/start', changefreq: 'weekly', priority: 0.9 },
         { path: '/harnesses', changefreq: 'weekly', priority: 0.9 },
+        { path: '/model-plans', changefreq: 'monthly', priority: 0.6 },
         { path: '/skills', changefreq: 'weekly', priority: 0.9 },
         { path: '/improve', changefreq: 'weekly', priority: 0.8 },
         { path: '/updates', changefreq: 'daily', priority: 0.5 },
@@ -151,7 +153,7 @@ function createDiscoveryRoutes(ctx) {
             name: SITE_NAME,
             base: site,
             summary: 'OpenVibe.Codes: the open coding-agent harness. openvibe-codes runs a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code, the DeepSeek API or your own OpenAI-compatible model, hands it to the next agent when one fails, and keeps every run; plus a public catalog and routing API, and the way to improve OpenVibe itself.',
-            details: `Every page is server-rendered and readable without JavaScript. The harness is a command-line tool and a Node.js module that runs on your machine with your agents and keys (install: ${INSTALL_HINT}). Every agent's output becomes one event stream in Claude Code's stream-json shape. The catalog and the router are public: GET /api/v1/harnesses lists every harness with its models, and POST /api/v1/harnesses/route picks one for a task by capability first, then cost. A hosted runner comes next. The developer console that used to live here (projects, apps, keys, the API reference, OAuth and webhook tools, releases) is OpenVibe.Services at ${SERVICES_ORIGIN}.`,
+            details: `Every page is server-rendered and readable without JavaScript. The harness is a command-line tool and a Node.js module that runs on your machine with your agents and keys (install: ${INSTALL_HINT}). Every agent's output becomes one event stream in Claude Code's stream-json shape. The catalog and the router are public: GET /api/v1/harnesses lists every harness with its models, and POST /api/v1/harnesses/route picks one for a task by capability first, then cost. Model plans: GET/PUT /api/v1/model-plans, GET /api/v1/model-plans/presets, and POST /api/v1/tasks with plan or preset; see /model-plans. A hosted runner comes next. The developer console that used to live here (projects, apps, keys, the API reference, OAuth and webhook tools, releases) is OpenVibe.Services at ${SERVICES_ORIGIN}.`,
             sections: [
                 { title: 'Public pages', links: (await allPages()).map(p => ({ title: p.title || describePage(p.path, { governance }).title, url: abs(p.path), note: p.text || describePage(p.path, { governance }).text, canonical: true })) },
                 { title: 'Start here', links: [

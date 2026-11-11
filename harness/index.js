@@ -347,4 +347,4 @@ function createHarness({ env = process.env, fetch: fetchImpl = globalThis.fetch,
     return { agents, route, run, store, adapters };
 }
 
-module.exports = { createHarness, adaptersFor, availability, handoffNote, onPath, exchangeKeyOf, deepseekAdapter, exchangeModelOf, platformHost };
+module.exports = { createHarness, adaptersFor, availability, handoffNote, onPath, exchangeKeyOf, deepseekAdapter, exchangeModelOf, platformHost, networkToken };

@@ -46,7 +46,7 @@ const FIL = /^fil_[0-9A-HJKMNP-TV-Z]{26}$/;
 // The Dock's Code tab shape (the home composer's three ways, as JSON): POST /tasks dispatches on it.
 const DOCK_MODES = ['create', 'openvibe', 'repo'];
 
-function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, fleet = null, sharing = null, conductor = null, attachments = null, log = console }) {
+function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, modelPlans = null, fleet = null, sharing = null, conductor = null, attachments = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
@@ -149,6 +149,18 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         }
         return problem(req, res, 401, 'token.required', `${cap} needs a Network service token for ${config.serviceAudience}, or a signed-in owner`);
     };
+
+    r.get('/model-plans/presets', actorLimits.reads('codes.read'), async (_req, res) => res.json({ presets: modelPlans ? await modelPlans.presets() : {} }));
+    r.get('/model-plans', guardAny('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
+        if (!modelPlans) return problem(req, res, 503, 'codes.model_plans_unavailable', 'model plans are unavailable');
+        try { return res.json(await modelPlans.get(req.principal.subject, req.query.project || null)); }
+        catch (e) { return problem(req, res, e.status || 500, e.code || 'codes.model_plans_failed', e.message); }
+    });
+    r.put('/model-plans', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!modelPlans) return problem(req, res, 503, 'codes.model_plans_unavailable', 'model plans are unavailable');
+        try { return res.json(await modelPlans.put(req.principal.subject, req.body?.plan, req.query.project || null)); }
+        catch (e) { return problem(req, res, e.status || 500, e.code || 'codes.model_plans_failed', e.message); }
+    });
 
     /** The task, its attempts and its outcome in plain words. The task's own fields stay at the top level. */
     const timeline = async (row) => {
@@ -351,6 +363,8 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         delete bodyForValidate.actor_step_id;
         delete bodyForValidate.goal;
         delete bodyForValidate.effort;
+        delete bodyForValidate.plan;
+        delete bodyForValidate.preset;
         const check = validate('codes.task-start-request@1', bodyForValidate);
         if (!check.valid) return problem(req, res, 422, 'codes.task_invalid', check.errors.map((e) => `${e.instancePath || 'body'} ${e.message}`).join('; ').slice(0, 500));
         let goal = null;
@@ -386,6 +400,13 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         const project = await taskStore.latestProject(p.subject);
         if (!project) {
             return problem(req, res, 409, 'codes.no_project', `this person has not run a task on ${config.baseUrl}/run yet: a service's task runs in the project of their latest one there, on a machine of theirs (openvibe.my/#machines)`);
+        }
+        if (b.plan != null || b.preset != null) {
+            if (!modelPlans) return problem(req, res, 503, 'codes.model_plans_unavailable', 'model plans are unavailable');
+            try {
+                const selected = await modelPlans.select(p.subject, project, { plan: b.plan || null, preset: b.preset || null });
+                args = { ...args, plan: selected.plan, plan_source: selected.source, preset: selected.preset, model_fallbacks: selected.fallbacks };
+            } catch (e) { return problem(req, res, e.status || 500, e.code || 'codes.model_plan_invalid', e.message); }
         }
         let row;
         try {
@@ -547,6 +568,29 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         if (out.error) return problem(req, res, 409, 'codes.task_conflict', out.error);
         // One continuation at a time: an attempt that is already live answers this press, and no second one starts.
         if (!out.live) log.info(`[Codes] task ${row.id} carried on (${agent ? `with ${agent}` : 'by the owner'})`);
+        return res.json(await timeline(out.row));
+    });
+
+    /**
+     * A message to the task (ask 354): while an attempt is live the message waits for the next attempt (202, nothing
+     * lost — a Run job on the person's own machine cannot be interrupted mid-run); when nothing runs it carries the
+     * task on at once, like a continue with a note.
+     */
+    r.post('/tasks/:id/message', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        const row = await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
+        const b = req.body || {};
+        const text = typeof b.text === 'string' ? b.text : (typeof b.note === 'string' ? b.note : null);
+        const out = await taskStore.messageTask(row, { note: text });
+        if (out.error) {
+            const status = out.error === 'no such task' ? 404 : /needs words|at most/.test(out.error) ? 422 : 409;
+            return problem(req, res, status,
+                status === 404 ? 'codes.task_not_found' : status === 422 ? 'codes.message_invalid' : 'codes.task_conflict', out.error);
+        }
+        if (out.queued) {
+            return res.status(202).json({ queued: true, message: { id: out.message.id, n: out.message.n, text: out.message.text } });
+        }
+        log.info(`[Codes] task ${row.id} carried on by a message`);
         return res.json(await timeline(out.row));
     });
 

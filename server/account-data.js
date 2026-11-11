@@ -30,12 +30,13 @@ const TASK_ROWS_MAX = 20000;
 const TABLES = [
     {
         table: 'run_tasks', subject: 'subject', file: 'run-tasks.json', order: 'created_at',
-        columns: ['id', 'project_id', 'job_id', 'repo', 'ref', 'prompt', 'agent', 'push', 'pull_request', 'state', 'result', 'error', 'started_at', 'finished_at', 'created_at', 'updated_at', 'machine', 'pin'],
+        columns: ['id', 'project_id', 'job_id', 'repo', 'ref', 'prompt', 'agent', 'push', 'pull_request', 'state', 'result', 'error', 'started_at', 'finished_at', 'created_at', 'updated_at', 'machine', 'pin', 'model_plan', 'plan_source', 'preset', 'role_runs'],
         // Erased by extraErase below, after the rows that point at these task ids (the SDK deletes the table's rows
         // before calling it, so a default delete here would lose the ids first).
         erase: { keep: 'erased with its task-keyed rows by the service extraErase' },
     },
     { table: 'codes_user_settings', subject: 'subject', file: 'settings.json', order: 'updated_at' },
+    { table: 'codes_model_plans', subject: 'subject', file: 'model-plans.json', order: 'updated_at' },
     // The files a person attached to a message (owner 2026-11-07): what they are and which turn they belong to. The
     // bytes are theirs too, but the export carries the record, not a second copy of every 20 MB file; deletion takes
     // the rows (and their bytes) with the person.
@@ -79,6 +80,12 @@ const TASK_KEYED = [
     },
     // The approvals the person decided, and the ones still waiting when their account is erased.
     { table: 'codes_approvals', file: 'approvals.json', columns: 'l.id, l.task_id, l.tool, l.summary, l.decision, l.message, l.created_at, l.decided_at', order: 'l.created_at ASC', kind: 'approvals', max: TASK_ROWS_MAX },
+    // A message sent while an attempt ran (ask 354): what the person said, taken by the next attempt.
+    {
+        table: 'codes_task_messages', file: 'task-messages.json',
+        columns: 'l.id, l.task_id, l.n, l.text, l.state, l.created_at',
+        order: 'l.n ASC', kind: 'task_messages', max: TASK_ROWS_MAX,
+    },
     { table: 'codes_events_inbox', file: null, kind: 'events_received' },
     // The one notice sent per task and state (Codes C9c): no content of its own, erased with the task, not exported.
     { table: 'codes_notices', file: null, kind: 'notices' },

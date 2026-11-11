@@ -80,6 +80,7 @@ function aliasEntry(alias) {
         policy,
         state: avail.state,
         badge: 'Dynamic',
+        efforts: Array.isArray(alias.efforts) ? alias.efforts.filter((effort) => ['none', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) : null,
         desc: `Dynamic: ${alias.description || 'the router picks the model for each request'} Its price is what the chosen model's retail rate says.`,
     };
 }
@@ -101,6 +102,7 @@ function modelEntry(model) {
         state: avail.state,
         badge: avail.badge,
         output_nano_usd_per_m: outputNano(model) == null ? null : String(outputNano(model)),
+        efforts: Array.isArray(model.efforts) ? model.efforts.filter((effort) => ['none', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) : null,
         desc: price || 'No published price',
     };
 }

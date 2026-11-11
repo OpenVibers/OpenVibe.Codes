@@ -57,6 +57,18 @@ const asObject = (v) => {
     if (typeof v === 'string') { try { const p = JSON.parse(v); return p && typeof p === 'object' && !Array.isArray(p) ? p : null; } catch { return null; } }
     return null;
 };
+const asArray = (v) => {
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string') { try { const p = JSON.parse(v); return Array.isArray(p) ? p : null; } catch { return null; } }
+    return null;
+};
+const presentRoleRuns = (value) => (asArray(value) || []).slice(0, 30).map((run) => drop({
+    role: run.role, model: str(run.model, 200), effort: run.effort, outcome: run.outcome,
+    tokens: Number.isFinite(Number(run.tokens)) ? Math.max(0, Math.round(Number(run.tokens))) : 0,
+    cost_usd: Number.isFinite(Number(run.cost_usd)) ? Math.max(0, Number(run.cost_usd)) : 0,
+    duration_ms: Number.isFinite(Number(run.duration_ms)) ? Math.max(0, Math.round(Number(run.duration_ms))) : 0,
+    reason: str(run.reason, 1000),
+}));
 
 /** The job's result document (harness/job.js) as codes.task@1's `result`, or undefined. */
 function presentResult(d) {
@@ -154,7 +166,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null, goalVerifier = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null, modelPlans = null, goalVerifier = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -477,9 +489,11 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                     error = COALESCE($4, error),
                     started_at = COALESCE($5::timestamptz, started_at),
                     finished_at = COALESCE($6::timestamptz, finished_at),
-                    updated_at = $7
+                    updated_at = $7,
+                    model_plan = COALESCE($8::jsonb, model_plan),
+                    role_runs = COALESCE($9::jsonb, role_runs)
                  WHERE id = $1 RETURNING *`,
-                [current.id, state, result == null ? null : JSON.stringify(result), error, startedAt, finishedAt, store.now()],
+                [current.id, state, result == null ? null : JSON.stringify(result), error, startedAt, finishedAt, store.now(), result?.model_plan ? JSON.stringify(result.model_plan) : null, result?.role_runs ? JSON.stringify(result.role_runs) : null],
             );
             if (changed) await taskOutbox.emitTask(updated, current.state);
             // Every Run job is one attempt: the attempt of this job follows the job.
@@ -588,8 +602,13 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const turnId = claims.length ? (messageId || store.newId('msg')) : null;
         // A task with no agent named is `auto` (Codes C9c): the router reads the fleet — who is signed in, whose window
         // still has room — and the task is started on the agent it picks. Never a fixed agent, and never an Anthropic one.
-        let agent = args.agent || null;
-        let model = args.model || null;
+        if (modelPlans?.enabled() && !args.plan && args.kind !== 'bench') {
+            const selected = await modelPlans.select(subject, project);
+            args = { ...args, plan: selected.plan, plan_source: selected.source, preset: selected.preset, model_fallbacks: selected.fallbacks };
+        }
+        let agent = args.plan ? 'openvibe-ai' : args.agent || null;
+        let model = args.plan ? (args.plan.roles.find((role) => role.role === 'builder')?.model || 'auto') : args.model || null;
+        if (model === 'auto') model = 'openvibe/auto';
         let why = agent ? `the first try, with ${attemptStore.nameOf(agent)}` : 'the first try, with the agent that fits the task';
         // Nothing may take it: the task says why, and needs a person. It never starts on an agent without room.
         let refusal = null;
@@ -613,7 +632,8 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         if (knowledge && runArgs.repo && runArgs.repo !== 'bench://') {
             try {
                 const recalled = await knowledge.recall({ subject, projectId: project, repo: runArgs.repo, prompt: runArgs.prompt });
-                const text = knowledge.block(recalled.rows);
+                // Previously first: what the last session on this repository was asked, and how it ended.
+                const text = [recalled.previousText, knowledge.block(recalled.rows)].filter((t) => t && t.trim()).join('\n\n');
                 if (text) runArgs.knowledge = text;
             } catch (e) {
                 log.warn(`[Codes] task ${id}: knowledge could not be recalled: ${String((e && e.message) || e).slice(0, 200)}`);
@@ -647,9 +667,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const placementKind = placed ? `harness.${taskKind}` : null;
         let inserted;
         await store.tx(async () => {
-            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, pin, goal, mode, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $17::jsonb, $18, $19, $19) RETURNING *`,
-            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, pin, runArgs.goal ? JSON.stringify(runArgs.goal) : null, startMode, at]);
+            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, pin, goal, mode, model_plan, plan_source, preset, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $17::jsonb, $18, $19::jsonb, $20, $21, $22, $22) RETURNING *`,
+            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, pin, runArgs.goal ? JSON.stringify(runArgs.goal) : null, startMode, runArgs.plan ? JSON.stringify(runArgs.plan) : null, runArgs.plan_source || null, runArgs.preset || null, at]);
             if (claims.length) await filesStore.link(subject, claims, { taskId: id, attemptN: 1, messageId: turnId });
             await taskOutbox.emitTask(inserted, null);
             return inserted;
@@ -907,7 +927,10 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
         // repository uses) is stored before the next attempt is planned, so the next run can recall it. The capture is
         // idempotent per (subject, kind, text), so a redelivered ending adds no second row.
         if (knowledge) {
-            try { await knowledge.captureTask(row); } catch (e) {
+            try {
+                await knowledge.captureTask(row);
+                await knowledge.captureSummary(row, ending);
+            } catch (e) {
                 log.warn(`[Codes] task ${row.id}: knowledge could not be captured: ${String((e && e.message) || e).slice(0, 200)}`);
             }
         }
@@ -939,15 +962,33 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
             try { await writeSessionReport(saved, collected, ending); } catch (e) {
                 log.warn('[Codes] the session report of task ' + row.id + ' failed: ' + String((e && e.message) || e).slice(0, 200));
             }
+            // A message sent while the attempt ran carries the task on after all: the engine is done, the person is
+            // not. This is the manual continue the owner would press next, with the waiting notes taken into it.
+            const waiting = await pendingMessages(row.id);
+            if (waiting.length) {
+                const fresh = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [row.id]);
+                const carried = fresh ? await continueTask(fresh, {}) : { error: 'no such task' };
+                if (!carried.error && carried.job) {
+                    log.info(`[Codes] task ${row.id}: ${waiting.length} waiting message(s) started the next attempt`);
+                    return carried.row;
+                }
+                if (carried.error) log.warn(`[Codes] task ${row.id}: waiting messages could not carry it on: ${carried.error}`);
+            }
             return saved;
         }
         if (!plan.kind) return row;
+        // A message sent while the attempt ran rides the follow-up the engine planned: the person is answered.
+        // Marked delivered only once the job is submitted; a follow-up that never starts leaves the queue for the
+        // owner's next press, and a message arriving after this read stays queued for the attempt after that.
+        const riding = await pendingMessages(row.id);
+        if (riding.length) plan.prompt = `${plan.prompt || ''}${notesSection(riding)}`;
         // The goal's budgets are checked before the next turn starts: a spent budget ends the task here, with its reason.
         if (goal) {
             const hit = goalBudgetHit(attempts, asObject(row.goal) || goal, row);
             if (hit) return await finishGoal(row, { outcome: 'unfinished', note: `stopped by budget: ${hit}`, end_state: 'stopped_by_budget' });
         }
         const done = await startFollowUp(row, plan, ending);
+        if (riding.length && done.created && done.job) await db.exec(`UPDATE codes_task_messages SET state = 'delivered' WHERE task_id = $1 AND state = 'queued' AND id = ANY($2)`, [row.id, riding.map((m) => m.id)]);
         return done.row || row;
     }
 
@@ -1046,6 +1087,61 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
     }
 
     /**
+     * A message to the task while it works. A Run job on the person's own machine cannot be interrupted mid-run
+     * (Run has no job-input channel), so a message sent while an attempt is live waits in codes_task_messages — the
+     * conductor's turn queue works the same way. The next attempt carries the waiting notes in its prompt: the
+     * engine's own follow-up takes them, and when the engine ends the task instead, afterEnd carries it on with
+     * them. Nothing the person sent is lost; on a stopped task the queue waits until the owner carries it on.
+     */
+    const MAX_MESSAGE = 4000;
+    function cleanMessage(text) {
+        const t = typeof text === 'string' ? text.trim() : '';
+        if (!t) return { error: 'a message needs words' };
+        if (t.length > MAX_MESSAGE) return { error: `a message is at most ${MAX_MESSAGE} characters` };
+        return { text: t };
+    }
+    /** The messages still waiting for the next attempt, oldest first (also what the task page shows). */
+    async function pendingMessages(taskId) {
+        if (!taskId) return [];
+        return db.many('SELECT * FROM codes_task_messages WHERE task_id = $1 AND state = $2 ORDER BY n ASC', [taskId, 'queued']);
+    }
+    /** Take the waiting messages inside the attempt's own transaction: taken exactly once, by the attempt that runs. */
+    async function takeMessages(taskId) {
+        const rows = await db.many('SELECT * FROM codes_task_messages WHERE task_id = $1 AND state = $2 ORDER BY n ASC FOR UPDATE', [taskId, 'queued']);
+        if (rows.length) await db.exec('UPDATE codes_task_messages SET state = $2 WHERE task_id = $1 AND state = $3', [taskId, 'delivered', 'queued']);
+        return rows;
+    }
+    function notesSection(rows) {
+        return `\n\n---\n## Notes from the owner (sent while the last attempt ran)\n\n${rows.map((m) => String(m.text)).join('\n\n---\n\n')}\n`;
+    }
+    async function queueMessage(row, text) {
+        const n = await db.one('SELECT COALESCE(MAX(n), 0) + 1 AS n FROM codes_task_messages WHERE task_id = $1', [row.id]);
+        return db.one(`INSERT INTO codes_task_messages (id, task_id, n, text, state) VALUES ($1, $2, $3, $4, 'queued') RETURNING *`,
+            [store.newId('msg'), row.id, Number(n.n), text]);
+    }
+    /** A message to the task: it waits while an attempt is live, and carries the task on when nothing runs. */
+    async function messageTask(row, { note = null } = {}) {
+        if (!row || !row.id) return { error: 'no such task' };
+        const clean = cleanMessage(note);
+        if (clean.error) return { error: clean.error };
+        const attempts = await attemptStore.list(row.id);
+        if (!attempts.length) return { error: 'the task has no attempt to carry on' };
+        const live = attempts.slice().reverse().find((a) => !ENDED.has(a.state));
+        if (live) {
+            const message = await queueMessage(row, clean.text);
+            log.info(`[Codes] task ${row.id}: a message waits for the next attempt`);
+            return { queued: true, message, attempt: live, row };
+        }
+        const carried = await continueTask(row, { note: clean.text });
+        if (carried.live) {
+            // An attempt started between the check and the carry-on: the message waits after all.
+            const message = await queueMessage(carried.row || row, clean.text);
+            return { queued: true, message, attempt: carried.attempt, row: carried.row || row };
+        }
+        return carried;
+    }
+
+    /**
      * The next attempt now: the owner carries the task on (with a note), or switches to another agent. The task's row
      * is locked while the attempt is written, so two presses start one attempt and not two.
      *
@@ -1102,6 +1198,13 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
             if (!current) return { error: 'no such task' };
             if (!TERMINAL.has(current.state)) return { error: 'the task is still running' };
             if (current.outcome === 'stopped') return { error: 'the task was stopped on purpose' };
+            // A message sent while the last attempt ran rides this one: taken here, in the attempt's own
+            // transaction, so exactly one attempt carries each message.
+            const waiting = await takeMessages(row.id);
+            if (waiting.length) {
+                plan.prompt += notesSection(waiting);
+                if (!text) plan.why = `carried on by the owner: ${String(waiting[0].text).slice(0, 200)}`;
+            }
             const made = await attemptStore.create({
                 task: current, agent: plan.agent, model: plan.model, effort: plan.effort || null, session: null, why: plan.why, kind: plan.kind, state: 'queued', budget: left.left,
             });
@@ -1219,6 +1322,9 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
             id: row.id, state: STATES.has(row.state) ? row.state : 'failed', repo: String(row.repo).slice(0, 300), ref: row.ref || null,
             agent: row.agent || null, url: `${config.baseUrl}/run/tasks/${row.id}`, created_at: iso(row.created_at), updated_at: iso(row.updated_at),
             error: row.error ? String(row.error).slice(0, 1000) : null, result,
+            ...(row.model_plan ? { model_plan: asObject(row.model_plan) } : {}),
+            ...(row.preset ? { preset: row.preset } : {}),
+            ...(row.role_runs ? { role_runs: presentRoleRuns(row.role_runs) } : {}),
             ...(goal ? { goal: { ...goal, ...(verdict ? { verdict } : {}) } } : {}),
         });
     }
@@ -1234,6 +1340,7 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
     return {
         start, refresh, applyJob, applyEvent, recordState, afterEnd, continueTask, stopTask, proof: taskProof,
         latestProject, present, who, attempts: attemptStore, setConductor, attachBindings, fundTurn,
+        messageTask, pendingMessages,
         setForge(f) { forge = f || null; },
     };
 }

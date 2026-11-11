@@ -66,6 +66,7 @@ const { createKnowledge } = require('./domain/knowledge');
 const { createFleet } = require('./domain/fleet');
 const { createNotices } = require('./domain/notices');
 const { createUserSettings } = require('./domain/user-settings');
+const { createModelPlans } = require('./domain/model-plans');
 const { createAttachments } = require('./domain/attachments');
 const { createPlacementOutcomes } = require('./domain/placement-outcomes');
 const { createBenchPriors } = require('./domain/bench-priors');
@@ -116,6 +117,7 @@ async function createApp(opts = {}) {
     // OpenVibe.AI's real model catalog (AI Exchange P9), when CODES_AI_CATALOG is on: the pickers read it, and
     // nothing else depends on it.
     const aiCatalog = createAiCatalog({ config, fetchImpl: fetchImpl || globalThis.fetch, now: store.now });
+    const modelPlans = createModelPlans({ store, aiCatalog, config });
     const runTokens = createRunTokens({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The task's attempts (stage C2): every Run job is one attempt, and the engine decides what happens next.
     const attempts = createAttempts({ store, config, log, harnesses });
@@ -138,8 +140,8 @@ async function createApp(opts = {}) {
     const sharing = opts.sharing || createSharing({ db: store.db, config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The skills hub (Compute plan §5, E6): versioned skills, rules and MCP servers, shared through the same SDK.
     const skills = opts.skills || createSkills({ store, sharing, log });
-    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, attachments, goalVerifier: opts.goalVerifier || null, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
-    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, runTokens, attempts, fleet, notices, notify, userSettings, attachments, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
+    const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, attachments, modelPlans, goalVerifier: opts.goalVerifier || null, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
+    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, modelPlans, runTokens, attempts, fleet, notices, notify, userSettings, attachments, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The person's own memory store (OpenVibe Memory M2b): the notes live in OpenVibe.AI, sealed there, and only the
@@ -189,6 +191,8 @@ async function createApp(opts = {}) {
             }
             if (Object.keys(kept).some((k) => METHODS.has(k))) paths[p] = kept;
         }
+        Object.assign(paths, require('./http/model-plan-openapi').modelPlanPaths());
+        require('./http/model-plan-openapi').extendTaskCreate(paths);
         res.set('Cache-Control', 'public, max-age=3600').set('Access-Control-Allow-Origin', '*').json({ ...doc, paths });
     });
     app.disable('x-powered-by');
@@ -315,7 +319,7 @@ async function createApp(opts = {}) {
     }
     app.use('/api/v1', createApi(ctx));
     app.use('/api/v1', createSkillsApi({ config, skills: ctx.skills, actorLimits: ctx.actorLimits, log }));
-    app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, fleet: ctx.fleet, conductor: ctx.conductor, attachments: ctx.attachments, actorLimits: ctx.actorLimits, sharing, log }));
+    app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, modelPlans, fleet: ctx.fleet, conductor: ctx.conductor, attachments: ctx.attachments, actorLimits: ctx.actorLimits, sharing, log }));
     // The composer's files: upload before send (with progress), or as the multipart form without JavaScript.
     app.use('/api/v1', createAttachmentsApi({ attachments: ctx.attachments, actorLimits: ctx.actorLimits, config, keys, log }));
     app.use('/api/v1', createMeApi({ config, store, sso, keys, run, harnesses, tasks, userSettings: ctx.userSettings, github: ctx.github, approvals: ctx.approvals, repoPicker: ctx.repoPicker, forge: ctx.forge, actorLimits: ctx.actorLimits, log }));
@@ -366,6 +370,7 @@ async function createApp(opts = {}) {
     app.use(require('./http/chat').createChatRoutes(ctx));
     app.use(require('./http/git').createGitRoutes(ctx));   // after the chat app: it renders in ctx.chatShell
     app.use(ctx.adminRepos.page);
+    app.use(require('./http/admin-model-plans').createAdminModelPlans(ctx));
     app.use(ctx.githubLearningRoutes.page);
     // C4 workspace pages sit before the legacy marketing pages and share the existing owner-scoped task store.
     c4Routes = require('./http/c4').createC4Routes(ctx);

@@ -25,6 +25,7 @@ const { assemble } = require('./prompt');
 const transcript = require('./transcript');
 const joblines = require('./joblines');
 const budget = require('./budget');
+const ledger = require('./ledger');
 
 /** The wall clock when the task sets none: no limit, like every other unset limit. */
 const DEFAULT_TIMEOUT_MS = 0;
@@ -41,6 +42,10 @@ const DEFAULT_TIMEOUT_MS = 0;
  * @param {string} [opts.permission] 'read' | 'edit' | 'full'
  * @param {string} [opts.resume] the session to continue
  * @param {object} [opts.budget] the limits ({ steps, minutes, usd }); null means no limit
+ * @param {object[]} [opts.ledger] the caller's per-turn ledger (engine/ledger.js); this attempt appends to it
+ * @param {string} [opts.trigger] what triggered this attempt (ledger entry)
+ * @param {string} [opts.parent] the parent turn when delegated (ledger entry)
+ * @param {boolean} [opts.ledgerWarned] the cap warning already went out (threaded back as result.ledgerWarned)
  * @param {boolean} [opts.know] this machine has the shared Know MCP server (Claude Code gets mcp__ov_know)
  * @param {string} [opts.claudeConfig] the Claude Code config to read for that check
  * @param {string} [opts.knowLessons] the Know store's module (know/lessons.js) for the prompt's lessons
@@ -75,6 +80,20 @@ async function runAttempt(opts = {}) {
     // the builder and the process keeps Command Code, Claude Code and MiniMax Code from their old hard-coded 150/200.
     const limits = budget.limitsFor({ budget: opts.budget || {} }, opts.agent, opts.budgetOverride);
     const caps = budget.caps(limits);
+    // The per-turn ledger and the pre-call gate (engine/ledger.js): the caller's turns ride in on opts.ledger, the
+    // gate refuses at the cap with a 409 instead of running, and this attempt's spending is appended after the run.
+    const turns = Array.isArray(opts.ledger) ? opts.ledger : [];
+    const gate = ledger.preCall(turns, { turns: limits.steps, usd: limits.usd }, { warned: !!opts.ledgerWarned });
+    if (!gate.allowed) {
+        return {
+            agent: adapter.id, ok: false, sessionId: opts.resume || null, model: opts.model || null,
+            summary: gate.message, promptLayers: prompt.parts,
+            refused: { status: gate.status, code: 'budget.capped', hit: gate.hit, message: gate.message },
+            usage: { input: 0, output: 0, cached: 0 }, cost: null, steps: 0,
+            budgetHit: gate.hit, wrapUp: null, log,
+            ledger: turns, ledgerWarned: gate.warned, ledgerWarning: gate.warning || null,
+        };
+    }
     const built = adapter.build({
         prompt: prompt.text,
         model: opts.model,
@@ -140,9 +159,22 @@ async function runAttempt(opts = {}) {
     const hit = budget.evaluate(used, limits).hit;
     const wrap = budget.wrapUp(hit, { done: false });
 
+    const ok = !!(st.events || []).some((e) => e.t === 'final' && !e.isError);
+    // This attempt's spending joins the caller's ledger: engine and model, effort, tokens with cached called out,
+    // cost where the transcript priced it, what triggered it, the parent when delegated, how it ended.
+    const u = state.usage || {};
+    ledger.add(turns, {
+        engine: adapter.id, model: st.model || opts.model || null, effort: opts.effort || null,
+        inputTokens: u.input != null ? Number(u.input) : null,
+        outputTokens: u.output != null ? Number(u.output) : null,
+        cachedTokens: u.cached != null ? Number(u.cached) : null,
+        costUsd: state.cost != null ? Number(state.cost) : null,
+        costSource: state.cost != null ? 'transcript' : null,
+        trigger: opts.trigger || 'attempt', parent: opts.parent || null, outcome: ok ? 'ok' : 'error',
+    });
     const result = {
         agent: adapter.id,
-        ok: !!(st.events || []).some((e) => e.t === 'final' && !e.isError),
+        ok,
         sessionId: state.sessionId,
         model: st.model || opts.model || null,
         summary: ((st.events || []).find((e) => e.t === 'final') || {}).text || '',
@@ -154,6 +186,10 @@ async function runAttempt(opts = {}) {
         budgetHit: hit,
         wrapUp: wrap.action === 'wrap-up' ? wrap.prompt : null,
         log,
+        ledger: turns,
+        ledgerSummary: ledger.summarize(turns),
+        ledgerWarned: gate.warned,
+        ledgerWarning: gate.warning || null,
     };
 
     // The wrap-up turn: the same session, one last turn that lands the work.

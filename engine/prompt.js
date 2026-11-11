@@ -13,6 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const { repomap } = require('./repomap');
+const { block: memoryBlock } = require('./memory');
 
 const HERE = __dirname;
 const FRAGMENTS = path.join(HERE, 'fragments');
@@ -63,12 +64,15 @@ function assemble({ brief, dir, env = process.env, know } = {}) {
     const houseRules = fragment('house-rules.md');
     const repo = repomap(dir);
     const learned = lessons({ file: know, repo: repo.repo, brief, env });
+    // The small memory index: MEMORY.md always, the topics the brief points at (engine/memory.js).
+    const memory = memoryBlock({ dir, brief });
     // Every prompt section is inspectable as a versioned layer. Stable layers stay first;
     // the request is always last so changing the task leaves the cached prefix byte-identical.
     const parts = [
         { name: 'git-rule', layer: 'platform', source: 'engine/fragments/git-rule.md', version: 1, text: gitRule },
         { name: 'house-rules', layer: 'product', source: 'engine/fragments/house-rules.md', version: 1, text: houseRules },
         { name: 'lessons', layer: 'role', source: 'Know recall', version: 1, text: learned },
+        { name: 'memory', layer: 'role', source: 'engine/memory.js', version: 1, text: memory.text },
         { name: 'repo-digest', layer: 'role', source: 'engine/repomap.js', version: 1, text: repo.text },
         { name: 'brief', layer: 'task', source: 'launch request', version: 1, text: String(brief || '') },
     ].filter((p) => p.text && p.text.trim());
