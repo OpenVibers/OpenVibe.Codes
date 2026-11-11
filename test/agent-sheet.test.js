@@ -22,6 +22,7 @@ const { boot, check, done } = require('./helpers/boot');
             assert.strictEqual(sheet.work.length, 1);
             assert.strictEqual(sheet.work[0].cost_usd, 0.25);
             assert.strictEqual(sheet.activity[0].entries[0].what, 'Fixed the failing check');
+            assert.match(sheet.activity[0].day, /^\d{4}-\d{2}-\d{2}$/);
             assert.deepStrictEqual(sheet.memory, []);
             assert.deepStrictEqual(sheet.schedules, []);
             assert.strictEqual(r.headers.get('cache-control'), 'private, no-store');

@@ -214,7 +214,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         }));
         const now = work.find((row) => ['queued', 'running'].includes(row.state)) || null;
         const activity = Object.values(work.reduce((days, row) => {
-            const day = String(row.started_at).slice(0, 10);
+            const day = new Date(row.started_at).toISOString().slice(0, 10);
             (days[day] ||= { day, entries: [] }).entries.push({ task_id: row.task_id, what: row.what || row.title, result: row.result, outcome: row.outcome, cost_usd: row.cost_usd, url: row.url });
             return days;
         }, {}));
