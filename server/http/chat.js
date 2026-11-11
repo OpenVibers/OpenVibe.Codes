@@ -531,7 +531,7 @@ function createChatRoutes(ctx) {
     function whereAgents(list) {
         const tail = '<span class="ch-where-tail">in a fresh copy of the code, with a pull request at the end</span>';
         if (list == null) return `${ico('machines')}<span>Runs on your computer ${tail}</span>`;
-        if (!list.length) return `${ico('machines')}<span>Runs on your computer. <a href="https://openvibe.my/#machines">Pair it first</a>: it takes a minute, and the task waits for it.</span>`;
+        if (!list.length) return `${ico('machines')}<span>Runs on your computer. <a href="https://openvibe.link/machines#pair">Pair it first</a>: it takes a minute, and the task waits for it.</span>`;
         const on = list.find((m) => m.state === 'online');
         const m = on || list[0];
         const name = esc(m.name || m.node_id || 'your computer');
