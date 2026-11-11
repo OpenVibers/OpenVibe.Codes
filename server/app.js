@@ -221,7 +221,8 @@ async function createApp(opts = {}) {
                 scriptSrc: ["'self'", "'unsafe-inline'", 'https://openvibe.network', 'https://static.cloudflareinsights.com'],
                 styleSrc: ["'self'", "'unsafe-inline'", 'https://openvibe.network', 'https://fonts.googleapis.com', 'https://cdnjs.cloudflare.com'],
                 fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com'],
-                imgSrc: ["'self'", 'data:', 'https://openvibe.network', 'https://openvibe.media'],
+                imgSrc: ["'self'", 'data:', 'blob:', 'https://openvibe.network', 'https://openvibe.media'],
+                mediaSrc: ["'self'", 'blob:'],
                 // openvibe.events: release notifications (release-watch's EventSource, openvibe-shared 1.17).
                 // The navbar's Messages count asks Chat (openvibe-shared 4.130.0).
                 connectSrc: ["'self'", 'https://openvibe.chat', 'https://openvibe.network', 'https://cloudflareinsights.com', 'https://openvibe.events'],
