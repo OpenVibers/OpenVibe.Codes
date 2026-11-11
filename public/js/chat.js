@@ -175,106 +175,71 @@
             if ($('.ovt.is-start', app) && !matchMedia('(pointer: coarse)').matches) text.focus({ preventScroll: true });
         }
         if (form) {
-            // ── The composer's files: upload before send, with a chip, a thumbnail, a progress bar and a × ──
-            // The kit's attach menu renders one input per row (Files, Photos and videos, the camera): every one of
-            // them feeds the same queue, and the no-JavaScript post sends them all as multipart.
-            const pickers = Array.from(form.querySelectorAll('input[data-ovt-files], input[data-ch-files]'));
-            const picker = pickers[0] || null;
-            const chips = $('[data-ch-files-list]', form);
+            // The shared picker owns drop, keyboard selection, rows and progress. Codes owns its upload transport.
+            const uploadRoot = $('[data-ch-upload]', form);
             const BLOCKED = /\.(exe|dll|com|bat|cmd|msi|scr|ps1|sh|so|dylib|app|apk|deb|rpm|jar|bin|elf|vbs|wsf|hta)$/i;
             const MAX_FILES = 10, MAX_FILE = 20 * 1024 * 1024, MAX_TOTAL = 50 * 1024 * 1024;
             const entries = [];
-            const sizeWords = (n) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / (1024 * 1024)).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`);
-            const attachIcon = picker && picker.closest('label') && picker.closest('label').querySelector('svg');
-            const chipFor = (entry) => {
-                const li = document.createElement('span');
-                li.className = 'ch-chip ch-file';
-                li.setAttribute('role', 'listitem');
-                li.dataset.chFile = entry.file.name;
-                if (/^image\//i.test(entry.file.type)) {
-                    const img = document.createElement('img');
-                    img.width = 24; img.height = 24; img.alt = ''; img.src = entry.thumb;
-                    li.appendChild(img);
-                } else if (attachIcon) {
-                    li.appendChild(attachIcon.cloneNode(true));
+            let picker = null;
+            function addFile(file, row) {
+                const total = entries.reduce((n, e) => n + e.file.size, 0);
+                let problem = '';
+                if (BLOCKED.test(file.name)) problem = `“${file.name}” is a program or script, and cannot be attached`;
+                else if (!file.size) problem = `“${file.name}” is empty`;
+                else if (file.size > MAX_FILE) problem = `“${file.name}” is larger than 20 MB`;
+                else if (entries.length >= MAX_FILES) problem = 'A message carries at most 10 files';
+                else if (total + file.size > MAX_TOTAL) problem = 'The files of one message are larger than 50 MB together';
+                if (problem) { row.dispatchEvent(new Event('remove')); row.remove(); say(problem, true); return; }
+                const meterRoot = document.createElement('div');
+                row.append(meterRoot);
+                const meter = OVUpload.progress(meterRoot, { onRetry: () => sendFile() });
+                const entry = { file, row, meter, id: null, uploading: true, xhr: null };
+                entries.push(entry);
+                function sendFile() {
+                    entry.uploading = true;
+                    meter.update({ state: 'sending', done: 0, total: file.size });
+                    const xhr = entry.xhr = new XMLHttpRequest();
+                    xhr.open('POST', '/api/v1/attachments');
+                    xhr.withCredentials = true;
+                    xhr.upload.onprogress = (e) => { if (e.lengthComputable) meter.update({ state: 'sending', done: e.loaded, total: e.total }); };
+                    xhr.onload = () => {
+                        entry.uploading = false;
+                        let doc = {};
+                        try { doc = JSON.parse(xhr.responseText || '{}'); } catch { /* response is not JSON */ }
+                        if (xhr.status === 201 && doc.attachment && doc.attachment.id) {
+                            entry.id = doc.attachment.id;
+                            meter.update({ state: 'done', done: file.size, total: file.size });
+                        } else {
+                            const message = doc.detail || `“${file.name}” could not be attached`;
+                            meter.update({ state: 'failed', message }); say(message, true);
+                        }
+                    };
+                    xhr.onerror = () => { entry.uploading = false; const message = `“${file.name}” could not be attached`; meter.update({ state: 'failed', message }); say(message, true); };
+                    xhr.onabort = () => { entry.uploading = false; };
+                    const data = new FormData(); data.append('file', file, file.name); xhr.send(data);
                 }
-                const name = document.createElement('span'); name.textContent = entry.file.name; li.appendChild(name);
-                const size = document.createElement('small'); size.textContent = sizeWords(entry.file.size); li.appendChild(size);
-                const bar = document.createElement('progress'); bar.max = 100; bar.value = 0; bar.setAttribute('aria-label', `Uploading ${entry.file.name}`); li.appendChild(bar);
-                const remove = document.createElement('button');
-                remove.type = 'button'; remove.className = 'ch-icon-btn'; remove.title = `Remove ${entry.file.name}`;
-                remove.setAttribute('aria-label', `Remove ${entry.file.name}`); remove.textContent = '×';
-                remove.addEventListener('click', () => {
-                    const i = entries.indexOf(entry);
-                    if (i >= 0) entries.splice(i, 1);
-                    if (entry.xhr) entry.xhr.abort();
-                    if (entry.thumb) URL.revokeObjectURL(entry.thumb);
-                    li.remove();
-                    if (entry.id) fetch(`/api/v1/attachments/${encodeURIComponent(entry.id)}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
-                    say(entries.length ? `${entries.length} file${entries.length === 1 ? '' : 's'} ready to send` : '');
-                });
-                entry.bar = bar; entry.li = li;
-                li.appendChild(remove);
-                if (chips) { chips.hidden = false; chips.appendChild(li); }
-                return li;
-            };
-            const upload = (entry) => {
-                entry.uploading = true;
-                const xhr = entry.xhr = new XMLHttpRequest();
-                xhr.open('POST', '/api/v1/attachments');
-                xhr.withCredentials = true;
-                xhr.upload.onprogress = (e) => { if (e.lengthComputable && entry.bar) entry.bar.value = Math.round((e.loaded / e.total) * 100); };
-                xhr.onload = () => {
-                    entry.uploading = false;
-                    let doc = {};
-                    try { doc = JSON.parse(xhr.responseText || '{}'); } catch { doc = {}; }
-                    if (xhr.status === 201 && doc.attachment && doc.attachment.id) {
-                        entry.id = doc.attachment.id;
-                        if (entry.bar) { entry.bar.value = 100; entry.bar.hidden = true; }
-                        if (entry.li) entry.li.dataset.uploaded = '1';
-                    } else {
-                        if (entry.li) entry.li.classList.add('is-bad');
-                        say(doc.detail || `“${entry.file.name}” could not be attached`, true);
-                    }
-                };
-                xhr.onerror = () => { entry.uploading = false; if (entry.li) entry.li.classList.add('is-bad'); say(`“${entry.file.name}” could not be attached`, true); };
-                xhr.onabort = () => { entry.uploading = false; };
-                const data = new FormData();
-                data.append('file', entry.file, entry.file.name);
-                xhr.send(data);
-            };
-            const addFiles = (list) => {
-                const incoming = Array.from(list || []);
-                if (!incoming.length) return;
-                if (entries.length + incoming.length > MAX_FILES) { say(`A message carries at most ${MAX_FILES} files`, true); return; }
-                let total = entries.reduce((n, e) => n + e.file.size, 0);
-                for (const file of incoming) {
-                    if (BLOCKED.test(file.name)) { say(`“${file.name}” is a program or script, and cannot be attached`, true); continue; }
-                    if (!file.size) { say(`“${file.name}” is empty`, true); continue; }
-                    if (file.size > MAX_FILE) { say(`“${file.name}” is larger than 20 MB`, true); continue; }
-                    if (total + file.size > MAX_TOTAL) { say('The files of one message are larger than 50 MB together', true); break; }
-                    total += file.size;
-                    const entry = { file, id: null, uploading: false, thumb: /^image\//i.test(file.type) ? URL.createObjectURL(file) : null, xhr: null };
-                    entries.push(entry);
-                    chipFor(entry);
-                    upload(entry);
-                }
-                if (entries.length) say(`${entries.length} file${entries.length === 1 ? '' : 's'} ready to send`);
-            };
-            for (const one of pickers) {
-                one.addEventListener('change', () => { addFiles(one.files); one.value = ''; });
+                sendFile();
+                say(`${entries.length} file${entries.length === 1 ? '' : 's'} selected`);
             }
-            // Paste an image from the clipboard, or drop files on the composer.
-            if (text) text.addEventListener('paste', (e) => {
-                const files = e.clipboardData && e.clipboardData.files;
-                if (files && files.length) { e.preventDefault(); addFiles(files); }
-            });
-            form.addEventListener('dragover', (e) => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) { e.preventDefault(); form.classList.add('is-dragging'); } });
-            form.addEventListener('dragleave', () => form.classList.remove('is-dragging'));
-            form.addEventListener('drop', (e) => {
-                if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
-                e.preventDefault(); form.classList.remove('is-dragging'); addFiles(e.dataTransfer.files);
-            });
+            if (uploadRoot && window.OVUpload) {
+                picker = OVUpload.picker(uploadRoot, {
+                    label: 'Attach files', accept: uploadRoot.dataset.accept, multiple: true,
+                    onFile: addFile,
+                    onRemove: (file) => {
+                        const i = entries.findIndex((entry) => entry.file === file);
+                        if (i < 0) return;
+                        const [entry] = entries.splice(i, 1);
+                        if (entry.xhr) entry.xhr.abort();
+                        entry.meter.destroy();
+                        if (entry.id) fetch(`/api/v1/attachments/${encodeURIComponent(entry.id)}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
+                        say(entries.length ? `${entries.length} file${entries.length === 1 ? '' : 's'} selected` : '');
+                    }
+                });
+                if (text) text.addEventListener('paste', (e) => {
+                    const files = e.clipboardData && e.clipboardData.files;
+                    if (files && files.length) { e.preventDefault(); picker.add(files); }
+                });
+            }
             form.addEventListener('submit', async (e) => {
                 const submitter = e.submitter;
                 if (submitter && submitter.formAction && submitter.formAction !== form.action) return; // Stop: a plain post
@@ -314,7 +279,6 @@
                 }
                 // The files are up: a plain form post names their ids (and sends the words and the pickers as usual).
                 form.enctype = 'application/x-www-form-urlencoded';
-                for (const one of pickers) one.value = '';
                 for (const id of ids) {
                     const hidden = document.createElement('input');
                     hidden.type = 'hidden'; hidden.name = 'attachment_ids'; hidden.value = id;

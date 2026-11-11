@@ -440,9 +440,9 @@ function createChatRoutes(ctx) {
     function composer({ action, api = '', placeholder, pickers = '', options = '', examples = [], live = false, stopAction = '', note = '', id = null, where = '', files = false, value = '' }) {
         return thread.composer({
             action, id, placeholder, label: placeholder, tools: pickers,
-            attach: files ? { menu: true, accept: ATTACH_ACCEPT, library: MEDIA_LIBRARY, name: 'files' } : null,
+            attach: null,
             options: options ? { html: options, label: 'Options' } : null, examples, value,
-            foot: `${files ? '<div class="ch-files" data-ch-files-list role="list" aria-live="polite"></div>' : ''}${where}`,
+            foot: `${files ? `<div data-ch-upload data-accept="${esc(ATTACH_ACCEPT)}"></div>${MEDIA_LIBRARY ? `<a href="${esc(MEDIA_LIBRARY)}">From your OpenVibe files</a>` : ''}<noscript><label>Attach files<input type="file" name="files" accept="${esc(ATTACH_ACCEPT)}" multiple></label></noscript>` : ''}${where}`,
             note: files ? (note ? `${note} ${ATTACH_NOTE}` : ATTACH_NOTE) : note,
             attrs: { ...(api ? { 'data-ch-api': api } : {}), ...(files ? { enctype: 'multipart/form-data' } : {}) },
             busy: live, stopAction: live && stopAction ? stopAction : null, maxlength: 16000,
@@ -462,7 +462,7 @@ function createChatRoutes(ctx) {
             cls: page != null ? 'is-page' : '',
         });
         const body = `<div class="ch" data-chat${streamUrl ? ` data-ch-stream="${esc(streamUrl)}"` : ''}>${view}</div>`;
-        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css', 'thread.css', ...styles], sharedScripts: ['kit-web.js', 'ov-thread.js', ...sharedScripts], scripts: [...scripts, 'js/md.js', 'js/chat.js'], body: raw(body) });
+        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css', 'thread.css', 'ov-upload.css', ...styles], sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-upload.js', ...sharedScripts], scripts: [...scripts, 'js/md.js', 'js/chat.js'], body: raw(body) });
     }
 
     /** The panel: who worked on it, and where the work is. */
