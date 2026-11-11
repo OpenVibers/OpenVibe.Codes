@@ -97,7 +97,9 @@ function createC4Routes(ctx) {
         // A page may add its own stylesheet (the guided setup's), so c4.css stays the size every page pays for.
         const css = ['css/c4.css', ...(Array.isArray(extra.css) ? extra.css : [])];
         const own = Array.isArray(extra.scripts) ? extra.scripts : [];
-        const styles = ['kit.css', ...(Array.isArray(extra.styles) ? extra.styles : [])];
+        // The kit's empty states are on the signed-in/tool pages; the server-rendered front door has none, and its
+        // size budget counts every stylesheet.
+        const styles = [...(extra.index ? [] : ['kit.css']), ...(Array.isArray(extra.styles) ? extra.styles : [])];
         if (viewer(req) && ctx.chatShell && !extra.index) {
             const here = '/' + (String(req.path || '/').split('/')[1] || '');
             return ctx.chatShell(req, res, { title: title || 'Codes', body: String(body), css, scripts: ['js/c4.js', ...own], styles, sharedScripts: extra.sharedScripts, here });

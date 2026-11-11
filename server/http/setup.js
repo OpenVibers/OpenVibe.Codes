@@ -22,7 +22,7 @@
 
 const { asyncRouter } = require('./router');
 const { esc } = require('../render/html');
-const kit = require('openvibe-shared/kit');
+const ovkKit = require('openvibe-shared/kit');
 const { readiness, optionAttrs, SETUP } = require('../domain/readiness');
 const { CONDUCTOR_AGENTS, AGENT_NAMES } = require('../domain/conductor-failover');
 
@@ -120,7 +120,7 @@ function createSetupRoutes(ctx, kit) {
         const list = (d.keys && d.keys.credentials) || [];
         const rows = list.map((k) => `<li class="c4-row c4-row-flat"><span class="c4-row-dot${k.status === 'ok' ? ' c4-dot-ok' : k.status === 'failing' ? ' c4-dot-bad' : ''}" aria-hidden="true"></span><span class="c4-row-label">${esc(PROVIDER_NAMES[k.provider] || k.provider)}</span><span class="c4-row-note">…${esc(k.hint || '????')}</span>${k.status === 'ok' ? pill('Working', 'ok') : k.status === 'failing' ? pill('Not working', 'bad') : pill('Not tested', 'skip')}</li>`).join('');
         return `<p class="c4-hint">Only for agents and models you pay for by use (DeepSeek, OpenAI, Anthropic, Google and more). An agent signed in with a plan needs no key. Keys live on Your AI, sealed, and every OpenVibe site uses the same ones.</p>
-${rows ? `<ul class="c4-rows">${rows}</ul>` : d.keys ? kit.empty({ icon: 'key', title: 'No keys yet', text: 'Keys are optional: add one on Your AI and the agents can use models paid by use.' }) : kit.empty({ icon: 'key', title: 'Your keys could not be read just now', text: 'Try again in a minute, or open Your AI to check them.' })}
+${rows ? `<ul class="c4-rows">${rows}</ul>` : d.keys ? ovkKit.empty({ icon: 'key', title: 'No keys yet', text: 'Keys are optional: add one on Your AI and the agents can use models paid by use.' }) : ovkKit.empty({ icon: 'key', title: 'Your keys could not be read just now', text: 'Try again in a minute, or open Your AI to check them.' })}
 <div class="c4-setup-actions"><a class="c4-button${rows ? ' c4-button-light' : ''}" href="${esc(YOUR_AI)}" rel="noopener">${rows ? 'Manage keys' : 'Add a key'} ↗</a></div>`;
     }
 
