@@ -21,6 +21,7 @@ const { codex } = require('../engine/adapters/codex');
 const { commandCode } = require('../engine/adapters/command-code');
 const { opencode } = require('../engine/adapters/opencode');
 const { minimaxCode } = require('../engine/adapters/minimax-code');
+const { muse } = require('../engine/adapters/muse');
 const transcript = require('../engine/transcript');
 const { runAttempt } = require('../engine/jobrunner');
 const { assemble } = require('../engine/prompt');
@@ -34,13 +35,24 @@ function dry(adapter, ctx = {}) {
 
 (async () => {
     await check('every harness Codes can run is an adapter, and each one names the portal script it came from', () => {
-        assert.deepStrictEqual(ids().sort(), ['claude-code', 'claude-other', 'codex', 'command-code', 'minimax-code', 'opencode']);
+        assert.deepStrictEqual(ids().sort(), ['claude-code', 'claude-other', 'codex', 'command-code', 'minimax-code', 'muse', 'opencode']);
         for (const id of ids()) {
             const a = adapterFor(id);
             assert.ok(a.portal, `${id} names no portal script`);
             assert.ok(typeof a.build === 'function' && typeof a.feed === 'function', `${id} is not a full adapter`);
         }
         assert.equal(adapterFor('nope'), null);
+    });
+
+    await check('Muse Code uses its local sign-in, model and reasoning flags with contributor mode off', () => {
+        const d = dry(muse, { model: 'muse-ember-1.0', effort: 'high', resume: 'session-1' });
+        assert.equal(d.cmd, 'muse');
+        assert.ok(d.argv.includes('--contributor-mode') && d.argv.includes('off'));
+        assert.ok(d.argv.includes('--disable-request-user-input'));
+        assert.ok(d.argv.includes('--model') && d.argv.includes('muse-ember-1.0'));
+        assert.ok(d.argv.includes('--reasoning-effort') && d.argv.includes('high'));
+        assert.ok(d.argv.includes('--session-id') && d.argv.includes('session-1'));
+        assert.equal(d.stdin, 'do the thing');
     });
 
     await check('Claude Code: the portal\'s argv and the cm-style environment', () => {

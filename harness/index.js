@@ -139,6 +139,7 @@ function adaptersFor(env) {
         'claude-other': cli.claudeOther,
         // MiniMax Code: the person's own MiniMax sign-in on this machine.
         'minimax-code': cli.minimaxCode,
+        muse: cli.muse,
         codex: cli.codex,
         opencode: cli.opencode,
         'command-code': cli.commandCode,

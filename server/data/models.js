@@ -29,6 +29,11 @@ const MODELS = {
         { id: 'deepseek-chat', name: 'Chat', note: 'quick and very cheap' },
         { id: 'deepseek-reasoner', name: 'Reasoner', note: 'thinks first: harder problems' },
     ],
+    muse: [
+        { id: 'muse-spark-1.3', name: 'Spark 1.3', note: 'default: agentic coding work at scale' },
+        { id: 'muse-wonder-full', name: 'Wonder Full', note: 'complex engineering and long-horizon work' },
+        { id: 'muse-ember-1.0', name: 'Ember', note: 'efficient high-volume repeated work' },
+    ],
 };
 const DEFAULT = { id: '', name: 'its default', note: 'the model the agent picks for itself' };
 

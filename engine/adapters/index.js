@@ -19,6 +19,7 @@ const { codex } = require('./codex');
 const { commandCode } = require('./command-code');
 const { opencode } = require('./opencode');
 const { minimaxCode } = require('./minimax-code');
+const { muse } = require('./muse');
 const { effortFor, EFFORT_LEVELS } = require('./base');
 
 const ADAPTERS = {
@@ -28,6 +29,7 @@ const ADAPTERS = {
     'command-code': commandCode,
     opencode,
     'minimax-code': minimaxCode,
+    muse,
 };
 
 /** The adapter of a harness, or null. */

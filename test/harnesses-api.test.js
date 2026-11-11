@@ -29,6 +29,14 @@ const rows = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'server', 'da
         }
     });
 
+    await check('GET /harnesses/models offers Muse models and reasoning levels', async () => {
+        const r = await t.get('/api/v1/harnesses/models');
+        assert.strictEqual(r.status, 200, r.text.slice(0, 300));
+        const muse = r.json().agents.find((agent) => agent.agent === 'muse');
+        assert.deepStrictEqual(muse.models.map((model) => model.id), ['muse-spark-1.3', 'muse-wonder-full', 'muse-ember-1.0']);
+        assert.ok(muse.efforts.includes('high'));
+    });
+
     await check('POST /harnesses/route {task:review} returns a selected offer and candidates', async () => {
         const r = await post({ task: 'review' });
         assert.strictEqual(r.status, 200, r.text.slice(0, 300));

@@ -312,6 +312,92 @@
     ]
   },
   {
+    "id": "muse",
+    "name": "Muse Code",
+    "provider": "meta",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": true,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "muse"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 14400,
+      "max_concurrent_runs": 4,
+      "max_context_tokens": 200000
+    },
+    "agents": [
+      {
+        "id": "muse-spark-1.3",
+        "harness": "muse",
+        "provider": "meta",
+        "model": "muse-spark-1.3",
+        "context_limits": {
+          "input_tokens": 1048576,
+          "output_tokens": 524288
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      },
+      {
+        "id": "muse-wonder-full",
+        "harness": "muse",
+        "provider": "meta",
+        "model": "muse-wonder-full",
+        "context_limits": {
+          "input_tokens": 1048576,
+          "output_tokens": 524288
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      },
+      {
+        "id": "muse-ember-1.0",
+        "harness": "muse",
+        "provider": "meta",
+        "model": "muse-ember-1.0",
+        "context_limits": {
+          "input_tokens": 1048576,
+          "output_tokens": 524288
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
     "id": "aider",
     "name": "Aider",
     "provider": "aider",
@@ -405,7 +491,7 @@
         "concurrency": 8,
         "price_per_1k_tokens": {
           "fresh_usd": 0.00027,
-          "cached_usd": 7e-05,
+          "cached_usd": 0.00007,
           "output_usd": 0.0011
         },
         "availability_windows": []

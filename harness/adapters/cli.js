@@ -335,6 +335,40 @@ const minimaxCode = {
     },
 };
 
+// ── Muse Code: the person's own Muse sign-in; never pass a Meta API key ──
+const muse = {
+    id: 'muse', name: 'Muse Code', kind: 'cli', bin: 'muse',
+    version: (env) => versionOf('muse', env),
+    check(env = {}) {
+        try {
+            const raw = execFileSync('muse', ['usage', '--json'], { env: { ...process.env, ...env }, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] });
+            const meter = JSON.parse(raw);
+            return meter && meter.allowance ? { available: true } : { available: false, reason: 'sign in with your Muse plan (`muse login`)' };
+        } catch { return { available: false, reason: 'sign in with your Muse plan (`muse login`)' }; }
+    },
+    start(t, ctx = {}) {
+        const args = ['exec', '--json', '--prompt-file', '-', '--workspace', t.cwd || process.cwd(),
+            '--disable-request-user-input', '--approval-mode', 'never', '--trust-workspace',
+            '--contributor-mode', 'off', '--sandbox-network', 'restricted'];
+        if (t.model) args.push('--model', t.model);
+        const effort = effortFor('muse', t.effort); if (effort) args.push('--reasoning-effort', effort);
+        if (t.resume) args.push('--session-id', String(t.resume));
+        const startedAt = Date.now();
+        const parser = jsonLines(muse, (o, emit, st) => {
+            st.startedAt = startedAt;
+            if (o.type === 'task.lifecycle.started') { st.sessionId = o.session_id || o.sessionId || null; emit(ev.init(st.sessionId, 'muse', t.model)); }
+            else if (o.type === 'run.output.delta') { const text = String(o.delta || o.text || ''); if (text) { st.lastText = (st.lastText || '') + text; emit(ev.text(text, t.model)); } }
+            else if (o.type === 'run.usage') st.usage = o.usage || o;
+            else if (o.type === 'run.terminal.failed') st.failed = String(o.error?.message || o.error || 'Muse run failed');
+            else if (o.type === 'run.terminal.completed') st.sessionId = o.session_id || o.sessionId || st.sessionId;
+        }, (info, emit, st) => {
+            const ok = !st.failed && !!st.lastText && info.code === 0;
+            emit(ev.result({ ok, text: ok ? st.lastText : (st.failed || exitReason(info, 'Muse Code')), sessionId: st.sessionId, model: t.model, startedAt, usage: st.usage }));
+        });
+        return spawnAgent({ cmd: this.bin, args, cwd: t.cwd, env: ctx.env, timeoutMs: t.timeoutMs, signal: t.signal, parser, stdin: t.prompt });
+    },
+};
+
 // ── Claude Code on another provider: the same CLI, the cm-style environment (the portal's cm-run.sh) ──
 // The endpoint and the model come from the person's own connection (Codes C3): the base URL and the run token travel
 // in the environment, and the model id rides in ANTHROPIC_MODEL. No provider is named here: this harness is whatever
@@ -390,4 +424,4 @@ const claudeOther = {
     },
 };
 
-module.exports = { claudeCode, claudeOther, codex, opencode, commandCode, aider, minimaxCode, jsonLines, versionOf };
+module.exports = { claudeCode, claudeOther, codex, opencode, commandCode, aider, minimaxCode, muse, jsonLines, versionOf };
