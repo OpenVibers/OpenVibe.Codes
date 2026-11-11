@@ -23,6 +23,7 @@ function createLifecycle({ server, ctx, exit, signals }) {
             () => { if (ctx.publisher) return ctx.publisher.stop(); return undefined; },
             () => { if (ctx.sessionRetention) ctx.sessionRetention.stop(); },
             () => { if (ctx.githubLearningJob) ctx.githubLearningJob(); },
+            () => { if (ctx.knowledgeDreamJob) ctx.knowledgeDreamJob(); },
             () => ctx.keys.client.stop(),
             async () => { if (ctx.telemetryRetention) await ctx.telemetryRetention.stop(); await telemetry.stop(); },
             () => ctx.store.close(),
@@ -35,6 +36,8 @@ async function start() {
     const { config } = ctx;
     // GitHub research is due based: the first boot catches an overdue day, then checks once an hour.
     ctx.githubLearningJob = every('codes-github-learning', 60 * 60_000, () => ctx.learning.runOnce(), { initialDelayMs: 10_000, jitterMs: 30_000, log: console });
+    if (!config.drill) ctx.knowledgeDreamJob = every('codes-knowledge-dream', 60 * 60_000,
+        () => ctx.knowledge.dream(), { initialDelayMs: 30_000, jitterMs: 30_000, log: console });
 
     // Socket activation (2026-10-31): systemd's .socket unit holds the listener across restarts, so a deploy
     // queues requests in the kernel instead of answering 502. Without the socket unit, the usual listen.
