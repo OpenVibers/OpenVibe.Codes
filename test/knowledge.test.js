@@ -284,6 +284,8 @@ function fakeHarness() {
             assert.ok(!recalled.rows.some((r) => r.id === stale.id), 'unsupported text cannot steer another run');
             assert.strictEqual((await t.ctx.knowledge.list({ subject: ada.subject })).find((r) => r.id === stale.id).dream_status,
                 'unsupported', 'the owner can still inspect it');
+            assert.match((await t.get('/knowledge', { as: ada })).text, /Needs review.*The moon is green\..*not sent to the next run/s,
+                'the owner sees why the row is no longer recalled');
             const manual = await t.ctx.knowledge.edit({ subject: ada.subject, id: stale.id, text: 'The moon is blue.' });
             assert.strictEqual(manual.source_task, null, 'an owner edit becomes manual knowledge');
             assert.strictEqual(manual.dream_status, 'active');
