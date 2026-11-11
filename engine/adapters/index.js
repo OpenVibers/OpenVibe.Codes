@@ -12,6 +12,7 @@
  *   command-code   Command Code                                     cc-run.sh
  *   opencode       OpenCode                                         oc-run.sh
  *   minimax-code   MiniMax Code                                     mm-run.sh
+ *   muse           Muse Code                                         muse exec
  */
 
 const { claudeCode, claudeOther } = require('./claude-code');
