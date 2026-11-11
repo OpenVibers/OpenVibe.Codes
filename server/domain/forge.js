@@ -87,10 +87,10 @@ function createForge({ config, fetchImpl = globalThis.fetch, log = console }) {
         return { full_name: r.doc.full_name, html_url: r.doc.html_url, clone_url: r.doc.clone_url, private: r.doc.visibility === 'private' };
     }
 
-    async function repos(actor) {
+    async function repos(actor, { timeoutMs = 8000 } = {}) {
         if (!isEnabled() || !USER.test(String(actor && actor.subject || ''))) return [];
         if (!LOGIN.test(String(actor.username || ''))) return [];
-        const r = await call('GET', `/api/v1/profile/${encodeURIComponent(actor.username.toLowerCase())}`, { subject: actor.subject }).catch(() => null);
+        const r = await call('GET', `/api/v1/profile/${encodeURIComponent(actor.username.toLowerCase())}`, { subject: actor.subject, timeoutMs }).catch(() => null);
         if (!r || r.status !== 200 || !r.doc || !Array.isArray(r.doc.repositories)) return [];
         return r.doc.repositories.map((x) => ({
             full_name: x.full_name, html_url: x.html_url, private: x.visibility === 'private',

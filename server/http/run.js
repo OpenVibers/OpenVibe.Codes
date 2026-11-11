@@ -11,7 +11,7 @@
  *   POST /run/tasks/:id/cancel   stop it
  *
  * Every task is its owner's alone (another person's is 404). Forms post only from this site. The job runs where Run
- * places it: on a machine the person added on openvibe.link/machines, never anyone else's (contracts 0.161.0).
+ * places it: on a machine the person paired at openvibe.my (openvibe.my/#machines), never anyone else's (contracts 0.161.0).
  */
 const express = require('express');
 const { serviceAuth, capabilities, http } = require('openvibe-contracts');
@@ -24,7 +24,7 @@ const { createRunTasks, TERMINAL, STATE_LABEL } = require('../domain/run-tasks')
 const { createSessionLines } = require('../domain/session-lines');
 
 const DELEGABLE = new Set(['owner', 'admin']);
-const MACHINES_URL = 'https://openvibe.link/machines';
+const MACHINES_URL = 'https://openvibe.my/#machines';
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 /** The task's outcome in the words a person reads. */
@@ -51,7 +51,7 @@ function guestRunPage() {
                 title: 'Run locally', index: true, agent: true,
                 body: html`<h1>Run coding agents locally, started from any browser</h1>
 <p class="lead">Start a task from any browser, your phone included, and your own computer does the work: the agents and keys you already have, in a sandbox, with nothing to host. You watch it live here and get the changes back as a patch, a branch or a pull request.</p>
-<ol class="run-steps"><li>Add your computer on <a href="${MACHINES_URL}">openvibe.link/machines</a>: one command, which installs OpenVibe Link with its job worker.</li><li>Sign in here and describe the task.</li><li>Your machine clones the repository, runs the agent and sends the result back.</li></ol>
+<ol class="run-steps"><li>Add your computer on <a href="${MACHINES_URL}">openvibe.my</a>: one command, which installs OpenVibe Link with its job worker.</li><li>Sign in here and describe the task.</li><li>Your machine clones the repository, runs the agent and sends the result back.</li></ol>
 <p><a class="run-btn run-btn-primary" href="/auth/login?next=%2Frun">Sign in to start</a></p>`,
             };
 }
@@ -162,7 +162,7 @@ ${error ? html`<p class="run-notice run-notice-error" role="alert">${error}</p>`
         ]);
         const defaults = sharing ? await defaultsHtml(req.viewer.subject) : '';
         const body = html`<h1>Run locally</h1>
-<p class="lead">The task runs on a machine you added on <a href="${MACHINES_URL}">openvibe.link/machines</a>, in its job sandbox, with the agents and keys installed there. Nobody else's machine ever gets it.</p>
+<p class="lead">The task runs on a machine you added on <a href="${MACHINES_URL}">openvibe.my</a>, in its job sandbox, with the agents and keys installed there. Nobody else's machine ever gets it.</p>
 ${defaults}
 ${projects.length ? formHtml({ projects, values, error }) : html`<form class="run-card" method="post" action="/run/project">
 ${error ? html`<p class="run-notice run-notice-error" role="alert">${error}</p>` : ''}
@@ -246,7 +246,7 @@ ${tasksHtml(recent)}`;
         const files = Array.isArray(d.files) ? d.files : [];
         const push = d.push || null;
         const verdict = row.state !== 'succeeded'
-            ? html`<p class="run-notice run-notice-error">${row.state === 'expired' ? 'No machine of yours took the task in time. Is it online on openvibe.link/machines, with the Codes job runner?' : row.error || STATE_LABEL[row.state]}</p>`
+            ? html`<p class="run-notice run-notice-error">${row.state === 'expired' ? 'No machine of yours took the task in time. Is it online at openvibe.my/#machines, with the Codes job runner?' : row.error || STATE_LABEL[row.state]}</p>`
             : d.ok ? html`<p class="run-notice run-notice-ok">The agents finished the task${d.agents && d.agents.length ? ` (${d.agents.join(' → ')})` : ''}.</p>`
                 : html`<p class="run-notice run-notice-error">The task ended without success${d.error ? `: ${d.error}` : ''}.</p>`;
         const ended = !(session && row.state === 'succeeded' && d.ok);

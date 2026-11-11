@@ -144,9 +144,13 @@ async function createApp(opts = {}) {
     // The person's own memory store (OpenVibe Memory M2b): the notes live in OpenVibe.AI, sealed there, and only the
     // person's own token opens them. Codes forwards the token and renders the answer; it never holds a note.
     ctx.memory = createMemory({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
-    ctx.github = createGitHub({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
+    ctx.github = opts.github || createGitHub({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
     // OpenVibe Git through Codes' service token, acting for the person it names (server/domain/forge.js).
     ctx.forge = opts.forge || require('./domain/forge').createForge({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    // The repository field's dropdown (ask 348): the owner's sources, merged in their order.
+    ctx.repoPicker = opts.repoPicker || require('./domain/repo-picker').createRepoPicker({
+        config, store, forge: ctx.forge, github: ctx.github, fetchImpl: fetchImpl || globalThis.fetch, fetchCustom: opts.fetchCustom || null, log, now: store.now,
+    });
     tasks.setForge?.(ctx.forge);
     ctx.usage = createUsage({ store });
     // The conductor (Codes C9b) and its approvals inbox. The conductor starts Run jobs and reads their events through
@@ -312,7 +316,10 @@ async function createApp(opts = {}) {
     app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, fleet: ctx.fleet, conductor: ctx.conductor, attachments: ctx.attachments, actorLimits: ctx.actorLimits, sharing, log }));
     // The composer's files: upload before send (with progress), or as the multipart form without JavaScript.
     app.use('/api/v1', createAttachmentsApi({ attachments: ctx.attachments, actorLimits: ctx.actorLimits, config, keys, log }));
-    app.use('/api/v1', createMeApi({ config, store, sso, keys, run, harnesses, tasks, userSettings: ctx.userSettings, github: ctx.github, approvals: ctx.approvals, actorLimits: ctx.actorLimits, log }));
+    app.use('/api/v1', createMeApi({ config, store, sso, keys, run, harnesses, tasks, userSettings: ctx.userSettings, github: ctx.github, approvals: ctx.approvals, repoPicker: ctx.repoPicker, forge: ctx.forge, actorLimits: ctx.actorLimits, log }));
+    // The owner's repository sources (ask 348): the dropdown's sources and their order.
+    ctx.adminRepos = require('./http/admin-repos').createAdminRepos(ctx);
+    app.use('/api/v1', ctx.adminRepos.api);
     // The Dock's agent view (Dock K-D3, Agent Streams S1): the person's own desk stream with a view ticket minted here.
     app.use('/api/v1', createAgentView({ config, sso, actorLimits: ctx.actorLimits, log }));
     // Know K5: the person's own agents read and add workspace knowledge with their token (the ov-know MCP server).
@@ -354,6 +361,7 @@ async function createApp(opts = {}) {
     // The chat app (L31 CH1) answers a signed-in person's / and /tasks/:id; everyone else falls through to C4.
     app.use(require('./http/chat').createChatRoutes(ctx));
     app.use(require('./http/git').createGitRoutes(ctx));   // after the chat app: it renders in ctx.chatShell
+    app.use(ctx.adminRepos.page);
     // C4 workspace pages sit before the legacy marketing pages and share the existing owner-scoped task store.
     c4Routes = require('./http/c4').createC4Routes(ctx);
     app.use(c4Routes);

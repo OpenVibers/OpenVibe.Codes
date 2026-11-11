@@ -13,6 +13,8 @@
  *   createGitHub({ config, store, fetchImpl, log })
  *     search(subject, q)        → { recent, found, problem }: repositories, the person's own first
  *     pullRequest(url)          → { url, state, ci, mergeable, checked_at } or { url, problem }
+ *     publicRepo(owner, name)  → one public repository, or null
+ *     userRepos(login, q)       → a linked account's public repositories, newest first
  *
  * The optional token (CODES_GITHUB_TOKEN) raises GitHub's limits; it is never logged, never in an answer and never sent
  * anywhere but api.github.com.
@@ -74,10 +76,46 @@ function createGitHub({ config = {}, store = null, fetchImpl = globalThis.fetch,
         ...(tokenOf() ? { Authorization: `Bearer ${tokenOf()}` } : {}),
     });
 
-    async function getJson(path) {
-        const res = await fetchImpl(`https://api.github.com${path}`, { headers: headers(), signal: AbortSignal.timeout(6000) });
+    async function getJson(path, timeoutMs = 6000) {
+        const res = await fetchImpl(`https://api.github.com${path}`, { headers: headers(), signal: AbortSignal.timeout(timeoutMs) });
         const doc = await res.json().catch(() => null);
         return { status: res.status, ok: res.ok, doc };
+    }
+
+    /** One public repository, exactly as named (never a private one): null when GitHub does not have it or it is private. */
+    async function publicRepo(owner, name, { timeoutMs = 6000 } = {}) {
+        if (!OWNER.test(String(owner || '')) || !NAME.test(String(name || ''))) return null;
+        const out = await getJson(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, timeoutMs);
+        if (!out.ok || !out.doc || typeof out.doc !== 'object' || out.doc.private) return null;
+        return {
+            full_name: String(out.doc.full_name || `${owner}/${name}`).slice(0, 140),
+            html_url: String(out.doc.html_url || `https://github.com/${owner}/${name}`).slice(0, 300),
+            private: false,
+            description: out.doc.description ? String(out.doc.description).slice(0, 160) : null,
+            updated_at: out.doc.updated_at || null,
+        };
+    }
+
+    /**
+     * A linked GitHub account's repositories, newest first, narrowed by the query. Codes only asks this when
+     * OpenVibe.Network has told it the person's GitHub login; without a link there is no account to read.
+     */
+    async function userRepos(login, q, { limit = 8, timeoutMs = 6000 } = {}) {
+        if (!/^[A-Za-z0-9-]{1,39}$/.test(String(login || ''))) return [];
+        const out = await getJson(`/users/${encodeURIComponent(login)}/repos?per_page=100&sort=updated`, timeoutMs);
+        if (!out.ok || !Array.isArray(out.doc)) return [];
+        const asked = String(q || '').trim().toLowerCase();
+        return out.doc
+            .filter((x) => x && !x.private && x.full_name)
+            .map((x) => ({
+                full_name: String(x.full_name).slice(0, 140),
+                html_url: String(x.html_url || `https://github.com/${x.full_name}`).slice(0, 300),
+                private: false,
+                description: x.description ? String(x.description).slice(0, 160) : null,
+                updated_at: x.updated_at || null,
+            }))
+            .filter((x) => !asked || `${x.full_name} ${x.description || ''}`.toLowerCase().includes(asked))
+            .slice(0, limit);
     }
 
     /** The person's own repositories used here, newest first (a URL is enough: Codes stored them already). */
@@ -196,7 +234,7 @@ function createGitHub({ config = {}, store = null, fetchImpl = globalThis.fetch,
         return value;
     }
 
-    return { search, pullRequest, recent, githubRepo, pullRequestParts };
+    return { search, pullRequest, recent, githubRepo, pullRequestParts, publicRepo, userRepos };
 }
 
 module.exports = { createGitHub, githubRepo, pullRequestParts, mergeWord, ciWord, MAX_FOUND };

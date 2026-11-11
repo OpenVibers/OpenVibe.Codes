@@ -39,7 +39,8 @@ const TASK3 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAX';
             const codes = home.text.indexOf('https://github.com/OpenVibers/OpenVibe.Codes');
             assert.ok(shared > -1 && codes > -1, 'both repositories are offered');
             assert.ok(shared < codes, 'the last one used comes first');
-            assert.ok(home.text.includes('data-ch-repo-url="/api/v1/me/repos"'), 'the repository field searches');
+            assert.ok(home.text.includes('data-ov-combo="/api/v1/me/repos"'), 'the repository field asks the dropdown source');
+            assert.ok(!home.text.includes('list="ch-repos"') && !home.text.includes('<datalist'), 'the datalist is gone');
             assert.ok(home.text.includes('data-ch-saved-repo="https://github.com/OpenVibers/OpenVibe.Shared"'), 'and the recent ones are a tap away');
             // A task cannot be pinned to a machine yet (Run's pin is a Bot device): the default machine is chosen in Settings.
             assert.ok(!home.text.includes('<option value="' + NODE + '">Desk'), 'the chat offers no machine it could not honour');
@@ -138,7 +139,7 @@ const TASK3 = 'tsk_01ARZ3NDEKTSV4RRFFQ69G5FAX';
         await check('Machine management leads to Link', async () => {
             const page = await t.get('/machines', { as: ada });
             assert.strictEqual(page.status, 301);
-            assert.strictEqual(page.headers.get('location'), 'https://openvibe.link/machines');
+            assert.strictEqual(page.headers.get('location'), 'https://openvibe.my/#machines');
         });
 
         await check('Settings are remembered per person', async () => {
