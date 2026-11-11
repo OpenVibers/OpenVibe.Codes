@@ -632,7 +632,8 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         if (knowledge && runArgs.repo && runArgs.repo !== 'bench://') {
             try {
                 const recalled = await knowledge.recall({ subject, projectId: project, repo: runArgs.repo, prompt: runArgs.prompt });
-                const text = knowledge.block(recalled.rows);
+                // Previously first: what the last session on this repository was asked, and how it ended.
+                const text = [recalled.previousText, knowledge.block(recalled.rows)].filter((t) => t && t.trim()).join('\n\n');
                 if (text) runArgs.knowledge = text;
             } catch (e) {
                 log.warn(`[Codes] task ${id}: knowledge could not be recalled: ${String((e && e.message) || e).slice(0, 200)}`);
@@ -926,7 +927,10 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
         // repository uses) is stored before the next attempt is planned, so the next run can recall it. The capture is
         // idempotent per (subject, kind, text), so a redelivered ending adds no second row.
         if (knowledge) {
-            try { await knowledge.captureTask(row); } catch (e) {
+            try {
+                await knowledge.captureTask(row);
+                await knowledge.captureSummary(row, ending);
+            } catch (e) {
                 log.warn(`[Codes] task ${row.id}: knowledge could not be captured: ${String((e && e.message) || e).slice(0, 200)}`);
             }
         }
