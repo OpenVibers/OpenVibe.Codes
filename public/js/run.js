@@ -45,13 +45,20 @@
             if (!run || !host.isConnected) return;
             if (oldView) oldView.destroy();
             host.textContent = '';
+            // A Run job on the person's machine cannot be interrupted mid-run, so a message to a live task waits
+            // for the next attempt (POST /message, 202); the reload shows it waiting under Live.
+            var live = section.hasAttribute('data-events');
             var view = window.OpenVibeAgentSession.mount(host, {
                 title: run.title || section.getAttribute('data-title') || 'Task', status: run.status || 'running',
-                follow: section.hasAttribute('data-events'), files: false,
-                onSend: section.getAttribute('data-owner') === '1' && !section.hasAttribute('data-events') ? function (text) {
-                    return fetch('/api/v1/tasks/' + encodeURIComponent(id) + '/continue', {
+                follow: live, files: false,
+                sayPlaceholder: live ? 'Message the run: it starts the next attempt' : undefined,
+                onSend: section.getAttribute('data-owner') === '1' ? function (text) {
+                    return fetch('/api/v1/tasks/' + encodeURIComponent(id) + (live ? '/message' : '/continue'), {
                         method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ note: text })
-                    }).then(function (r) { if (!r.ok) throw new Error('The task could not take the message yet.'); });
+                    }).then(function (r) {
+                        if (!r.ok) throw new Error('The task could not take the message yet.');
+                        if (r.status === 202) window.location.reload();
+                    });
                 } : undefined
             });
             section.dataset.agentUi = '1';

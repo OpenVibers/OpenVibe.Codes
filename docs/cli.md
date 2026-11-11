@@ -110,6 +110,8 @@ const { task } = await res.json();
 // GET  /api/v1/tasks?state=running  your tasks: running, needs (left unfinished for you), done
 // GET  /api/v1/tasks/:id/events     the event stream (SSE; Last-Event-ID resumes it)
 // POST /api/v1/tasks/:id/continue   { note?, agent? } → the next attempt now
+// POST /api/v1/tasks/:id/message    { text } → 202 while an attempt runs (it waits for the next attempt),
+//                                    or the next attempt now when nothing runs, like a continue with a note
 // POST /api/v1/tasks/:id/stop       the running attempt stops; nothing carries it on
 ```
 

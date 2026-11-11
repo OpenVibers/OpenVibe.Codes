@@ -962,15 +962,33 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
             try { await writeSessionReport(saved, collected, ending); } catch (e) {
                 log.warn('[Codes] the session report of task ' + row.id + ' failed: ' + String((e && e.message) || e).slice(0, 200));
             }
+            // A message sent while the attempt ran carries the task on after all: the engine is done, the person is
+            // not. This is the manual continue the owner would press next, with the waiting notes taken into it.
+            const waiting = await pendingMessages(row.id);
+            if (waiting.length) {
+                const fresh = await db.maybe('SELECT * FROM run_tasks WHERE id = $1', [row.id]);
+                const carried = fresh ? await continueTask(fresh, {}) : { error: 'no such task' };
+                if (!carried.error && carried.job) {
+                    log.info(`[Codes] task ${row.id}: ${waiting.length} waiting message(s) started the next attempt`);
+                    return carried.row;
+                }
+                if (carried.error) log.warn(`[Codes] task ${row.id}: waiting messages could not carry it on: ${carried.error}`);
+            }
             return saved;
         }
         if (!plan.kind) return row;
+        // A message sent while the attempt ran rides the follow-up the engine planned: the person is answered.
+        // Marked delivered only once the job is submitted; a follow-up that never starts leaves the queue for the
+        // owner's next press, and a message arriving after this read stays queued for the attempt after that.
+        const riding = await pendingMessages(row.id);
+        if (riding.length) plan.prompt = `${plan.prompt || ''}${notesSection(riding)}`;
         // The goal's budgets are checked before the next turn starts: a spent budget ends the task here, with its reason.
         if (goal) {
             const hit = goalBudgetHit(attempts, asObject(row.goal) || goal, row);
             if (hit) return await finishGoal(row, { outcome: 'unfinished', note: `stopped by budget: ${hit}`, end_state: 'stopped_by_budget' });
         }
         const done = await startFollowUp(row, plan, ending);
+        if (riding.length && done.created && done.job) await db.exec(`UPDATE codes_task_messages SET state = 'delivered' WHERE task_id = $1 AND state = 'queued' AND id = ANY($2)`, [row.id, riding.map((m) => m.id)]);
         return done.row || row;
     }
 
@@ -1069,6 +1087,61 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
     }
 
     /**
+     * A message to the task while it works. A Run job on the person's own machine cannot be interrupted mid-run
+     * (Run has no job-input channel), so a message sent while an attempt is live waits in codes_task_messages — the
+     * conductor's turn queue works the same way. The next attempt carries the waiting notes in its prompt: the
+     * engine's own follow-up takes them, and when the engine ends the task instead, afterEnd carries it on with
+     * them. Nothing the person sent is lost; on a stopped task the queue waits until the owner carries it on.
+     */
+    const MAX_MESSAGE = 4000;
+    function cleanMessage(text) {
+        const t = typeof text === 'string' ? text.trim() : '';
+        if (!t) return { error: 'a message needs words' };
+        if (t.length > MAX_MESSAGE) return { error: `a message is at most ${MAX_MESSAGE} characters` };
+        return { text: t };
+    }
+    /** The messages still waiting for the next attempt, oldest first (also what the task page shows). */
+    async function pendingMessages(taskId) {
+        if (!taskId) return [];
+        return db.many('SELECT * FROM codes_task_messages WHERE task_id = $1 AND state = $2 ORDER BY n ASC', [taskId, 'queued']);
+    }
+    /** Take the waiting messages inside the attempt's own transaction: taken exactly once, by the attempt that runs. */
+    async function takeMessages(taskId) {
+        const rows = await db.many('SELECT * FROM codes_task_messages WHERE task_id = $1 AND state = $2 ORDER BY n ASC FOR UPDATE', [taskId, 'queued']);
+        if (rows.length) await db.exec('UPDATE codes_task_messages SET state = $2 WHERE task_id = $1 AND state = $3', [taskId, 'delivered', 'queued']);
+        return rows;
+    }
+    function notesSection(rows) {
+        return `\n\n---\n## Notes from the owner (sent while the last attempt ran)\n\n${rows.map((m) => String(m.text)).join('\n\n---\n\n')}\n`;
+    }
+    async function queueMessage(row, text) {
+        const n = await db.one('SELECT COALESCE(MAX(n), 0) + 1 AS n FROM codes_task_messages WHERE task_id = $1', [row.id]);
+        return db.one(`INSERT INTO codes_task_messages (id, task_id, n, text, state) VALUES ($1, $2, $3, $4, 'queued') RETURNING *`,
+            [store.newId('msg'), row.id, Number(n.n), text]);
+    }
+    /** A message to the task: it waits while an attempt is live, and carries the task on when nothing runs. */
+    async function messageTask(row, { note = null } = {}) {
+        if (!row || !row.id) return { error: 'no such task' };
+        const clean = cleanMessage(note);
+        if (clean.error) return { error: clean.error };
+        const attempts = await attemptStore.list(row.id);
+        if (!attempts.length) return { error: 'the task has no attempt to carry on' };
+        const live = attempts.slice().reverse().find((a) => !ENDED.has(a.state));
+        if (live) {
+            const message = await queueMessage(row, clean.text);
+            log.info(`[Codes] task ${row.id}: a message waits for the next attempt`);
+            return { queued: true, message, attempt: live, row };
+        }
+        const carried = await continueTask(row, { note: clean.text });
+        if (carried.live) {
+            // An attempt started between the check and the carry-on: the message waits after all.
+            const message = await queueMessage(carried.row || row, clean.text);
+            return { queued: true, message, attempt: carried.attempt, row: carried.row || row };
+        }
+        return carried;
+    }
+
+    /**
      * The next attempt now: the owner carries the task on (with a note), or switches to another agent. The task's row
      * is locked while the attempt is written, so two presses start one attempt and not two.
      *
@@ -1125,6 +1198,13 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
             if (!current) return { error: 'no such task' };
             if (!TERMINAL.has(current.state)) return { error: 'the task is still running' };
             if (current.outcome === 'stopped') return { error: 'the task was stopped on purpose' };
+            // A message sent while the last attempt ran rides this one: taken here, in the attempt's own
+            // transaction, so exactly one attempt carries each message.
+            const waiting = await takeMessages(row.id);
+            if (waiting.length) {
+                plan.prompt += notesSection(waiting);
+                if (!text) plan.why = `carried on by the owner: ${String(waiting[0].text).slice(0, 200)}`;
+            }
             const made = await attemptStore.create({
                 task: current, agent: plan.agent, model: plan.model, effort: plan.effort || null, session: null, why: plan.why, kind: plan.kind, state: 'queued', budget: left.left,
             });
@@ -1260,6 +1340,7 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
     return {
         start, refresh, applyJob, applyEvent, recordState, afterEnd, continueTask, stopTask, proof: taskProof,
         latestProject, present, who, attempts: attemptStore, setConductor, attachBindings, fundTurn,
+        messageTask, pendingMessages,
         setForge(f) { forge = f || null; },
     };
 }
