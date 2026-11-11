@@ -28,7 +28,7 @@
     document.querySelectorAll('[data-memory-zip-form]').forEach((form) => {
         const root = form.querySelector('[data-memory-zip-picker]');
         const error = form.querySelector('[data-memory-zip-error]');
-        const meter = OVUpload.progress(form.querySelector('[data-memory-zip-progress]'));
+        const meter = OVUpload.progress(form.querySelector('[data-memory-zip-progress]'), { onRetry: () => form.requestSubmit() });
         let selected = null;
         const picker = OVUpload.picker(root, {
             label: 'Choose an export ZIP', accept: '.zip,application/zip,application/x-zip-compressed', multiple: false,

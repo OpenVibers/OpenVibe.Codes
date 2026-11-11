@@ -192,29 +192,33 @@
                 if (problem) { row.dispatchEvent(new Event('remove')); row.remove(); say(problem, true); return; }
                 const meterRoot = document.createElement('div');
                 row.append(meterRoot);
-                const meter = OVUpload.progress(meterRoot);
+                const meter = OVUpload.progress(meterRoot, { onRetry: () => sendFile() });
                 const entry = { file, row, meter, id: null, uploading: true, xhr: null };
                 entries.push(entry);
-                meter.update({ state: 'sending', done: 0, total: file.size });
-                const xhr = entry.xhr = new XMLHttpRequest();
-                xhr.open('POST', '/api/v1/attachments');
-                xhr.withCredentials = true;
-                xhr.upload.onprogress = (e) => { if (e.lengthComputable) meter.update({ state: 'sending', done: e.loaded, total: e.total }); };
-                xhr.onload = () => {
-                    entry.uploading = false;
-                    let doc = {};
-                    try { doc = JSON.parse(xhr.responseText || '{}'); } catch { /* response is not JSON */ }
-                    if (xhr.status === 201 && doc.attachment && doc.attachment.id) {
-                        entry.id = doc.attachment.id;
-                        meter.update({ state: 'done', done: file.size, total: file.size });
-                    } else {
-                        const message = doc.detail || `“${file.name}” could not be attached`;
-                        meter.update({ state: 'failed', message }); say(message, true);
-                    }
-                };
-                xhr.onerror = () => { entry.uploading = false; const message = `“${file.name}” could not be attached`; meter.update({ state: 'failed', message }); say(message, true); };
-                xhr.onabort = () => { entry.uploading = false; };
-                const data = new FormData(); data.append('file', file, file.name); xhr.send(data);
+                function sendFile() {
+                    entry.uploading = true;
+                    meter.update({ state: 'sending', done: 0, total: file.size });
+                    const xhr = entry.xhr = new XMLHttpRequest();
+                    xhr.open('POST', '/api/v1/attachments');
+                    xhr.withCredentials = true;
+                    xhr.upload.onprogress = (e) => { if (e.lengthComputable) meter.update({ state: 'sending', done: e.loaded, total: e.total }); };
+                    xhr.onload = () => {
+                        entry.uploading = false;
+                        let doc = {};
+                        try { doc = JSON.parse(xhr.responseText || '{}'); } catch { /* response is not JSON */ }
+                        if (xhr.status === 201 && doc.attachment && doc.attachment.id) {
+                            entry.id = doc.attachment.id;
+                            meter.update({ state: 'done', done: file.size, total: file.size });
+                        } else {
+                            const message = doc.detail || `“${file.name}” could not be attached`;
+                            meter.update({ state: 'failed', message }); say(message, true);
+                        }
+                    };
+                    xhr.onerror = () => { entry.uploading = false; const message = `“${file.name}” could not be attached`; meter.update({ state: 'failed', message }); say(message, true); };
+                    xhr.onabort = () => { entry.uploading = false; };
+                    const data = new FormData(); data.append('file', file, file.name); xhr.send(data);
+                }
+                sendFile();
                 say(`${entries.length} file${entries.length === 1 ? '' : 's'} selected`);
             }
             if (uploadRoot && window.OVUpload) {

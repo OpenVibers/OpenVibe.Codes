@@ -188,7 +188,7 @@
         const meterRoot = form.querySelector('[data-c4-upload-progress]');
         if (!root || !window.OVUpload) return;
         const files = [];
-        const meter = OVUpload.progress(meterRoot);
+        const meter = OVUpload.progress(meterRoot, { onRetry: () => form.requestSubmit() });
         const say = (message, bad) => { if (status) { status.textContent = message; status.classList.toggle('is-bad', !!bad); } };
         const blocked = /\.(exe|dll|com|bat|cmd|msi|scr|ps1|sh|so|dylib|app|apk|deb|rpm|jar|bin|elf|vbs|wsf|hta)$/i;
         const picker = OVUpload.picker(root, {
