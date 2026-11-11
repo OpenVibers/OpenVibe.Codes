@@ -242,6 +242,30 @@ function fakeHarness() {
             assert.strictEqual(anon.status, 401);
         });
 
+        await check('every task rewrites one session summary, and the next run reads it first', async () => {
+            const { summaryKey, summaryText } = require('../server/domain/knowledge');
+            assert.strictEqual(summaryKey(REPO), 'summary:github.com/OpenVibers/OpenVibe.Codes');
+            assert.match(summaryText({ repo: REPO, prompt: 'Fix the footer.\nSecond line.', ending: { state: 'succeeded' } }),
+                /^Previously on github\.com\/OpenVibers\/OpenVibe\.Codes: Fix the footer\. — finished\./);
+            const summaries = async () => (await knowledgeOf(ada.subject)).filter((r) => r.kind === 'fact' && /^Previously on /.test(r.text));
+            const third = await startTask('Bump the footer year.');
+            await end(third.id, 'succeeded', { ok: true, summary: 'Done.', agents: ['claude-code'], log: [] });
+            assert.strictEqual((await summaries()).length, 1, 'one summary row, rewritten not added');
+            assert.match((await summaries())[0].text, /Bump the footer year.*finished/);
+            const fourth = await startTask('Fix the header link.');
+            await end(fourth.id, 'failed', { ok: false, summary: 'Could not.', agents: ['codex'], log: [] }, 'the tests failed');
+            const again = await summaries();
+            assert.strictEqual(again.length, 1, 'the second task rewrote the same row');
+            assert.match(again[0].text, /Fix the header link.*failed/);
+            assert.strictEqual(again[0].source_task, fourth.id, 'the row names its latest run');
+            const fifth = await startTask('Polish the footer.');
+            assert.match(calls.at(-1).args.knowledge, /^Previously on .*Fix the header link.*failed/, 'the next run reads the last session first');
+            await end(fifth.id, 'succeeded', { ok: true, summary: 'Done.', agents: ['claude-code'], log: [] });
+            const other = await t.ctx.knowledge.recall({ subject: ada.subject, repo: 'https://github.com/OpenVibers/OpenVibe.Bot', prompt: '' });
+            assert.strictEqual(other.previous, null, 'another repository has no summary');
+            assert.strictEqual(other.previousText, '');
+        });
+
         await check('the person’s knowledge is exported with the account and erased with it', async () => {
             const { TABLES } = require('../server/account-data');
             assert.ok(TABLES.some((x) => x.table === 'codes_knowledge' && x.subject === 'subject'), 'the table is covered');
