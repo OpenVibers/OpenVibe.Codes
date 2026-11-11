@@ -35,6 +35,41 @@
         }
     }
 
+    // AG-UI is the task's durable run timeline. EventSource keeps the last SSE id on reconnect,
+    // so a dropped connection resumes without repeating steps or losing streamed text.
+    function agentRun(section, host, oldView) {
+        var id = (section.getAttribute('data-run-id') || '').trim();
+        if (!id || !window.OpenVibeAgentSession || !window.EventSource) return;
+        var url = '/api/v1/runs/' + encodeURIComponent(id);
+        fetch(url, { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (run) {
+            if (!run || !host.isConnected) return;
+            if (oldView) oldView.destroy();
+            host.textContent = '';
+            var view = window.OpenVibeAgentSession.mount(host, {
+                title: run.title || section.getAttribute('data-title') || 'Task', status: run.status || 'running',
+                follow: section.hasAttribute('data-events'), files: false,
+                onSend: section.getAttribute('data-owner') === '1' && !section.hasAttribute('data-events') ? function (text) {
+                    return fetch('/api/v1/tasks/' + encodeURIComponent(id) + '/continue', {
+                        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ note: text })
+                    }).then(function (r) { if (!r.ok) throw new Error('The task could not take the message yet.'); });
+                } : undefined
+            });
+            section.dataset.agentUi = '1';
+            var source = new EventSource(url + '/events');
+            ['RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR', 'STEP_STARTED', 'STEP_FINISHED', 'TEXT_MESSAGE_START',
+                'TEXT_MESSAGE_CONTENT', 'TEXT_MESSAGE_END', 'TOOL_CALL_START', 'TOOL_CALL_ARGS', 'TOOL_CALL_END',
+                'TOOL_CALL_RESULT', 'REASONING_START', 'REASONING_MESSAGE_START', 'REASONING_MESSAGE_CONTENT',
+                'REASONING_MESSAGE_END', 'REASONING_END', 'REASONING_ENCRYPTED_VALUE', 'STATE_SNAPSHOT', 'STATE_DELTA',
+                'ACTIVITY_SNAPSHOT', 'ACTIVITY_DELTA', 'CUSTOM'].forEach(function (type) {
+                source.addEventListener(type, function (e) {
+                    try { view.push(JSON.parse(e.data)); } catch (err) { /* one malformed event cannot stop the run */ }
+                    if (type === 'RUN_FINISHED' || type === 'RUN_ERROR') source.close();
+                });
+            });
+            window.addEventListener('pagehide', function () { source.close(); }, { once: true });
+        }).catch(function () { /* the saved session remains available */ });
+    }
+
     function follow(section) {
         var log = section.querySelector('[data-log]');
         var pill = document.querySelector('[data-state]');
@@ -46,6 +81,7 @@
             log.parentNode.replaceChild(host, log);
             view = window.OpenVibeAgentSession.mount(host, { title: section.getAttribute('data-title') || 'Task', status: 'queued', empty: 'Waiting for your machine to take the task…' });
             log = null;
+            agentRun(section, host, view);
         }
         var source = new EventSource(section.getAttribute('data-events'));
         source.addEventListener('output', function (e) {
@@ -58,7 +94,7 @@
                 if (!raw.trim()) return;
                 var doc;
                 try { doc = JSON.parse(raw); } catch (err) { doc = null; }
-                if (view) { if (doc) view.push(doc); return; }
+                if (view) { if (doc && section.dataset.agentUi !== '1') view.push(doc); return; }
                 if (doc) show(log, doc); else line(log, 'tool', raw);
             });
         });
@@ -67,7 +103,7 @@
                 var s = JSON.parse(e.data).state;
                 if (LABEL[s]) lastState = s;
                 if (pill && LABEL[s]) { pill.textContent = LABEL[s]; pill.className = 'run-pill run-pill-' + s; }
-                if (view) view.status(s, LABEL[s]);
+                if (view && section.dataset.agentUi !== '1') view.status(s, LABEL[s]);
             } catch (err) { /* ignore */ }
         });
         var lastState = section.getAttribute('data-state') || 'queued';
@@ -75,7 +111,7 @@
             source.close();
             // Switch from live streaming to replay without a full reload: the session lines are read back from
             // /run/tasks/:id/session.json and pushed into the same agent-session view.
-            if (view && window.fetch) {
+            if (view && window.fetch && section.dataset.agentUi !== '1') {
                 var sessionUrl = section.getAttribute('data-events').replace('/events', '/session.json') + '?after=0';
                 fetch(sessionUrl, { credentials: 'same-origin' })
                     .then(function (r) { return r.json(); })
@@ -118,6 +154,7 @@
         var view = window.OpenVibeAgentSession.mount(into, { title: section.getAttribute('data-title') || 'Task', status: 'running', follow: false });
         view.pushAll(lines);
         view.status(state, LABEL[state]);
+        agentRun(section, into, view);
     }
 
     document.querySelectorAll('[data-events]').forEach(follow);
