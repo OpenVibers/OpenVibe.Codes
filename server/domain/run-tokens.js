@@ -10,7 +10,8 @@
  * are, so a run can be traced), never logged and never answered; the transcript normaliser redacts it everywhere a
  * line is written (server/domain/redact.js).
  *
- * The environment the harness gets points it at OpenVibe.AI:
+ * The environment the harness gets points hosted CLI requests at OpenVibe.Exchange, with the run token as its key.
+ * The rollback switch points them at OpenVibe.AI. The harness env names remain the CLI's own API names:
  *   Claude Code          ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_CUSTOM_HEADERS
  *   Codex, OpenAI-like   OPENAI_BASE_URL, OPENAI_API_KEY
  * The credential header (x-openvibe-credential) names the provider whose key the run uses, when the person has one.
@@ -31,6 +32,7 @@ const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 /** The harnesses that speak Anthropic's Messages API (the rest speak OpenAI's Chat Completions). */
 const ANTHROPIC_HARNESSES = ['claude-code', 'claude-other'];
+const CLI_HARNESSES = new Set(['claude-code', 'claude-other', 'codex', 'opencode', 'command-code', 'aider', 'minimax-code', 'muse']);
 
 /** The claims of a JWT, decoded but not verified (the receiver verifies; this is for the jti and the expiry). */
 function claims(token) {
@@ -61,7 +63,8 @@ function exchangeBase(config) {
  * has a key for that provider) the header that says which key.
  */
 function envFor({ config, harness, token, provider, ownKey }) {
-    const base = aiBase(config);
+    const cliExchange = CLI_HARNESSES.has(harness) && (!config.runTokens || config.runTokens.cliExchange !== false);
+    const base = cliExchange ? exchangeBase(config) : aiBase(config);
     const credential = ownKey && provider ? `x-openvibe-credential: ${provider}` : null;
     if (ANTHROPIC_HARNESSES.includes(harness)) {
         return {
