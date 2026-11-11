@@ -86,8 +86,9 @@ function eventOf(id, type, jobId, subject, project, state, timings = {}) {
             const line = await db.maybe("SELECT * FROM codes_session_lines WHERE task_id = $1 AND kind = 'done'", [task.id]);
             assert.ok(line, 'the result log was back-filled');
             const outbox = await db.many('SELECT topic, payload FROM codes_outbox WHERE payload->>\'task_id\' = $1 ORDER BY created_at', [task.id]);
-            assert.deepStrictEqual(outbox.map((x) => x.topic), ['codes.task.queued', 'codes.task.running', 'codes.task.succeeded']);
-            const payload = outbox[2].payload;
+            assert.deepStrictEqual(outbox.map((x) => x.topic).sort(),
+                ['codes.task.queued', 'codes.task.running', 'codes.task.succeeded', 'codes.task.updated', 'codes.task.updated', 'codes.task.updated'].sort());
+            const payload = outbox.find((x) => x.topic === 'codes.task.succeeded').payload;
             assert.strictEqual(payload.task_id, task.id);
             assert.strictEqual(payload.state, 'succeeded');
             assert.strictEqual(payload.repo, 'Octocat/Hello-World');

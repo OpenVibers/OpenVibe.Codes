@@ -201,7 +201,9 @@ const { boot, check, done } = require('./helpers/boot');
             assert.ok(carried.json.attempts.length >= 2, 'the continue is the next attempt');
             const stopped = await asAda('POST', `/tasks/${own.id}/stop`);
             assert.strictEqual(stopped.status, 200, JSON.stringify(stopped.json));
-            assert.strictEqual(stopped.json.outcome.state, 'stopped');
+            assert.deepStrictEqual(stopped.json, { ok: true }, 'the owner\u2019s shape (the Dock); a service keeps the timeline');
+            const ended = await asAda('GET', `/tasks/${own.id}`);
+            assert.strictEqual(ended.json.outcome.state, 'stopped', 'the task did stop');
         });
 
         await check('list filters: needs is the task the engine left unfinished, done is the rest', async () => {

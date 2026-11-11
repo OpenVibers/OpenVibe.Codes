@@ -430,16 +430,20 @@ function createChatRoutes(ctx) {
     function effortPicker(selected = '', cls = '') {
         return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="How hard it thinks"><span class="ch-sr">Effort</span>${ico('sub')}<select name="effort" data-ch-effort data-ov-select="bare" data-ov-title="Effort" data-ovt-default="${esc(selected)}">${EFFORT.map(([v, l]) => `<option value="${v}"${selected === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
-    /** Any file (not a program) up to 10 at once: the script adds chips and progress, the plain form posts multipart. */
-    function filePicker() {
-        return `<label class="ch-pick ch-pick-file ch-for-agents" title="Attach files">${ico('attach')}<span class="ch-sr">Attach files</span><input type="file" name="files" multiple data-ch-files></label>`;
-    }
+    // The composer's files (the kit's own attach menu, thread.composer): images, text and code, PDF and zip —
+    // the owner's words for the limits the server holds (domain/attachments.js). The person's OpenVibe files live
+    // on OpenVibe.Media, which names the library row until the shared files picker lands (composer-plumbing).
+    const ATTACH_ACCEPT = 'image/*,text/*,application/pdf,application/zip,.pdf,.zip,.md,.markdown,.json,.js,.ts,.jsx,.tsx,.py,.css,.html,.xml,.yml,.yaml,.toml,.sql,.csv,.log,.txt';
+    const MEDIA_LIBRARY = (() => { try { const m = require('openvibe-contracts').services.get('media'); return (m && m.publicOrigin) || null; } catch { return null; } })();
+    const ATTACH_NOTE = 'Files: up to 10, 20 MB each, 50 MB a message. Programs can\u2019t be attached.';
     /** The kit's composer with Codes' pickers in its tools, where the work runs under the bar, and its JSON route. */
-    function composer({ action, api = '', placeholder, pickers = '', options = '', examples = [], live = false, stopAction = '', note = '', id = null, where = '', files = false }) {
+    function composer({ action, api = '', placeholder, pickers = '', options = '', examples = [], live = false, stopAction = '', note = '', id = null, where = '', files = false, value = '' }) {
         return thread.composer({
-            action, id, placeholder, label: placeholder, tools: (files ? filePicker() : '') + pickers,
-            options: options ? { html: options, label: 'Options' } : null, examples,
-            foot: `${files ? '<div class="ch-files" data-ch-files-list role="list" aria-live="polite"></div>' : ''}${where}`, note,
+            action, id, placeholder, label: placeholder, tools: pickers,
+            attach: files ? { menu: true, accept: ATTACH_ACCEPT, library: MEDIA_LIBRARY, name: 'files' } : null,
+            options: options ? { html: options, label: 'Options' } : null, examples, value,
+            foot: `${files ? '<div class="ch-files" data-ch-files-list role="list" aria-live="polite"></div>' : ''}${where}`,
+            note: files ? (note ? `${note} ${ATTACH_NOTE}` : ATTACH_NOTE) : note,
             attrs: { ...(api ? { 'data-ch-api': api } : {}), ...(files ? { enctype: 'multipart/form-data' } : {}) },
             busy: live, stopAction: live && stopAction ? stopAction : null, maxlength: 16000,
         });
@@ -548,7 +552,11 @@ function createChatRoutes(ctx) {
         const asked = String(req.query.repo || '');
         // A repository shows by its name (owner/name), not a cut-off URL; the server reads either.
         const repo = asked || (repos[0] && (repos[0].full_name || repos[0].url)) || '';
-        const mode = start.MODES.includes(req.query.mode) ? req.query.mode : asked ? 'code' : repos.length ? 'code' : 'new';
+        // The Dock's Code tab names the ways create|openvibe|repo; the site's own are new|openvibe|code.
+        const askedMode = { create: 'new', openvibe: 'openvibe', repo: 'code', new: 'new', code: 'code' }[String(req.query.mode || '')];
+        const mode = askedMode || (asked ? 'code' : repos.length ? 'code' : 'new');
+        // The Dock's fallback when the tasks API is unreachable: its link carries the words here.
+        const prompt = String(req.query.prompt || '').slice(0, 4000);
         const kind = start.KINDS[req.query.kind] ? req.query.kind : 'website';
         const chosenProject = start.project(req.query.project) ? String(req.query.project) : 'auto';
         const error = String(req.query.error || '').slice(0, 200);
@@ -611,7 +619,7 @@ function createChatRoutes(ctx) {
         const hello = `<div class="ch-hello"><span class="ov-mark" data-size="40" aria-hidden="true" data-ovt-fold></span><h1>${ask}</h1><p data-ovt-fold>Say it the way you would to a friend.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
         return frame(req, res, {
             title: 'New chat', heading: 'New chat', start: true, empty: hello,
-            composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'What should change?', pickers, options, examples: (sets[mode] || []).slice(0, 12).map((i) => i.text), where, files: true }) + nudge + ideas,
+            composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'What should change?', pickers, options, examples: (sets[mode] || []).slice(0, 12).map((i) => i.text), where, files: true, value: prompt }) + nudge + ideas,
         });
     });
 
@@ -694,12 +702,12 @@ function createChatRoutes(ctx) {
             for (const [i, x] of targets.entries()) {
                 const note = `\n\n(This request spans ${names.join(', ')}. This task is the ${names[i]} part; the others are separate tasks. Change only what this repository needs, and keep the names and behaviour consistent with the other parts.)`;
                 const each = parseArgs(jobInput(x.url, `${text}${note}`.slice(0, 16000)));
-                const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args: each, attachmentIds: i === 0 ? ids : [], pin });
+                const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args: each, attachmentIds: i === 0 ? ids : [], pin, mode: 'openvibe' });
                 if (!first) first = row;
             }
             return res.redirect(303, `/tasks/${encodeURIComponent(first.id)}`);
         }
-        const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args, attachmentIds: ids, pin });
+        const row = await tasks.start({ subject: req.viewer.subject, project: project.id || project, args, attachmentIds: ids, pin, mode: mode === 'openvibe' ? 'openvibe' : 'repo' });
         return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}`);
     });
 

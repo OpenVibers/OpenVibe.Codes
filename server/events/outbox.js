@@ -21,6 +21,12 @@ const TOPICS = Object.freeze([
     'codes.task.queued', 'codes.task.running', 'codes.task.succeeded', 'codes.task.failed', 'codes.task.cancelled',
 ]);
 const TOPIC_SET = new Set(TOPICS);
+/**
+ * The one event the Dock's Code tab follows instead of polling (codes.task.updated@1): written on every task state
+ * change, alongside the per-state codes.task.* event above. Its payload is the per-state payload with the task's
+ * page URL added.
+ */
+const UPDATED_TOPIC = 'codes.task.updated';
 /** A ticket follows its pull request (AL5): bound, follow-up started, ended. Payloads are plain JSON; the
  *  service manifest's eventsProduced stays the codes.task.* five (contracts.test.js), so these are the
  *  portal's view, not a new contract. */
@@ -123,21 +129,40 @@ function agentStepOf(row, status) {
     };
 }
 
-function createOutbox({ store, log = console }) {
+function createOutbox({ store, log = console, baseUrl = null } = {}) {
     const db = store.db;
+    const urlOf = (row) => {
+        const base = String(baseUrl || 'https://openvibe.codes').replace(/\/+$/, '');
+        return `${base}/tasks/${encodeURIComponent(row.id)}`;
+    };
 
-    /** Write the state change's event in the caller's (ambient) transaction. → the evt_ id, or null. */
+    /**
+     * Write the state change's events in the caller's (ambient) transaction. → the first evt_ id, or null.
+     * A per-state codes.task.* row goes out when the announced state changed (placed → running is the same
+     * announced state, so only the updated row below is written); the codes.task.updated row goes out on every
+     * raw state change, so the Dock's Code tab follows one event instead of polling.
+     */
     async function emitTask(row, previousState) {
         if (!row || !row.id || !row.subject) return null;
+        const changed = row.state !== previousState;
         const topic = topicFor(row.state, previousState);
-        if (!topic || !TOPIC_SET.has(topic)) return null;
+        if (!changed && (!topic || !TOPIC_SET.has(topic))) return null;
         const eventId = ids.newId('event', store.now());
         const at = store.iso();
-        await db.exec(
-            `INSERT INTO codes_outbox (event_id, topic, subject, payload, created_at, next_attempt_at)
-             VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz, $5::timestamptz)`,
-            [eventId, topic, row.subject, JSON.stringify(payloadOf(row)), at],
-        );
+        if (topic && TOPIC_SET.has(topic)) {
+            await db.exec(
+                `INSERT INTO codes_outbox (event_id, topic, subject, payload, created_at, next_attempt_at)
+                 VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz, $5::timestamptz)`,
+                [eventId, topic, row.subject, JSON.stringify(payloadOf(row)), at],
+            );
+        }
+        if (changed) {
+            await db.exec(
+                `INSERT INTO codes_outbox (event_id, topic, subject, payload, created_at, next_attempt_at)
+                 VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz, $5::timestamptz)`,
+                [ids.newId('event', store.now()), UPDATED_TOPIC, row.subject, JSON.stringify({ ...payloadOf(row), url: urlOf(row) }), at],
+            );
+        }
         await emitAgentStep(row);
         return eventId;
     }
@@ -354,4 +379,4 @@ function createPublisher({ config, store, fetchImpl = globalThis.fetch, log = co
     };
 }
 
-module.exports = { createOutbox, createPublisher, TOPICS, TOPIC_SET, PR_TOPICS, AGENT_TOPICS, agentStepOf, topicFor, groupOf, payloadOf, repoSlug, MAX_BACKOFF_MS, DEAD_AFTER_REFUSALS, DEAD_AFTER_ATTEMPTS };
+module.exports = { createOutbox, createPublisher, TOPICS, TOPIC_SET, UPDATED_TOPIC, PR_TOPICS, AGENT_TOPICS, agentStepOf, topicFor, groupOf, payloadOf, repoSlug, MAX_BACKOFF_MS, DEAD_AFTER_REFUSALS, DEAD_AFTER_ATTEMPTS };

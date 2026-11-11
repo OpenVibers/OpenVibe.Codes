@@ -176,7 +176,10 @@
         }
         if (form) {
             // ── The composer's files: upload before send, with a chip, a thumbnail, a progress bar and a × ──
-            const picker = $('[data-ch-files]', form);
+            // The kit's attach menu renders one input per row (Files, Photos and videos, the camera): every one of
+            // them feeds the same queue, and the no-JavaScript post sends them all as multipart.
+            const pickers = Array.from(form.querySelectorAll('input[data-ovt-files], input[data-ch-files]'));
+            const picker = pickers[0] || null;
             const chips = $('[data-ch-files-list]', form);
             const BLOCKED = /\.(exe|dll|com|bat|cmd|msi|scr|ps1|sh|so|dylib|app|apk|deb|rpm|jar|bin|elf|vbs|wsf|hta)$/i;
             const MAX_FILES = 10, MAX_FILE = 20 * 1024 * 1024, MAX_TOTAL = 50 * 1024 * 1024;
@@ -258,8 +261,8 @@
                 }
                 if (entries.length) say(`${entries.length} file${entries.length === 1 ? '' : 's'} ready to send`);
             };
-            if (picker) {
-                picker.addEventListener('change', () => { addFiles(picker.files); picker.value = ''; });
+            for (const one of pickers) {
+                one.addEventListener('change', () => { addFiles(one.files); one.value = ''; });
             }
             // Paste an image from the clipboard, or drop files on the composer.
             if (text) text.addEventListener('paste', (e) => {
@@ -311,7 +314,7 @@
                 }
                 // The files are up: a plain form post names their ids (and sends the words and the pickers as usual).
                 form.enctype = 'application/x-www-form-urlencoded';
-                if (picker) picker.value = '';
+                for (const one of pickers) one.value = '';
                 for (const id of ids) {
                     const hidden = document.createElement('input');
                     hidden.type = 'hidden'; hidden.name = 'attachment_ids'; hidden.value = id;
