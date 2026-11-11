@@ -399,7 +399,7 @@ ${pr.problem ? `<p class="c4-hint">${esc(pr.problem.detail)}</p>` : `<dl class="
         return `${showcase.hero({
             eyebrow: 'OpenVibe.Codes · alpha',
             title: 'Every coding agent.', accent: 'One place.',
-            lede: 'Claude Code, Codex, OpenCode, Command Code, DeepSeek and models you run yourself, in one conversation. Bring the plans and keys you already pay for, run on your computer or ours, and follow the work from your phone.',
+            lede: 'Claude Code, Codex, OpenCode, Command Code, Muse Code, DeepSeek and models you run yourself, in one conversation. Bring the plans and keys you already pay for, run on your computer or ours, and follow the work from your phone.',
             actions: [{ label: 'Start a task', href: '#c4-prompt', primary: true }, { label: 'How it works', href: '#how' }],
             note: 'Open source (AGPL-3.0). No fee on your own plans and keys.',
             aside: { html: thread },

@@ -27,7 +27,7 @@ const { windowFull, FULL_PCT } = require('../../engine/router');
 const CONDUCTOR_AGENTS = ['claude-code', 'codex', 'opencode'];
 const AGENT_NAMES = {
     'claude-code': 'Claude Code', 'claude-other': 'Claude Code (another provider)', codex: 'Codex', opencode: 'OpenCode',
-    'command-code': 'Command Code', 'minimax-code': 'MiniMax Code', aider: 'Aider', deepseek: 'DeepSeek',
+    'command-code': 'Command Code', 'minimax-code': 'MiniMax Code', muse: 'Muse Code', aider: 'Aider', deepseek: 'DeepSeek',
     'openvibe-ai': 'OpenVibe.AI', 'openai-compatible': 'Your own model',
 };
 const MODEL = /^[A-Za-z0-9._:/-]{1,100}$/;

@@ -75,7 +75,7 @@ const ico = (name, cls = '') => `<svg class="ch-i${cls ? ` ${cls}` : ''}" aria-h
 const AGENTS = {
     'claude-code': ['Claude Code', 'C', '#d97757'], codex: ['Codex', 'Cx', '#10a37f'], opencode: ['OpenCode', 'O', '#7c6cff'],
     'command-code': ['Command Code', 'Cc', '#f59e0b'], aider: ['Aider', 'A', '#14b8a6'], deepseek: ['DeepSeek', 'D', '#4f7cff'],
-    'minimax-code': ['MiniMax Code', 'M', '#ec4899'], minimax: ['MiniMax', 'M', '#ec4899'],
+    'minimax-code': ['MiniMax Code', 'M', '#ec4899'], muse: ['Muse Code', 'Mu', '#0081fb'], minimax: ['MiniMax', 'M', '#ec4899'],
     'openvibe-ai': ['OpenVibe.AI', 'AI', '#64748b'], 'openai-compatible': ['Your model', 'Y', '#64748b'],
     'claude-other': ['Claude Code (another provider)', 'C', '#d97757'],
 };
