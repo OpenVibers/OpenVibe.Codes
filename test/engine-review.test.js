@@ -49,6 +49,12 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
             assert.ok(/approved/.test(prompt) && /changes_requested/.test(prompt), 'the verdict is asked for');
         });
 
+        await check('an incremental re-review names the reviewed and current heads', () => {
+            const prompt = reviewPrompt({ patch: '+fix', reviewedHead: 'abc123', head: 'def456' });
+            assert.ok(prompt.includes('incremental re-review of abc123..def456'));
+            assert.ok(!reviewPrompt({ patch: '+fix', reviewedHead: 'abc123' }).includes('incremental re-review'));
+        });
+
         await check('quiet by default: only this diff, at most three, no style, and a prior ledger on a re-review', () => {
             const prompt = reviewPrompt({ patch: '+x', summary: 'add x' });
             assert.match(prompt, /only issues this change introduces/i);
@@ -89,7 +95,7 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
             const fetchImpl = async (url, options) => { calls.push({ url, options }); return OK(); };
             const verdict = await reviewWithAi({
                 baseUrl: 'https://ai.openvibe.services/v1', token: 'test-token', model: 'deepseek-chat',
-                patch: '+x', summary: 'a change', fetchImpl,
+                patch: '+x', summary: 'a change', reviewedHead: 'abc123', head: 'def456', fetchImpl,
             });
             assert.strictEqual(calls.length, 1);
             assert.strictEqual(calls[0].url, 'https://ai.openvibe.services/v1/chat/completions');
@@ -97,6 +103,7 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
             assert.strictEqual(JSON.parse(calls[0].options.body).model, 'deepseek-chat');
             assert.strictEqual(verdict.verdict, 'approved');
             assert.strictEqual(verdict.family, 'deepseek');
+            assert.deepStrictEqual([verdict.reviewed_head, verdict.head], ['abc123', 'def456']);
             assert.deepEqual(verdict.findings, [], 'an approval is an empty findings list, not a "no issues" note');
         });
 
