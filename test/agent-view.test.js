@@ -75,7 +75,7 @@ const STREAM = (o = {}) => ({
         });
 
         await check('the live stream comes with the embed, its ticket minted here, and the person\'s own token to Live', async () => {
-            live.streams = [STREAM({ state: 'ended', last_frame_url: 'https://openvibe.live/x' }), STREAM()];
+            live.streams = [STREAM({ state: 'ended', last_frame_url: 'https://openvibe.live/x' }), STREAM({ current_step: { title: 'Run the checkout tests', status: 'started' } })];
             live.authorizations.length = 0;   // this check's calls only (a token's iat is the second it was minted)
             const token = t.network.userToken(ada);
             const res = await t.get('/api/v1/me/agent-view', { bearer: token });
@@ -85,6 +85,7 @@ const STREAM = (o = {}) => ({
             assert.strictEqual(a.state, 'live');
             assert.strictEqual(a.title, 'Fix the flaky upload test');
             assert.deepStrictEqual(a.task, STREAM().task);
+            assert.deepStrictEqual(a.current_step, { title: 'Run the checkout tests', status: 'started' });
             assert.deepStrictEqual([a.viewers, a.worked_seconds], [2, 720]);
             assert.strictEqual(a.embed_url, `https://openvibe.live/embed/agent/${LIVE_ID}?vt=wvt_the_view_ticket`);
             assert.strictEqual(a.page_url, `https://openvibe.live/@ada/agents/${LIVE_ID}`);
