@@ -350,7 +350,6 @@ async function createApp(opts = {}) {
         return agentLayer(req, res, next);
     });
     app.use(ctx.skillPages);
-    app.get('/agents', (req, res, next) => req.viewer && req.viewer.kind === 'user' ? next() : res.vary('Cookie').set('Cache-Control', 'private, no-store').redirect(301, '/harnesses'));
     app.get('/community', (_req, res) => res.redirect(301, '/policy'));
     // The chat app (L31 CH1) answers a signed-in person's / and /tasks/:id; everyone else falls through to C4.
     app.use(require('./http/chat').createChatRoutes(ctx));
