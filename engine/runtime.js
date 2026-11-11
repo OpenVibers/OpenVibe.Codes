@@ -98,6 +98,10 @@ const MANIFEST = Object.freeze({
         terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'none', context_handoff: 'session', enforcement: 'native',
     }),
+    muse: Object.freeze({
+        terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
+        subagents: 'none', context_handoff: 'session', enforcement: 'native',
+    }),
     deepseek: Object.freeze({
         terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'none', context_handoff: 'session', enforcement: 'client-boundary',
@@ -117,7 +121,7 @@ const MANIFEST = Object.freeze({
  * `claude-other`, and `cm`/`claude` are Claude Code on Anthropic; the others are one-to-one.
  */
 const RUNNER_HARNESS = Object.freeze({
-    cm: 'claude-code', claude: 'claude-code',
+    cm: 'claude-code', claude: 'claude-code', mu: 'muse',
     cx: 'codex', cc: 'command-code', oc: 'opencode', dsh: 'deepseek', mm: 'minimax-code',
 });
 

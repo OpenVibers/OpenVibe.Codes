@@ -13,7 +13,7 @@ const rows = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
 
 (async () => {
     await check('every seed row matches the pinned harness and agent contracts', async () => {
-        assert.strictEqual(rows.length, 10);
+        assert.strictEqual(rows.length, 11);
         for (const row of rows) {
             // The row is one contract instance: the offer and the agents (models) it runs.
             const harnessCheck = contracts.validate('platform.harness-offer@1', row);
@@ -52,6 +52,12 @@ const rows = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
         for (const id of adapterIds()) {
             assert.ok(rows.some((row) => row.id === id), `the catalogue has ${id}`);
         }
+    });
+
+    await check('Muse Code catalog lists Spark 1.3, Wonder Full and Ember', async () => {
+        const muse = rows.find((row) => row.id === 'muse');
+        assert.ok(muse);
+        assert.deepStrictEqual(muse.agents.map((agent) => agent.model), ['muse-spark-1.3', 'muse-wonder-full', 'muse-ember-1.0']);
     });
 
     await check('harness and agent ids are unique', async () => {

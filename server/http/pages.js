@@ -102,7 +102,7 @@ Added test/date.test.js: three cases, all pass.
 ✔ done (48 s · $0.0400 · 31k in / 1.2k out)`;
         // What works today: the state of each piece, read with how it works.
         const statusTable = table(['Piece', 'State'], [
-            [html`<a href="/start">The harness on your machine</a> (<code>openvibe-codes</code>)`, `Live, ${VERSION}: runs a task on any of the eight agents with your CLIs and keys, streams one event format, keeps every run to show or resume.`],
+            [html`<a href="/start">The harness on your machine</a> (<code>openvibe-codes</code>)`, `Live, ${VERSION}: runs a task on any catalog agent with your CLIs and keys, streams one event format, keeps every run to show or resume.`],
             ['Hand-offs between agents', 'Live: a failed, rate-limited or silent agent hands the task to the next one with a note on what was done.'],
             [html`<a href="/run">Run locally</a>: start a task in any browser, your phone included; your own computer runs it`, 'Live: pair your machine at openvibe.my/#machines (one command), then watch the task live here and get the patch, a branch or a pull request. It runs only on your own machines, in Link\'s job sandbox.'],
             [html`<a href="/harnesses">The agent catalog</a>`, 'Live: every harness and model with its capabilities, prices and limits.'],
@@ -117,7 +117,7 @@ Added test/date.test.js: three cases, all pass.
             body: html`${raw(showcase.hero({
                 eyebrow: 'OpenVibe.Codes · the open coding-agent harness · alpha',
                 title: 'Code with', accent: 'any agent',
-                lede: 'One open harness for Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API and models you host yourself: send a coding task to the agent that fits it, hand it over when one gets stuck, and keep the whole run in one place. Then point it at OpenVibe itself.',
+                lede: 'One open harness for Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code, the DeepSeek API and models you host yourself: send a coding task to the agent that fits it, hand it over when one gets stuck, and keep the whole run in one place. Then point it at OpenVibe itself.',
                 // Two, so they sit side by side on a phone; the agents are the next section.
                 actions: [{ label: 'Install the harness', href: '/start', primary: true }, { label: 'Run locally from the web', href: '/run' }],
                 note: `Open source (AGPL-3.0). Version ${VERSION} runs on your machine with the agents and keys you already have, from your terminal or started from this site in any browser; the list below says exactly what works.`,
@@ -176,7 +176,7 @@ for await (const event of harness.run({ prompt: 'fix the failing test', cwd: '.'
         return {
             agent: true, index: true, cache: PUBLIC_CACHE,
             title: 'Get started with the coding-agent harness',
-            description: 'Install openvibe-codes and run coding tasks on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or your own model, with hand-offs between them, from your terminal or your own code.',
+            description: 'Install openvibe-codes and run coding tasks on Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code, the DeepSeek API or your own model, with hand-offs between them, from your terminal or your own code.',
             crumbs: [{ label: 'Get started' }],
             body: html`<h1>Get started</h1>
 <p><code>openvibe-codes</code> runs a coding task on whichever agent fits it, hands it to the next one when an agent fails, hits its limit or goes quiet, and keeps the whole run. It runs on your machine with the agents and keys you already have: nothing goes through OpenVibe, and it needs no account.</p>
@@ -190,6 +190,7 @@ ${table(['Agent', 'What it needs'], [
                 [html`<a href="/harnesses#claude-code">Claude Code</a>`, html`<code>claude</code> on PATH, signed in`],
                 [html`<a href="/harnesses#claude-other">Claude Code (another provider)</a>`, html`<code>claude</code> on PATH, plus your own Anthropic-compatible endpoint in <code>ANTHROPIC_BASE_URL</code>, its token in <code>ANTHROPIC_AUTH_TOKEN</code> and the model id in <code>ANTHROPIC_MODEL</code>`],
                 [html`<a href="/harnesses#minimax-code">MiniMax Code</a>`, html`<code>mcode</code> on PATH, signed in to your own MiniMax account`],
+                [html`<a href="/harnesses#muse">Muse Code</a>`, html`<code>muse</code> on PATH, signed in with <code>muse login</code>; uses your Muse plan with contributor mode off`],
                 [html`<a href="/harnesses#codex">Codex</a>`, html`<code>codex</code> on PATH, signed in`],
                 [html`<a href="/harnesses#opencode">OpenCode</a>`, html`<code>opencode</code> on PATH`],
                 [html`<a href="/harnesses#command-code">Command Code</a>`, html`<code>cmd</code> on PATH`],
@@ -248,10 +249,10 @@ ${table(['Level', 'What the agent may do'], [
         return {
             agent: true, index: true, cache: PUBLIC_CACHE,
             title: 'The coding agents',
-            description: 'Claude Code, Codex, OpenCode, Command Code, Aider and the DeepSeek API: every coding harness OpenVibe.Codes routes a task to, with its models, capabilities, prices and limits.',
+            description: 'Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code and the DeepSeek API: every coding harness OpenVibe.Codes routes a task to, with its models, capabilities, prices and limits.',
             crumbs: [{ label: 'Agents' }],
             body: html`<h1>The coding agents</h1>
-<p>A task is routed with <code>POST /api/v1/harnesses/route</code> over <code>openvibe-sdk/placement</code>, which picks an offer from this catalog: hard requirements first (a capability the task needs), then cost. The catalog is read and validated when Codes starts; every price and limit is as the offer states it. Machine-readable: <a href="/api/v1/harnesses"><code>GET /api/v1/harnesses</code></a>.</p>
+<p>A task is routed with <code>POST /api/v1/harnesses/route</code> over <code>openvibe-sdk/placement</code>, which picks an offer from this catalog: hard requirements first (a capability the task needs), then cost. The catalog is read and validated when Codes starts; every price and limit is as the offer states it. Muse Code runs with your own Muse sign-in. Its choices include Spark 1.3, Wonder Full and Ember, with reasoning effort. Machine-readable: <a href="/api/v1/harnesses"><code>GET /api/v1/harnesses</code></a>.</p>
 ${table(['Harness', 'Provider', 'Address', 'Can', 'Price', 'Limits'], offers.map((o) => [
                 html`<strong id="${o.id}">${o.name}</strong><br><code>${o.id}</code>`,
                 o.provider,

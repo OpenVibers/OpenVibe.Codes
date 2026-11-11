@@ -20,7 +20,7 @@ const { asyncRouter } = require('./router');
 
 const SITE_NAME = 'OpenVibe.Codes';
 const SERVICES_ORIGIN = 'https://openvibe.services';
-const DESCRIPTION = 'The open coding-agent harness: run a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or a model you host, with routing by capability and cost, hand-offs between agents, and the way to improve OpenVibe itself.';
+const DESCRIPTION = 'The open coding-agent harness: run a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code, the DeepSeek API or a model you host, with routing by capability and cost, hand-offs between agents, and the way to improve OpenVibe itself.';
 const { version: VERSION } = require('../../package.json');
 const INSTALL_HINT = `npm install -g https://codeload.github.com/OpenVibers/OpenVibe.Codes/tar.gz/refs/tags/v${VERSION}`;
 // Sign-in and the API are not for crawlers. The console's old addresses redirect to openvibe.services.
@@ -32,7 +32,7 @@ const PAGE_TEXT = {
     '/': ['OpenVibe.Codes home', 'Code with any agent: the coding-agent harness, how a task is routed and handed off, what works today, and how to improve OpenVibe.'],
     '/run': ['Run locally', 'Start coding agents from any browser and run them on your own computer.'],
     '/start': ['Get started with the coding-agent harness', 'Install openvibe-codes; the agents it can use and what each needs; the commands, permission levels, hand-offs, the event format and using it from your own code.'],
-    '/harnesses': ['The coding agents', 'Every harness the router can pick (Claude Code, Codex, OpenCode, Command Code, Aider, DeepSeek, your own model) with its models, capabilities, prices and limits.'],
+    '/harnesses': ['The coding agents', 'Every harness the router can pick (Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code, DeepSeek, your own model) with its models, capabilities, prices and limits.'],
     '/skills': ['The skills hub', 'Skills, rules and MCP servers kept per person and per project, versioned, shared through the four audiences, and synced into each coding tool on your own machine with a dry run and an undo.'],
     '/improve': ['Improve OpenVibe', 'How OpenVibe is built in the open: every repository, and the path from a change to a reviewed pull request.'],
     '/updates': ['What shipped on OpenVibe.Codes', 'This site\'s update log, from the network changelog feed.'],
@@ -150,7 +150,7 @@ function createDiscoveryRoutes(ctx) {
         res.type('text/plain').set('Cache-Control', TEXT).send(llmsTxt({
             name: SITE_NAME,
             base: site,
-            summary: 'OpenVibe.Codes: the open coding-agent harness. openvibe-codes runs a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or your own OpenAI-compatible model, hands it to the next agent when one fails, and keeps every run; plus a public catalog and routing API, and the way to improve OpenVibe itself.',
+            summary: 'OpenVibe.Codes: the open coding-agent harness. openvibe-codes runs a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code, the DeepSeek API or your own OpenAI-compatible model, hands it to the next agent when one fails, and keeps every run; plus a public catalog and routing API, and the way to improve OpenVibe itself.',
             details: `Every page is server-rendered and readable without JavaScript. The harness is a command-line tool and a Node.js module that runs on your machine with your agents and keys (install: ${INSTALL_HINT}). Every agent's output becomes one event stream in Claude Code's stream-json shape. The catalog and the router are public: GET /api/v1/harnesses lists every harness with its models, and POST /api/v1/harnesses/route picks one for a task by capability first, then cost. A hosted runner comes next. The developer console that used to live here (projects, apps, keys, the API reference, OAuth and webhook tools, releases) is OpenVibe.Services at ${SERVICES_ORIGIN}.`,
             sections: [
                 { title: 'Public pages', links: (await allPages()).map(p => ({ title: p.title || describePage(p.path, { governance }).title, url: abs(p.path), note: p.text || describePage(p.path, { governance }).text, canonical: true })) },

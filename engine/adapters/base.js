@@ -66,6 +66,7 @@ const EFFORT_LEVELS = {
     opencode: [],
     aider: ['low', 'medium', 'high'],
     'minimax-code': ['low', 'medium', 'high', 'xhigh', 'max'],
+    muse: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
 };
 
 /**

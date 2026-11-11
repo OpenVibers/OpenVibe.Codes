@@ -5,7 +5,7 @@
 module.exports = {
     id: 'codes',
     name: 'OpenVibe.Codes',
-    purpose: 'The open coding-agent harness: one router over Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API and your own models, with hand-offs between agents, and the way to improve OpenVibe itself.',
+    purpose: 'The open coding-agent harness: one router over Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code, the DeepSeek API and your own models, with hand-offs between agents, and the way to improve OpenVibe itself.',
     home: 'https://openvibe.codes',
     site: 'openvibe.codes',
     api: '/api/v1',

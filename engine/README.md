@@ -17,7 +17,7 @@ engine.outcome(attempts);                                            // { state,
 ### `adapters/` — every harness Codes can run, with the portal's argv and environment
 
 Six harnesses, each one the portal's runner script, ported: `claude-code` and `claude-other` (Claude Code, and Claude
-Code on another provider with the cm-style environment), `codex`, `command-code`, `opencode` and `minimax-code`. An
+Code on another provider with the cm-style environment), `codex`, `command-code`, `opencode`, `minimax-code` and `muse`. An
 adapter says how its CLI is started (the argv and the environment — the portal's, not a guess), how what it prints is
 read into the one transcript shape (the portal's feed converters), and what its reasoning levels are.
 

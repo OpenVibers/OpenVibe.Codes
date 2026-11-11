@@ -69,7 +69,7 @@ function priced(row, freshUsd) {
     await check('every seed offer validates as platform.resource-offer@1 of kind harness', async () => {
         const harnesses = createHarnesses({ catalogPath });
         const offers = harnesses.list().flatMap((harness) => harnesses.agents(harness.id).map((agent) => [harness, toOffer(harness, agent, { now })]));
-        assert.strictEqual(offers.length, 10);
+        assert.strictEqual(offers.length, 13);
         for (const [harness, offer] of offers) {
             const result = contracts.validate('platform.resource-offer@1', JSON.parse(JSON.stringify(offer)));
             assert.ok(result.valid, `${offer.offer_id}: ${JSON.stringify(result.errors)}`);
@@ -136,7 +136,7 @@ function priced(row, freshUsd) {
         const [harnessId] = r.selected.split(':');
         assert.ok(toOffer(harnesses.get(harnessId), harnesses.agents(harnessId)[0]).capabilities.includes('task:review'));
         assert.ok(r.reasons.length);
-        assert.deepStrictEqual(r.candidates.map((c) => c.id), ['claude-code:claude-code-sonnet', 'claude-other:claude-other-default', 'codex:codex-default', 'command-code:command-code-default', 'opencode:opencode-default', 'minimax-code:minimax-code-default', 'aider:aider-default', 'deepseek:deepseek-chat', 'openvibe-ai:openvibe-ai-router', 'openai-compatible:openai-compatible-local']);
+        assert.deepStrictEqual(r.candidates.map((c) => c.id), ['claude-code:claude-code-sonnet', 'claude-other:claude-other-default', 'codex:codex-default', 'command-code:command-code-default', 'opencode:opencode-default', 'minimax-code:minimax-code-default', 'muse:muse-spark-1.3', 'muse:muse-wonder-full', 'muse:muse-ember-1.0', 'aider:aider-default', 'deepseek:deepseek-chat', 'openvibe-ai:openvibe-ai-router', 'openai-compatible:openai-compatible-local']);
     });
 
     await check('an offer whose health is down is excluded with a reason', async () => {

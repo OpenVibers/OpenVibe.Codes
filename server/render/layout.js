@@ -131,7 +131,7 @@ function renderPage(o) {
         title: o.title || `${SITE_NAME}: code with any agent`,
         titleSuffix: o.title ? ` · ${SITE_NAME}` : '',
         siteName: SITE_NAME,
-        description: o.description || 'The open coding-agent harness: Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API and your own models behind one router, and the way to improve OpenVibe itself.',
+        description: o.description || 'The open coding-agent harness: Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code, the DeepSeek API and your own models behind one router, and the way to improve OpenVibe itself.',
         canonical,
         image: new URL(require('openvibe-shared/social').url('codes'), o.config.baseUrl).href,
         imageAlt: 'OpenVibe Codes — coding agents',

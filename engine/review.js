@@ -42,6 +42,7 @@ const HARNESS_FAMILY = {
     'claude-code': 'anthropic',
     codex: 'openai',
     'command-code': 'deepseek',
+    muse: 'meta',
     opencode: 'qwen',
     deepseek: 'deepseek',
     aider: 'openai',

@@ -23,6 +23,7 @@ const SETUP = {
     opencode: { name: 'OpenCode', plan: 'OpenCode Go, or your own keys', install: 'npm install -g opencode-ai', signIn: 'opencode auth login', docs: 'https://opencode.ai/docs' },
     'command-code': { name: 'Command Code', plan: 'a Command Code plan', install: null, signIn: null, docs: 'https://commandcode.ai' },
     'minimax-code': { name: 'MiniMax Code', plan: 'a MiniMax coding plan', install: null, signIn: null, docs: 'https://www.minimax.io' },
+    muse: { name: 'Muse Code', plan: 'your Muse plan', install: null, signIn: 'muse login', docs: 'https://dev.meta.ai/docs/muse-ember' },
 };
 
 function readiness(rows) {
