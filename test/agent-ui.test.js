@@ -32,6 +32,7 @@ const { clean } = require('../server/agent-ui/codes');
             { seq: 3, body: { t: 'done', ok: true, text: 'Finished.' } },
         ]);
         await lines.complete(id);
+        await t.ctx.store.db.exec("UPDATE run_tasks SET via = 'service:actor' WHERE id = $1", [id]);
         await check('snapshot access matches tasks, full output persists, replay is exact', async () => {
             const snapshot = await t.get(`/api/v1/runs/${id}`, { as: owner });
             assert.equal(snapshot.status, 200, snapshot.text);
@@ -51,6 +52,20 @@ const { clean } = require('../server/agent-ui/codes');
             assert.deepEqual([...b.text.matchAll(/^id: (\d+)$/gm)].map((m) => +m[1]), ids.filter((n) => n > after));
             const c = await t.get(`/api/v1/runs/${id}/events`, { as: owner });
             assert.equal(c.text, a.text);
+        });
+        await check('existing service scopes and shared-reader grants also govern runs', async () => {
+            const service = t.network.mintService('svc:actor', 'openvibe.codes', ['codes.task.read']);
+            const headers = { 'X-OV-Subject': owner.subject };
+            assert.equal((await t.get(`/api/v1/runs/${id}`, { bearer: service, headers })).status, 200);
+            const wrong = t.network.mintService('svc:chat', 'openvibe.codes', ['codes.task.read']);
+            assert.equal((await t.get(`/api/v1/runs/${id}`, { bearer: wrong, headers })).status, 404);
+            const sharePath = `/api/v1/task/${id}/share`;
+            const first = await t.get(sharePath, { as: owner, headers: { 'x-requested-with': 'ov-share' } });
+            const saved = await t.get(sharePath, { as: owner, method: 'PUT', json: { audience: 'link' }, headers: { 'x-requested-with': 'ov-share', 'if-match': first.headers.get('etag') } });
+            assert.equal(saved.status, 200, saved.text);
+            assert.equal((await t.get(`/api/v1/runs/${id}`, { as: other })).status, 200);
+            assert.equal((await t.get(`/api/v1/runs/${id}/events`, { as: other })).status, 200);
+            assert.equal((await t.get(`/api/v1/runs/${id}`, { bearer: wrong, headers })).status, 404);
         });
         await check('owner switch hides both endpoints', async () => {
             t.config.agentUi = false;

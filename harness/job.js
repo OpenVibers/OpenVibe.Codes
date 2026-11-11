@@ -394,7 +394,7 @@ function compact(e, ctx) {
     if (e.type === 'user' && e.message && Array.isArray(e.message.content)) {
         return e.message.content.filter((c) => c && c.type === 'tool_result')
             .map((c) => {
-                const line = { t: 'tool_result', id: String(c.tool_use_id || ''), ok: !c.is_error, output: clean(cutTo(resultText(c.content), MAX_OUTPUT)), full_output: clean(resultText(c.full_output == null ? c.content : c.full_output)), ...parent };
+                const line = { t: 'tool_result', id: String(c.tool_use_id || ''), ok: !c.is_error, output: clean(cutTo(resultText(c.content), MAX_OUTPUT)), ...(resultText(c.full_output == null ? c.content : c.full_output).length > MAX_OUTPUT ? { full_output: clean(resultText(c.full_output == null ? c.content : c.full_output)) } : {}), ...parent };
                 const pictures = imageAttachments(c.content, ctx && ctx.pictures);
                 if (pictures.length) line.attachments = pictures;
                 return line;
@@ -418,7 +418,7 @@ function compact(e, ctx) {
  */
 function sessionLog(lines) {
     const size = (l) => JSON.stringify(l).length + 1;
-    let list = lines.slice();
+    let list = lines.map(({ full_output, ...line }) => line);
     let total = list.reduce((n, l) => n + size(l), 0);
     if (total <= MAX_LOG) return list;
     // The pictures go before the words: a session keeps what was said before it keeps what was shown.
