@@ -75,6 +75,14 @@ const { boot, check, done } = require('./helpers/boot');
             assert.ok(!task.text.includes('>https://github.com/'), 'never a bare URL');
             assert.ok(!task.text.includes('data-ch-stream'), 'a finished task does not stream');
         });
+        await check('empty states are the shared kit, not bare lines', async () => {
+            const newbie = t.network.addUser('newbie');
+            const tasks = await t.get('/tasks', { as: newbie });
+            assert.strictEqual(tasks.status, 200);
+            assert.ok(tasks.text.includes('class="ovk-empty"'), 'the empty task list is a kit empty state');
+            assert.ok(tasks.text.includes('No tasks yet'), 'and says what is empty');
+            assert.ok(/class="ovk-btn[^"]*"[^>]*href="\/#c4-prompt"/.test(tasks.text), 'with Start a task as a kit button');
+        });
     } finally { await t.close(); }
     done();
 })().catch((e) => { console.error(e); process.exit(1); });

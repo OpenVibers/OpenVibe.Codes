@@ -11,6 +11,7 @@
  */
 const express = require('express');
 const { esc } = require('../render/html');
+const kit = require('openvibe-shared/kit');
 const { asyncRouter } = require('./router');
 
 function createGitRoutes(ctx) {
@@ -33,7 +34,7 @@ function createGitRoutes(ctx) {
         const error = String(req.query.error || '').slice(0, 240);
         return `${ok ? `<div class="notice c4-notice" role="status">${esc(ok)}</div>` : ''}${error ? `<div class="notice c4-notice c4-notice-bad" role="alert">${esc(error)}</div>` : ''}`;
     };
-    const page = (req, res, body) => ctx.chatShell(req, res, { title: 'OpenVibe Git', body: wrap(body), css: ['css/c4.css'], here: '/git' });
+    const page = (req, res, body) => ctx.chatShell(req, res, { title: 'OpenVibe Git', body: wrap(body), css: ['css/c4.css'], styles: ['kit.css'], here: '/git' });
 
     r.get('/git', async (req, res, next) => {
         if (!viewer(req)) return next();
@@ -51,7 +52,7 @@ function createGitRoutes(ctx) {
         const mine = await forge.repos(who);
         const list = mine.length
             ? `<ul class="c4-rows">${mine.map((x) => `<li class="c4-row c4-row-flat"><span class="c4-row-label"><a href="${esc(x.html_url)}" rel="noopener">${esc(x.full_name)}</a></span><span class="c4-row-note">${x.private ? 'Private' : 'Public'}${x.description ? ` · ${esc(x.description.slice(0, 120))}` : ''}</span><a class="c4-opill" href="/?mode=code&amp;repo=${encodeURIComponent(x.html_url)}">Work on it</a></li>`).join('')}</ul>`
-            : '<p class="c4-emptyline">No repositories yet. Make your first one above.</p>';
+            : kit.empty({ icon: 'code', title: 'No repositories yet', text: 'Make your first one below: it starts with a README on main and opens straight in a new chat.' });
         return page(req, res, `${head}${flash(req)}
 <section class="c4-card"><div class="c4-card-head"><h2>A new repository</h2></div>
 <p class="c4-sub">It starts with a README on <code class="c4-code-inline">main</code>, in your name (${esc(who.username)}), and opens straight in a new chat.</p>
