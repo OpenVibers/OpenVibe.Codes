@@ -29,6 +29,7 @@
 const express = require('express');
 const { asyncRouter } = require('./router');
 const { esc } = require('../render/html');
+const ovkKit = require('openvibe-shared/kit');
 
 /** The adapter ids the Link reads and the services that write, and the names a person knows them by. */
 const SOURCE_NAMES = {
@@ -312,7 +313,7 @@ function createMemoryRoutes(ctx, kit) {
         const head = '<section class="c4-card"><div class="c4-card-head"><h2>Sources</h2><span class="c4-muted">'
             + rows.length + (rows.length === 1 ? ' source' : ' sources') + '</span></div>';
         if (!rows.length) {
-            return head + kit.empty({ icon: 'file', title: 'Nothing here yet', text: 'On your computer, run '
+            return head + ovkKit.empty({ icon: 'file', title: 'Nothing here yet', text: 'On your computer, run '
                 + 'openvibe-link memory upload: it shows what it found and asks before sending anything.' }) + '<p class="c4-hint"><a href="https://github.com/OpenVibers/OpenVibe.Link/blob/main/docs/memory.md#the-upload">The Link docs</a></p></section>';
         }
         const sourceRow = (row) => {
@@ -349,7 +350,7 @@ function createMemoryRoutes(ctx, kit) {
             + '<button class="c4-button c4-button-light">Search</button></form>';
         const body = notes.length
             ? '<ul class="c4-rows">' + notes.map((item) => noteRow(item, merged.has(item.id))).join('') + '</ul>'
-            : q || scope ? kit.empty({ icon: 'search', title: 'No note matches', text: 'Try another word, or show every note.', action: { href: '/memory?tab=notes', label: 'Show all notes', icon: 'list' } }) : kit.empty({ icon: 'file', title: 'No notes yet', text: 'A note is one thing your tools remembered; it appears here after a task or an import.' });
+            : q || scope ? ovkKit.empty({ icon: 'search', title: 'No note matches', text: 'Try another word, or show every note.', action: { href: '/memory?tab=notes', label: 'Show all notes', icon: 'list' } }) : ovkKit.empty({ icon: 'file', title: 'No notes yet', text: 'A note is one thing your tools remembered; it appears here after a task or an import.' });
         return '<section class="c4-card">'
             + search + '<div class="c4-chips" aria-label="Scopes">' + chips + '</div>' + body
             + '<p class="c4-hint">A note is one thing your tools remembered. Everything here is yours: edit it, archive it or delete it.</p></section>';
