@@ -266,6 +266,41 @@ function fakeHarness() {
             assert.strictEqual(other.previousText, '');
         });
 
+        await check('the nightly dream rechecks captured rows against the saved transcript without repeating a lesson', async () => {
+            const task = await startTask('Check the release tests.');
+            await end(task.id, 'succeeded', { ok: true, summary: 'Done.\n\nLearned:\n- npm test covers the release.\n- The release uses CI.', agents: ['codex'], log: [] });
+            const valid = (await knowledgeOf(ada.subject)).find((r) => r.source_task === task.id && /covers the release/.test(r.text));
+            assert.ok(valid);
+            const ghost = await t.ctx.knowledge.remember({ subject: ada.subject, kind: 'lesson',
+                text: 'The moon is green.', repo: REPO, sourceTask: task.id });
+            const pass = await t.ctx.knowledge.dream({ limit: 100 });
+            assert.strictEqual(pass.skipped, false);
+            assert.ok(pass.processed > 0);
+            assert.strictEqual((await db.one('SELECT seen FROM codes_knowledge WHERE id = $1', [valid.id])).seen, valid.seen,
+                'a nightly replay of the same task is not a second sighting');
+            const stale = await db.one('SELECT * FROM codes_knowledge WHERE id = $1', [ghost.row.id]);
+            assert.strictEqual(stale.dream_status, 'unsupported', 'the saved task does not support this claim');
+            const recalled = await t.ctx.knowledge.recall({ subject: ada.subject, repo: REPO, prompt: 'moon green' });
+            assert.ok(!recalled.rows.some((r) => r.id === stale.id), 'unsupported text cannot steer another run');
+            assert.strictEqual((await t.ctx.knowledge.list({ subject: ada.subject })).find((r) => r.id === stale.id).dream_status,
+                'unsupported', 'the owner can still inspect it');
+            assert.match((await t.get('/knowledge', { as: ada })).text, /Needs review.*The moon is green\..*not sent to the next run/s,
+                'the owner sees why the row is no longer recalled');
+            const manual = await t.ctx.knowledge.edit({ subject: ada.subject, id: stale.id, text: 'The moon is blue.' });
+            assert.strictEqual(manual.source_task, null, 'an owner edit becomes manual knowledge');
+            assert.strictEqual(manual.dream_status, 'active');
+            assert.strictEqual((await t.ctx.knowledge.dream()).skipped, true, 'the due check runs once a day');
+            const next = await startTask('Check the next release.');
+            await end(next.id, 'succeeded', { ok: true, summary: 'Done.\n\nLearned:\n- npm test covers the release.', agents: ['codex'], log: [] });
+            const repeated = await db.one('SELECT seen, source_task FROM codes_knowledge WHERE id = $1', [valid.id]);
+            assert.strictEqual(repeated.source_task, next.id);
+            assert.strictEqual(repeated.seen, valid.seen + 1, 'a new task is a second sighting');
+            await t.ctx.knowledge.dream({ force: true, limit: 100 });
+            const replayed = await db.one('SELECT seen, source_task FROM codes_knowledge WHERE id = $1', [valid.id]);
+            assert.strictEqual(replayed.seen, repeated.seen, 'replaying an older task does not inflate sightings');
+            assert.strictEqual(replayed.source_task, next.id, 'replay does not move attribution backwards');
+        });
+
         await check('the person’s knowledge is exported with the account and erased with it', async () => {
             const { TABLES } = require('../server/account-data');
             assert.ok(TABLES.some((x) => x.table === 'codes_knowledge' && x.subject === 'subject'), 'the table is covered');

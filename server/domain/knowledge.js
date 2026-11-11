@@ -153,6 +153,7 @@ function present(row, { subject } = {}) {
         source: row.source_task ? { task: row.source_task, job: row.source_job || null, agent: row.source_agent || null } : null,
         seen: Number(row.seen) || 1,
         redacted: !!row.redacted,
+        dream_status: row.dream_status || 'active',
         created_at: iso(row.created_at),
         updated_at: iso(row.updated_at),
         last_seen_at: iso(row.last_seen_at),
@@ -269,7 +270,7 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
 
     /** Add one row, or raise the one it repeats. → { row, created, redacted }. A fixed `key` names the row instead
      * of the text hash: the same key rewritten is the same row (the session summary), never a second one. */
-    async function remember({ subject, kind = 'lesson', text, repo = null, paths = [], sourceTask = null, sourceJob = null, sourceAgent = null, teamId = null, pinned = false, visibility = null, key = null } = {}) {
+    async function remember({ subject, kind = 'lesson', text, repo = null, paths = [], sourceTask = null, sourceJob = null, sourceAgent = null, teamId = null, pinned = false, visibility = null, key = null, replay = false } = {}) {
         const k = KINDS.includes(kind) ? kind : 'lesson';
         const fixed = key == null ? null : String(key).slice(0, 200).trim() || null;
         const cleaned = scrub(clean(text));
@@ -287,16 +288,20 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
                  dedupe_key, seen, pinned, redacted, created_at, updated_at, last_seen_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, 1, $13, $14, $15, $15, $15)
              ON CONFLICT (subject, kind, dedupe_key) WHERE dedupe_key IS NOT NULL
-             DO UPDATE SET seen = codes_knowledge.seen + 1,
-                           last_seen_at = EXCLUDED.last_seen_at,
-                           updated_at = EXCLUDED.updated_at,
-                           source_task = COALESCE(EXCLUDED.source_task, codes_knowledge.source_task),
-                           source_job = COALESCE(EXCLUDED.source_job, codes_knowledge.source_job),
-                           source_agent = COALESCE(EXCLUDED.source_agent, codes_knowledge.source_agent)
+             DO UPDATE SET seen = CASE WHEN $16::boolean THEN codes_knowledge.seen
+                                       WHEN EXCLUDED.source_task IS NOT NULL AND codes_knowledge.source_task = EXCLUDED.source_task
+                                       THEN codes_knowledge.seen ELSE codes_knowledge.seen + 1 END,
+                           last_seen_at = CASE WHEN $16::boolean THEN codes_knowledge.last_seen_at ELSE EXCLUDED.last_seen_at END,
+                           updated_at = CASE WHEN $16::boolean THEN codes_knowledge.updated_at ELSE EXCLUDED.updated_at END,
+                           dream_status = CASE WHEN $16::boolean AND codes_knowledge.source_task IS DISTINCT FROM EXCLUDED.source_task
+                                               THEN codes_knowledge.dream_status ELSE 'active' END,
+                           source_task = CASE WHEN $16::boolean THEN codes_knowledge.source_task ELSE COALESCE(EXCLUDED.source_task, codes_knowledge.source_task) END,
+                           source_job = CASE WHEN $16::boolean THEN codes_knowledge.source_job ELSE COALESCE(EXCLUDED.source_job, codes_knowledge.source_job) END,
+                           source_agent = CASE WHEN $16::boolean THEN codes_knowledge.source_agent ELSE COALESCE(EXCLUDED.source_agent, codes_knowledge.source_agent) END
              RETURNING *, (xmax = 0) AS created`,
             [id, subject, share.team_id, share.visibility, k, cleaned.text, repository, JSON.stringify(allPaths),
                 sourceTask ? String(sourceTask) : null, sourceJob ? String(sourceJob) : null, sourceAgent ? String(sourceAgent) : null,
-                fixed || dedupeKey({ kind: k, text: cleaned.text, repo: repository }), !!pinned, cleaned.redacted, at],
+                fixed || dedupeKey({ kind: k, text: cleaned.text, repo: repository }), !!pinned, cleaned.redacted, at, !!replay],
         );
         return { row, created: !!row.created, redacted: cleaned.redacted };
     }
@@ -313,6 +318,7 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
         const repository = repoOf(row.repo);
         return await db.one(
             `UPDATE codes_knowledge SET text = $2, kind = $3, dedupe_key = $4, redacted = $5,
+                    source_task = NULL, source_job = NULL, dream_status = 'active',
                     pinned = COALESCE($6::boolean, pinned), updated_at = $7
               WHERE id = $1 RETURNING *`,
             [row.id, cleaned.text, k, dedupeKey({ kind: k, text: cleaned.text, repo: repository }), cleaned.redacted,
@@ -347,7 +353,7 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
      * What one finished run taught, captured idempotently: the agent's Learned: and Fact: lines, a failure with its
      * reason, the command that failed, and the commands the repository's runs use. Never the whole transcript.
      */
-    async function captureTask(row) {
+    async function captureTask(row, { replay = false } = {}) {
         if (!row || !row.id || !row.subject) return [];
         const result = row.result && typeof row.result === 'object' ? row.result : {};
         const logLines = Array.isArray(result.log) ? result.log : [];
@@ -395,10 +401,11 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
             try {
                 const saved = await remember({
                     subject: row.subject, kind: entry.kind, text: entry.text, repo, paths: pathsIn(entry.text),
-                    sourceTask: row.id, sourceJob: row.job_id || null, sourceAgent: agent,
+                    sourceTask: row.id, sourceJob: row.job_id || null, sourceAgent: agent, replay,
                 });
                 out.push(saved.row);
             } catch (e) {
+                if (replay && (!e || e.code !== 'knowledge.empty')) throw e;
                 if (!e || e.code !== 'knowledge.empty') log.warn(`[Codes] knowledge capture for ${row.id}: ${String((e && e.message) || e).slice(0, 160)}`);
             }
         }
@@ -424,6 +431,44 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
             if (!e || e.code !== 'knowledge.empty') log.warn(`[Codes] knowledge summary for ${row.id}: ${String((e && e.message) || e).slice(0, 160)}`);
             return null;
         }
+    }
+
+    /** Recheck a bounded batch of auto-captured rows against the saved task transcript, once per day.
+     * Re-capture restores missed observations through remember's exact dedupe key. A row the transcript no longer
+     * supports stays visible to its owner but cannot steer a later run. Owner edits become manual rows and are never
+     * touched by this pass. The cursor carries a large backlog across nights. */
+    async function dream({ force = false, limit = 50 } = {}) {
+        const at = now();
+        const state = await db.maybe('SELECT last_at, cursor FROM codes_knowledge_dream_state WHERE name = $1', ['nightly']);
+        if (!force && state && at - Number(state.last_at) < 86400e3) return { skipped: true, processed: 0, unsupported: 0 };
+        const batch = Math.max(1, Math.min(100, Number(limit) || 50));
+        const tasks = await db.many(`SELECT t.id, t.subject, t.repo, t.job_id, t.agent, t.state, t.error,
+                    t.result - 'patch' - 'files' AS result
+                FROM run_tasks t
+                WHERE t.id > $1 AND t.result IS NOT NULL AND t.state IN ('succeeded', 'failed', 'cancelled', 'expired')
+                  AND EXISTS (SELECT 1 FROM codes_knowledge k WHERE k.source_task = t.id AND k.subject = t.subject
+                              AND COALESCE(k.dedupe_key, '') NOT LIKE 'summary:%')
+                ORDER BY t.id LIMIT $2`, [state && state.cursor || '', batch]);
+        let unsupported = 0;
+        for (const task of tasks) {
+            const before = await db.many(`SELECT id FROM codes_knowledge
+                WHERE source_task = $1 AND subject = $2 AND pinned = false AND visibility = 'private'
+                  AND updated_at = last_seen_at AND COALESCE(dedupe_key, '') NOT LIKE 'summary:%'`, [task.id, task.subject]);
+            const supported = new Set((await captureTask(task, { replay: true })).map((row) => row.id));
+            for (const row of before) {
+                if (supported.has(row.id)) continue;
+                await db.exec(`UPDATE codes_knowledge SET dream_status = 'unsupported'
+                    WHERE id = $1 AND source_task = $2 AND subject = $3 AND pinned = false AND visibility = 'private'
+                      AND updated_at = last_seen_at`,
+                [row.id, task.id, task.subject]);
+                unsupported++;
+            }
+        }
+        const cursor = tasks.length === batch ? tasks[tasks.length - 1].id : '';
+        await db.exec(`INSERT INTO codes_knowledge_dream_state (name, last_at, cursor) VALUES ($1, $2, $3)
+            ON CONFLICT (name) DO UPDATE SET last_at = EXCLUDED.last_at, cursor = EXCLUDED.cursor`,
+        ['nightly', at, cursor]);
+        return { skipped: false, processed: tasks.length, unsupported, cursor };
     }
 
     /** Rank the rows a next run should see: pinned first, then this repository, then the words it shares with the brief. */
@@ -457,13 +502,13 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
         // run reads it first. It is keyed by repository, so a summary from another repository never leaks in.
         const key = summaryKey(repo);
         const previous = rows.find((r) => r.kind === 'fact' && r.dedupe_key === key) || null;
-        const rest = previous ? rows.filter((r) => r !== previous) : rows;
+        const rest = rows.filter((r) => r !== previous && (r.dream_status || 'active') === 'active');
         const picked = rank(rest, { repo: repoOf(repo), prompt }).slice(0, Math.max(1, Math.min(8, limit)));
         return { rows: picked, previous, previousText: previous ? previous.text : '', text: block(picked, { limit: picked.length }) };
     }
 
     return {
-        projectsOf, teamIdsOf, list, get, remember, edit, pin, remove, share, unshare, captureTask, captureSummary,
+        projectsOf, teamIdsOf, list, get, remember, edit, pin, remove, share, unshare, captureTask, captureSummary, dream,
         summaryKey, summaryText, recall, rank,
         block, present: (row, opts) => present(row, opts), scrub, repoOf, learnedLines, factLines, KINDS,
     };
