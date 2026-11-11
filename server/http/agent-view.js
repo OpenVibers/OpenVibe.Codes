@@ -98,6 +98,10 @@ function createAgentView({ config, sso, actorLimits, fetchImpl = (...a) => fetch
             state: row.state,
             title: row.title,
             task: row.task && typeof row.task === 'object' ? row.task : null,
+            // Live's S2 list already includes the newest step. Older Live deployments omit it.
+            current_step: row.current_step && typeof row.current_step.title === 'string'
+                ? { title: row.current_step.title.slice(0, 120), status: ['started', 'passed', 'failed', 'skipped'].includes(row.current_step.status) ? row.current_step.status : 'started' }
+                : null,
             curtain: { up: !!(row.curtain && row.curtain.up) },
             viewers: Number(row.viewers) || 0,
             worked_seconds: Number(row.worked_seconds) || 0,
