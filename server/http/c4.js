@@ -813,7 +813,7 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
 <div class="c4-safety" role="group" aria-label="Safety level">${SAFETY_OPTIONS.map(([value, title, desc]) => `<label class="c4-safety-card"><input type="radio" name="safety" value="${value}"${settings.safety === value ? ' checked' : ''}><span><b>${title}</b><small>${desc}</small></span></label>`).join('')}</div>
 ${conductorSection}
 <button class="c4-button" type="submit">Save settings</button>
-</form></section>` : signIn(req)}`;
+</form></section><section class="c4-card"><h2>Model plan</h2><p>Set a default for planning, building and checking tasks.</p><a class="ovk-btn ovk-btn--quiet" href="/settings/model-plan">Edit model plan</a></section>` : signIn(req)}`;
         page(req, res, 'Settings', wrap(content));
     });
     r.post('/settings', form, async (req, res) => {
@@ -843,6 +843,7 @@ ${conductorSection}
             return res.redirect(303, `/settings?error=${encodeURIComponent(String((e && e.message) || 'the settings could not be saved').slice(0, 180))}`);
         }
     });
+    r.use(require('./model-plan-settings').createModelPlanSettings(ctx, { page, wrap, header, flash, sameOrigin, viewer, form, signIn }));
 
     // The Memory page (OpenVibe Memory M2b): the person's own notes, in Codes' own kit. The routes live in their own
     // module and borrow this one's kit (the page, the frame, the card, the pill, the flash and the same-origin check).

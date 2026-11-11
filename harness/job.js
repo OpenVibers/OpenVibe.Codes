@@ -23,6 +23,8 @@ const { collectProof } = require('../engine/proof');
 const { createCheckpoints, toolPaths } = require('./checkpoints');
 const { runCheck } = require('./goal-check');
 const { boundedEvidence } = require('../engine/goal');
+const { validatePlan } = require('../engine/model-plan');
+const { repositoryPlan, selectPlan, resolveRepositoryPlan, runModelPlan } = require('./model-plan');
 const skills = require('../engine/skills');
 
 const JOB_PROTOCOL = '1.0.0';
@@ -275,6 +277,8 @@ function parseArgs(raw, env = process.env) {
             budget: rawGoal.budget && typeof rawGoal.budget === 'object' && !Array.isArray(rawGoal.budget) ? rawGoal.budget : {},
             no_progress_limit: Number.isInteger(rawGoal.no_progress_limit) ? rawGoal.no_progress_limit : 3,
         } : null;
+    const plan = a.plan == null ? null : validatePlan(a.plan);
+    const planSource = ['task', 'project', 'account'].includes(a.plan_source) ? a.plan_source : 'task';
     return {
         kind, repo: repo ? repo.toString() : null, ref, prompt, permission, push,
         // The task this job is an attempt of, when the server names it: the checkpoint refs carry it.
@@ -296,6 +300,8 @@ function parseArgs(raw, env = process.env) {
         // The conversation's work so far (Codes L31 CH4): applied to the clone before the agent starts.
         ...(typeof a.base_patch === 'string' && a.base_patch.trim() && a.base_patch.length <= MAX_PATCH ? { base_patch: a.base_patch } : {}),
         ...(goal ? { goal } : {}),
+        ...(plan ? { plan, planSource, preset: typeof a.preset === 'string' ? a.preset : null,
+            modelFallbacks: Array.isArray(a.model_fallbacks) ? a.model_fallbacks.slice(0, 8).filter((item) => item && typeof item.role === 'string' && typeof item.requested === 'string' && typeof item.model === 'string') : [] } : {}),
     };
 }
 
@@ -776,6 +782,20 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                 job = { ...job, prompt: job.prompt + attachmentPrompt(files) };
                 say({ t: 'step', text: `${files.length} file${files.length === 1 ? '' : 's'} attached` });
             }
+            if (job.plan) {
+                for (const fallback of job.modelFallbacks || []) say({ t: 'note', text: `${fallback.role} model ${fallback.requested} unavailable; using ${fallback.model} from the plan ladder` });
+                const projectPlan = repositoryPlan(work);
+                job.plan = selectPlan({ saved: job.plan, repository: projectPlan, task: job.planSource === 'task' ? job.plan : null });
+                if (projectPlan && job.planSource !== 'task') {
+                    const resolved = await resolveRepositoryPlan(job.plan, { env, fetchImpl });
+                    job.plan = resolved.plan;
+                    for (const fallback of resolved.fallbacks) say({ t: 'note', text: `${fallback.role} model ${fallback.requested} unavailable; using ${fallback.model} from the plan ladder` });
+                    result.model_fallbacks = resolved.fallbacks;
+                }
+                result.model_plan = job.plan;
+                if (job.preset) result.preset = job.preset;
+                say({ t: 'step', text: `Model plan: ${job.plan.mode}${projectPlan && job.planSource !== 'task' ? ' from .openvibe/codes.yml' : ''}` });
+            }
         } else if (job.kind === 'conductor') {
             // The owner's own folder: never a clone, never touched by git. Claude Code opens it, so it loads that
             // project's memory and AGENTS.md.
@@ -816,7 +836,16 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             fs.mkdirSync(work, { recursive: true });
             say({ t: 'step', text: 'Preparing an empty benchmark workspace' });
         }
-        const run = harness.run({
+        const run = job.plan ? {
+            runId: job.taskId || 'plan',
+            async *[Symbol.asyncIterator]() {
+                yield await runModelPlan({
+                    plan: job.plan, task: agentPrompt(job, work), harness, cwd: work,
+                    diff: async () => (await changes(work)).patch,
+                    say, compact, permission: job.permission, sandboxed: !!env.OPENVIBE_JOB_ID,
+                });
+            },
+        } : harness.run({
             prompt: agentPrompt(job, work), task: 'edit', agent: job.agent, model: job.model, effort: job.effort || null,
             advisor: job.advisor || null, cwd: work,
             permission: job.permission, handoff: !job.agent, maxAttempts: job.kind === 'conductor' ? 1 : 3,
@@ -866,6 +895,10 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         result.summary = answer.slice(0, 4000);
         if (job.kind === 'bench') result.output = answer.slice(0, 200000);
         result.cost_usd = last && last.total_cost_usd ? last.total_cost_usd : 0;
+        if (job.plan && last && Array.isArray(last.role_runs)) {
+            result.role_runs = last.role_runs;
+            result.escalation_reasons = last.escalation_reasons || [];
+        }
         // OpenVibe.AI's own disclosure: the model that actually ran, inside x_openvibe. Kept where Codes keeps a
         // run's result, so the attempt records the resolved model, not only the one that was asked for.
         if (last && last.resolved_model) result.resolved_model = String(last.resolved_model).slice(0, 300);

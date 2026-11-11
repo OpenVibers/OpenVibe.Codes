@@ -18,7 +18,8 @@
  *   remember({ … })                   add one row (redacted, deduped), or raise the one it repeats
  *   edit/pin/remove/share/unshare     the owner's changes
  *   captureTask(row)                  what a finished run taught: its Learned: lines, a failure, a failed command
- *   recall({ subject, projectId, … }) the few rows the next run's prompt gets
+ *   captureSummary(row, ending)       the session summary: one rewritten row per repository ("Previously")
+ *   recall({ subject, projectId, … }) the few rows the next run's prompt gets, with the previous session first
  *   block(rows)                       those rows as the prompt's own section
  *
  * A store that cannot be reached gives no rows, never an error: a run must not fail because memory is unavailable.
@@ -98,6 +99,23 @@ function dedupeKey({ kind, text, repo }) {
 }
 
 const pathsOf = (paths) => [...new Set((Array.isArray(paths) ? paths : []).map((p) => String(p || '').trim()).filter(Boolean))].slice(0, 12);
+
+/** One row per person and repository: what the last session there was asked, and how it ended. The fixed key means
+ * every task rewrites the same row instead of adding one (the upsert keeps the first text, so the writer removes
+ * the old row first and remembers the new one). */
+function summaryKey(repo) {
+    return `summary:${repoOf(repo) || 'workspace'}`.slice(0, 200);
+}
+
+/** The one-line session summary. The ending's state in plain words, with its first line of why. */
+function summaryText({ repo, prompt, ending } = {}) {
+    const where = repoOf(repo) || 'this workspace';
+    const asked = clean(String(prompt || '').split(/\r?\n/)[0], 120) || 'a task';
+    const state = String((ending && ending.state) || 'unfinished');
+    const word = { done: 'finished', succeeded: 'finished', failed: 'failed', cancelled: 'cancelled', expired: 'expired', stopped: 'stopped' }[state] || state;
+    const why = ending && (ending.error || ending.note) ? ` — ${clean(String(ending.error || ending.note).split(/\r?\n/)[0], 160)}` : '';
+    return `Previously on ${where}: ${asked} — ${word}${why}.`;
+}
 
 /** The paths a text names, the way the portal's lessons store reads them (a small, useful signal). */
 function pathsIn(text) {
@@ -249,9 +267,11 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
         );
     }
 
-    /** Add one row, or raise the one it repeats. → { row, created, redacted }. */
-    async function remember({ subject, kind = 'lesson', text, repo = null, paths = [], sourceTask = null, sourceJob = null, sourceAgent = null, teamId = null, pinned = false, visibility = null } = {}) {
+    /** Add one row, or raise the one it repeats. → { row, created, redacted }. A fixed `key` names the row instead
+     * of the text hash: the same key rewritten is the same row (the session summary), never a second one. */
+    async function remember({ subject, kind = 'lesson', text, repo = null, paths = [], sourceTask = null, sourceJob = null, sourceAgent = null, teamId = null, pinned = false, visibility = null, key = null } = {}) {
         const k = KINDS.includes(kind) ? kind : 'lesson';
+        const fixed = key == null ? null : String(key).slice(0, 200).trim() || null;
         const cleaned = scrub(clean(text));
         if (!cleaned.text || cleaned.text === '[redacted]') {
             throw Object.assign(new Error('there is nothing to remember after removing the secrets'), { status: 422, code: 'knowledge.empty' });
@@ -276,7 +296,7 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
              RETURNING *, (xmax = 0) AS created`,
             [id, subject, share.team_id, share.visibility, k, cleaned.text, repository, JSON.stringify(allPaths),
                 sourceTask ? String(sourceTask) : null, sourceJob ? String(sourceJob) : null, sourceAgent ? String(sourceAgent) : null,
-                dedupeKey({ kind: k, text: cleaned.text, repo: repository }), !!pinned, cleaned.redacted, at],
+                fixed || dedupeKey({ kind: k, text: cleaned.text, repo: repository }), !!pinned, cleaned.redacted, at],
         );
         return { row, created: !!row.created, redacted: cleaned.redacted };
     }
@@ -385,6 +405,27 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
         return out;
     }
 
+    /** Write this task as the repository's session summary: what it was asked, how its last attempt ended. */
+    async function captureSummary(row, ending = null) {
+        if (!row || !row.id || !row.subject) return null;
+        const key = summaryKey(row.repo);
+        const text = summaryText({ repo: row.repo, prompt: row.prompt, ending });
+        const agent = (row.result && typeof row.result === 'object' && Array.isArray(row.result.agents) && row.result.agents[0])
+            || row.agent || null;
+        try {
+            await db.exec('DELETE FROM codes_knowledge WHERE subject = $1 AND kind = $2 AND dedupe_key = $3',
+                [row.subject, 'fact', key]);
+            const saved = await remember({
+                subject: row.subject, kind: 'fact', text, repo: row.repo, key,
+                sourceTask: row.id, sourceJob: row.job_id || null, sourceAgent: agent,
+            });
+            return saved.row;
+        } catch (e) {
+            if (!e || e.code !== 'knowledge.empty') log.warn(`[Codes] knowledge summary for ${row.id}: ${String((e && e.message) || e).slice(0, 160)}`);
+            return null;
+        }
+    }
+
     /** Rank the rows a next run should see: pinned first, then this repository, then the words it shares with the brief. */
     function rank(rows, { repo, prompt } = {}) {
         const words = new Set(String(prompt || '').toLowerCase().match(/[a-z0-9_./-]{4,}/g) || []);
@@ -412,16 +453,23 @@ function createKnowledge({ store, config = {}, fetchImpl = globalThis.fetch, log
     async function recall({ subject, projectId = null, repo = null, prompt = '', limit = 6 } = {}) {
         const teams = projectId && String(projectId).startsWith('prj_') ? [projectId] : [];
         const rows = await list({ subject, teamIds: teams, limit: 200 });
-        const picked = rank(rows, { repo: repoOf(repo), prompt }).slice(0, Math.max(1, Math.min(8, limit)));
-        return { rows: picked, text: block(picked, { limit: picked.length }) };
+        // The session summary stands apart from the ranked rows: it is the last session, not a lesson, and the next
+        // run reads it first. It is keyed by repository, so a summary from another repository never leaks in.
+        const key = summaryKey(repo);
+        const previous = rows.find((r) => r.kind === 'fact' && r.dedupe_key === key) || null;
+        const rest = previous ? rows.filter((r) => r !== previous) : rows;
+        const picked = rank(rest, { repo: repoOf(repo), prompt }).slice(0, Math.max(1, Math.min(8, limit)));
+        return { rows: picked, previous, previousText: previous ? previous.text : '', text: block(picked, { limit: picked.length }) };
     }
 
     return {
-        projectsOf, teamIdsOf, list, get, remember, edit, pin, remove, share, unshare, captureTask, recall, rank,
+        projectsOf, teamIdsOf, list, get, remember, edit, pin, remove, share, unshare, captureTask, captureSummary,
+        summaryKey, summaryText, recall, rank,
         block, present: (row, opts) => present(row, opts), scrub, repoOf, learnedLines, factLines, KINDS,
     };
 }
 
 module.exports = {
     createKnowledge, block, scrub, repoOf, learnedLines, factLines, dedupeKey, pathsIn, present, KINDS, MAX_TEXT,
+    summaryKey, summaryText,
 };

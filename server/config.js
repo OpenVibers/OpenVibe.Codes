@@ -97,6 +97,8 @@ function load(env = process.env) {
             enabled: bool(env.CODES_AI_CATALOG),
             ttlMs: Math.max(0, int(env.CODES_AI_CATALOG_TTL_MS, 5 * 60_000)),
         },
+        // New task behavior is owner opt-in. A saved plan has no effect until this switch is on.
+        modelPlans: { enabled: bool(env.CODES_MODEL_PLANS) },
         // A run token (Codes C3): the short-lived Network token an attempt's harness carries, so that AI knows whose
         // key and whose budget the run is. Two hours is the longest a coding attempt may run.
         runTokens: {

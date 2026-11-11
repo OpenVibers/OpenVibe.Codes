@@ -15,6 +15,7 @@ function createAgentPages(ctx, publicViews, { home = null } = {}) {
         if (path === '/skills' || path.startsWith('/skills/')) return twin(await ctx.skillPages.publicView(path), path);
         if (path === '/start') return twin(views.start(), path);
         if (path === '/harnesses') return twin(views.harnesses(), path);
+        if (path === '/model-plans') return twin(views.modelPlans(), path);
         if (path === '/improve') return twin(views.improve(), path);
         if (path === '/updates') return twin(await views.updates(), path);
         if (path === '/policy') return twin(views.policy(), path);
