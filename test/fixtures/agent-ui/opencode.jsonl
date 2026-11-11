@@ -1,0 +1,4 @@
+{"type":"step_start","sessionID":"session-1","part":{}}
+{"type":"tool_use","sessionID":"session-1","part":{"id":"read1","tool":"read","state":{"status":"completed","input":{"path":"a.js"},"output":"const a = 1;"}}}
+{"type":"text","sessionID":"session-1","part":{"messageID":"message-1","text":"done"}}
+{"type":"step_finish","sessionID":"session-1","part":{"tokens":{"input":20,"output":3}}}

@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"session-1","model":"test"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"read1","name":"Read","input":{"file_path":"server/auth/handoff.js"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"read1","content":"module.exports = {};","is_error":false}]}}
+{"type":"result","is_error":false,"result":"done"}

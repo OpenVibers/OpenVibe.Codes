@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"session-1"}
+{"type":"item.started","item":{"id":"cmd1","type":"command_execution","command":"ls","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"cmd1","type":"command_execution","command":"ls","aggregated_output":"a.js","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"answer","type":"agent_message","text":"done"}}
+{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":2}}

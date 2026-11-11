@@ -158,7 +158,9 @@ function createSessionLines({ store, config = {}, log = console, media = null })
             const kind = String(line.kind || 'text').slice(0, 64) || 'text';
             // The transcript normaliser: a run token (Codes C3) that an agent printed is redacted here, before the
             // line is kept, so it never reaches the transcript, the page or the log.
-            clean.push({ seq, at, kind, body: clipBody(redact.scrubValue(await storeAttachments(line.body, subject))) });
+            const safe = require('../agent-ui/codes').clean(await storeAttachments(line.body, subject));
+            const { full_output, ...body } = safe && typeof safe === 'object' ? safe : { t: 'text', text: safe };
+            clean.push({ seq, at, kind, body: clipBody(body), full_output: full_output == null ? null : String(full_output) });
         }
         let inserted = 0;
         for (let i = 0; i < clean.length; i += 200) {
@@ -166,12 +168,12 @@ function createSessionLines({ store, config = {}, log = console, media = null })
             const values = [];
             const params = [];
             chunk.forEach((line, j) => {
-                const b = j * 6;
-                values.push(`($${b + 1}, $${b + 2}, $${b + 3}::timestamptz, $${b + 4}, $${b + 5}::jsonb, $${b + 6})`);
-                params.push(taskId, line.seq, line.at, line.kind, JSON.stringify(line.body), attemptN);
+                const b = j * 7;
+                values.push(`($${b + 1}, $${b + 2}, $${b + 3}::timestamptz, $${b + 4}, $${b + 5}::jsonb, $${b + 6}, $${b + 7})`);
+                params.push(taskId, line.seq, line.at, line.kind, JSON.stringify(line.body), attemptN, line.full_output);
             });
             inserted += await db.exec(
-                `INSERT INTO codes_session_lines (task_id, seq, at, kind, body, attempt_n) VALUES ${values.join(', ')}
+                `INSERT INTO codes_session_lines (task_id, seq, at, kind, body, attempt_n, full_output) VALUES ${values.join(', ')}
                  ON CONFLICT (task_id, seq) DO NOTHING`, params);
         }
         return inserted;
@@ -281,7 +283,8 @@ function createSessionLines({ store, config = {}, log = console, media = null })
         let cursor = 0;
         const missing = [];
         for (const body of log) {
-            const text = JSON.stringify(body);
+            const { full_output: _full, ...display } = body;
+            const text = JSON.stringify(display);
             let found = -1;
             for (let i = cursor; i < existing.length; i++) { if (existing[i] === text) { found = i; break; } }
             if (found >= 0) cursor = found + 1;
