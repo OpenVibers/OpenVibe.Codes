@@ -290,10 +290,30 @@ function reviewAdapter({ env = {}, jobEnv = {}, fetchImpl = globalThis.fetch, ba
             err.code = 'review.no_model';
             throw err;
         }
-        return await reviewTwoAxes({
+        const reviewed = await reviewTwoAxes({
             baseUrl: baseUrl || aiRoot(jobEnv) || env.OPENVIBE_AI_URL || 'https://ai.openvibe.services/v1',
             token, model: chosen, family: familyOf(chosen), patch, summary, tests, prior, standards, fetchImpl,
         });
+        // Item 4: every confirmed record through its own fresh verifier, with a refute prompt. A verifier that
+        // cannot be reached leaves the review standing as it was; verification never fails a review by itself.
+        try {
+            const { verifyConfirmed } = require('../engine/verifier');
+            const verified = await verifyConfirmed({
+                baseUrl: baseUrl || aiRoot(jobEnv) || env.OPENVIBE_AI_URL || 'https://ai.openvibe.services/v1',
+                token, models, reviewer: reviewed.requested_model || reviewed.model || chosen,
+                reviewerFamily: reviewed.family || familyOf(chosen),
+                findings: reviewed.findings, patch, fetchImpl,
+            });
+            return {
+                ...reviewed,
+                findings: verified.findings,
+                verifications: verified.verifications,
+                verification_line: verified.line,
+                lifecycle_line: [reviewed.lifecycle_line, verified.line].filter(Boolean).join(' · '),
+            };
+        } catch (e) {
+            return { ...reviewed, verifications: [], verification_line: `verification skipped: ${(e && e.message) || e}` };
+        }
     };
 }
 
