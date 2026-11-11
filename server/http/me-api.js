@@ -18,12 +18,18 @@ const { http, validate } = require('openvibe-contracts');
 const { asyncRouter } = require('./router');
 const { parseArgs } = require('../../harness/job');
 const { createRunTasks, TERMINAL } = require('../domain/run-tasks');
+const { summarize } = require('../domain/task-summary');
+const { corsOpenVibe } = require('./openvibe-origins');
+const start = require('./start');
+
+// The person's latest, running first; the Dock asks with ?limit=8.
+const LIST_LIMIT = 50;
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const DELEGABLE = new Set(['owner', 'admin']);
 
-function createMeApi({ config, store, sso, run, harnesses, userSettings = null, actorLimits, tasks = null, github = null, log = console }) {
+function createMeApi({ config, store, sso, keys, run, harnesses, userSettings = null, actorLimits, tasks = null, github = null, approvals = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
@@ -31,6 +37,26 @@ function createMeApi({ config, store, sso, run, harnesses, userSettings = null, 
     const json = express.json({ limit: '32kb' });
 
     const signedIn = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
+    /**
+     * The person a Network access token belongs to, or null (the token openvibe.codes signs a person in with,
+     * and the one `openvibe-codes task` reads from OPENVIBE_TOKEN). A person token carries no capability claim:
+     * being that person is what authorizes their own tasks.
+     */
+    async function personOf(token) {
+        if (!keys) return null;
+        if (!keys.loaded()) await keys.ensure();
+        const v = await keys.verifyUser(token, { issuer: config.networkIssuer, audience: [config.oauth.sessionAudience, config.serviceAudience] });
+        if (!v.ok) return null;
+        const subject = typeof v.claims.subject_id === 'string' ? v.claims.subject_id : null;
+        return USER.test(subject || '') ? subject : null;
+    }
+    /** The signed-in person, or their own token as a Bearer (what the Dock on another OpenVibe site sends). */
+    async function subjectOf(req) {
+        if (signedIn(req)) return req.viewer.subject;
+        const header = String(req.headers.authorization || '');
+        if (header.startsWith('Bearer ')) return personOf(header.slice(7).trim());
+        return null;
+    }
     const sameOrigin = (req) => {
         const origin = req.get('origin');
         if (!origin) return true;
@@ -69,12 +95,48 @@ function createMeApi({ config, store, sso, run, harnesses, userSettings = null, 
         return row && row.subject === req.viewer.subject ? row : null;
     };
 
+    // The Dock's Code tab reads this from another OpenVibe site with the person's bearer token: an allowed origin
+    // is reflected so the page may read the answer (server/http/openvibe-origins.js). Writes below stay same-site.
+    // Only this router's own routes: another router's preflight must fall through to its own answer.
+    r.use(corsOpenVibe({ methods: 'GET, POST, OPTIONS', paths: ['/me/tasks'] }));
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
+    /**
+     * The person's latest tasks, running first → { tasks: [codes.task-summary@1] }. ?limit= caps the list
+     * (the Dock asks with 8). A session cookie or the person's own Network bearer token; another person's tasks
+     * are never in the answer.
+     */
     r.get('/me/tasks', actorLimits.reads('codes.read'), async (req, res) => {
-        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to see your tasks');
-        const rows = await db.many('SELECT * FROM run_tasks WHERE subject = $1 ORDER BY updated_at DESC LIMIT 50', [req.viewer.subject]);
-        return res.json({ tasks: rows.map((row) => taskStore.present(row)) });
+        const subject = await subjectOf(req);
+        if (!subject) return problem(req, res, 401, 'auth.required', 'sign in to see your tasks');
+        const limit = Math.min(Math.max(Number(req.query.limit) || LIST_LIMIT, 1), LIST_LIMIT);
+        const rows = await db.many(
+            `SELECT * FROM run_tasks WHERE subject = $1
+             ORDER BY (state IN ('queued', 'placed', 'running')) DESC, updated_at DESC LIMIT $2`,
+            [subject, limit],
+        );
+        const ids = rows.map((row) => row.id);
+        const stepsByTask = {};
+        if (ids.length) {
+            const [attempts, messages] = await Promise.all([
+                db.many('SELECT task_id, COUNT(*)::int AS n FROM codes_attempts WHERE task_id = ANY($1) GROUP BY task_id', [ids]),
+                db.many('SELECT task_id, COUNT(*)::int AS n FROM codes_conductor_messages WHERE task_id = ANY($1) GROUP BY task_id', [ids]),
+            ]);
+            for (const a of attempts) stepsByTask[a.task_id] = a.n;
+            for (const m of messages) stepsByTask[m.task_id] = Math.max(stepsByTask[m.task_id] || 0, m.n);
+        }
+        const waiting = new Set();
+        if (approvals && ids.length) {
+            try {
+                for (const a of await approvals.inbox(subject)) if (ids.includes(a.task_id)) waiting.add(a.task_id);
+            } catch { /* approvals down: no task reads as waiting for the person */ }
+        }
+        return res.json({
+            tasks: summarize(rows, {
+                stepsByTask, waitingIds: waiting,
+                openvibeUrls: new Set(start.PROJECTS.map((p) => p.url)), baseUrl: config.baseUrl,
+            }),
+        });
     });
 
     r.post('/me/tasks', actorLimits.budget('codes.task.start'), json, async (req, res) => {

@@ -16,6 +16,7 @@
 const { http } = require('openvibe-contracts');
 const { asyncRouter } = require('./router');
 const { readMultipart, readBody, isMultipart } = require('./upload');
+const { corsOpenVibe } = require('./openvibe-origins');
 
 const FILE = /^fil_[0-9A-HJKMNP-TV-Z]{26}$/;
 const INLINE = /^(image\/(png|jpeg|gif|webp|avif|heic)|application\/pdf)$/;
@@ -24,9 +25,8 @@ function createAttachmentsApi({ attachments, actorLimits, config, keys = null, l
     const r = asyncRouter();
     const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
     const signedIn = (req) => req.viewer && req.viewer.kind === 'user' && req.viewer.subject;
-    /** The person: the session cookie, or their own Network access token as a Bearer (what a job on their machine has). */
-    async function subjectOf(req) {
-        if (signedIn(req)) return req.viewer.subject;
+    /** A write from another OpenVibe site is the person's own bearer token — never the session cookie. */
+    const bearerSubject = async (req) => {
         const header = String(req.headers.authorization || '');
         if (!header.startsWith('Bearer ') || !keys) return null;
         try {
@@ -36,18 +36,28 @@ function createAttachmentsApi({ attachments, actorLimits, config, keys = null, l
             const subject = typeof v.claims.subject_id === 'string' ? v.claims.subject_id : null;
             return /^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(subject || '') ? subject : null;
         } catch { return null; }
-    }
+    };
     const sameOrigin = (req) => {
         const origin = req.get('origin');
         if (!origin) return true;
         try { return new URL(origin).origin === new URL(config.baseUrl).origin; } catch { return false; }
     };
+    /** The person: the session cookie, or their own Network access token as a Bearer (what a job on their machine has).
+     *  Across sites the session cookie stays out of it: only the person's own bearer token names them. */
+    async function subjectOf(req) {
+        if (sameOrigin(req) && signedIn(req)) return req.viewer.subject;
+        return bearerSubject(req);
+    };
+    const writeAllowed = async (req) => sameOrigin(req) || (await bearerSubject(req)) != null;
+    // The Dock uploads from another OpenVibe site with the person's bearer token: an allowed origin is reflected
+    // so the page may read the answer (server/http/openvibe-origins.js). Only this router's own routes.
+    r.use(corsOpenVibe({ methods: 'GET, POST, DELETE, OPTIONS', paths: ['/attachments'] }));
     r.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
     r.post('/attachments', actorLimits.budget('codes.attachment.upload'), async (req, res) => {
         const subject = await subjectOf(req);
         if (!subject) return problem(req, res, 401, 'auth.required', 'sign in to attach a file');
-        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site uploads are refused');
+        if (!(await writeAllowed(req))) return problem(req, res, 403, 'cross_site', 'cross-site uploads are refused');
         try {
             let file;
             if (isMultipart(req)) {
@@ -85,7 +95,7 @@ function createAttachmentsApi({ attachments, actorLimits, config, keys = null, l
     r.delete('/attachments/:id', actorLimits.budget('codes.attachment.upload'), async (req, res) => {
         const subject = await subjectOf(req);
         if (!subject) return problem(req, res, 401, 'auth.required', 'sign in to remove an attachment');
-        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site changes are refused');
+        if (!(await writeAllowed(req))) return problem(req, res, 403, 'cross_site', 'cross-site changes are refused');
         if (!FILE.test(String(req.params.id))) return problem(req, res, 404, 'attachment.not_found', 'no such attachment');
         try {
             return res.json(await attachments.remove(subject, req.params.id));

@@ -36,17 +36,27 @@ const { createTaskEvents } = require('./task-events');
 const { createServiceTokenClient } = require('openvibe-sdk/auth');
 const { expandMatrix } = require('../domain/bench');
 const childReport = require('../domain/child-report');
+const { readMultipart, isMultipart } = require('./upload');
+const { corsOpenVibe } = require('./openvibe-origins');
+const start = require('./start');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
+const FIL = /^fil_[0-9A-HJKMNP-TV-Z]{26}$/;
+// The Dock's Code tab shape (the home composer's three ways, as JSON): POST /tasks dispatches on it.
+const DOCK_MODES = ['create', 'openvibe', 'repo'];
 
-function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, fleet = null, sharing = null, log = console }) {
+function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, fleet = null, sharing = null, conductor = null, attachments = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
     const taskEvents = createTaskEvents({ store, config, log, attempts: taskStore.attempts });
     const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
     const json = express.json({ limit: '32kb' });
+    // The Dock's Code tab calls these from another OpenVibe site with the person's bearer token: an allowed origin
+    // is reflected so the page may read the answer (server/http/openvibe-origins.js). Only the Dock's own two
+    // routes: another router's preflight must fall through to its own answer.
+    r.use(corsOpenVibe({ methods: 'GET, POST, OPTIONS', paths: ['/tasks', /^\/tasks\/[^/]+\/stop$/] }));
     const benchTokens = config.oauth.clientSecret ? createServiceTokenClient({
         tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId,
         clientSecret: config.oauth.clientSecret, audience: 'openvibe.bench', scope: 'bench.run.publish',
@@ -182,8 +192,121 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         return res.json({ ok: out.ok !== false, machines: latest.machines, agents, at: latest.at, ...(out.problem ? { problem: out.problem } : {}) });
     });
 
+    /**
+     * The Dock's Code tab start (the home composer's three ways, as JSON): { text, mode, repo?, attachments? }.
+     * Only the owner starts one this way (a session, or their own Network token); a service keeps the
+     * codes.task-start-request@1 shape below. The checks, limits and quota are the site's own (POST /chat): the
+     * words, the repository, the project, and the files — all refused before any task is started.
+     */
+    async function dockCreate(req, res) {
+        const p = req.principal;
+        if (!p.owner) return problem(req, res, 422, 'codes.task_invalid', 'services start tasks with codes.task-start-request@1 (a prompt and a repo)');
+        let b = req.body || {};
+        let uploaded = [];
+        if (isMultipart(req)) {
+            if (!attachments) return problem(req, res, 503, 'codes.attachments_unavailable', 'file uploads are not configured here');
+            try {
+                const parsed = await readMultipart(req, { maxBytes: attachments.MAX_MESSAGE_BYTES });
+                b = parsed.fields || {};
+                uploaded = parsed.files || [];
+            } catch (e) { return problem(req, res, e.status || 500, e.code || 'codes.task_invalid', String((e && e.message) || 'the form could not be read').slice(0, 300)); }
+        }
+        const first = (v) => (Array.isArray(v) ? v[0] : v);
+        const text = String(first(b.text) || '').trim().slice(0, 16000);
+        const mode = String(first(b.mode) || '').trim();
+        if (!DOCK_MODES.includes(mode)) return problem(req, res, 422, 'codes.task_invalid', 'mode is create, openvibe or repo');
+        if (!text) return problem(req, res, 422, 'codes.task_invalid', 'write what you want made or changed first');
+        const repoIn = String(first(b.repo) || '').trim().slice(0, 500);
+        const named = [
+            ...(Array.isArray(b.attachments) ? b.attachments : b.attachments ? [b.attachments] : []),
+            ...(Array.isArray(b.attachment_ids) ? b.attachment_ids : b.attachment_ids ? [b.attachment_ids] : []),
+        ].map(String).filter(Boolean);
+        // Something new: OpenVibe AI builds it on openvibe.space, like the site's own handover. No Codes task is
+        // started: the answer is where to press Build. Files ride with a task, never with a handover.
+        if (mode === 'create') {
+            if (repoIn || named.length || uploaded.length) {
+                return problem(req, res, 422, 'codes.create_invalid', 'Something new starts in OpenVibe AI, where you can add the repository and the files there.');
+            }
+            return res.json({ id: null, url: start.spaceHref({ text }) });
+        }
+        // The files this task carries: uploaded before send by their ids, or posted with the form now (no
+        // JavaScript). A limit or a program is refused before any task is started; an id from outside Codes names
+        // where it resolves (composer.attachment@1, once OpenVibe.Media serves it).
+        let ids = [];
+        if (named.length || uploaded.length) {
+            if (!attachments) return problem(req, res, 503, 'codes.attachments_unavailable', 'file uploads are not configured here');
+            const foreign = named.find((id) => !FIL.test(id));
+            if (foreign) return problem(req, res, 422, 'codes.attachment_unresolved', `attach ${foreign.slice(0, 40)} on openvibe.codes first: shared library files arrive with composer.attachment@1`);
+            try {
+                const saved = uploaded.length ? await attachments.saveMany(p.subject, uploaded) : [];
+                const pending = await attachments.pending(p.subject, [...saved.map((f) => f.id), ...named]);
+                ids = pending.map((f) => f.id);
+            } catch (e) { return problem(req, res, e.status || 500, e.code || 'codes.task_invalid', String((e && e.message) || 'the files could not be attached').slice(0, 300)); }
+        }
+        // Which repository the task works on: one of OpenVibe's own projects, or the person's own address.
+        let targets = null;
+        let repoUrl = '';
+        if (mode === 'openvibe') {
+            if (repoIn) {
+                const hit = start.PROJECTS.find((x) => x.repository === repoIn || x.url === start.normalizeRepo(repoIn));
+                if (!hit) return problem(req, res, 422, 'codes.repo_unknown', 'pick one of OpenVibe\u2019s own projects, or name yours with mode repo');
+                repoUrl = hit.url;
+            } else {
+                const found = start.matchProjects(text);
+                if (!found.length) {
+                    return problem(req, res, 422, 'codes.project_unknown', 'say which OpenVibe site this is for, in your own words (like Live, Chat or Games, or \u201cthe navbar\u201d), or pick it from the list');
+                }
+                targets = found;
+                repoUrl = found[0].url;
+            }
+        } else {
+            repoUrl = start.normalizeRepo(repoIn);
+            if (!repoUrl) {
+                return problem(req, res, 422, 'codes.task_invalid', repoIn
+                    ? 'That is not a Git address Codes can clone: use https://\u2026, git@host:owner/name or owner/name, with no password in it.'
+                    : 'Pick a repository (owner/name or any Git URL), choose an OpenVibe site, or start something new.');
+            }
+        }
+        let args;
+        try {
+            args = parseArgs(JSON.stringify({ repo: repoUrl, prompt: text, permission: 'edit' }));
+        } catch (e) {
+            return problem(req, res, 422, 'codes.task_invalid', e.message);
+        }
+        const header = String(req.headers.authorization || '');
+        const token = req.token || (req.viewer && req.viewer.token) || (header.startsWith('Bearer ') ? header.slice(7).trim() : null);
+        let project = null;
+        try {
+            project = await taskStore.latestProject(p.subject)
+                || (conductor ? await conductor.projectFor(token, p.subject) : null);
+        } catch { project = null; }
+        if (!project) return problem(req, res, 409, 'codes.no_project', 'Codes could not find or make a project for you on OpenVibe.Services: sign in again and retry.');
+        const jobInput = (repo, prompt) => JSON.stringify({ repo, prompt, permission: 'edit' });
+        let firstRow = null;
+        try {
+            if (targets && targets.length > 1) {
+                // One request across several projects: a task for each, each told what the others are, like the site.
+                const names = targets.map((x) => x.repository.replace(/^OpenVibers\//, ''));
+                for (const [i, x] of targets.entries()) {
+                    const note = `\n\n(This request spans ${names.join(', ')}. This task is the ${names[i]} part; the others are separate tasks. Change only what this repository needs, and keep the names and behaviour consistent with the other parts.)`;
+                    const each = parseArgs(jobInput(x.url, `${text}${note}`.slice(0, 16000)));
+                    const row = await taskStore.start({ subject: p.subject, project, args: each, attachmentIds: i === 0 ? ids : [], mode: 'openvibe' });
+                    if (!firstRow) firstRow = row;
+                }
+            } else {
+                firstRow = await taskStore.start({ subject: p.subject, project, args, attachmentIds: ids, mode: mode === 'openvibe' ? 'openvibe' : 'repo' });
+            }
+        } catch (e) {
+            return problem(req, res, e.status || 502, e.code || 'codes.task_failed', String((e && e.message) || 'the task could not start').slice(0, 300));
+        }
+        log.info(`[Codes] task ${firstRow.id} started from the Dock for ${p.subject} (${mode})`);
+        return res.status(201).json({ id: firstRow.id, url: `${config.baseUrl}/tasks/${firstRow.id}` });
+    }
+
     r.post('/tasks', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
         const b = req.body;
+        // The Dock's shape takes its own path; services and the site shape keep the contract below.
+        if ((b && b.mode != null) || isMultipart(req)) return dockCreate(req, res);
         // Actor back-reference: the contract does not carry these yet, so they are stripped before validation and stored
         // separately. When the contract is amended, pass them through instead.
         const actorRef = {};
@@ -371,13 +494,18 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         return res.json(await timeline(out.row));
     });
 
-    /** The running attempt stops: the outcome is "stopped" and nothing carries it on. */
+    /**
+     * The running attempt stops: the outcome is "stopped" and nothing carries it on. The owner (the Dock's shape)
+     * gets { ok }; a service keeps the timeline its capability was built on. Another person's task is 404, never
+     * a refusal that says it exists.
+     */
     r.post('/tasks/:id/stop', guardAny('codes.task.cancel'), actorLimits.budget('codes.task.start'), async (req, res) => {
         const row = await mine(req);
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
         const out = await taskStore.stopTask(row);
         if (out.error) return problem(req, res, 409, 'codes.task_conflict', out.error);
         log.info(`[Codes] task ${row.id} stopped by ${req.principal.via || req.principal.subject}`);
+        if (req.principal.owner) return res.json({ ok: true });
         return res.json(await timeline(out.row));
     });
 

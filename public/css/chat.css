@@ -70,9 +70,6 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch-pick .ch-i:not(.ch-caret){width:15px;height:15px}
 .ch-pick-repo input{width:min(240px,48vw);border:0;background:transparent;color:inherit;font:inherit;font-size:13px}
 .ch-pick-repo input:focus{outline:none}
-.ch-pick-file{cursor:pointer;padding:0 9px}
-.ch-pick-file input{position:absolute;inset:0;opacity:0;cursor:pointer}
-.ch-pick-file.has-files{color:var(--ch-accent);border-color:color-mix(in srgb,var(--ch-accent) 50%,var(--ch-line))}
 /* Files waiting in the composer: one row that wraps, a chip per file that never outgrows a phone; the upload is a
    2px line along the chip's foot, and the remove keeps a 44px target inside a 32px chip. */
 .ch-files{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;min-width:0}
@@ -125,8 +122,9 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch-dim{height:32px;padding:0 11px;font-size:12.5px;font-weight:750;letter-spacing:.03em}
 .ch-kinds:has([data-ch-kind][value="game"]:checked) .ch-dims{display:inline-flex}
 @media (pointer:coarse){.ch-kind{height:40px}.ch-dim{height:40px}}
-/* Each picker and line shows for the way it belongs to. */
-.ch:has([data-ch-mode][value="new"]:checked) :is(.ch-for-openvibe,.ch-for-code,.ch-for-agents),
+/* Each picker and line shows for the way it belongs to (the kit's attach menu with them: files ride with a
+   task on your code or an OpenVibe site, never with Something new). */
+.ch:has([data-ch-mode][value="new"]:checked) :is(.ch-for-openvibe,.ch-for-code,.ch-for-agents,.ovt-attach-menu,.ovt-attach),
 .ch:has([data-ch-mode][value="openvibe"]:checked) :is(.ch-for-new,.ch-for-code),
 .ch:has([data-ch-mode][value="code"]:checked) :is(.ch-for-new,.ch-for-openvibe){display:none}
 /* The repositories used last, one tap each: a sideways row that never wraps the composer taller. */

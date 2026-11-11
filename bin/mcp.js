@@ -206,6 +206,8 @@ async function stopTask(args) {
     const id = String(args.id || '');
     if (!TASK.test(id)) return failed('that is not a task id (tsk_…)');
     const t = await call(auth(), 'POST', `/api/v1/tasks/${encodeURIComponent(id)}/stop`);
+    // The owner's shape is { ok: true }: the stop was accepted, so the attempt stops and the outcome is stopped.
+    if (t && t.ok === true) return text({ id, state: 'stopped', outcome: 'stopped' });
     return text({ id: t.id, state: t.state, outcome: t.outcome ? t.outcome.state : null });
 }
 
