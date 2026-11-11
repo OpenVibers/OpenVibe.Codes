@@ -76,7 +76,7 @@ const OK = async () => ({ status: 200, ok: true, json: async () => ({ choices: [
                 return { status: 200, ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ verdict: 'changes_requested', summary: 'findings', findings }) } }] }) };
             };
             const withFindings = await reviewTwoAxes({ ...opts, fetchImpl: findingsFetch });
-            assert.deepEqual(withFindings.findings.map((f) => f.file), ['a.js', 'spec.js', 'b.js']);
+            assert.deepEqual(withFindings.findings.map((f) => f.file), ['a.js', 'spec.js', 'b.js', 'c.js']);
         });
 
         await check('an incremental re-review names the reviewed and current heads', () => {

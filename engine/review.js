@@ -251,7 +251,7 @@ async function reviewTwoAxes(options = {}) {
         if (standardFindings[i]) current.push(standardFindings[i]);
         if (specFindings[i]) current.push(specFindings[i]);
     }
-    const merged = merge(spec ? prior : prior.filter((f) => f.axis !== 'spec'), current.slice(0, MAX_FINDINGS));
+    const merged = merge(spec ? prior : prior.filter((f) => f.axis !== 'spec'), current);
     if (!spec) merged.findings.push(...prior.filter((f) => f.axis === 'spec'));
     const failed = standards.verdict !== 'approved' || (specification && specification.verdict !== 'approved');
     return {
