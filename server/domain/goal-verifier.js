@@ -23,6 +23,8 @@ const { verify } = require('../../engine/goal');
 const DEFAULT_MODEL = 'deepseek-chat';
 /** Room for the answer plus a reasoning model's thinking: 300 left AI's reasoning models with no content. */
 const MAX_ANSWER_TOKENS = 800;
+/** A short verdict needs no long deliberation; "low" keeps the reasoning model inside the synchronous wait. */
+const REASONING_EFFORT = 'low';
 
 /** The answer's text from either dialect OpenVibe.AI speaks. */
 function answerText(doc) {
@@ -60,6 +62,7 @@ function createGoalVerifier({ config = {}, fetchImpl = globalThis.fetch, log = c
         };
         let { res, doc } = await ask('/v1/chat/completions', {
             model, messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: MAX_ANSWER_TOKENS,
+            reasoning_effort: REASONING_EFFORT,
         });
         if (res && res.status === 404) {
             ({ res, doc } = await ask('/v1/messages', {
