@@ -50,7 +50,7 @@ const { check, done } = require('./helpers/boot');
 
     await check('every codes.task.* payload validates against the pinned contracts, and the manifest names the topics', async () => {
         const contracts = require('openvibe-contracts');
-        const { TOPICS, payloadOf } = require('../server/events/outbox');
+        const { TOPICS, UPDATED_TOPIC, payloadOf } = require('../server/events/outbox');
         const row = { id: 'tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3', agent: 'claude', repo: 'https://github.com/OpenVibers/OpenVibe.Codes.git',
             started_at: '2026-10-28T16:00:00.000Z', finished_at: null, error: null, result: null };
         const rows = [
@@ -70,7 +70,9 @@ const { check, done } = require('./helpers/boot');
         assert.strictEqual(payloadOf(rows[2]).repo, 'OpenVibers/OpenVibe.Codes');
         assert.strictEqual(payloadOf(rows[2]).files_changed, 2);
         const manifest = require('openvibe-contracts/manifests/services/codes.json');
-        assert.deepStrictEqual(manifest.eventsProduced, TOPICS);
+        // The released manifest may name more than the five state topics (codes.task.updated joined them in
+        // OpenVibe.Contracts 0.416.0); every topic the code publishes must be named there.
+        for (const topic of [...TOPICS, UPDATED_TOPIC]) assert.ok(manifest.eventsProduced.includes(topic), topic);
         assert.ok(manifest.eventsConsumed.includes('run.job.succeeded') && manifest.eventsConsumed.includes('network.account.deleted'));
         assert.ok(!fs.existsSync(path.join(__dirname, '..', 'docs', 'contracts-proposal')), 'the proposal moved to Contracts 0.232.0');
     });

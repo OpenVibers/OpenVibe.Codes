@@ -28,8 +28,8 @@ const TOPIC_SET = new Set(TOPICS);
  */
 const UPDATED_TOPIC = 'codes.task.updated';
 /** A ticket follows its pull request (AL5): bound, follow-up started, ended. Payloads are plain JSON; the
- *  service manifest's eventsProduced stays the codes.task.* five (contracts.test.js), so these are the
- *  portal's view, not a new contract. */
+ *  service manifest's eventsProduced names the codes.task.* topics (the five states plus updated, since
+ *  OpenVibe.Contracts 0.416.0), so these are the portal's view, not a new contract. */
 const PR_TOPICS = Object.freeze(['codes.pr.bound', 'codes.pr.followup', 'codes.pr.ended']);
 const PR_TOPIC_SET = new Set(PR_TOPICS);
 const MAX_BACKOFF_MS = 5 * 60_000;
