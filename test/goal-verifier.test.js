@@ -48,6 +48,7 @@ function verifier(aiAnswer) {
         const ask = calls.find((c) => c.url.endsWith('/v1/chat/completions'));
         assert.ok(ask, 'the verifier called AI');
         assert.strictEqual(ask.body.max_tokens, 800);
+        assert.strictEqual(ask.body.reasoning_effort, 'low');
         assert.strictEqual(ask.body.model, 'deepseek-chat');
     });
 
