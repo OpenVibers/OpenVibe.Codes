@@ -21,7 +21,7 @@ const BUDGETS = {
     jsRawKB: 411.5, // 2026-11-10: openvibe-shared 4.197.0 (the menu's row of places, the You tab's row, the Sign in mark, the tooltip)
     jsBrotliKB: 98.5, // 2026-11-11: openvibe-shared 4.190.0 (the site name's dropdown, the footer's online strip, the balances pill); 94.2: measured 94.1 KB brotli with openvibe-shared 4.186.0 (2026-11-10: the mark's Working and Thinking states, the Dock and the menu as one sheet, bare controls styled by the loader); 94: measured 92 with openvibe-shared 4.163.0, plus room for 4.162.0–4.163.0, 2026-11-09
     cssFiles: 3,   // C4 adds its responsive workspace stylesheet alongside codes.css and run.css.
-    cssRawKB: 86, // 86: measured 84.5 with the model plan editor's styles in c4.css (2026-11-11); 84.4: measured 79.4 with openvibe-shared 4.161.0, plus room for 4.162.0–4.163.0, 2026-11-09
+    cssRawKB: 86.5, // 86.5 openvibe-shared v4.227.0 (2026-11-12: measured 86.1, raised by pin-bump from 86); 86: measured 84.5 with the model plan editor's styles in c4.css (2026-11-11); 84.4: measured 79.4 with openvibe-shared 4.161.0, plus room for 4.162.0–4.163.0, 2026-11-09
     cssBrotliKB: 17.5, // 17.5: measured 16.3 with openvibe-shared 4.161.0, plus room for 4.162.0–4.163.0, 2026-11-09
     externalFiles: 2,   // 0
 };
