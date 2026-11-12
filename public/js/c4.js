@@ -232,7 +232,7 @@
                 const text = (form.querySelector('textarea[name="text"]') || {}).value || '';
                 const res = await fetch(form.dataset.conductorApi, {
                     method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                    credentials: 'same-origin', body: JSON.stringify({ text, attachments: [] }),
+                    credentials: 'same-origin', body: JSON.stringify({ text, attachments: [], who: (form.querySelector('select[name="who"]') || {}).value || undefined }),
                 });
                 const doc = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(doc.detail || `the message was refused (${res.status})`);
