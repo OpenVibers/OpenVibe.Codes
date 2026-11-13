@@ -731,6 +731,14 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
     const started = Date.now();
     const log = [];
     const say = (doc) => { if (doc && doc.t && doc.t !== 'result_doc') log.push(doc); emit(JSON.stringify(doc)); };
+    // A check is one more kind of Codes job (harness/check.js): no agent and no task workspace; act runs one workflow
+    // job in host mode. It has its own input and result, so it is handed over before the task path parses anything.
+    let requested = null;
+    try { requested = typeof input === 'string' ? JSON.parse(String(input || '').trim() || '{}') : input; } catch { /* parseArgs answers a bad task input */ }
+    if (requested && typeof requested === 'object' && !Array.isArray(requested) && requested.kind === 'check') {
+        const { runCheck } = require('./check');
+        return runCheck({ input, emit, writeResult, env, tmp, fetchImpl });
+    }
     let job;
     try {
         job = parseArgs(input, env);
