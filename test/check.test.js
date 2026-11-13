@@ -196,6 +196,9 @@ const checkInput = (repo, extra = {}) => JSON.stringify({
         assert.ok(record.argv.includes('-j') && record.argv[record.argv.indexOf('-j') + 1] === 'test');
         assert.ok(record.argv.includes('-P') && record.argv[record.argv.indexOf('-P') + 1] === 'ubuntu-latest=-self-hosted');
         assert.ok(record.argv.includes('--eventpath'));
+        // The cache server listens on loopback inside the job (a sandbox drops its link-local outbound address).
+        assert.strictEqual(record.argv[record.argv.indexOf('--cache-server-addr') + 1], '127.0.0.1');
+        assert.ok(record.argv[record.argv.indexOf('--cache-server-path') + 1].endsWith('actcache'));
         assert.ok(record.argv.includes('--matrix') && record.argv[record.argv.indexOf('--matrix') + 1] === 'node:20');
         assert.ok(!record.argv.includes('--secret') && !record.argv.includes('-s'));
         assert.ok(!record.argv.includes('ghp_abcdefghijklmnopqrstuvwxyz0123'));
