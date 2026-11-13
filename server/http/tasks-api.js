@@ -44,11 +44,31 @@ const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const FIL = /^fil_[0-9A-HJKMNP-TV-Z]{26}$/;
 // The Dock's Code tab shape (the home composer's three ways, as JSON): POST /tasks dispatches on it.
-const DOCK_MODES = ['create', 'openvibe', 'repo'];
+const DOCK_MODES = ['create', 'openvibe', 'repo', 'make'];
+// A Git address in the words: a URL on a Git host, or git@host:owner/name. A bare owner/name counts only when it is one
+// of the person's own recent repositories (prose like "and/or" is not a repository).
+const GIT_URL = /(?:https?:\/\/(?:www\.)?(?:github\.com|gitlab\.com|codeberg\.org|bitbucket\.org|git\.openvibe\.codes)\/[\w.-]+\/[\w.-]+|git@[\w.-]+:[\w.-]+\/[\w.-]+)/i;
 
 function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, modelPlans = null, fleet = null, sharing = null, conductor = null, attachments = null, races = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
+    /** The repository the words name: a Git address in them, or one of the person's recent repositories by its name. */
+    async function repoFromWords(subject, text) {
+        const hit = GIT_URL.exec(text);
+        if (hit && start.normalizeRepo(hit[0])) return hit[0];
+        let rows = [];
+        try { rows = await db.many(`SELECT DISTINCT repo FROM run_tasks WHERE subject = $1 AND repo IS NOT NULL AND repo <> '' AND (mode IS NULL OR mode <> 'openvibe') ORDER BY repo LIMIT 50`, [subject]); } catch { rows = []; }
+        const words = String(text).toLowerCase();
+        for (const r of rows) {
+            const full = String(r.repo || '').replace(/\.git$/, '');
+            const path = full.replace(/^https?:\/\/[^/]+\//, '').toLowerCase();
+            const name = path.split('/').pop();
+            if (!name || name.length < 3) continue;
+            const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            if (new RegExp(`(^|[^\\w-])(${esc(path)}|${esc(name)})([^\\w-]|$)`).test(words)) return full;
+        }
+        return '';
+    }
     const taskStore = tasks || createRunTasks({ store, run, config, log });
     const taskEvents = createTaskEvents({ store, config, log, attempts: taskStore.attempts });
     const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
@@ -259,10 +279,17 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         }
         const first = (v) => (Array.isArray(v) ? v[0] : v);
         const text = String(first(b.text) || '').trim().slice(0, 16000);
-        const mode = String(first(b.mode) || '').trim();
-        if (!DOCK_MODES.includes(mode)) return problem(req, res, 422, 'codes.task_invalid', 'mode is create, openvibe or repo');
+        let mode = String(first(b.mode) || '').trim();
+        if (!DOCK_MODES.includes(mode)) return problem(req, res, 422, 'codes.task_invalid', 'mode is make, openvibe, create or repo');
         if (!text) return problem(req, res, 422, 'codes.task_invalid', 'write what you want made or changed first');
-        const repoIn = String(first(b.repo) || '').trim().slice(0, 500);
+        let repoIn = String(first(b.repo) || '').trim().slice(0, 500);
+        // Make or change (2026-11-13, the owner: "combine … create and my code … infer that information based on the
+        // prompt"): a repository named in the words, or one of yours mentioned by name, means work on it; otherwise it
+        // is something new.
+        if (mode === 'make') {
+            if (!repoIn) repoIn = await repoFromWords(p.subject, text);
+            mode = repoIn ? 'repo' : 'create';
+        }
         const named = [
             ...(Array.isArray(b.attachments) ? b.attachments : b.attachments ? [b.attachments] : []),
             ...(Array.isArray(b.attachment_ids) ? b.attachment_ids : b.attachment_ids ? [b.attachment_ids] : []),
