@@ -248,7 +248,7 @@ ${tasksHtml(recent)}`;
         const push = d.push || null;
         const verdict = row.state !== 'succeeded'
             ? html`<p class="run-notice run-notice-error">${row.state === 'expired' ? 'No machine of yours took the task in time. Is it online at openvibe.my/#machines, with the Codes job runner?' : row.error || STATE_LABEL[row.state]}</p>`
-            : d.ok ? html`<p class="run-notice run-notice-ok">The agents finished the task${d.agents && d.agents.length ? ` (${d.agents.join(' → ')})` : ''}.</p>`
+            : d.ok ? html`<p class="run-notice run-notice-ok">The agents finished the task${d.agents && d.agents.length ? ` (${d.agents.join(', then ')})` : ''}.</p>`
                 : html`<p class="run-notice run-notice-error">The task ended without success${d.error ? `: ${d.error}` : ''}.</p>`;
         const ended = !(session && row.state === 'succeeded' && d.ok);
         return html`<section class="run-result">${ended ? verdict : ''}

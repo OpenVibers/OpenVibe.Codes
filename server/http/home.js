@@ -97,7 +97,7 @@ openvibe-codes run --permission read "where is the session cookie set?"
 openvibe-codes runs                   # every run, kept to show or resume` },
             { label: 'Ask the router (public API)', lang: 'bash', code: `curl -s https://openvibe.codes/api/v1/harnesses/route \\
   -H 'Content-Type: application/json' -d '{ "task": "review" }'
-# → { "selected": "claude-code:claude-code-sonnet",
+# Response: { "selected": "claude-code:claude-code-sonnet",
 #     "reasons": [ "no marginal cost (already-paid capacity or a free allowance)", … ],
 #     "candidates": [ … every agent, with why it was or was not picked ] }` },
         ],

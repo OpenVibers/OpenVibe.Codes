@@ -293,7 +293,7 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
             model: model || null,
             effort: router.fitEffort(runner, effort),
             tier,
-            why: picked ? picked.why : `${tier} → ${runner}`,
+            why: picked ? picked.why : `${tier}; ${runner}`,
         });
         if (picked && picked.runner !== exclude && usable(picked.runner)) return shape(picked.runner, picked.model, picked.effort);
         for (const [runner, model, effort] of ladder) {

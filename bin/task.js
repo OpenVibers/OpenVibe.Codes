@@ -219,7 +219,7 @@ async function follow(c, id) {
         try { body = JSON.parse(data.join('\n')); } catch { return; }
         if (event === 'line') {
             const b = body.body || {};
-            const text = typeof b.text === 'string' ? b.text : b.t === 'tool' ? `→ ${b.name || ''} ${oneLine(b.input && (b.input.command || b.input.file_path) || '', 120)}`.trim() : '';
+            const text = typeof b.text === 'string' ? b.text : b.t === 'tool' ? `calls ${b.name || ''} ${oneLine(b.input && (b.input.command || b.input.file_path) || '', 120)}`.trim() : '';
             if (body.attempt_n && body.attempt_n !== current) { current = body.attempt_n; out(dim(`[attempt ${body.attempt_n}]`)); }
             if (text) for (const line of text.split('\n')) out(`  ${line}`);
             return;

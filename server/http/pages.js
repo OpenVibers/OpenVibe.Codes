@@ -99,10 +99,10 @@ $ openvibe-codes run "add a test for the date parser"
 run run_20261008… · ~/my-project
 ▶ codex · session 0199…
 ! You have hit your usage limit.
-⇢ handing over from codex: You have hit your usage limit.
+handing over from codex: You have hit your usage limit.
 ▶ claude-code · session 4f2e…
-  → Read src/date.js
-  → Edit test/date.test.js
+  calls Read src/date.js
+  calls Edit test/date.test.js
 Added test/date.test.js: three cases, all pass.
 ✔ done (48 s · $0.0400 · 31k in / 1.2k out)`;
         // What works today: the state of each piece, read with how it works.
