@@ -1,6 +1,6 @@
 'use strict';
 // Every icon Codes names in its navbar and app bar is an OpenVibe glyph. A name the set does not have draws nothing:
-// the conductor's tab showed an empty active pill on phones (10-30, `fa-chart-simple`), which is why the layout names
+// the conductor's tab showed an empty active pill on phones (10-30, a Font Awesome name the set lacked), which is why the layout names
 // glyphs now and never a Font Awesome class.
 const assert = require('assert');
 const fs = require('fs');
