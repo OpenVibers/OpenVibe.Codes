@@ -35,6 +35,12 @@ const TABLES = [
         // before calling it, so a default delete here would lose the ids first).
         erase: { keep: 'erased with its task-keyed rows by the service extraErase' },
     },
+    // Race mode (compare-arena-ecosystem.md §5): the person's races, their two sides and the match body they
+    // recorded. The check rows hang under a race (codes_race_checks.race_id, ON DELETE CASCADE) and leave with it.
+    {
+        table: 'codes_races', subject: 'subject', file: 'races.json', order: 'created_at',
+        columns: ['id', 'project_id', 'source_task_id', 'repo', 'ref', 'prompt', 'permission', 'budget', 'sides', 'shown', 'state', 'match_id', 'match_body', 'match_recorded', 'merged_slot', 'merged_judged', 'error', 'created_at', 'updated_at'],
+    },
     { table: 'codes_user_settings', subject: 'subject', file: 'settings.json', order: 'updated_at' },
     { table: 'codes_model_plans', subject: 'subject', file: 'model-plans.json', order: 'updated_at' },
     // The files a person attached to a message (owner 2026-11-07): what they are and which turn they belong to. The
@@ -152,6 +158,9 @@ const EXEMPT = {
     // created_by is the author of a version, not the person whose account is being erased: a record's versions leave
     // with the record (codes_skills), and a version never outlives it.
     codes_skill_versions: 'created_by is the author of a version, not a subject column; versions leave with their skill',
+    // A check row names the person (subject) but hangs under its race (race_id, ON DELETE CASCADE): it is exported
+    // and erased with codes_races, never on its own.
+    codes_race_checks: 'the check jobs of a race: they hang under codes_races and leave with it (ON DELETE CASCADE)',
 };
 
 module.exports = { create, TABLES, TASK_KEYED, TOPICS, EXEMPT };
