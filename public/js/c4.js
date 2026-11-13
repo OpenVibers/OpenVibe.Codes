@@ -281,7 +281,7 @@
             const b = line && line.body;
             if (typeof b === 'string') return b;
             if (!b || typeof b !== 'object') return String(b ?? '');
-            if (b.t === 'tool') return `→ ${b.name || ''} ${String((b.input && (b.input.command || b.input.file_path)) || b.what || '')}`.trim();
+            if (b.t === 'tool') return `calls ${b.name || ''} ${String((b.input && (b.input.command || b.input.file_path)) || b.what || '')}`.trim();
             if (b.t === 'tool_result') return `  ${b.ok === false ? '✗' : '·'} ${String(b.output || '').split('\n')[0]}`;
             return b.text || b.message || '';
         };

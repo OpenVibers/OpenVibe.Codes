@@ -176,7 +176,7 @@ function choose({ chain, fleet = null, switchPct = DEFAULT_SWITCH_PCT, now = Dat
     } else if (allOut && list.length > 1) {
         note = `Every agent in your chain is at its limit (${usage.map((u) => u.label).join('; ')}); this turn tries ${nameOf(pick.agent)}.`;
     } else if (allOut && primary.state === 'full') {
-        note = `${primary.label}, and no fallback is set (Settings → Conductor); this turn tries it anyway.`;
+        note = `${primary.label}, and no fallback is set (Settings, then Conductor); this turn tries it anyway.`;
     }
     return { pick: { agent: pick.agent, model: pick.model || null }, index, switched: index > 0, note, usage };
 }

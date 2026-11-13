@@ -84,7 +84,7 @@ const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : St
 
 function printEvent(e) {
     if (e.type === 'system' && e.subtype === 'init') return out(dim(`▶ ${e.agent}${e.model ? ` (${e.model})` : ''}${e.session_id ? ` · session ${e.session_id}` : ''}`));
-    if (e.type === 'system' && e.subtype === 'handoff') return out(`⇢ handing over from ${e.from}: ${e.reason}`);
+    if (e.type === 'system' && e.subtype === 'handoff') return out(`handing over from ${e.from}: ${e.reason}`);
     if (e.type === 'system' && (e.subtype === 'error' || e.subtype === 'warning')) return out(dim(`! ${e.text}`));
     if (e.type === 'assistant') {
         for (const c of (e.message && e.message.content) || []) {
@@ -92,7 +92,7 @@ function printEvent(e) {
             if (c.type === 'tool_use') {
                 const i = c.input || {};
                 const what = i.command || i.file_path || i.path || i.pattern || i.query || i.description || '';
-                out(dim(`  → ${c.name}${what ? ` ${String(what).split('\n')[0].slice(0, 120)}` : ''}`));
+                out(dim(`  calls ${c.name}${what ? ` ${String(what).split('\n')[0].slice(0, 120)}` : ''}`));
             }
         }
         return undefined;
@@ -157,7 +157,7 @@ async function main() {
         const d = harness.route({ task: o.task || 'edit', requirements });
         if (o.forAgent) { out(agentOut.line({ event: 'route', selected: d.selected || null, reasons: d.reasons || [], candidates: (d.candidates || []).map((c) => ({ id: c.id, included: !!c.included, reason: c.reason || undefined })) })); return d.selected ? 0 : 1; }
         if (o.json) { out(JSON.stringify(d, null, 2)); return 0; }
-        out(d.selected ? `→ ${d.selected}` : '→ no agent here can take it');
+        out(d.selected ? `selected ${d.selected}` : 'no agent here can take it');
         for (const r of d.reasons || []) out(dim(`  ${r}`));
         for (const c of d.candidates || []) out(`${c.included ? '  ✔' : '  ·'} ${c.id}${c.reason ? dim(` — ${c.reason}`) : ''}`);
         return d.selected ? 0 : 1;
@@ -238,7 +238,7 @@ async function main() {
         if (o.json) { out(JSON.stringify(runs, null, 2)); return 0; }
         for (const r of runs) {
             const ok = r.result && !r.result.is_error;
-            out(`${ok ? '✔' : '✗'} ${r.run_id}  ${(r.attempts || []).map((a) => a.agent).join(' ⇢ ').padEnd(28)} ${dim(String(r.prompt || '').split('\n')[0].slice(0, 70))}`);
+            out(`${ok ? '✔' : '✗'} ${r.run_id}  ${(r.attempts || []).map((a) => a.agent).join(', then ').padEnd(28)} ${dim(String(r.prompt || '').split('\n')[0].slice(0, 70))}`);
         }
         return 0;
     }

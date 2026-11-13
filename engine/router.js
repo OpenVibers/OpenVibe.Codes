@@ -260,7 +260,7 @@ function pick(prompt, { cfg, health, counts, models, runs, JOBS, name, ladder, c
         const m = model && models[runner] && !models[runner].includes(model) ? null : model;
         const effort = fitEffort(runner, wanted);
         const judged = c.brief ? `${c.why} (the brief it names)` : c.why;
-        return { runner, model: m, effort, tier: c.tier, brief: c.brief || null, why: `${judged} → ${runner}${m ? ' · ' + m : ''}${effort ? ' · ' + effort : ''}` };
+        return { runner, model: m, effort, tier: c.tier, brief: c.brief || null, why: `${judged}; ${runner}${m ? ' · ' + m : ''}${effort ? ' · ' + effort : ''}` };
     }
     return null;
 }

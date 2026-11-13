@@ -43,7 +43,7 @@ async function start() {
     // queues requests in the kernel instead of answering 502. Without the socket unit, the usual listen.
     const socketActivated = process.env.LISTEN_FDS === '1' && Number(process.env.LISTEN_PID) === process.pid;
     const server = app.listen(...(socketActivated ? [{ fd: 3 }] : [config.port, config.host]), () => {
-        console.log(`[Codes] ${config.nodeEnv} on http://${config.host}:${config.port} → ${config.baseUrl} (db ${ctx.store.db.store})`);
+        console.log(`[Codes] ${config.nodeEnv} on http://${config.host}:${config.port}, public ${config.baseUrl} (db ${ctx.store.db.store})`);
         console.log(`[Codes] ${ctx.harnesses.list().length} harnesses in the catalog; the developer console's addresses redirect to openvibe.services`);
     });
     // Announce the public revision on deploy/start. Shared sends batches of 100, one second apart.

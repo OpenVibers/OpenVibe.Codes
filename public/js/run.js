@@ -26,9 +26,9 @@
         switch (doc.t) {
         case 'step': return line(log, 'step', '· ' + doc.text);
         case 'agent': return line(log, 'agent', '▶ ' + doc.agent + (doc.model ? ' (' + doc.model + ')' : ''));
-        case 'handoff': return line(log, 'handoff', '⇢ handing over from ' + doc.from + ': ' + doc.reason);
+        case 'handoff': return line(log, 'handoff', 'handing over from ' + doc.from + ': ' + doc.reason);
         case 'text': return line(log, 'text', doc.text);
-        case 'tool': return line(log, 'tool', '  → ' + doc.name + (doc.what ? ' ' + doc.what : ''));
+        case 'tool': return line(log, 'tool', '  calls ' + doc.name + (doc.what ? ' ' + doc.what : ''));
         case 'note': return line(log, 'note', '! ' + doc.text);
         case 'done': return line(log, doc.ok ? 'step' : 'note', (doc.ok ? '✔ done' : '✗ ' + (doc.text || 'not done')) + ' (' + Math.round((doc.duration_ms || 0) / 1000) + ' s)');
         default: return undefined;

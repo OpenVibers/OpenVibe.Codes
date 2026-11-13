@@ -139,7 +139,7 @@ function taskDoc(over = {}) {
             assert.strictEqual(r.code, 0, r.err + r.out);
             assert.match(r.out, /▶ attempt 1 · codex/);
             assert.match(r.out, /looking at the parser/);
-            assert.match(r.out, /→ Read lib\/parse\.js/);
+            assert.match(r.out, /calls Read lib\/parse\.js/);
             assert.match(r.out, /✔ attempt 1 ended: done/);
             assert.match(r.out, /outcome: done/);
             assert.match(r.out, /Renamed getUser to findUser/);

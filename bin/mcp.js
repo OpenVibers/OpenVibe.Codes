@@ -183,7 +183,7 @@ async function showTask(args) {
         last_lines: lines.map((l) => {
             const b = l.body || {};
             if (typeof b === 'string') return b;
-            if (b.t === 'tool') return `→ ${b.name || ''} ${String((b.input && (b.input.command || b.input.file_path)) || b.what || '').slice(0, 200)}`.trim();
+            if (b.t === 'tool') return `calls ${b.name || ''} ${String((b.input && (b.input.command || b.input.file_path)) || b.what || '').slice(0, 200)}`.trim();
             if (b.t === 'tool_result') return `  ${b.ok === false ? '✗' : '·'} ${String(b.output || '').split('\n')[0].slice(0, 200)}`;
             if (b.t === 'done') return `done${b.ok === false ? ' (failed)' : ''}: ${String(b.text || '').split('\n')[0].slice(0, 300)}`;
             return String(b.text || b.message || '').split('\n')[0].slice(0, 300);

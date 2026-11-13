@@ -30,7 +30,7 @@ const BIN = path.join(__dirname, '..', 'bin', 'openvibe-codes.js');
     await check('route: the decision, its reasons and every candidate', () => {
         const r = cli('route', '--task', 'review');
         assert.strictEqual(r.code, 0, r.err);
-        assert.match(r.out, /^→ \S+:/m);
+        assert.match(r.out, /^selected \S+:/m);
         assert.match(r.out, /aider:aider-default — `aider` is not on PATH/);
     });
 
@@ -41,7 +41,7 @@ const BIN = path.join(__dirname, '..', 'bin', 'openvibe-codes.js');
         runId = (r.out.match(/^run (run_\S+)/m) || [])[1];
         assert.ok(runId, r.out);
         assert.match(r.out, /▶ codex/);
-        assert.match(r.out, /⇢ handing over from codex: .*usage limit/);
+        assert.match(r.out, /handing over from codex: .*usage limit/);
         assert.match(r.out, /✔ done/);
     });
 
@@ -56,7 +56,7 @@ const BIN = path.join(__dirname, '..', 'bin', 'openvibe-codes.js');
     await check('runs, show and resume', () => {
         const list = cli('runs');
         assert.ok(list.out.includes(runId), list.out);
-        assert.match(list.out, /codex ⇢ /);
+        assert.match(list.out, /codex, then /);
         const show = cli('show', runId);
         assert.strictEqual(show.code, 0);
         assert.match(show.out, /✗ codex/);
