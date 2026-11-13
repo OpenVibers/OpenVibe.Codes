@@ -104,6 +104,26 @@ function assertSummary(s) {
             assert.ok(String(r.json().url).startsWith('https://openvibe.space'), r.json().url);
         });
 
+        await check('make works out new or existing from the words (2026-11-13: Create and My code are one)', async () => {
+            // Nothing named and nothing of yours mentioned: something new, handed over like create.
+            let r = await api('POST', '/tasks', { as: ada, body: { text: 'A bakery site with today\u2019s hours', mode: 'make' } });
+            assert.strictEqual(r.status, 200, r.text);
+            assert.strictEqual(r.json().id, null, 'something new: no task yet');
+            assert.ok(String(r.json().url).startsWith('https://openvibe.space'), r.json().url);
+            // A Git address in the words: work on that repository.
+            r = await api('POST', '/tasks', { as: ada, body: { text: 'Add a test for the date parser in https://github.com/octocat/Hello-World', mode: 'make' } });
+            assert.ok(r.status === 200 || r.status === 201, r.text);
+            assert.match(String(r.json().id), /^tsk_/, 'a task on the named repository');
+            let row = await t.ctx.store.db.maybe('SELECT mode, repo FROM run_tasks WHERE id = $1', [r.json().id]);
+            assert.strictEqual(row.mode, 'repo');
+            // One of yours by its name (the task above made Hello-World one of ada's repositories).
+            r = await api('POST', '/tasks', { as: ada, body: { text: 'Now fix the README typo in hello-world', mode: 'make' } });
+            assert.ok(r.status === 200 || r.status === 201, r.text);
+            assert.match(String(r.json().id), /^tsk_/, 'a task on your repository, found by its name');
+            row = await t.ctx.store.db.maybe('SELECT mode, repo FROM run_tasks WHERE id = $1', [r.json().id]);
+            assert.match(String(row.repo), /octocat\/Hello-World/i);
+        });
+
         await check('openvibe mode works out the project from the words, like the site', async () => {
             const r = await api('POST', '/tasks', { as: ada, body: { text: 'Make Live faster on phones', mode: 'openvibe' } });
             assert.strictEqual(r.status, 201, r.text);
