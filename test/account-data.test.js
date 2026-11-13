@@ -51,6 +51,12 @@ async function startNetworkStub() {
         await db.exec("INSERT INTO codes_attempts (id, task_id, n, state, agent) VALUES ($1, $2, 1, 'done', 'codex')", [`att_${ids.ulid()}`, taskId]);
         await db.exec("INSERT INTO codes_task_proof (id, task_id, attempt_n, n, kind, label, ok) VALUES ($1, $2, 1, 1, 'tests', 'tests', true)", [`prf_${ids.ulid()}`, taskId]);
         await db.exec("INSERT INTO codes_run_tokens (id, task_id, subject, provider, jti, expires_at) VALUES ($1, $2, $3, 'openai', $4, now())", [`rtk_${ids.ulid()}`, taskId, subject, `jti_${ids.ulid()}`]);
+        // A race and its check row name the person too: the race is exported and erased, the check cascades with it.
+        const raceId = `rce_${ids.ulid()}`;
+        await db.exec("INSERT INTO codes_races (id, subject, project_id, repo, prompt, sides, shown, state, match_id, created_at, updated_at) VALUES ($1, $2, $3, 'https://github.com/a/b', $4, '[]'::jsonb, '[]'::jsonb, 'running', $5, 1, 2)",
+            [raceId, subject, ids.newId('project'), `${subject} race`, `mat_${ids.ulid()}`]);
+        await db.exec("INSERT INTO codes_race_checks (id, race_id, slot, subject, project_id, repo, ref, state, created_at, updated_at) VALUES ($1, $2, 'a', $3, $4, 'https://github.com/a/b', 'race/a', 'queued', 1, 2)",
+            [`rch_${ids.ulid()}`, raceId, subject, ids.newId('project')]);
         await db.exec("INSERT INTO codes_user_settings (subject, default_agent) VALUES ($1, 'codex')", [subject]);
         await db.exec("INSERT INTO codes_model_plans (subject, scope, plan) VALUES ($1, 'account', '{\"mode\":\"single\"}'::jsonb)", [subject]);
         await db.exec("INSERT INTO codes_outbox (event_id, topic, subject, payload) VALUES ($1, 'codes.task.updated', $2, '{}'::jsonb)", [`evt_${ids.ulid()}`, subject]);
@@ -119,6 +125,10 @@ async function startNetworkStub() {
             assert.ok(kn, 'knowledge.json is in the export');
             assert.strictEqual(kn.content.length, 1, 'Ada’s knowledge only');
             assert.match(kn.content[0].text, /learned this \(README\.md\)/);
+            const races = part.body.files.find((x) => x.name === 'races.json');
+            assert.ok(races, 'races.json is in the export');
+            assert.strictEqual(races.content.length, 1, 'Ada’s race only');
+            assert.strictEqual(races.content[0].prompt, `${ada} race`);
         });
 
         await check('a deletion erases them, keeps everyone else’s, and confirms once', async () => {
@@ -140,6 +150,8 @@ async function startNetworkStub() {
                 const left = (await db.many(`SELECT ${key} FROM ${table}`)).map((r) => r[key]);
                 assert.deepStrictEqual(left, who, `${table}: only Bo’s row is left`);
             }
+            assert.deepStrictEqual((await db.many('SELECT subject FROM codes_races')).map((r) => r.subject), [bo], 'codes_races: only Bo’s race is left');
+            assert.deepStrictEqual((await db.many('SELECT subject FROM codes_race_checks')).map((r) => r.subject), [bo], 'codes_race_checks: Ada’s check cascaded with her race');
             const samples = await db.many('SELECT subject FROM telemetry_samples ORDER BY subject NULLS FIRST');
             assert.deepStrictEqual(samples.map((r) => r.subject), [null, bo], 'Ada’s telemetry sample stays, without her');
         });

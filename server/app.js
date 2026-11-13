@@ -39,6 +39,7 @@ const { createConductorApi } = require('./http/conductor-api');
 const { createAttachmentsApi } = require('./http/attachments-api');
 const { createRunClient } = require('./domain/run-client');
 const { createRunTasks } = require('./domain/run-tasks');
+const { createRaces } = require('./domain/races');
 const { createConnections } = require('./domain/connections');
 const { createAiCatalog } = require('./domain/ai-catalog');
 const { createRunTokens } = require('./domain/run-tokens');
@@ -169,6 +170,14 @@ async function createApp(opts = {}) {
     // bindings (a terminal result with a PR binds it) — wired to each other here, not in a constructor.
     ctx.prBindings = require('./domain/pr-bindings').createPrBindings({ store, tasks, outbox, config, log });
     tasks.attachBindings(ctx.prBindings);
+    // Race mode (compare-arena-ecosystem.md §5): one task, two harnesses, one budget, the tests first and the merge
+    // later. Its sides are ordinary tasks, so tasks tells it when a side ended; its check jobs are its own rows.
+    ctx.races = opts.races || createRaces({
+        store, config, tasks, run, github: ctx.github, forge: ctx.forge, fleet, harnesses,
+        fetchImpl: fetchImpl || globalThis.fetch, log, now: store.now,
+        recorder: opts.matchRecorder || null, random: opts.random || Math.random,
+    });
+    tasks.attachRaces(ctx.races);
 
     const app = express();
     ctx.indexnow = require('openvibe-shared/indexnow').createIndexNow({ host: config.baseUrl, key: (opts.env || process.env).INDEXNOW_KEY || '', log: (message) => log.warn(message) });
@@ -250,7 +259,7 @@ async function createApp(opts = {}) {
         const accountSend = opts.accountSend || (config.oauth.clientSecret
             ? createNetworkSender({ networkInternalUrl: config.networkInternalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret, fetch: fetchImpl || globalThis.fetch })
             : null);
-        const consumer = createEventsConsumer({ config, store, tasks, run, accountData, accountSend, bindings: ctx.prBindings, log });
+        const consumer = createEventsConsumer({ config, store, tasks, run, accountData, accountSend, bindings: ctx.prBindings, races: ctx.races, log });
         ctx.accountData = accountData;
         ctx.eventsConsumer = consumer;
         ctx.publisher = createPublisher({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -320,7 +329,7 @@ async function createApp(opts = {}) {
     }
     app.use('/api/v1', createApi(ctx));
     app.use('/api/v1', createSkillsApi({ config, skills: ctx.skills, actorLimits: ctx.actorLimits, log }));
-    app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, modelPlans, fleet: ctx.fleet, conductor: ctx.conductor, attachments: ctx.attachments, actorLimits: ctx.actorLimits, sharing, log }));
+    app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, modelPlans, fleet: ctx.fleet, conductor: ctx.conductor, attachments: ctx.attachments, actorLimits: ctx.actorLimits, sharing, races: ctx.races, log }));
     // The composer's files: upload before send (with progress), or as the multipart form without JavaScript.
     app.use('/api/v1', createAttachmentsApi({ attachments: ctx.attachments, actorLimits: ctx.actorLimits, config, keys, log }));
     app.use('/api/v1', createMeApi({ config, store, sso, keys, run, harnesses, tasks, userSettings: ctx.userSettings, github: ctx.github, approvals: ctx.approvals, repoPicker: ctx.repoPicker, forge: ctx.forge, actorLimits: ctx.actorLimits, log }));
@@ -377,7 +386,7 @@ async function createApp(opts = {}) {
     c4Routes = require('./http/c4').createC4Routes(ctx);
     app.use(c4Routes);
     app.use(pageRoutes);
-    app.use(createRunRoutes({ config, store, sso, harnesses, run, tasks, sessions, keys, sharing, fetchImpl: fetchImpl || globalThis.fetch, log }));
+    app.use(createRunRoutes({ config, store, sso, harnesses, run, tasks, sessions, keys, sharing, races: ctx.races, fetchImpl: fetchImpl || globalThis.fetch, log }));
     app.use((req, res) => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Not found', body: html`<h1>Not found</h1><p>No page here. Try <a href="/harnesses">the agents</a>, <a href="/improve">Improve OpenVibe</a>, or the developer platform at <a href="https://openvibe.services">openvibe.services</a>.</p>` }));
 
     // eslint-disable-next-line no-unused-vars

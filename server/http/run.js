@@ -57,7 +57,7 @@ function guestRunPage() {
             };
 }
 
-function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globalThis.fetch, log = console, tasks = null, sessions = null, keys = null, sharing = null }) {
+function createRunRoutes({ config, store, sso, harnesses, run, fetchImpl = globalThis.fetch, log = console, tasks = null, sessions = null, keys = null, sharing = null, races = null }) {
     const r = asyncRouter();
     const db = store.db;
     const form = express.urlencoded({ extended: false, limit: '32kb' });
@@ -316,6 +316,118 @@ ${i.summary ? html`<p class="run-proof-summary" data-proof-summary>${i.summary}<
 </section>`;
     }
 
+    /** "Race this task": the person picks two harnesses (or leaves them to Codes), then sees both sides together. */
+    function raceForm(row) {
+        const opt = (v, label, sel) => html`<option value="${v}"${sel ? raw(' selected') : ''}>${label}</option>`;
+        return html`<section class="run-race-start" data-race-start>
+<h2>Race this task</h2>
+<p class="muted">Run the same brief and repository on two harnesses, with the same budget each. The repository's own check runs on both results, and the pull request you merge wins the match.</p>
+<form method="post" action="/run/tasks/${row.id}/race">
+<div class="run-field-row">
+<label class="run-field"><span>First harness</span><select name="agent_a">${opt('', 'Codes suggests one', true)}${harnesses.list().map((a) => opt(a.id, a.name, false))}</select></label>
+<label class="run-field"><span>Second harness</span><select name="agent_b">${opt('', 'Codes suggests one', true)}${harnesses.list().map((a) => opt(a.id, a.name, false))}</select></label>
+</div>
+<button class="run-btn run-btn-primary" type="submit">Race two harnesses</button>
+</form></section>`;
+    }
+
+    /** A task that is one side of a race says so, and links to both sides. */
+    function raceLink(race, row) {
+        if (!race) return '';
+        const side = (race.sides || []).find((x) => x.task_id === row.id);
+        return html`<p class="run-race-link" data-race="${race.id}"><a href="/run/races/${race.id}">This task is side ${side ? side.slot.toUpperCase() : '?'} of a race</a>: both sides, their checks and the match are on one page.</p>`;
+    }
+
+    /** One side of the race as a card: the harness, its state, the receipts and the check's share. */
+    async function raceSideHtml(race, side, row) {
+        const check = side.check || {};
+        const receipts = side.receipts || {};
+        const bits = [];
+        if (receipts.cost_usd != null) bits.push(`$${Number(receipts.cost_usd).toFixed(4)}`);
+        if (receipts.tokens_in != null || receipts.tokens_out != null) bits.push(`${(receipts.tokens_in || 0) + (receipts.tokens_out || 0)} tokens`);
+        if (receipts.wall_ms != null) bits.push(`${Math.round(receipts.wall_ms / 1000)} s`);
+        if (receipts.tool_calls != null) bits.push(`${receipts.tool_calls} tool calls`);
+        const score = check.score == null ? null : `${Math.round(Number(check.score) * 100)}% of checks passed`;
+        return html`<article class="run-race-side" data-slot="${side.slot}" data-task="${side.task_id || ''}">
+<h2>Side ${side.slot.toUpperCase()} · ${side.agent || 'not started'}${side.model ? html` <small>${side.model}</small>` : ''}</h2>
+<p><span class="run-pill run-pill-${row ? row.state : 'queued'}" data-state>${row ? (STATE_LABEL[row.state] || row.state) : 'Queued'}</span>
+<span class="run-pill" data-check-state="${check.state || 'pending'}">check: ${check.state || 'pending'}</span>
+${score ? html`<span class="run-pill">${score}</span>` : ''}</p>
+<p class="muted">Entrant <code>${side.entrant}</code>${row && row.state !== 'succeeded' && row.error ? html` · ${row.error}` : ''}</p>
+${bits.length ? html`<p class="run-race-receipts" data-receipts>${bits.join(' · ')}</p>` : ''}
+${check.reason ? html`<p class="muted">${check.reason}</p>` : ''}
+${row ? await timelineHtml(row) : html`<p class="muted">This side has not started yet.</p>`}
+${row && TERMINAL.has(row.state) ? resultHtml(row) : ''}
+${row && !TERMINAL.has(row.state) ? html`<p><a href="/run/tasks/${row.id}">Watch this side live</a></p>` : ''}
+</article>`;
+    }
+
+    /** The two sides side by side (one column on a phone, in the order the match showed them). */
+    r.get('/run/races/:id', async (req, res) => {
+        if (!races || !/^rce_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(req.params.id))) {
+            return page(req, res, { title: 'Not found', body: html`<h1>Not found</h1><p>No such race. <a href="/run">Your tasks</a></p>` }, 404);
+        }
+        let race = await races.byId(req.params.id);
+        if (!race || !signedIn(req) || race.subject !== req.viewer.subject) {
+            return page(req, res, { title: 'Not found', index: false, body: html`<h1>Not found</h1><p>No such race. <a href="/run">Run locally</a></p>` }, 404);
+        }
+        // The two sides are ordinary tasks: the page reads each one (the 10-minute fallback, never a poll), then the
+        // race's own merge fallback. A race whose task events were missed still moves on from here.
+        const rowsBySlot = new Map();
+        for (const side of race.sides || []) {
+            if (!side.task_id) continue;
+            let row = await anyTask(side.task_id);
+            if (row) row = await refresh(row);
+            rowsBySlot.set(side.slot, row);
+        }
+        if (race.state === 'running') {
+            const rows = [...rowsBySlot.values()].filter(Boolean);
+            if (rows.length === 2 && rows.every((row) => TERMINAL.has(row.state))) {
+                try { await races.onTaskEnded(rows[0]); } catch (e) { log.warn(`[Codes] race ${race.id}: ${e.message}`); }
+                race = (await races.byId(race.id)) || race;
+            }
+        }
+        race = (await races.checkMerges(race)) || race;
+        const sideRows = new Map();
+        for (const side of race.sides || []) sideRows.set(side.slot, rowsBySlot.get(side.slot) || (side.task_id ? await anyTask(side.task_id) : null));
+        const order = (race.shown && race.shown.length ? race.shown : race.sides.map((x) => x.slot))
+            .map((slot) => (race.sides || []).find((x) => x.slot === slot)).filter(Boolean);
+        const cards = [];
+        for (const side of order) cards.push(await raceSideHtml(race, side, sideRows.get(side.slot)));
+        const match = race.match_recorded
+            ? html`<p class="run-race-match" data-match="${race.match_id}"><b>Bench match</b> <code>${race.match_id}</code> · recorded with the tests${race.merged_slot ? ' and the merge' : ''}.</p>`
+            : html`<p class="run-race-match" data-match="${race.match_id}"><b>Bench match</b> <code>${race.match_id}</code> · ${race.state === 'skipped' ? `not recorded: ${race.error || 'Codes has no bench.judgement.cast grant'}` : 'not recorded yet'}.</p>`;
+        const title = `Race: ${String(race.prompt || '').split('\n')[0].slice(0, 80)}`;
+        const body = html`<p class="crumbs"><a href="/run">Run locally</a></p>
+<h1>Race: two harnesses, one task</h1>
+<p class="lead">The same brief, repository and budget on two harnesses. The repository's own check runs on each pushed branch; the pull request a person merges is the implicit winner.</p>
+<p class="run-repo">${repoName(race.repo)}${race.ref ? html` <small>${race.ref}</small>` : ''}</p>
+<pre tabindex="0" class="run-prompt">${race.prompt}</pre>
+${match}
+<div class="run-race-sides">${cards}</div>`;
+        return page(req, res, { title, body });
+    });
+
+    /** "Race this task" pressed: two new jobs from this task's brief, on the harnesses the person named. */
+    r.post('/run/tasks/:id/race', form, async (req, res) => {
+        if (!signedIn(req)) return res.redirect(303, '/auth/login?next=%2Frun');
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
+        if (!races) return res.status(503).type('text/plain').send('Race mode is not configured here.\n');
+        const row = await own(req, req.params.id);
+        if (!row) return res.status(404).type('text/plain').send('No such task of yours.\n');
+        const existing = await races.ofTask(row);
+        if (existing) return res.redirect(303, `/run/races/${existing.id}`);
+        const agents = [String(req.body.agent_a || '').trim(), String(req.body.agent_b || '').trim()].filter(Boolean);
+        if (agents.length > 2 || new Set(agents).size !== agents.length) return res.status(422).type('text/plain').send('Pick two different harnesses, or leave one to Codes.\n');
+        try {
+            const race = await races.startFromTask(row, { agents });
+            return res.redirect(303, `/run/races/${race.id}`);
+        } catch (e) {
+            log.warn(`[Codes] race on task ${row.id} did not start: ${e.message}`);
+            return res.status(e.status || 422).type('text/plain').send(`${e.message}\n`);
+        }
+    });
+
     /**
      * A task is its owner's. Someone it was shared with reads the same page without Cancel; anybody else gets the
      * gate for Specific people, or "not found" when it is Only me (the task is never named to them).
@@ -335,6 +447,7 @@ ${i.summary ? html`<p class="run-proof-summary" data-proof-summary>${i.summary}<
         let row = base;
         if (mine) row = await refresh(row);
         const live = !TERMINAL.has(row.state);
+        const race = races ? await races.ofTask(row) : null;
         // The agents' session (openvibe-shared/agent-session.js, js/run.js mounts it): live from the job's stream, and
         // after the end from codes_session_lines; a task from before this change falls back to the result's old log.
         const lines = live ? null : await sessionStore.linesForRow(row);
@@ -347,12 +460,14 @@ ${i.summary ? html`<p class="run-proof-summary" data-proof-summary>${i.summary}<
 <h1 class="run-repo">${repoName(row.repo)}${row.ref ? html` <small>${row.ref}</small>` : ''}</h1>
 <p><span class="run-pill run-pill-${row.state}" data-state>${STATE_LABEL[row.state] || row.state}</span>${row.agent ? html` <span class="run-pill">${row.agent}</span>` : ''}</p>
 ${mine ? shareButton(row) : html`<p class="muted">This task was shared with you. Only its owner can change it.</p>`}
+${raceLink(race, row)}
 <pre tabindex="0" class="run-prompt">${row.prompt}</pre>
 ${await timelineHtml(row)}
 ${goalHtml(row)}
 ${await proofHtml(row)}
 ${live ? html`<section class="run-live" data-events="/run/tasks/${row.id}/events" data-run-id="${row.id}" data-owner="${mine ? '1' : '0'}" data-title="${title}" aria-live="polite"><h2>Live</h2>${waitingLine}<ol class="run-log" data-log></ol></section>
-${mine ? html`<form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : ''}` : html`${session}${resultHtml(row, { session: !!(lines && lines.length) })}`}`;
+${mine ? html`<form method="post" action="/run/tasks/${row.id}/cancel"><button class="run-btn" type="submit">Cancel</button></form>` : ''}` : html`${session}${resultHtml(row, { session: !!(lines && lines.length) })}`}
+${!race && mine ? raceForm(row) : ''}`;
         return page(req, res, { title: 'Task', body, sharedScripts: ['agent-session.js'] });
     });
 

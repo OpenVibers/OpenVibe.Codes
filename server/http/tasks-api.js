@@ -46,7 +46,7 @@ const FIL = /^fil_[0-9A-HJKMNP-TV-Z]{26}$/;
 // The Dock's Code tab shape (the home composer's three ways, as JSON): POST /tasks dispatches on it.
 const DOCK_MODES = ['create', 'openvibe', 'repo'];
 
-function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, modelPlans = null, fleet = null, sharing = null, conductor = null, attachments = null, log = console }) {
+function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, modelPlans = null, fleet = null, sharing = null, conductor = null, attachments = null, races = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
@@ -600,6 +600,28 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         }
         log.info(`[Codes] task ${row.id} carried on by a message`);
         return res.json(await timeline(out.row));
+    });
+
+    /**
+     * "Race this task": the same brief and repository on two harnesses, one budget each (compare-arena-ecosystem.md §5).
+     * A person names both, or one, or neither (Codes suggests two). The answer is the race and its two tasks; the
+     * tests judgement and the merged-wins judge follow on the race's own page.
+     */
+    r.post('/tasks/:id/race', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!races) return problem(req, res, 503, 'codes.race_unavailable', 'Race mode is not configured here.');
+        const row = await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
+        const b = req.body && typeof req.body === 'object' ? req.body : {};
+        const agents = Array.isArray(b.agents) ? b.agents.map(String).filter(Boolean).slice(0, 2) : [];
+        if (new Set(agents).size !== agents.length) return problem(req, res, 422, 'codes.race_agents', 'agents must be two different harnesses');
+        if (agents.some((a) => !harnesses.list().some((h) => h.id === a))) return problem(req, res, 422, 'codes.agent_unknown', 'agents are harnesses from GET /api/v1/harnesses');
+        try {
+            const race = await races.startFromTask(row, { agents, via: req.principal.via });
+            log.info(`[Codes] race ${race.id} started from task ${row.id} by ${req.principal.via || req.principal.subject}`);
+            return res.status(201).json({ race: races.present(race), tasks: (race.sides || []).map((side) => ({ slot: side.slot, task_id: side.task_id, agent: side.agent })) });
+        } catch (e) {
+            return problem(req, res, e.status || 422, e.code || 'codes.race_failed', String((e && e.message) || 'the race could not start').slice(0, 300));
+        }
     });
 
     /**

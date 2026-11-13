@@ -48,7 +48,7 @@ function errorText(error) {
     return null;
 }
 
-function createEventsConsumer({ config, store, tasks, run, accountData, accountSend = null, bindings = null, log = console, now = store.now }) {
+function createEventsConsumer({ config, store, tasks, run, accountData, accountSend = null, bindings = null, races = null, log = console, now = store.now }) {
     const db = store.db;
     const secrets = (config.events && config.events.secrets ? config.events.secrets : []).filter((x) => typeof x === 'string' && x.length >= 32);
     const stats = { received: 0, applied: 0, duplicates: 0, ignored: 0, refused: 0, failed: 0, last_at: null };
@@ -73,7 +73,30 @@ function createEventsConsumer({ config, store, tasks, run, accountData, accountS
         const seen = await db.maybe('SELECT task_id FROM codes_events_inbox WHERE event_id = $1', [event.event_id]);
         if (seen) return { duplicate: true, outcome: null, task_id: seen.task_id || undefined };
         const row = await db.maybe('SELECT * FROM run_tasks WHERE job_id = $1', [jobId]);
-        if (!row) return await ignore(event, 'ignored:not_a_codes_task');
+        if (!row) {
+            // A race's check job is its own row (codes_race_checks), never a person's task: its run.job.* events
+            // land on the race's test_suite judgement instead.
+            if (!races) return await ignore(event, 'ignored:not_a_codes_task');
+            const check = await db.maybe('SELECT * FROM codes_race_checks WHERE job_id = $1', [jobId]);
+            if (!check) return await ignore(event, 'ignored:not_a_codes_task');
+            const requester = payload.requester && typeof payload.requester === 'object' ? payload.requester.id : null;
+            if (requester && requester !== check.subject) return await ignore(event, 'ignored:another_subject', check.id);
+            if (payload.project_id && payload.project_id !== check.project_id) return await ignore(event, 'ignored:another_project', check.id);
+            let job = null;
+            if (TERMINAL.has(state)) job = await run.read(jobId, { subject: check.subject, project: check.project_id });
+            const applied = await store.tx(async () => {
+                const inserted = await db.maybe(
+                    `INSERT INTO codes_events_inbox (event_id, event_type, task_id, outcome, processed_at)
+                     VALUES ($1, $2, $3, $4, $5::timestamptz) ON CONFLICT (event_id) DO NOTHING RETURNING event_id`,
+                    [event.event_id, event.event_type, check.id, state, store.iso()],
+                );
+                if (!inserted) return { duplicate: true, outcome: null, task_id: check.id };
+                await races.applyCheck(check, { state, job, error: errorText(payload.error) });
+                await db.exec('UPDATE codes_events_inbox SET outcome = $2 WHERE event_id = $1', [event.event_id, state]);
+                return { duplicate: false, outcome: state, task_id: check.id };
+            });
+            return applied;
+        }
         const requester = payload.requester && typeof payload.requester === 'object' ? payload.requester.id : null;
         if (requester && requester !== row.subject) return await ignore(event, 'ignored:another_subject', row.id);
         if (payload.project_id && payload.project_id !== row.project_id) return await ignore(event, 'ignored:another_project', row.id);
@@ -139,10 +162,19 @@ function createEventsConsumer({ config, store, tasks, run, accountData, accountS
             // duplicate, and the wake below runs once.
             const seen = await db.maybe('SELECT task_id, outcome FROM codes_events_inbox WHERE event_id = $1', [event.event_id]);
             if (seen) { stats.duplicates++; return res.json({ event_id: event.event_id, duplicate: true, outcome: null }); }
+            // A merge is also a race's implicit judgement (a Codes race that opened both pull requests): it goes to
+            // the same bench.match@1 id, whether or not the task has an AL5 binding.
+            let raceResult = null;
+            if (races) {
+                try { raceResult = await races.handleGithubEvent(event); }
+                catch (err) { log.warn(`[Codes] race judgement for ${event.event_id} failed: ${String(err && err.message).slice(0, 200)}`); }
+            }
             if (!bindings) {
-                const result = await ignore(event, 'ignored:no_bindings');
+                const outcome = raceResult && String(raceResult.outcome).startsWith('race:') ? raceResult.outcome : 'ignored:no_bindings';
+                const result = await ignore(event, outcome);
                 if (result.duplicate) stats.duplicates++; else stats.ignored++;
-                return res.json({ event_id: event.event_id, duplicate: result.duplicate, outcome: result.outcome });
+                return res.json({ event_id: event.event_id, duplicate: result.duplicate, outcome: result.outcome,
+                    ...(raceResult && raceResult.race_ids && raceResult.race_ids.length ? { races: raceResult.race_ids } : {}) });
             }
             let result;
             try {
@@ -164,7 +196,8 @@ function createEventsConsumer({ config, store, tasks, run, accountData, accountS
             }
             if (result.duplicate) { stats.duplicates++; return res.json({ event_id: event.event_id, duplicate: true, outcome: null }); }
             if (String(result.outcome).startsWith('ignored:')) stats.ignored++; else stats.applied++;
-            return res.json({ event_id: event.event_id, duplicate: false, outcome: result.outcome, ...(result.followed_up && result.followed_up.length ? { task_ids: result.followed_up } : {}) });
+            return res.json({ event_id: event.event_id, duplicate: false, outcome: result.outcome, ...(result.followed_up && result.followed_up.length ? { task_ids: result.followed_up } : {}),
+                ...(raceResult && raceResult.race_ids && raceResult.race_ids.length ? { races: raceResult.race_ids } : {}) });
         }
 
         if (!RUN_TOPICS.includes(event.event_type)) {

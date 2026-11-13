@@ -166,7 +166,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null, modelPlans = null, goalVerifier = null }) {
+function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null, modelPlans = null, goalVerifier = null, raceSideEnded = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -550,6 +550,11 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
             const meta = asObject(saved.actor_ref);
             if (meta && meta.bench) await benchAttemptEnded(saved).catch((e) => log.warn(`[Codes] benchmark publish failed for task ${saved.id}: ${String(e && e.message).slice(0, 200)}`));
         }
+        // A race side is a finished comparison half: the race keeps it and, when both are in, runs the checks.
+        if (TERMINAL.has(saved.state) && raceSideEnded && saved.actor_ref) {
+            const meta = asObject(saved.actor_ref);
+            if (meta && meta.race) await raceSideEnded(saved).catch((e) => log.warn(`[Codes] race side ${saved.id} was not recorded: ${String(e && e.message).slice(0, 200)}`));
+        }
         return saved;
     }
 
@@ -602,7 +607,7 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
         const turnId = claims.length ? (messageId || store.newId('msg')) : null;
         // A task with no agent named is `auto` (Codes C9c): the router reads the fleet — who is signed in, whose window
         // still has room — and the task is started on the agent it picks. Never a fixed agent, and never an Anthropic one.
-        if (modelPlans?.enabled() && !args.plan && args.kind !== 'bench') {
+        if (modelPlans?.enabled() && !args.plan && !args.race && args.kind !== 'bench') {
             const selected = await modelPlans.select(subject, project);
             args = { ...args, plan: selected.plan, plan_source: selected.source, preset: selected.preset, model_fallbacks: selected.fallbacks };
         }
@@ -890,6 +895,8 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
         // The conductor's turns are its own: a turn that ended lands its message and the next one starts.
         if (row.kind === 'conductor') return conductorTurns ? conductorTurns.onTurnEnd(row.id, row.job_id) : row;
         const actorRef = asObject(row.actor_ref);
+        // A race side is exactly one run: its ending is the comparison's receipt, never a follow-up attempt.
+        if (actorRef && actorRef.race) return row;
         if (actorRef && actorRef.bench) {
             const done = row.state === 'succeeded';
             // A benchmark attempt that ran out of money says so, with what it spent: it is not a crash.
@@ -1340,6 +1347,7 @@ ${String(verdict.check_output || '').slice(0, 50000)}`;
     return {
         start, refresh, applyJob, applyEvent, recordState, afterEnd, continueTask, stopTask, proof: taskProof,
         latestProject, present, who, attempts: attemptStore, setConductor, attachBindings, fundTurn,
+        attachRaces(r) { raceSideEnded = r ? (row) => r.onTaskEnded(row) : null; },
         messageTask, pendingMessages,
         setForge(f) { forge = f || null; },
     };
