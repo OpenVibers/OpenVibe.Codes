@@ -89,18 +89,23 @@ function parseCheckArgs(raw, env = process.env) {
 
     const repo = parseRepo(a.repo, env);
     const sha = String(a.sha == null ? '' : a.sha).trim();
-    if (!SHA.test(sha)) throw new Error('sha must be a 40-character hex commit');
-    const workflow = String(a.workflow == null ? '' : a.workflow).trim();
-    if (!isWorkflowPath(workflow)) throw new Error('workflow must be a path under .github/workflows/ ending in .yml or .yaml');
-    const job = String(a.job == null ? '' : a.job).trim();
-    if (!JOB_ID.test(job)) throw new Error('job must be a workflow job id');
-    const event = a.event;
-    if (event !== 'push' && event !== 'pull_request') throw new Error('event must be push or pull_request');
+    if (sha && !SHA.test(sha)) throw new Error('sha must be a 40-character hex commit');
+    // A race checks the branch a side pushed, before Codes has read its commit: the ref names it and the check
+    // resolves the commit itself. A job that names a sha is still checked against it exactly.
     let ref = null;
     if (a.ref != null && a.ref !== '') {
         ref = String(a.ref).trim();
         if (!REF.test(ref) || ref.startsWith('-') || ref.startsWith('/') || ref.includes('..') || ref.includes('//')) throw new Error('ref must be a branch or tag name');
     }
+    if (!sha && !ref) throw new Error('sha or ref is required');
+    const workflow = String(a.workflow == null ? '' : a.workflow).trim();
+    if (workflow && !isWorkflowPath(workflow)) throw new Error('workflow must be a path under .github/workflows/ ending in .yml or .yaml');
+    const job = String(a.job == null ? '' : a.job).trim();
+    if (job && !JOB_ID.test(job)) throw new Error('job must be a workflow job id');
+    // Both named, or neither: with neither, the check runs the repository's own first runnable workflow job.
+    if (!!workflow !== !!job) throw new Error('workflow and job go together, or neither for the repository’s own check');
+    const event = a.event;
+    if (event !== 'push' && event !== 'pull_request') throw new Error('event must be push or pull_request');
     const matrix = parseMatrix(a.matrix);
     let timeout_ms = DEFAULT_TIMEOUT_MS;
     if (a.timeout_ms != null) {
@@ -193,6 +198,53 @@ function jobIn(wf, jobId) {
     const job = has(wf.jobs, jobId) ? wf.jobs[jobId] : null;
     if (!job || typeof job !== 'object' || Array.isArray(job)) throw new Error(`the workflow has no job named ${jobId}`);
     return job;
+}
+
+/** The events a workflow listens for (`on:` is a string, a list or a map of events). */
+function workflowTriggers(wf) {
+    const on = wf && (wf.on !== undefined ? wf.on : wf.true);
+    if (typeof on === 'string') return [on];
+    if (Array.isArray(on)) return on.filter((x) => typeof x === 'string');
+    if (on && typeof on === 'object') return Object.keys(on);
+    return [];
+}
+
+/**
+ * The repository's own check, when the job names no workflow: the first workflow job that listens for pull requests
+ * (or any event) and that act can run in host mode. Sorted by file name, so the same repository always gets the same
+ * check. When nothing is runnable the first job is still named: the check's own skip reason says why it was left out.
+ * → { workflow, job } or null when the repository has no workflow.
+ */
+function discoverWorkflow(work) {
+    const dir = path.join(work, '.github', 'workflows');
+    let names;
+    try { names = fs.readdirSync(dir); } catch { return null; }
+    const parsed = [];
+    for (const name of names.filter((n) => /\.ya?ml$/i.test(n)).sort()) {
+        const file = path.join(dir, name);
+        let st;
+        try { st = fs.statSync(file); } catch { continue; }
+        if (!st.isFile() || st.size > MAX_WORKFLOW_BYTES) continue;
+        try {
+            const source = fs.readFileSync(file, 'utf8');
+            parsed.push({ workflow: `.github/workflows/${name}`, source, wf: parsedWorkflow(source), triggers: [] });
+            parsed[parsed.length - 1].triggers = workflowTriggers(parsed[parsed.length - 1].wf);
+        } catch { /* a workflow act could not read is not the repository's check */ }
+    }
+    const forPullRequests = (p) => p.triggers.includes('pull_request');
+    const ordered = [...parsed.filter(forPullRequests), ...parsed.filter((p) => !forPullRequests(p))];
+    // Within a workflow, a job that sounds like the check (test, lint, build) comes before a deploy or a publish.
+    const rank = (id) => (/test/i.test(id) ? 0 : /check|ci|lint|build/i.test(id) ? 1 : 2);
+    for (const p of ordered) {
+        const jobs = Object.keys(p.wf.jobs || {}).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+        const runnable = jobs.find((id) => {
+            try { return skipReason(p.source, id) === null; } catch { return false; }
+        });
+        if (runnable) return { workflow: p.workflow, job: runnable };
+    }
+    const first = ordered[0];
+    const firstJob = first && Object.keys(first.wf.jobs || {})[0];
+    return first && firstJob ? { workflow: first.workflow, job: firstJob } : null;
 }
 
 /** The workflow's jobs.<id> as a plain object; an unreadable workflow or a missing job is an error, not a skip. */
@@ -576,6 +628,7 @@ async function runCheck({ input, emit = () => {}, writeResult = () => {}, env = 
             kind: 'check',
             conclusion,
             ...(reason ? { reason: clean(reason) } : {}),
+            ...(job && job.workflow ? { workflow: job.workflow, job: job.job, sha: job.sha } : {}),
             steps: steps.map((step) => ({
                 name: step.name,
                 conclusion: step.conclusion || 'cancelled',
@@ -592,24 +645,39 @@ async function runCheck({ input, emit = () => {}, writeResult = () => {}, env = 
         job = parseCheckArgs(input, env);
         dir = fs.mkdtempSync(path.join(tmp, 'codes-check-'));
         const work = path.join(dir, 'repo');
-        say({ t: 'step', text: `Cloning ${scrub(job.repo)} at ${job.sha.slice(0, 12)}` });
+        say({ t: 'step', text: `Cloning ${scrub(job.repo)} at ${job.sha ? job.sha.slice(0, 12) : job.ref}` });
 
         await git(['init', '-q', work], { timeout: 60_000 });
         await git(['remote', 'add', 'origin', job.repo], { cwd: work });
         const auth = gitAuthFor(job.repo, env);
-        try {
-            await git(['fetch', '--depth', '1', '--no-tags', 'origin', job.sha], { cwd: work, timeout: 300_000, ...(auth.env ? { env: auth.env } : {}) });
-        } catch (first) {
-            // Some servers do not serve an arbitrary commit by sha; the branch the scheduler names can still hold it.
-            if (!job.ref) throw new Error(cloneProblem(first.message, job.repo));
-            await git(['fetch', '--no-tags', 'origin', job.ref], { cwd: work, timeout: 300_000, ...(auth.env ? { env: auth.env } : {}) }).catch((e) => { throw new Error(cloneProblem(e.message, job.repo)); });
-            try { await git(['cat-file', '-e', `${job.sha}^{commit}`], { cwd: work }); } catch { throw new Error(`commit ${job.sha} is not in ${job.repo}`); }
+        if (job.sha) {
+            try {
+                await git(['fetch', '--depth', '1', '--no-tags', 'origin', job.sha], { cwd: work, timeout: 300_000, ...(auth.env ? { env: auth.env } : {}) });
+            } catch (first) {
+                // Some servers do not serve an arbitrary commit by sha; the branch the scheduler names can still hold it.
+                if (!job.ref) throw new Error(cloneProblem(first.message, job.repo));
+                await git(['fetch', '--no-tags', 'origin', job.ref], { cwd: work, timeout: 300_000, ...(auth.env ? { env: auth.env } : {}) }).catch((e) => { throw new Error(cloneProblem(e.message, job.repo)); });
+                try { await git(['cat-file', '-e', `${job.sha}^{commit}`], { cwd: work }); } catch { throw new Error(`commit ${job.sha} is not in ${job.repo}`); }
+            }
+            await git(['checkout', '-q', '--detach', job.sha], { cwd: work });
+        } else {
+            // A race names the branch its side pushed: fetch it, and let the commit it points at be the one checked.
+            await git(['fetch', '--no-tags', 'origin', job.ref], { cwd: work, timeout: 300_000, ...(auth.env ? { env: auth.env } : {}) })
+                .catch((e) => { throw new Error(cloneProblem(e.message, job.repo)); });
+            await git(['checkout', '-q', '--detach', 'FETCH_HEAD'], { cwd: work });
         }
-        await git(['checkout', '-q', '--detach', job.sha], { cwd: work });
         const head = (await git(['rev-parse', 'HEAD'], { cwd: work })).trim().toLowerCase();
-        if (head !== job.sha) throw new Error('the cloned commit is not the one asked for');
+        if (job.sha && head !== job.sha) throw new Error('the cloned commit is not the one asked for');
+        job.sha = head;
         if (auth.env) say({ t: 'step', text: 'Cloned with this machine\'s token for a private repository' });
 
+        if (!job.workflow) {
+            const found = discoverWorkflow(work);
+            if (!found) throw new Error('the repository has no workflow under .github/workflows/');
+            job.workflow = found.workflow;
+            job.job = found.job;
+            say({ t: 'step', text: `Using ${found.workflow} job ${found.job}` });
+        }
         const workflowFile = path.join(work, job.workflow);
         let realWorkflow;
         try { realWorkflow = fs.realpathSync(workflowFile); } catch { throw new Error(`the workflow ${job.workflow} is not in the repository at ${job.sha}`); }
@@ -689,6 +757,6 @@ function tail(raw) {
 
 module.exports = {
     ACT_VERSION, ACT_URL, ACT_SHA256, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS,
-    parseCheckArgs, parseArgs: parseCheckArgs, skipReason, workflowJob, eventPayload, parseActLine, outputText, prepareAct,
+    parseCheckArgs, parseArgs: parseCheckArgs, skipReason, workflowJob, discoverWorkflow, eventPayload, parseActLine, outputText, prepareAct,
     runCheck, tail,
 };

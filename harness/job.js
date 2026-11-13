@@ -260,7 +260,8 @@ function parseArgs(raw, env = process.env) {
     const resumeIn = a.resume == null || a.resume === '' ? env.RESUME : a.resume;
     const resume = typeof resumeIn === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(resumeIn) ? resumeIn : null;
     const wanted = jobEnv(a);
-    const limits = kind === 'bench' && a.limits && typeof a.limits === 'object' ? {
+    // A task's own budget (benchmark cells and race sides carry one): the same clamps whatever the kind.
+    const limits = a.limits && typeof a.limits === 'object' ? {
         ms: Number.isFinite(Number(a.limits.ms)) && Number(a.limits.ms) > 0 ? Math.min(300000, Number(a.limits.ms)) : null,
         tokens: Number.isFinite(Number(a.limits.tokens)) && Number(a.limits.tokens) > 0 ? Math.min(1000000, Number(a.limits.tokens)) : null,
         usd: Number.isFinite(Number(a.limits.usd)) && Number(a.limits.usd) > 0 ? Math.min(100, Number(a.limits.usd)) : null,
