@@ -713,6 +713,11 @@ async function runCheck({ input, emit = () => {}, writeResult = () => {}, env = 
             '-P', 'ubuntu-latest=-self-hosted',
             ...labels.filter((label) => label.toLowerCase() !== 'ubuntu-latest').flatMap((label) => ['-P', `${label}=-self-hosted`]),
             '--eventpath', eventPath,
+            // act's cache server (actions/cache, setup-node's `cache: npm`) binds to the outbound address by default.
+            // In Link's job sandbox that is a link-local address the egress filter drops, so a step that restores a
+            // cache waits on a connection that never opens. On loopback, inside the job's own network, it answers;
+            // its files stay in the job's directory.
+            '--cache-server-addr', '127.0.0.1', '--cache-server-path', path.join(dir, 'actcache'),
             ...Object.entries(job.matrix).flatMap(([key, value]) => ['--matrix', `${key}:${value}`]),
         ];
         say({ t: 'step', text: `Running ${job.workflow} job ${job.job} with act ${ACT_VERSION}` });
