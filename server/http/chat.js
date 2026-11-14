@@ -629,6 +629,9 @@ function createChatRoutes(ctx) {
         const hello = `<div class="ch-hello"><span class="ov-mark" data-size="40" aria-hidden="true" data-ovt-fold></span><h1>${ask}</h1><p data-ovt-fold>Say it the way you would to a friend.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
         return frame(req, res, {
             title: 'New chat', heading: 'New chat', start: true, empty: hello,
+            // 4.250.0 (plan §AB.8/47): the network's messenger full-page swaps in over this page once the site's Shared has
+            // OpenVibeRun.page and the navbar has the person's token (public/js/messenger.js); until then this page works.
+            scripts: ['js/messenger.js'],
             composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'What should change?', pickers, options, examples: (sets[mode] || []).slice(0, 12).map((i) => i.text), where, files: true, value: prompt }) + nudge + ideas,
         });
     });
