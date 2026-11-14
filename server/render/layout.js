@@ -24,12 +24,12 @@ const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public');
 // The product's own places: the main ones carry an icon (phones get them as the bottom tab bar), the rest fold into
 // the navbar's More (Shared 4.22). Search is the navbar's magnifier and What shipped is the footer's.
 const NAV = [
-    { label: 'Get started', href: '/start', icon: 'fa-play' },
-    { label: 'Run locally', href: '/run', icon: 'fa-microchip' },
-    { label: 'Agents', href: '/harnesses', icon: 'fa-robot' },
-    { label: 'Skills', href: '/skills', icon: 'fa-puzzle-piece' },
-    { label: 'Improve OpenVibe', href: '/improve', icon: 'fa-code', more: true },
-    { label: 'Community', href: '/policy', icon: 'fa-people-group', more: true },
+    { label: 'Get started', href: '/start', icon: 'play' },
+    { label: 'Run locally', href: '/run', icon: 'chip' },
+    { label: 'Agents', href: '/harnesses', icon: 'robot' },
+    { label: 'Skills', href: '/skills', icon: 'puzzle' },
+    { label: 'Improve OpenVibe', href: '/improve', icon: 'code', more: true },
+    { label: 'Community', href: '/policy', icon: 'members', more: true },
 ];
 
 // The workspace's own sections (Codes C4c). The shared Frame owns the page's navigation (openvibe.design/patterns/
@@ -37,14 +37,14 @@ const NAV = [
 // sidebar of its own. The product's own places (Get started, Run locally) move into More for a signed-in
 // person, so a workspace page has one navigation and not two.
 const WORKSPACE_NAV = [
-    { label: 'Home', href: '/', icon: 'fa-house' },
-    { label: 'Tasks', href: '/tasks', icon: 'fa-list' },
-    { label: 'Conductor', href: '/conductor', icon: 'fa-diagram-project' },
-    { label: 'Agents', href: '/agents', icon: 'fa-robot' },
-    { label: 'Memory', href: '/memory', icon: 'fa-brain' },
-    { label: 'Knowledge', href: '/knowledge', icon: 'fa-book' },
-    { label: 'Usage', href: '/usage', icon: 'fa-chart-line' },
-    { label: 'Settings', href: '/settings', icon: 'fa-gear' },
+    { label: 'Home', href: '/', icon: 'home' },
+    { label: 'Tasks', href: '/tasks', icon: 'list' },
+    { label: 'Conductor', href: '/conductor', icon: 'nodes' },
+    { label: 'Agents', href: '/agents', icon: 'robot' },
+    { label: 'Memory', href: '/memory', icon: 'brain' },
+    { label: 'Knowledge', href: '/knowledge', icon: 'book' },
+    { label: 'Usage', href: '/usage', icon: 'chart' },
+    { label: 'Settings', href: '/settings', icon: 'gear' },
 ];
 
 const hashes = new Map();
@@ -100,7 +100,7 @@ function renderPage(o) {
         // sections there — the first four (Home, Tasks, Conductor, Agents) and More, which opens the navbar's drawer with
         // the rest; the section the person is in is marked. Everyone else keeps the product's four.
         // Phones: in the app the rail is a drawer and the conversation owns the screen, so no tab bar (L31).
-        appBar: inApp ? false : [{ label: 'Home', href: '/', icon: 'fa-house' }, { label: 'Start', href: '/start', icon: 'fa-play' }, { label: 'Run', href: '/run', icon: 'fa-microchip' }, { label: 'Agents', href: '/harnesses', icon: 'fa-robot' }],
+        appBar: inApp ? false : [{ label: 'Home', href: '/', icon: 'home' }, { label: 'Start', href: '/start', icon: 'play' }, { label: 'Run', href: '/run', icon: 'chip' }, { label: 'Agents', href: '/harnesses', icon: 'robot' }],
         history: { type: 'page', title: o.title || SITE_NAME },
         silentLogin: `${o.config.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
@@ -112,7 +112,7 @@ function renderPage(o) {
     // This site's own account links live in the shared navbar's account menu (the page's account
     // bar below is only for visitors without JavaScript).
     // Your projects and apps live on the developer platform (OpenVibe.Services).
-    if (signedIn) nav.menu = { before: [{ label: 'Your projects', href: 'https://openvibe.services/projects', icon: 'fa-folder' }] };
+    if (signedIn) nav.menu = { before: [{ label: 'Your projects', href: 'https://openvibe.services/projects', icon: 'folder' }] };
     const footer = { service: 'codes', variant: signedIn && c4Workspace ? 'compact' : 'auto', path: o.path, mount: '#ov-footer', brandName: SITE_NAME, ...(signedIn && c4Workspace ? { shipped: false } : { updates: '/updates' }) };   // workspace pages use a compact frame
     const account = signedIn
         ? html`Signed in as <strong>${viewer.displayName || viewer.username || 'you'}</strong> · <a href="/auth/logout?next=${loginNext}">Sign out</a>`
