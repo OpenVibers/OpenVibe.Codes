@@ -1,7 +1,7 @@
 .c4{--c4-bg:#f7f8fa;--c4-surface:#fff;--c4-ink:#18212b;--c4-muted:#687583;--c4-line:#e1e6eb;--c4-accent:#176b5b;--c4-on-accent:#fff;--c4-dot:#98a5aa;--c4-dot-ok:#69a24f;--c4-dot-bad:#ce7441;--c4-dot-skip:#b3bcc1;--c4-dot-open:#179579;--c4-ok-bg:#edf6e9;--c4-ok-ink:#47713d;--c4-bad-bg:#fff0e9;--c4-bad-ink:#995128;--c4-bad-line:#e7c4b2;--c4-danger:#b3261e;--c4-on-danger:#fff;--c4-skip-bg:#f0f2f3;--c4-skip-ink:#5b6870;--c4-open-bg:#e9f4f1;--c4-open-ink:#176b5b;--c4-quiet-bg:#eef2f3;--c4-quiet-ink:#4f5d67;--c4-quiet:#f3f5f6;--c4-ghost:#f7f8f9;color:var(--c4-ink);max-width:1540px;margin:0 auto;padding:0 32px 44px}
 /* One navigation per page: the shared Frame navbar carries the workspace's sections, so the page has no sidebar
    of its own (openvibe.design/patterns/single-navbar). */
-.c4-main{min-width:0;max-width:1200px;width:100%;padding-top:34px}
+.c4-main {min-width:0;max-width:1200px;width:100%;padding-top: 12px}
 .c4-title{display:flex;justify-content:space-between;align-items:end;margin:0 0 22px}
 .c4-title h1{font-size:clamp(26px,3vw,36px);letter-spacing:-.045em;margin:0;line-height:1.12}
 .c4-title p{margin:8px 0 0;color:var(--c4-muted);font-size:14px;line-height:1.5}
@@ -439,3 +439,5 @@
 .mp-seg{display:flex}.mp-seg label{flex:1}.mp-seg span{flex:1;justify-content:center;padding:0 8px}
 }
 @media (prefers-reduced-motion:reduce){.mp-switch>span[aria-hidden],.mp-switch>span[aria-hidden]::after,.mp-role,.mp-limits>summary::after{transition:none}}
+/* Design rule 201 (the owner, 11-14): a page starts within 12 px of the bar, 8 px on a phone. */
+@media (max-width: 640px) { .c4-main { padding-top: 8px; } }
