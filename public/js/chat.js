@@ -258,7 +258,10 @@
             }
             form.addEventListener('submit', async (e) => {
                 const submitter = e.submitter;
-                if (submitter && submitter.formAction && submitter.formAction !== form.action) return; // Stop: a plain post
+                // A button with its own route (Stop) posts there: the browser does it, we do not. The attribute
+                // is what matters, not submitter.formAction (which is the page's address when the button has none).
+                const own = submitter && submitter.getAttribute('formaction');
+                if (own && own !== form.getAttribute('action')) return;
                 form.classList.add('is-sending');
                 form.querySelectorAll('button').forEach((b) => { b.disabled = b.matches('[data-ovt-send]'); });
                 const files = form.__ovc && form.__ovc.files ? form.__ovc.files() : [];
@@ -293,7 +296,10 @@
                     }
                     return;
                 }
-                // The plain form post: the kit's hidden fields carry the ids of the files.
+                // The plain form post: the kit's hidden fields carry the ids of the files. The file inputs
+                // are empty now (the files are up), so the form posts as ordinary fields: an empty file part would
+                // be a file the server refuses, and the whole message with it.
+                form.enctype = 'application/x-www-form-urlencoded';
                 say(ids.length === 1 ? 'Sending the file…' : `Sending ${ids.length} files…`);
                 form.submit();
             });
