@@ -56,10 +56,11 @@ const { stepKind } = require('../server/http/chat');
             assert.ok(text.includes('data-ovt-panel-open aria-controls="ch-side"') && text.includes('<aside class="ovt-panel" id="ch-side"'), 'what it did is the panel');
             assert.ok(text.includes('1 file changed') && text.includes('<span class="ch-add">+3</span>'), 'how it ended: the files');
             assert.ok(text.includes(`action="/tasks/${MINE}/continue"`), 'the composer carries it on');
-            assert.ok(text.includes('data-ch-upload') && text.includes('ov-upload.js') && text.includes('ov-upload.css'), 'the shared file picker is loaded for the composer');
+            assert.ok(text.includes('data-ovt-attach') && text.includes('ov-composer.js'), 'the kit\u2019s composer and its attach menu are loaded for the composer');
             assert.match(page.headers.get('content-security-policy'), /img-src[^;]*blob:/, 'the picker can preview image files');
             assert.match(page.headers.get('content-security-policy'), /media-src[^;]*blob:/, 'the picker can preview video files');
-            assert.ok(text.includes('20 MB each, 50 MB a message'), 'attachment limits are visible before upload');
+            assert.ok(text.includes('data-ch-files="Files: up to 10, 20 MB each, 50 MB a message. Programs can\u2019t be attached."'), 'the attachment limits are the + button\u2019s title');
+            assert.match(text, /<p class="ovt-c-note" data-ovt-note role="status"><\/p>/, 'the note says nothing until a file is refused');
             assert.ok(text.includes('aria-current="page"'), 'the rail marks the open conversation');
         });
 
@@ -96,6 +97,20 @@ const { stepKind } = require('../server/http/chat');
             assert.match(fresh.text, /value="new" form="ch-start" checked/, 'the chosen way is kept');
             assert.match(fresh.text, /<input type="radio" name="kind" value="game" form="ch-start" checked data-ch-kind>/);
             assert.match(fresh.text, /data-ch-idea-mode="new" data-ch-idea-kind="website"[\s\S]*?data-ch-idea-kind="game"[\s\S]*?data-ch-idea-kind="app"/, 'something new mixes the three kinds');
+        });
+
+        // The owner, 11-14: the attached file belongs just behind the + button, and the limits are its title
+        // instead of a line under the box that repeats them on every page.
+        await check('the composer\u2019s files sit behind one + button, and the note is quiet until a file is refused', async () => {
+            const home = await t.get('/', { as: ada });
+            const h = home.text;
+            assert.match(h, /<details class="ovt-attach-menu" data-ovt-attach>/, 'the kit\u2019s attach menu');
+            assert.match(h, /<summary class="ovt-btn ovt-attach"/, 'one + button opens it');
+            assert.match(h, /<a class="ovt-attach-row" role="menuitem" href="https:\/\/openvibe\.media">[\s\S]*?From your OpenVibe files/, 'the library row in the menu');
+            assert.doesNotMatch(h, /data-ch-upload/, 'no picker of its own in the composer');
+            assert.match(h, /data-ch-files="Files: up to 10, 20 MB each, 50 MB a message\. Programs can\u2019t be attached\."/, 'the limits are the + button\u2019s title');
+            assert.match(h, /<p class="ovt-c-note" data-ovt-note role="status"><\/p>/, 'the note says nothing until a file is refused');
+            assert.match(h, /<noscript><label>Attach files<input type="file" name="files"/, 'without JavaScript the form still takes files');
         });
 
         await check('something new goes to openvibe.space with the words in the box, and nothing is built here', async () => {

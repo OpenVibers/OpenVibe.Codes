@@ -175,97 +175,122 @@
             if ($('.ovt.is-start', app) && !matchMedia('(pointer: coarse)').matches) text.focus({ preventScroll: true });
         }
         if (form) {
-            // The shared picker owns drop, keyboard selection, rows and progress. Codes owns its upload transport.
-            const uploadRoot = $('[data-ch-upload]', form);
-            const BLOCKED = /\.(exe|dll|com|bat|cmd|msi|scr|ps1|sh|so|dylib|app|apk|deb|rpm|jar|bin|elf|vbs|wsf|hta)$/i;
-            const MAX_FILES = 10, MAX_FILE = 20 * 1024 * 1024, MAX_TOTAL = 50 * 1024 * 1024;
-            const entries = [];
-            let picker = null;
-            function addFile(file, row) {
-                const total = entries.reduce((n, e) => n + e.file.size, 0);
-                let problem = '';
-                if (BLOCKED.test(file.name)) problem = `“${file.name}” is a program or script, and cannot be attached`;
-                else if (!file.size) problem = `“${file.name}” is empty`;
-                else if (file.size > MAX_FILE) problem = `“${file.name}” is larger than 20 MB`;
-                else if (entries.length >= MAX_FILES) problem = 'A message carries at most 10 files';
-                else if (total + file.size > MAX_TOTAL) problem = 'The files of one message are larger than 50 MB together';
-                if (problem) { row.dispatchEvent(new Event('remove')); row.remove(); say(problem, true); return; }
-                const meterRoot = document.createElement('div');
-                row.append(meterRoot);
-                const meter = OVUpload.progress(meterRoot, { onRetry: () => sendFile() });
-                const entry = { file, row, meter, id: null, uploading: true, xhr: null };
-                entries.push(entry);
-                function sendFile() {
-                    entry.uploading = true;
-                    meter.update({ state: 'sending', done: 0, total: file.size });
-                    const xhr = entry.xhr = new XMLHttpRequest();
-                    xhr.open('POST', '/api/v1/attachments');
-                    xhr.withCredentials = true;
-                    xhr.upload.onprogress = (e) => { if (e.lengthComputable) meter.update({ state: 'sending', done: e.loaded, total: e.total }); };
-                    xhr.onload = () => {
-                        entry.uploading = false;
-                        let doc = {};
-                        try { doc = JSON.parse(xhr.responseText || '{}'); } catch { /* response is not JSON */ }
-                        if (xhr.status === 201 && doc.attachment && doc.attachment.id) {
-                            entry.id = doc.attachment.id;
-                            meter.update({ state: 'done', done: file.size, total: file.size });
-                        } else {
-                            const message = doc.detail || `“${file.name}” could not be attached`;
-                            meter.update({ state: 'failed', message }); say(message, true);
-                        }
-                    };
-                    xhr.onerror = () => { entry.uploading = false; const message = `“${file.name}” could not be attached`; meter.update({ state: 'failed', message }); say(message, true); };
-                    xhr.onabort = () => { entry.uploading = false; };
-                    const data = new FormData(); data.append('file', file, file.name); xhr.send(data);
+            // ── The files: the kit's chips, Codes' way of sending them ──────────────────────────────────────
+            // The kit's composer (openvibe-shared/ov-composer.js) draws the + button and its menu and shows the
+            // picked files as chips above the box. Codes sends each file up as it is picked (the route the picker
+            // used), so the message names the ids of its files. The server's rules are the ones that count
+            // (server/domain/attachments.js), in the server's words.
+            const limits = form.dataset.chFiles || '';
+            // The + button's title says what a file may be; the note says it only when a file is refused.
+            const plus = form.querySelector('[data-ovt-attach] > summary');
+            if (plus && limits) { plus.title = limits; plus.setAttribute('aria-label', 'Attach files'); }
+            // The server's rules: at most 10 files, 20 MB each, 50 MB a message, and no program.
+            const blocked = new Set(['.app', '.apk', '.bat', '.bin', '.cmd', '.com', '.deb', '.dll', '.dmg', '.elf', '.exe', '.jar',
+                '.msi', '.pkg', '.ps1', '.rpm', '.scr', '.sh', '.so', '.dylib', '.vb', '.vbs', '.wsf', '.cpl', '.msc', '.gadget', '.hta']);
+            const extOf = (name) => { const at = String(name || '').lastIndexOf('.'); return at > 0 ? String(name).slice(at).toLowerCase() : ''; };
+            /** Why the server would refuse this file, in the server's words (server/domain/attachments.js). */
+            const whyRefused = (file, others) => {
+                const name = String((file && file.name) || 'file');
+                const list = (others || []).filter((f) => f !== file);
+                const total = list.reduce((n, f) => n + (f.size || 0), 0) + (file.size || 0);
+                if (blocked.has(extOf(name))) return `${name}: programs and scripts cannot be attached`;
+                if (!file.size) return `${name} is empty`;
+                if (file.size > 20 * 1024 * 1024) return `${name} is larger than 20 MB`;
+                if (list.length + 1 > 10) return 'a message carries at most 10 files';
+                if (total > 50 * 1024 * 1024) return 'the files of one message are larger than 50 MB together';
+                return '';
+            };
+            /** One file up: the same route as before, with the progress the chip shows. */
+            const uploadFile = (file, onProgress) => new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/api/v1/attachments');
+                xhr.withCredentials = true;
+                xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / (e.total || 1)); };
+                xhr.onload = () => {
+                    let doc = {};
+                    try { doc = JSON.parse(xhr.responseText || '{}'); } catch { /* the answer is not JSON */ }
+                    if (xhr.status === 201 && doc.attachment && doc.attachment.id) resolve({ id: doc.attachment.id });
+                    else reject(new Error(String(doc.detail || `“${file.name}” could not be attached`).slice(0, 300)));
+                };
+                xhr.onerror = () => reject(new Error(`“${file.name}” could not be attached`));
+                xhr.onabort = () => reject(Object.assign(new Error('The upload was stopped'), { cancelled: true }));
+                const data = new FormData();
+                data.append('file', file, file.name);
+                xhr.send(data);
+            });
+            // A file the server would refuse never reaches the box: the note says why, in the server's words.
+            form.addEventListener('change', (e) => {
+                const input = e.target;
+                if (!input || input.type !== 'file' || !input.files || !input.files.length) return;
+                const inBox = form.__ovc && form.__ovc.files ? form.__ovc.files() : [];
+                const keep = [];
+                let why = '';
+                for (const file of Array.from(input.files)) {
+                    const problem = whyRefused(file, inBox.concat(keep));
+                    if (problem) { if (!why) why = problem; continue; }
+                    keep.push(file);
                 }
-                sendFile();
-                say(`${entries.length} file${entries.length === 1 ? '' : 's'} selected`);
-            }
-            if (uploadRoot && window.OVUpload) {
-                picker = OVUpload.picker(uploadRoot, {
-                    label: 'Attach files', accept: uploadRoot.dataset.accept, multiple: true,
-                    onFile: addFile,
-                    onRemove: (file) => {
-                        const i = entries.findIndex((entry) => entry.file === file);
-                        if (i < 0) return;
-                        const [entry] = entries.splice(i, 1);
-                        if (entry.xhr) entry.xhr.abort();
-                        entry.meter.destroy();
-                        if (entry.id) fetch(`/api/v1/attachments/${encodeURIComponent(entry.id)}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
-                        say(entries.length ? `${entries.length} file${entries.length === 1 ? '' : 's'} selected` : '');
-                    }
-                });
-                if (text) text.addEventListener('paste', (e) => {
-                    const files = e.clipboardData && e.clipboardData.files;
-                    if (files && files.length) { e.preventDefault(); picker.add(files); }
+                if (!why) return;
+                say(why, true);
+                if (!keep.length) { input.value = ''; return; }
+                try {
+                    const dt = new DataTransfer();
+                    keep.forEach((f) => dt.items.add(f));
+                    input.files = dt.files;
+                } catch { /* the browser keeps its own list */ }
+            }, true);
+            // The kit's transport for Codes' box: the file goes up as it is picked, and the message names its id.
+            if (window.OpenVibeComposer && window.OpenVibeComposer.mod) {
+                window.OpenVibeComposer.mod({
+                    id: 'codes-attachments',
+                    match: (box) => box.hasAttribute('data-ch-files'),
+                    upload: (file, onProgress) => {
+                        const inBox = form.__ovc && form.__ovc.files ? form.__ovc.files() : [];
+                        const why = whyRefused(file, inBox);
+                        if (why) { say(why, true); return Promise.reject(new Error(why)); }
+                        // A refusal from the server (a program, a size) says so in the note too.
+                        return uploadFile(file, onProgress).catch((err) => {
+                            say(String((err && err.message) || 'the file could not be attached'), true);
+                            throw err;
+                        });
+                    },
                 });
             }
             form.addEventListener('submit', async (e) => {
                 const submitter = e.submitter;
-                if (submitter && submitter.formAction && submitter.formAction !== form.action) return; // Stop: a plain post
+                // A button with its own route (Stop) posts there: the browser does it, we do not. The attribute
+                // is what matters, not submitter.formAction (which is the page's address when the button has none).
+                const own = submitter && submitter.getAttribute('formaction');
+                if (own && own !== form.getAttribute('action')) return;
                 form.classList.add('is-sending');
                 form.querySelectorAll('button').forEach((b) => { b.disabled = b.matches('[data-ovt-send]'); });
-                if (!entries.length) { say('Sending…'); return; }       // words alone: the plain form post
-                e.preventDefault();
-                // A file still going up is waited for, not dropped: the message names ids and the server checks them.
-                if (entries.some((x) => x.uploading)) say('Uploading the files…');
-                while (entries.some((x) => x.uploading)) await new Promise((done) => setTimeout(done, 120));
-                const failed = entries.filter((x) => !x.id);
-                if (failed.length) {
-                    say(`${failed.length} file${failed.length === 1 ? '' : 's'} could not be attached`, true);
+                const files = form.__ovc && form.__ovc.files ? form.__ovc.files() : [];
+                const ids = form.__ovc && form.__ovc.uploads ? form.__ovc.uploads() : [];
+                // A file that did not go up is never sent: the note says which, and the box keeps it.
+                if (files.length > ids.length) {
+                    const lost = files.length - ids.length;
+                    say(`${lost} file${lost === 1 ? '' : 's'} could not be attached`, true);
                     form.classList.remove('is-sending');
                     form.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+                    e.preventDefault();
                     return;
                 }
-                const ids = entries.map((x) => x.id);
+                if (!ids.length) { say('Sending…'); return; }        // words alone: the plain form post
+                e.preventDefault();
                 if (form.dataset.chApi) {
                     say(ids.length === 1 ? 'Sending the file…' : `Sending ${ids.length} files…`);
                     try {
                         const who = $('[name="who"]', form);
+                        const effort = $('[name="effort"]', form);
                         const res = await fetch(form.dataset.chApi, {
                             method: 'POST', credentials: 'same-origin',
                             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                            body: JSON.stringify({ text: text ? text.value : '', attachment_ids: ids, ...(who && who.value ? { who: who.value } : {}) }),
+                            // The pickers the person chose ride with the message, the ones behind the sliders too.
+                            body: JSON.stringify({
+                                text: text ? text.value : '', attachment_ids: ids,
+                                ...(who && who.value ? { who: who.value } : {}),
+                                ...(effort && effort.value ? { effort: effort.value } : {}),
+                            }),
                         });
                         const doc = await res.json().catch(() => ({}));
                         if (!res.ok) throw new Error(doc.detail || `the message was refused (${res.status})`);
@@ -277,18 +302,14 @@
                     }
                     return;
                 }
-                // The files are up: a plain form post names their ids (and sends the words and the pickers as usual).
+                // The plain form post: the kit's hidden fields carry the ids of the files. The file inputs
+                // are empty now (the files are up), so the form posts as ordinary fields: an empty file part would
+                // be a file the server refuses, and the whole message with it.
                 form.enctype = 'application/x-www-form-urlencoded';
-                for (const id of ids) {
-                    const hidden = document.createElement('input');
-                    hidden.type = 'hidden'; hidden.name = 'attachment_ids'; hidden.value = id;
-                    form.appendChild(hidden);
-                }
                 say(ids.length === 1 ? 'Sending the file…' : `Sending ${ids.length} files…`);
                 form.submit();
             });
         }
-
         // ── A running turn streams in: each tool as the agent takes it, and the finished turn when the attempt ends ──
         const stream = app.dataset.chStream;
         const live = $('[data-ovt-thread] > .ovt-turn[data-open]', app);

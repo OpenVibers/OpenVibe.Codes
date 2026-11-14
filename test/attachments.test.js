@@ -164,18 +164,20 @@ function multipart(fields, files) {
             assert.strictEqual((await t.get(`/api/v1/attachments/${rows[0].id}`, { as: ada, method: 'DELETE' })).status, 409);
         });
 
-        await check('the composers use the shared picker and keep a multipart fallback', async () => {
+        await check('the composers use the kit\u2019s attach menu and keep a multipart fallback', async () => {
             const home = await t.get('/', { as: ada });
             assert.strictEqual(home.status, 200);
             assert.match(home.text, /<form class="ovt-composer" id="ch-start"[^>]*enctype="multipart\/form-data"/, 'the start form posts multipart');
-            assert.match(home.text, /data-ch-upload/, 'the shared picker mount');
-            assert.match(home.text, /ov-upload\.js/, 'the shared picker script');
+            assert.match(home.text, /data-ovt-attach/, 'the kit\u2019s attach menu');
+            assert.match(home.text, /ov-composer\.js/, 'the kit\u2019s composer script');
+            assert.doesNotMatch(home.text, /data-ch-upload/, 'no picker of its own in the composer');
             assert.match(home.text, /<noscript><label>Attach files<input type="file" name="files"[^>]*multiple/, 'a native fallback takes files');
             assert.match(home.text, /accept="[^"]*image\/\*/, 'images, text, code, PDF and zip');
             assert.match(home.text, /From your OpenVibe files/, 'the library row');
             const task = await t.get(`/tasks/${taskId}`, { as: ada });
             assert.match(task.text, /enctype="multipart\/form-data"/, 'the reply composer too');
-            assert.match(task.text, /data-ch-upload/);
+            assert.match(task.text, /data-ovt-attach/, 'the reply composer has the same menu');
+            assert.doesNotMatch(task.text, /data-ch-upload/, 'no picker of its own there either');
         });
 
         await check('a multipart reply carries its own files on the next turn', async () => {
