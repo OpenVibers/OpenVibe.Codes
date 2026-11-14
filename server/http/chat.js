@@ -430,21 +430,28 @@ function createChatRoutes(ctx) {
     function effortPicker(selected = '', cls = '') {
         return `<label class="ch-pick${cls ? ` ${cls}` : ''}" title="How hard it thinks"><span class="ch-sr">Effort</span>${ico('sub')}<select name="effort" data-ch-effort data-ov-select="bare" data-ov-title="Effort" data-ovt-default="${esc(selected)}">${EFFORT.map(([v, l]) => `<option value="${v}"${selected === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${ico('chevron', 'ch-caret')}</label>`;
     }
-    // The composer's files (the kit's own attach menu, thread.composer): images, text and code, PDF and zip —
-    // the owner's words for the limits the server holds (domain/attachments.js). The person's OpenVibe files live
-    // on OpenVibe.Media, which names the library row until the shared files picker lands (composer-plumbing).
+    // The composer's files: the kit's own attach menu (thread.composer) draws one + button whose menu holds Files,
+    // Photos and videos, Take a photo and From your OpenVibe files. The limits are the + button's title now
+    // (the owner, 11-14: the note repeated them on every page); they show in the note only when a file is
+    // refused. The server keeps the rules themselves (server/domain/attachments.js).
     const ATTACH_ACCEPT = 'image/*,text/*,application/pdf,application/zip,.pdf,.zip,.md,.markdown,.json,.js,.ts,.jsx,.tsx,.py,.css,.html,.xml,.yml,.yaml,.toml,.sql,.csv,.log,.txt';
     const MEDIA_LIBRARY = (() => { try { const m = require('openvibe-contracts').services.get('media'); return (m && m.publicOrigin) || null; } catch { return null; } })();
-    const ATTACH_NOTE = 'Files: up to 10, 20 MB each, 50 MB a message. Programs can\u2019t be attached.';
+    const ATTACH_LIMITS = 'Files: up to 10, 20 MB each, 50 MB a message. Programs can\u2019t be attached.';
     /** The kit's composer with Codes' pickers in its tools, where the work runs under the bar, and its JSON route. */
     function composer({ action, api = '', placeholder, pickers = '', options = '', examples = [], live = false, stopAction = '', note = '', id = null, where = '', files = false, value = '' }) {
         return thread.composer({
             action, id, placeholder, label: placeholder, tools: pickers,
-            attach: null,
+            // One + button with the kit's menu: the files ride with the message, and the page's own script sends them.
+            attach: files ? { accept: ATTACH_ACCEPT, menu: true, library: MEDIA_LIBRARY, name: 'files' } : null,
             options: options ? { html: options, label: 'Options' } : null, examples, value,
-            foot: `${files ? `<div data-ch-upload data-accept="${esc(ATTACH_ACCEPT)}"></div>${MEDIA_LIBRARY ? `<a href="${esc(MEDIA_LIBRARY)}">From your OpenVibe files</a>` : ''}<noscript><label>Attach files<input type="file" name="files" accept="${esc(ATTACH_ACCEPT)}" multiple></label></noscript>` : ''}${where}`,
-            note: files ? (note ? `${note} ${ATTACH_NOTE}` : ATTACH_NOTE) : note,
-            attrs: { ...(api ? { 'data-ch-api': api } : {}), ...(files ? { enctype: 'multipart/form-data' } : {}) },
+            foot: `${files ? `<noscript><label>Attach files<input type="file" name="files" accept="${esc(ATTACH_ACCEPT)}" multiple></label></noscript>` : ''}${where}`,
+            note,
+            attrs: {
+                ...(api ? { 'data-ch-api': api } : {}),
+                // The limits ride with the box (the + button's title); the ids of the files ride with the message.
+                // No kit "more" sheet (the + is the attach menu) and no AI caption on a picture: Codes is not a photo site.
+                ...(files ? { 'data-ch-files': ATTACH_LIMITS, 'data-ovc-ids': 'attachment_ids', 'data-ovc-no-more': true, 'data-ovc-caption': 'off' } : {}),
+            },
             busy: live, stopAction: live && stopAction ? stopAction : null, maxlength: 16000,
         });
     }
@@ -462,7 +469,10 @@ function createChatRoutes(ctx) {
             cls: page != null ? 'is-page' : '',
         });
         const body = `<div class="ch" data-chat${streamUrl ? ` data-ch-stream="${esc(streamUrl)}"` : ''}>${view}</div>`;
-        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css', 'thread.css', 'ov-upload.css', ...styles], sharedScripts: ['kit-web.js', 'ov-thread.js', 'ov-upload.js', ...sharedScripts], scripts: [...scripts, 'js/md.js', 'js/chat.js'], body: raw(body) });
+        // The kit's composer (ov-composer.js) is here, not fetched by the thread's script at runtime: Codes' own
+        // script joins it (the files' transport) before a person can pick anything.
+        const shared = [...new Set(['kit-web.js', 'ov-thread.js', 'ov-composer.js', 'ov-upload.js', ...sharedScripts])];
+        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${title} · Codes`, css: [...css, 'css/chat.css'], styles: ['kit.css', 'thread.css', 'ov-upload.css', ...styles], sharedScripts: shared, scripts: [...scripts, 'js/md.js', 'js/chat.js'], body: raw(body) });
     }
 
     /** The panel: who worked on it, and where the work is. */
@@ -728,18 +738,22 @@ function createChatRoutes(ctx) {
             // The agent the next turn runs on: the conductor's own, or the fallback its usage moves it to.
             const next = (view.usage && view.usage.next) || { agent: row.agent || 'claude-code', model: row.model };
             const nextAgent = agentOf(next.agent);
-            const pickers = `<span class="ch-chip ch-chip-static" title="${esc(`The next turn runs ${nextAgent.name} on your machine`)}">${avatar(nextAgent)}${esc(String(next.model || 'its default model'))}</span>` + whoPicker(`${next.agent}|${next.model || ''}`, { label: 'Who leads this task', ready: await readyFor(req), catalog: await aiModels() });
+            // The row keeps what the person must see (who leads); the rest waits behind the sliders.
+            const pickers = `<span class="ch-chip ch-chip-static" title="${esc(`The next turn runs ${nextAgent.name} on your machine`)}">${avatar(nextAgent)}${esc(String(next.model || 'its default model'))}</span>`;
+            const options = whoPicker(`${next.agent}|${next.model || ''}`, { label: 'Who leads this task', ready: await readyFor(req), catalog: await aiModels() });
             return frame(req, res, {
                 currentId: row.id, title: 'Conductor', heading: titleOf(row), state, panel: await sideHtml(row, view),
                 turns: [...errorTurns, ...await conductorThread(row, view)],
                 streamUrl: `/api/v1/tasks/${encodeURIComponent(row.id)}/events?last_event_id=${last && last.seq != null ? Number(last.seq) : 0}`,
-                composerHtml: row.outcome === 'stopped' ? '' : composer({ action: `/tasks/${encodeURIComponent(row.id)}/messages`, api: `/api/v1/conductor/${encodeURIComponent(row.id)}/messages`, placeholder: live ? 'Say something: it is the next turn' : 'What next?', pickers, files: true, note: live ? 'A message waits until the current turn ends; it is not lost.' : '' }),
+                composerHtml: row.outcome === 'stopped' ? '' : composer({ action: `/tasks/${encodeURIComponent(row.id)}/messages`, api: `/api/v1/conductor/${encodeURIComponent(row.id)}/messages`, placeholder: live ? 'Say something: it is the next turn' : 'What next?', pickers, options, files: true, note: live ? 'A message waits until the current turn ends; it is not lost.' : '' }),
             });
         }
         // The stream starts after the last line this page already shows.
         const seqRow = live ? await db.maybe('SELECT max(seq) AS seq FROM codes_session_lines WHERE task_id = $1', [row.id]) : null;
         const lastSeq = seqRow && seqRow.seq != null ? Number(seqRow.seq) : 0;
-        const pickers = whoPicker('', { label: 'Who carries on', auto: `Same agent (${agentOf(row.agent, agentNames()).name})`, ready: await readyFor(req), catalog: await aiModels() }) + effortPicker('');
+        // The row keeps who carries on; the effort waits behind the sliders with the rest.
+        const pickers = whoPicker('', { label: 'Who carries on', auto: `Same agent (${agentOf(row.agent, agentNames()).name})`, ready: await readyFor(req), catalog: await aiModels() });
+        const options = effortPicker('');
         return frame(req, res, {
             currentId: row.id, title: titleOf(row), heading: titleOf(row), state, panel: await sideHtml(row),
             turns: [...errorTurns, ...await taskThread(row)],
@@ -747,7 +761,7 @@ function createChatRoutes(ctx) {
             composerHtml: row.outcome === 'stopped' ? '' : composer({
                 action: `/tasks/${encodeURIComponent(row.id)}/continue`, api: `/api/v1/tasks/${encodeURIComponent(row.id)}/continue`, live,
                 stopAction: `/tasks/${encodeURIComponent(row.id)}/stop`,
-                placeholder: live ? 'Wait for this turn, or stop it' : 'Ask for a change, or tell it what to do next', pickers, files: true,
+                placeholder: live ? 'Wait for this turn, or stop it' : 'Ask for a change, or tell it what to do next', pickers, options, files: true,
             }),
         });
     });

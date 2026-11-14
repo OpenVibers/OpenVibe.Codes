@@ -70,26 +70,6 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch-pick .ch-i:not(.ch-caret){width:15px;height:15px}
 .ch-pick-repo input{width:min(240px,48vw);border:0;background:transparent;color:inherit;font:inherit;font-size:13px}
 .ch-pick-repo input:focus{outline:none}
-/* Files waiting in the composer: one row that wraps, a chip per file that never outgrows a phone; the upload is a
-   2px line along the chip's foot, and the remove keeps a 44px target inside a 32px chip. */
-.ch-files{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;min-width:0}
-.ch-files[hidden]{display:none}
-.ch-file{position:relative;overflow:hidden;max-width:100%;min-width:0;min-height:32px;padding:3px 2px 3px 6px;gap:7px;cursor:default;color:var(--ch-ink)}
-.ch-file:hover{color:var(--ch-ink);border-color:var(--ch-line)}
-.ch-file img{width:24px;height:24px;flex:none;border-radius:6px;object-fit:cover}
-.ch-file>svg{width:15px;height:15px;flex:none;color:var(--ch-soft)}
-.ch-file>span{min-width:0;max-width:24ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ch-file small{flex:none;font-size:11.5px;color:var(--ch-muted);font-variant-numeric:tabular-nums}
-.ch-file progress{position:absolute;left:0;right:0;bottom:0;width:100%;height:2px;border:0;-webkit-appearance:none;appearance:none;background:transparent;color:var(--ch-accent)}
-.ch-file progress[hidden]{display:none}
-.ch-file progress::-webkit-progress-bar{background:transparent}
-.ch-file progress::-webkit-progress-value{background:var(--ch-accent)}
-.ch-file progress::-moz-progress-bar{background:var(--ch-accent)}
-.ch-file .ch-icon-btn{position:relative;width:26px;height:26px;border-radius:999px;font-size:17px;line-height:1}
-.ch-file .ch-icon-btn::after{content:"";position:absolute;inset:-9px}
-.ch-file.is-bad{border-color:color-mix(in srgb,var(--ch-bad) 55%,var(--ch-line));color:var(--ch-bad)}
-.ch-file.is-bad small{color:var(--ch-bad)}
-@media (max-width:520px){.ch-file>span{max-width:16ch}}
 .ch .ovt-c-note.is-bad{color:var(--ch-bad)}
 .ch .ovt-composer.is-sending textarea{opacity:.6}
 
@@ -188,7 +168,7 @@ html[data-ov-motion=off] .ch-spark-list[aria-hidden],html[data-ov-motion=off] .c
 .ch .ch-usage-foot a{color:var(--ch-accent)}
 /* The home's line to the guided setup (2026-11-03): how far along, and what is next. */
 /* Setup, under the composer: a ring with the count, two left-aligned lines, never a centred line that wraps mid-phrase. */
-.ch .ch-setup-nudge{display:flex;align-items:center;gap:12px;width:100%;max-width:780px;margin:12px auto 0;padding:10px 12px 10px 10px;min-height:56px;box-sizing:border-box;border:1px solid var(--ch-line);border-radius:16px;background:var(--ch-card);color:var(--ch-soft);text-decoration:none;transition:border-color .15s,transform .15s}
+.ch .ch-setup-nudge{display:flex;align-items:center;gap:12px;width:100%;max-width:780px;margin:16px auto 0;padding:10px 12px 10px 10px;min-height:56px;box-sizing:border-box;border:1px solid var(--ch-line);border-radius:16px;background:var(--ch-card);color:var(--ch-soft);text-decoration:none;transition:border-color .15s,transform .15s}
 .ch .ch-setup-nudge:hover{border-color:color-mix(in srgb,var(--ch-accent) 50%,var(--ch-line))}
 .ch .ch-setup-ring{flex:none;position:relative;display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:conic-gradient(var(--ch-accent) calc(var(--p) * 1%),color-mix(in srgb,var(--ch-ink) 10%,transparent) 0)}
 .ch .ch-setup-ring::before{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--ch-card)}
@@ -237,3 +217,23 @@ transition:transform .34s cubic-bezier(.2,.9,.25,1.12),width .34s cubic-bezier(.
 @keyframes ch-fade{from{opacity:0}}
 html[data-ov-motion=reduced] .ch :is(.ch-for-new,.ch-for-openvibe,.ch-for-code){animation-name:ch-fade;animation-duration:.2s}
 html[data-ov-motion=reduced] .ch-modes.has-glide::before{transition-duration:.18s;transition-timing-function:ease}
+
+/* ── The composer's row (11-14, the owner: "things are offset … clashing with each other and looking all buggy"):
+   one row on one line — the + (attach), the mic, the repository chip and the options on the left, Send on the
+   right, all 40 px tall, the same row on a computer. The repository chip shrinks with an ellipsis, so the row
+   never wraps, even at 360 px. ── */
+.ch .ovt-composer{grid-template-columns:minmax(0,1fr)}   /* the box never grows past its column, so the page never widens */
+.ch .ovt-composer .ovt-c-row{flex-wrap:nowrap}
+.ch .ovt-composer .ovt-c-tools{flex-wrap:nowrap;gap:6px}   /* the kit's own rule lets the row wrap; ours does not */
+.ch .ovt-composer .ovt-c-tools > *{flex:none}
+.ch .ovt-composer .ovt-c-tools > .ovt-attach-menu{order:-1}   /* the + first: the kit puts the mic in front of it */
+.ch .ovt-composer .ovt-c-tools > .ovt-opts-chips{flex:0 1 auto;min-width:0;overflow:hidden}
+.ch .ovt-composer .ovt-c-tools .ch-pick{height:40px;flex:0 1 auto;min-width:0;overflow:hidden}
+.ch .ovt-composer .ovt-c-tools .ch-pick select{flex:0 1 auto;min-width:0;max-width:100%}
+.ch .ovt-composer .ovt-c-tools .ch-pick-repo{flex:0 1 auto;min-width:64px;max-width:min(220px,max(72px,calc(100vw - 240px)))}
+.ch .ovt-composer .ovt-c-tools .ch-pick-repo input{flex:1 1 auto;width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* The note is the box's own line: the composer grows with it, and nothing under the composer is covered by it. */
+.ch .ovt-composer .ovc-files{min-width:0;max-width:100%}   /* the chips scroll sideways; the page never grows */
+.ch .ovt-composer > .ovt-c-note{position:static;margin:6px 4px 0;text-align:left;font-size:12.5px}
+.ch .ovt-dock:has(.ovt-c-note:not(:empty)){padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+.ch .ovt.is-start .ovt-dock:has(.ovt-c-note:not(:empty)){padding-bottom:max(24px,env(safe-area-inset-bottom,0px))}
