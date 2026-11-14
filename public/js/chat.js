@@ -281,10 +281,16 @@
                     say(ids.length === 1 ? 'Sending the file…' : `Sending ${ids.length} files…`);
                     try {
                         const who = $('[name="who"]', form);
+                        const effort = $('[name="effort"]', form);
                         const res = await fetch(form.dataset.chApi, {
                             method: 'POST', credentials: 'same-origin',
                             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                            body: JSON.stringify({ text: text ? text.value : '', attachment_ids: ids, ...(who && who.value ? { who: who.value } : {}) }),
+                            // The pickers the person chose ride with the message, the ones behind the sliders too.
+                            body: JSON.stringify({
+                                text: text ? text.value : '', attachment_ids: ids,
+                                ...(who && who.value ? { who: who.value } : {}),
+                                ...(effort && effort.value ? { effort: effort.value } : {}),
+                            }),
                         });
                         const doc = await res.json().catch(() => ({}));
                         if (!res.ok) throw new Error(doc.detail || `the message was refused (${res.status})`);
