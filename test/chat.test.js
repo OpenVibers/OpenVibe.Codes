@@ -84,6 +84,8 @@ const { stepKind } = require('../server/http/chat');
             ['new', 'openvibe', 'code'].forEach((v) => assert.match(h, new RegExp(`<input type="radio" name="mode" value="${v}" form="ch-start"`), `the ${v} card belongs to the form`));
             assert.ok(h.includes('<form class="ovt-composer" id="ch-start"'), 'the composer is the form the cards name');
             assert.ok(h.includes('<div class="ovt is-start" data-ovt>'), 'a start page: the greeting and the composer together');
+            // 4.250.0 (§AB.8/47): the network's messenger swaps in over the start page once the site's Shared has it.
+            assert.ok(/<script src="[^"]*js\/messenger\.js[^"]*"[^>]*><\/script>/.test(h), 'the messenger comes on the start page');
             assert.ok(!/name="repo"[^>]*required/.test(h), 'the repository is not required: something new needs none');
             assert.match(h, /<select name="project"[^>]*>[\s\S]*?<option value="OpenVibers\/OpenVibe\.Live"[^>]*>Live · openvibe\.live<\/option>/, 'OpenVibe projects are a list');
             assert.match(h, /<option value="OpenVibers\/OpenVibe\.Shared"/, 'the shared libraries too');

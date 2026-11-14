@@ -237,3 +237,8 @@ html[data-ov-motion=reduced] .ch-modes.has-glide::before{transition-duration:.18
 .ch .ovt-composer > .ovt-c-note{position:static;margin:6px 4px 0;text-align:left;font-size:12.5px}
 .ch .ovt-dock:has(.ovt-c-note:not(:empty)){padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
 .ch .ovt.is-start .ovt-dock:has(.ovt-c-note:not(:empty)){padding-bottom:max(24px,env(safe-area-inset-bottom,0px))}
+
+/* The messenger full-page (public/js/messenger.js, openvibe-shared ov-run.js OpenVibeRun.page): it fills the screen under
+   the navbar and above a phone's app bar; each side scrolls on its own. */
+.co-messenger { height: calc(100dvh - var(--ovnav-real-h, 52px) - var(--ovnav-appbar-h, 0px)); min-height: 420px; box-sizing: border-box; }
+html.co-has-messenger, html.co-has-messenger body { overflow: hidden; }
