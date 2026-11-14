@@ -145,7 +145,7 @@ function createMatchRecorder({ config = {}, fetchImpl = globalThis.fetch, tokens
         tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId,
         clientSecret: config.oauth.clientSecret, audience: BENCH_AUDIENCE, scope: BENCH_SCOPE, fetch: fetchImpl,
     }) : null);
-    const url = `${String((config.bench && config.bench.url) || 'https://bench.openvibe.services').replace(/\/+$/, '')}/api/v1/matches`;
+    const url = `${String((config.bench && config.bench.url) || 'https://openvibe.compare').replace(/\/+$/, '')}/api/v1/matches`;
     async function record(match) {
         if (!client) return { ok: false, absent: true, reason: `Codes has no Network client credentials for ${BENCH_AUDIENCE}` };
         let headers;

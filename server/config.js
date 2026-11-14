@@ -113,7 +113,7 @@ function load(env = process.env) {
                 'OPENVIBE_CODES_BASE_URL', 'OPENVIBE_CODES_API_KEY', 'OPENVIBE_CODES_MODEL', 'OPENVIBE_CODES_HEADERS'],
         },
         bench: {
-            url: trim(env.CODES_BENCH_URL || 'https://bench.openvibe.services'),
+            url: trim(env.CODES_BENCH_URL || 'https://openvibe.compare'),
             renderOrigin: trim(env.CODES_BENCH_RENDER_ORIGIN || 'https://bench-render.openvibe.services'),
             dailyTasks: Math.max(1, int(env.CODES_BENCH_DAILY_TASKS, 50)),
             maxMatrixSize: Math.max(1, int(env.CODES_BENCH_MAX_MATRIX, 100)),
