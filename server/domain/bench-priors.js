@@ -2,8 +2,9 @@
 
 /**
  * Bench priors for placement (agent plan A1, section 6): Bench's quality score per model on the kind of task Codes is
- * placing, cached for an hour. Codes asks the SDK's Bench client for the board; a Bench that does not answer leaves
- * the priors empty, so place() uses its 0.7 default (0.5 on the floor) and the task still runs.
+ * placing, cached for an hour. Codes asks the SDK's Compare client (openvibe-sdk/compare; Bench's API answers inside
+ * OpenVibe.Compare since 11-13) for the board; a Bench that does not answer leaves the priors empty, so place() uses its
+ * 0.7 default (0.5 on the floor) and the task still runs.
  *
  *   createBenchPriors({ config, fetchImpl, now, log }) →
  *     forTask('edit' | 'review') → { [model]: quality }   one board read per kind per hour
@@ -13,7 +14,7 @@
  * kind codes.patch to edit and codes.review to review; a model Bench has not seen simply has no prior.
  */
 const { createClient } = require('openvibe-sdk/core');
-const { createBenchClient } = require('openvibe-sdk/bench');
+const { createCompareClient } = require('openvibe-sdk/compare');
 
 const TTL_MS = 60 * 60_000;
 const BENCH_KIND = { edit: 'codes.patch', review: 'codes.review' };
@@ -22,7 +23,7 @@ function createBenchPriors({ config = {}, fetchImpl = globalThis.fetch, now = Da
     const bench = config.bench || {};
     const enabled = bench.priors !== false && !!bench.url;
     const client = enabled
-        ? createBenchClient(createClient({ baseUrls: { bench: bench.url }, autoDiscover: false, fetch: fetchImpl, timeoutMs: 4000, retries: 0 }), { baseUrl: bench.url })
+        ? createCompareClient(createClient({ baseUrls: { compare: bench.url }, autoDiscover: false, fetch: fetchImpl, timeoutMs: 4000, retries: 0 }), { baseUrl: bench.url })
         : null;
     const cache = new Map();   // Bench kind → { at, scores }
 
