@@ -87,3 +87,27 @@ Chat Completions API, and it is kept small and steady:
 - **grep through ripgrep** where it is installed (`OPENVIBE_CODES_RG` names it, `off` turns it off): the same
   `path:line: text` answer, 200 matches at most, no `.env`, no symlink followed, and off the server's event loop
   (the Live repository: 12-17 ms against 324-544 ms). A pattern only JavaScript reads (a look-behind) still works.
+
+## ACP agents: every agent that speaks the Agent Client Protocol
+
+`harness/adapters/acp.js` is one client for the Agent Client Protocol (JSON-RPC over the agent's stdin and stdout,
+agentclientprotocol.com), the protocol T3 Code, Zed and JetBrains drive agents with. `harness/acp-agents.json` pins
+16 agents from the public ACP registry, each at its exact version, launched with `npx` or `uvx` (a binary from the
+registry is never downloaded and run): Claude and Codex through their ACP bridges (`claude-acp`, `codex-acp`), Gemini CLI
+(`gemini-cli`), Qwen Code, Kimi Code, Grok, GitHub Copilot (`copilot-cli`), Cline, Kilo, LangChain's `deepagents`,
+Auggie, Qoder, CodeBuddy, GLM, Pi and Factory's Droid. `node scripts/acp-registry.js` refreshes the versions; an agent is
+added to its list by hand.
+
+- **One conversation:** `initialize` → `session/new` (or `session/load` to resume, when the agent can) →
+  `session/set_model` when the agent offers the asked model → `session/prompt` until its `stopReason`. Its
+  `session/update`s become Codes' events: text (chunks joined into whole messages), tool calls and their results, the
+  plan, the cost when the agent reports one.
+- **Codes answers the agent:** a permission request by the task's level (read: reads, searches and fetches; edit: also
+  edits, deletes and moves; full: also commands; a kind the protocol adds later needs full), and file reads and writes
+  inside the working directory only, with the API harness's own checks (no `..`, no link out, no `.env`, no `.git`
+  write). Anything else is "method not found".
+- **Stop:** `session/cancel`, then eight seconds before the process is killed. An agent's own words before a bare
+  "Internal error" (a plan's usage limit, a missing sign-in) are kept in the result.
+- **What it needs:** Node.js (`npx`) or uv (`uvx`) on the machine and the agent's own sign-in there; the first run fetches
+  the pinned package. Checked 11-15 against the real `claude-acp` (a read-only task: one tool call, the answer, the cost)
+  and `codex-acp` (the session opened; the plan's usage limit came back in words).

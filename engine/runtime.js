@@ -69,7 +69,19 @@ const CAPABILITY = Object.freeze({
  * the job pins its clone to `refs/codes/checkpoints/<task>/<run>/<n>` per turn (harness/checkpoints.js), whatever the
  * harness.
  */
+/**
+ * The ACP agents (harness/acp-agents.json, run by harness/adapters/acp.js): the protocol's stopReason is a structured
+ * end; session/load resumes a session the agent can load; Codes answers their permission requests and file reads and
+ * writes (client-boundary); what children an agent runs inside itself is not reported over the protocol.
+ */
+const ACP_MANIFEST = Object.freeze({
+    terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
+    subagents: 'none', context_handoff: 'session', enforcement: 'client-boundary',
+});
+const ACP_IDS = require('../harness/acp-agents.json').agents.map((a) => a.id);
+
 const MANIFEST = Object.freeze({
+    ...Object.fromEntries(ACP_IDS.map((id) => [id, ACP_MANIFEST])),
     'claude-code': Object.freeze({
         terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'native', context_handoff: 'session', enforcement: 'native',
