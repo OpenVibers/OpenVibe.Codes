@@ -87,6 +87,12 @@ Chat Completions API, and it is kept small and steady:
   mixed endings survive; `replace_all` edits every match; a miss names the closest lines (numbered like `read_file`)
   or says the edit is already there. The text is spliced in, so a `new_string` holding `$&` or `$1` is written as it is
   (`String.replace` rewrote those before).
+- **A summary when dropping is not enough** (after DeepSeek Harness and Codex): still over the limit, the earlier
+  turns are replaced by a summary the model writes (the state of the work: the task, facts found, what changed, what
+  failed, what is left; at most 500 words), one call through the same transport, its tokens and cost counted. The task
+  (the first words) and the current turn always stay, and the cut falls on a person's message, so every tool call keeps
+  its result. A summary that fails leaves the conversation as it was. `adapterOptions.compact: false` or
+  `OPENVIBE_CODES_COMPACT=off` turns it off.
 - **A valid resume.** The saved conversation keeps the system message and starts at a person's message, never at a
   tool result whose call was cut off.
 - **grep through ripgrep** where it is installed (`OPENVIBE_CODES_RG` names it, `off` turns it off): the same
