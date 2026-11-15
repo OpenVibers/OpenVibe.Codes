@@ -125,6 +125,7 @@ openvibe-codes tools find "merge pdf"                       # tools for a need, 
 openvibe-codes tools run dns target=example.com             # run one (--input '{"…"}' for any JSON)
 openvibe-codes tools mine                                   # the tools you made
 openvibe-codes tools make "turn meeting notes into actions" # a model drafts a tool and makes it (private)
+openvibe-codes tools make "add sales tax to a price" --code # the same, as JavaScript that computes it
 ```
 
 `--json` prints the answer as JSON; a failed run exits 1. Signed out, the catalogue and public tools work;

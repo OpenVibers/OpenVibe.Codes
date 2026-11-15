@@ -15,6 +15,7 @@ function fake() {
         calls.push({ path: u.pathname + u.search, auth: (init.headers || {}).Authorization || null, body });
         if (u.pathname === '/mcp' && body.params.name === 'find_tools') return reply(200, { jsonrpc: '2.0', id: body.id, result: { content: [{ type: 'text', text: JSON.stringify([{ tool: 'dns', name: 'DNS', summary: 'DNS records', input: { properties: { target: {} } } }]) }] } });
         if (u.pathname === '/mcp' && body.params.name === 'run_tool') return reply(200, { jsonrpc: '2.0', id: body.id, result: body.params.arguments.tool === 'bad' ? { content: [{ type: 'text', text: 'input.target is required' }], isError: true } : { content: [{ type: 'text', text: '{"records":{"A":["1.2.3.4"]}}' }] } });
+        if (u.pathname === '/api/v1/made-tools/draft' && body.kind === 'code') return reply(200, { draft: { kind: 'code', name: 'Price with tax' }, body: { slug: 'price-with-tax', name: 'Price with tax', summary: 'Adds tax.', kind: 'code', input: { type: 'object', properties: { price: { type: 'number' } } }, output: { kind: 'text' }, source_code: 'function run(input) { return String(input.price * 1.1); }', net: 'deny', hosting: 'openvibe', visibility: 'private' } });
         if (u.pathname === '/api/v1/made-tools/draft') return reply(200, { draft: { name: 'Meeting notes', summary: 'Notes to actions.', instructions: 'Do it.', inputs: [{ label: 'Note', kind: 'long' }, { label: 'People', kind: 'number' }], answer: 'fields', fields: [{ label: 'Actions' }] } });
         if (u.pathname === '/api/v1/made-tools' && init.method === 'POST') return reply(201, { id: 'mtl_01JCZ3NDEKTSV4RRFFQ69G5FA1', name: body.name, summary: body.summary, visibility: body.visibility, input: body.input });
         if (u.pathname === '/api/v1/made-tools') return reply(200, { tools: [{ id: 'mtl_01JCZ3NDEKTSV4RRFFQ69G5FA1', name: 'Meeting notes', summary: 'x', visibility: 'private', version: 1, runs: 3 }] });
@@ -59,6 +60,18 @@ function fake() {
         lines.length = 0;
         assert.strictEqual(await tools(['mine'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 0);
         assert.match(lines[0], /Meeting notes\s+\(private, v1, 3 runs\)/);
+        delete process.env.OPENVIBE_TOOLS_TOKEN;
+    });
+
+    await check('make --code: Tools writes the run(input) code and its body is made as it is', async () => {
+        const f = fake(); const lines = [];
+        process.env.OPENVIBE_TOOLS_TOKEN = 'tok-ada';
+        assert.strictEqual(await tools(['make', 'add sales tax to a price', '--code'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 0);
+        const draft = f.calls.find((c) => c.path === '/api/v1/made-tools/draft');
+        assert.deepStrictEqual(draft.body, { description: 'add sales tax to a price', kind: 'code' });
+        const made = f.calls.find((c) => c.path === '/api/v1/made-tools' && c.body);
+        assert.deepStrictEqual([made.body.kind, made.body.visibility, /function run/.test(made.body.source_code), made.body.prompt], ['code', 'private', true, undefined]);
+        assert.match(lines.join('\n'), /Made Price with tax \(mtl_\w+, private\)[\s\S]*price=…/);
         delete process.env.OPENVIBE_TOOLS_TOKEN;
     });
 

@@ -25,6 +25,7 @@ const HELP = `openvibe-codes tools — OpenVibe Tools from the terminal
   openvibe-codes tools run <tool> [key=value …]      run one (--input '{"…"}' for any JSON input)
   openvibe-codes tools mine                          the tools you made
   openvibe-codes tools make "<what it should do>"    a model drafts a tool from your words and makes it
+      --code                JavaScript that computes the answer (math, formats, conversions), not a model
       --model <id>          the model it runs on (default auto: the cheapest that does the job)
       --public | --unlisted  who can use it (default: only you)
   --json                    the answer as JSON
@@ -84,6 +85,7 @@ function flags(argv) {
         if (a === '--json') o.json = true;
         else if (a === '--public') o.visibility = 'public';
         else if (a === '--unlisted') o.visibility = 'unlisted';
+        else if (a === '--code') o.code = true;
         else if (a === '--model' || a === '--input') o[a.slice(2)] = argv[++i];
         else if (a === '--help' || a === '-h') o.help = true;
         else o.rest.push(a);
@@ -157,8 +159,18 @@ async function tools(argv, { out = (s) => process.stdout.write(`${s}\n`), json: 
         if (sub === 'make') {
             const description = o.rest.join(' ').trim();
             if (description.length < 8) throw new ToolsError('Say in a sentence or two what the tool should do', 'tools.input');
-            const drafted = await http('/api/v1/made-tools/draft', { method: 'POST', body: { description }, auth: true, ...opts });
-            const made = await http('/api/v1/made-tools', { method: 'POST', body: bodyOf(drafted.draft, { model: o.model || 'auto', visibility: o.visibility || 'private' }), auth: true, ...opts });
+            const drafted = await http('/api/v1/made-tools/draft', { method: 'POST', body: { description, kind: o.code ? 'code' : 'prompt' }, auth: true, ...opts });
+            // Tools answers the tool as POST takes it (body, since 11-15); an older Tools only the form's fields.
+            const visibility = o.visibility || 'private';
+            let body;
+            if (drafted.body) {
+                body = { ...drafted.body, visibility };
+                if (body.prompt && o.model) body.prompt = { ...body.prompt, model: o.model };
+            } else {
+                if (o.code) throw new ToolsError('This Tools cannot draft code tools yet: make it at openvibe.tools/make', 'tools.input');
+                body = bodyOf(drafted.draft, { model: o.model || 'auto', visibility });
+            }
+            const made = await http('/api/v1/made-tools', { method: 'POST', body, auth: true, ...opts });
             if (json) { out(JSON.stringify(made)); return 0; }
             const takes = Object.keys((made.input && made.input.properties) || {});
             out(`Made ${made.name} (${made.id}, ${made.visibility})\n    ${made.summary}\n    takes: ${takes.join(', ')}\n    try it: openvibe-codes tools run ${made.id} ${takes.map((k) => `${k}=…`).join(' ')}\n    change it: ${BASE()}/make#${made.id}`);
