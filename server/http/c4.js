@@ -768,8 +768,39 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
         ['project', 'Auto in the project', 'Run commands within the project automatically.'],
         ['full', 'Full access', 'Let the agent use the whole computer.'],
     ];
+    /**
+     * Settings → Issues as tasks (plan §AD.6 (2), domain/issue-tickets.js): the repositories the person watches for a
+     * label. An issue that gets the label becomes one of their tasks, with a pull request that closes it.
+     */
+    const issuesCardOf = async (req) => {
+        if (!viewer(req) || !ctx.issueTickets) return '';
+        const watches = await ctx.issueTickets.list(req.viewer.subject);
+        const row = (w) => `<li class="c4-issue-watch"><span><b>${esc(w.repo)}</b><small>label <code>${esc(w.label)}</code> · ${w.tickets === 1 ? '1 task' : `${w.tickets} tasks`}${w.last_error ? ` · <span class="c4-bad">${esc(w.last_error)}</span>` : (w.checked_at ? ' · checked' : ' · not checked yet')}</small></span><form method="post" action="/settings/issues/${encodeURIComponent(w.id)}/remove"><button class="ovk-btn ovk-btn--quiet" type="submit">Stop watching</button></form></li>`;
+        return `<section class="c4-card" id="issues"><h2>Issues as tasks</h2>
+<p class="c4-hint">Watch a repository for a label. When someone who can label issues there adds it, the issue becomes one of your tasks, and its pull request says "Fixes #" so merging it closes the issue. Issues labeled before you start watching are left alone.</p>
+${watches.length ? `<ul class="c4-issue-watches">${watches.map(row).join('')}</ul>` : ''}
+<form method="post" action="/settings/issues" class="c4-form-grid"><label>Repository <input name="repo" placeholder="owner/name" required autocomplete="off" spellcheck="false"></label><label>Label <input name="label" value="codes" required autocomplete="off" spellcheck="false" maxlength="50"></label><button class="c4-button" type="submit">Watch</button></form></section>`;
+    };
+    r.post('/settings/issues', form, async (req, res) => {
+        if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/settings#issues')}`);
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
+        try {
+            const w = await ctx.issueTickets.add(req.viewer.subject, { repo: req.body && req.body.repo, label: req.body && req.body.label });
+            return res.redirect(303, `/settings?ok=${encodeURIComponent(`Watching ${w.repo} for ${w.label}`)}#issues`);
+        } catch (e) {
+            return res.redirect(303, `/settings?error=${encodeURIComponent(String((e && e.status && e.message) || 'The repository could not be watched').slice(0, 180))}#issues`);
+        }
+    });
+    r.post('/settings/issues/:id/remove', form, async (req, res) => {
+        if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/settings#issues')}`);
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
+        const gone = await ctx.issueTickets.remove(req.viewer.subject, req.params.id);
+        return res.redirect(303, `/settings?${gone ? 'ok=Stopped%20watching' : 'error=No%20such%20repository'}#issues`);
+    });
+
     r.get('/settings', async (req, res) => {
         const settings = viewer(req) ? await userSettings.get(req.viewer.subject) : null;
+        const issuesCard = await issuesCardOf(req);
         // Each agent says what it is ready for (domain/readiness.js), drawn by Shared's select as a badge and a line.
         const fleetRows = viewer(req) && fleet ? await fleet.agents(req.viewer.subject, harnesses).catch(() => []) : [];
         const aware = agentReadiness(fleetRows);
@@ -823,7 +854,7 @@ ${report.days.length ? `<div class="table-wrap" tabindex="0" role="region" aria-
 <div class="c4-safety" role="group" aria-label="Safety level">${SAFETY_OPTIONS.map(([value, title, desc]) => `<label class="c4-safety-card"><input type="radio" name="safety" value="${value}"${settings.safety === value ? ' checked' : ''}><span><b>${title}</b><small>${desc}</small></span></label>`).join('')}</div>
 ${conductorSection}
 <button class="c4-button" type="submit">Save settings</button>
-</form></section><section class="c4-card"><h2>Model plan</h2><p>Set a default for planning, building and checking tasks.</p><a class="ovk-btn ovk-btn--quiet" href="/settings/model-plan">Edit model plan</a></section>` : signIn(req)}`;
+</form></section><section class="c4-card"><h2>Model plan</h2><p>Set a default for planning, building and checking tasks.</p><a class="ovk-btn ovk-btn--quiet" href="/settings/model-plan">Edit model plan</a></section>${issuesCard}` : signIn(req)}`;
         page(req, res, 'Settings', wrap(content));
     });
     r.post('/settings', form, async (req, res) => {

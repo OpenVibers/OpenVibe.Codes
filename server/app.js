@@ -173,6 +173,8 @@ async function createApp(opts = {}) {
     // A ticket follows its pull request (AL5): bindings need tasks (a follow-up is a task), and tasks need
     // bindings (a terminal result with a PR binds it) — wired to each other here, not in a constructor.
     ctx.prBindings = require('./domain/pr-bindings').createPrBindings({ store, tasks, outbox, config, log });
+    // GitHub issues as tasks (plan §AD.6 (2)): a watched repository's labeled issues; started by server/index.js.
+    ctx.issueTickets = require('./domain/issue-tickets').createIssueTickets({ store, tasks, config, log });
     tasks.attachBindings(ctx.prBindings);
     // Race mode (compare-arena-ecosystem.md §5): one task, two harnesses, one budget, the tests first and the merge
     // later. Its sides are ordinary tasks, so tasks tells it when a side ended; its check jobs are its own rows.
