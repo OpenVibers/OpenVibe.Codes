@@ -49,6 +49,47 @@ const DOCK_MODES = ['create', 'openvibe', 'repo', 'make'];
 // of the person's own recent repositories (prose like "and/or" is not a repository).
 const GIT_URL = /(?:https?:\/\/(?:www\.)?(?:github\.com|gitlab\.com|codeberg\.org|bitbucket\.org|git\.openvibe\.codes)\/[\w.-]+\/[\w.-]+|git@[\w.-]+:[\w.-]+\/[\w.-]+)/i;
 
+/** A Run API run id (a task, "codes:" before it or "~N" after it, as the Frame writes it) → the task id, or null. */
+function runTaskId(raw) {
+    const m = /^(?:codes:)?(tsk_[0-9A-HJKMNP-TV-Z]{26})(?:~[1-9][0-9]*)?$/.exec(String(raw || ''));
+    return m ? m[1] : null;
+}
+
+const RUN_EFFORTS = ['low', 'medium', 'high', 'max'];
+const RUN_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:\/#-]{0,99}$/;
+
+/**
+ * agents.message@1's USE as Codes runs it: { harness, model, effort } (a model by its id), null when absent, or
+ * { status, code, error } for one that is malformed (422) or names something Codes cannot run (409
+ * agents.use_unavailable: a model on the person's machine, an id Codes cannot pass to a harness, another field).
+ */
+function runUse(raw) {
+    if (raw === undefined || raw === null) return null;
+    const bad = (error) => ({ status: 422, code: 'runs.bad_use', error });
+    const cannot = (error) => ({ status: 409, code: 'agents.use_unavailable', error });
+    if (typeof raw !== 'object' || Array.isArray(raw)) return bad('use is { model, harness, effort }');
+    const other = Object.keys(raw).filter((k) => !['model', 'harness', 'effort'].includes(k));
+    if (other.length) return cannot(`a Codes run cannot change its ${other.join(' or ')}`);
+    const out = {};
+    if (raw.harness !== undefined) {
+        if (typeof raw.harness !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(raw.harness)) return bad('use.harness is a harness id');
+        out.harness = raw.harness;
+    }
+    if (raw.model !== undefined) {
+        const m = raw.model;
+        if (!m || typeof m !== 'object' || typeof m.id !== 'string' || !m.id) return bad('use.model is { id, … }');
+        if (m.source === 'machines') return cannot('a Codes run cannot use a model on your own machine yet: pick one from OpenVibe, your keys or a plan');
+        if (!RUN_MODEL.test(m.id)) return cannot(`Codes cannot run the model ${m.id.slice(0, 100)}`);
+        out.model = m.id;
+        if (RUN_EFFORTS.includes(m.effort)) out.effort = m.effort;
+    }
+    if (raw.effort !== undefined) {
+        if (!RUN_EFFORTS.includes(raw.effort)) return bad('use.effort is low, medium, high or max');
+        out.effort = raw.effort;
+    }
+    return Object.keys(out).length ? out : bad('use names a model, a harness or an effort');
+}
+
 function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, modelPlans = null, fleet = null, sharing = null, conductor = null, attachments = null, races = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
@@ -586,6 +627,67 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
         if (!(config.agentUiSetting ? config.agentUiSetting() : config.agentUi)) return problem(req, res, 404, 'codes.runs_disabled', 'Run streams are disabled.');
         return agentRuns.stream(req, res, row);
+    });
+
+    /**
+     * The Run API's message (agents.message@1, Contracts 0.434.0), on the runs the Frame reads above. TEXT carries the
+     * task on, or waits for the next attempt while one runs (as /tasks/:id/message). USE swaps what runs from this turn
+     * on, in the same task and thread: another harness (a hand-over carrying the conversation so far), another model,
+     * another effort. A swap needs the task between attempts (409 agents.run_busy while one runs); a task stopped on
+     * purpose is 409 agents.run_closed; a model or harness Codes cannot run is 409 agents.use_unavailable, and nothing
+     * changes. The answer is the person's step (agents.step@1): 201 when the task carried on, 202 when it waits. An
+     * Idempotency-Key answers a repeat with the first answer for ten minutes.
+     */
+    const runMessages = new Map();
+    r.post('/runs/:id/messages', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        const id = runTaskId(req.params.id);
+        if (id) req.params.id = id;
+        const row = id && await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
+        const b = req.body || {};
+        const text = typeof b.text === 'string' ? b.text.trim() : '';
+        if (!text) return problem(req, res, 422, 'runs.say_needs_words', 'Say something ({ text })');
+        if (Array.isArray(b.attachments) && b.attachments.length) return problem(req, res, 422, 'codes.attachments_unsupported', 'A Codes run takes words here: attach files on the task\'s page');
+        const use = runUse(b.use);
+        if (use && use.error) return problem(req, res, use.status, use.code, use.error);
+        if (use && use.harness && !harnesses.list().some((a) => a.id === use.harness)) return problem(req, res, 409, 'agents.use_unavailable', `Codes has no harness ${use.harness}: see GET /api/v1/harnesses`);
+        const key = String(req.get('idempotency-key') || (typeof b.idempotency_key === 'string' ? b.idempotency_key : '') || '');
+        if (key && !/^[A-Za-z0-9._:~-]{8,200}$/.test(key)) return problem(req, res, 422, 'runs.bad_key', 'Idempotency-Key is 8 to 200 letters, digits or ._:~-');
+        const memo = key ? `${row.id}|${key}` : null;
+        if (memo && runMessages.has(memo)) { const seen = runMessages.get(memo); return res.status(seen.status).json(seen.body); }
+        const out = use
+            ? await taskStore.continueTask(row, { note: text, agent: use.harness || null, model: use.model || null, effort: use.effort || null })
+            : await taskStore.messageTask(row, { note: text });
+        if (out.error) {
+            if (out.error === 'no such task') return problem(req, res, 404, 'codes.task_not_found', out.error);
+            if (/needs words|at most/.test(out.error)) return problem(req, res, 422, 'codes.message_invalid', out.error);
+            if (/stopped on purpose/.test(out.error)) return problem(req, res, 409, 'agents.run_closed', out.error);
+            if (/still running/.test(out.error)) return problem(req, res, 409, 'agents.run_busy', out.error);
+            return problem(req, res, 409, 'codes.task_conflict', out.error);
+        }
+        if (use && out.live) return problem(req, res, 409, 'agents.run_busy', 'an attempt is running: stop it or let it end, then swap');
+        const last = await store.db.maybe('SELECT MAX(seq) AS seq FROM codes_session_lines WHERE task_id = $1', [row.id]);
+        const step = { run_id: row.id, seq: Number((last && last.seq) || 0) + 1, kind: 'message', from: 'person', text: text.slice(0, 4000), started_at: new Date().toISOString() };
+        const status = out.queued ? 202 : 201;
+        if (memo) {
+            runMessages.set(memo, { status, body: step });
+            const timer = setTimeout(() => runMessages.delete(memo), 600_000);
+            if (timer.unref) timer.unref();
+        }
+        if (!out.queued) log.info(`[Codes] task ${row.id} carried on by a run message${use ? ` (${Object.keys(use).join(', ')} swapped)` : ''}`);
+        return res.status(status).json(step);
+    });
+
+    /** The Run API's stop: the running attempt stops, as /tasks/:id/stop; the answer is the run, stopped. */
+    r.post('/runs/:id/stop', guardAny('codes.task.cancel'), actorLimits.budget('codes.task.start'), async (req, res) => {
+        const id = runTaskId(req.params.id);
+        if (id) req.params.id = id;
+        const row = id && await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
+        const out = await taskStore.stopTask(row);
+        if (out.error) return problem(req, res, 409, 'codes.task_conflict', out.error);
+        log.info(`[Codes] task ${row.id} stopped through the Run API by ${req.principal.via || req.principal.subject}`);
+        return res.json({ id: row.id, ref: `codes:${row.id}`, status: 'stopped' });
     });
 
     /** The next attempt now: the owner carries the task on, or hands it to another agent. */
