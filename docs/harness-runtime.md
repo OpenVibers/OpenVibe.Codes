@@ -82,6 +82,11 @@ Chat Completions API, and it is kept small and steady:
   run's `adapterOptions.contextChars`) the oldest tool output, and the text of old file writes and edits, become a
   short note saying how much was dropped, down to 60% in one go, so the cached prefix breaks once a trim and not on
   every turn. The system message and the last eight messages are never touched.
+- **Edits that land** (ported from OpenCode's edit tool, MIT): `old_string` is matched exactly, then forgiving
+  typographic quotes, dashes and odd spaces, then trailing whitespace line by line, on the file's LF view so CRLF and
+  mixed endings survive; `replace_all` edits every match; a miss names the closest lines (numbered like `read_file`)
+  or says the edit is already there. The text is spliced in, so a `new_string` holding `$&` or `$1` is written as it is
+  (`String.replace` rewrote those before).
 - **A valid resume.** The saved conversation keeps the system message and starts at a person's message, never at a
   tool result whose call was cut off.
 - **grep through ripgrep** where it is installed (`OPENVIBE_CODES_RG` names it, `off` turns it off): the same

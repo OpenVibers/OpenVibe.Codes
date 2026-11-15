@@ -20,6 +20,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { createExchangeClient } = require('openvibe-sdk/exchange');
 const ev = require('../events');
+const { applyEdit } = require('./edit-match');
 
 const SYSTEM = `You are a careful coding agent working in a repository on the user's machine. Use the tools to look before
 you change anything: list and read the files involved, make the smallest change that does what was asked, and keep the
@@ -31,7 +32,7 @@ const TOOL_DEFS = {
     read_file: { level: 'read', description: 'Read a text file. Optional 1-based line offset and line limit.', parameters: { type: 'object', properties: { path: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer' } }, required: ['path'] } },
     grep: { level: 'read', description: 'Search files for a regular expression; returns path:line: text matches.', parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' } }, required: ['pattern'] } },
     write_file: { level: 'edit', description: 'Create or replace a file with the given content.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } },
-    edit_file: { level: 'edit', description: 'Replace one exact, unique occurrence of old_string with new_string in a file.', parameters: { type: 'object', properties: { path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' } }, required: ['path', 'old_string', 'new_string'] } },
+    edit_file: { level: 'edit', description: 'Replace one unique occurrence of old_string with new_string in a file (replace_all: every one). Copy old_string from read_file without its line numbers; small whitespace or quote differences are forgiven.', parameters: { type: 'object', properties: { path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean' } }, required: ['path', 'old_string', 'new_string'] } },
     run_command: { level: 'full', description: 'Run a shell command in the working directory (two-minute limit).', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } },
 };
 const LEVELS = { read: 1, edit: 2, full: 3 };
@@ -387,12 +388,14 @@ function runTool(name, args, cwd) {
     if (name === 'edit_file') {
         const f = inside(cwd, a.path, { write: true });
         if (f instanceof Error) return [f.message, true];
+        // OpenCode's matching (harness/adapters/edit-match.js): exact, then forgiving quotes and dashes, then trailing
+        // whitespace, CRLF-safe; a miss says where the closest lines are. The text is spliced in, never through
+        // String.replace (whose $& and $1 would rewrite a new_string that contains them).
         const text = fs.readFileSync(f, 'utf8');
-        const old = String(a.old_string || '');
-        const count = old ? text.split(old).length - 1 : 0;
-        if (count !== 1) return [count ? `old_string occurs ${count} times: add context so it is unique` : 'old_string not found: read the file first', true];
-        fs.writeFileSync(f, text.replace(old, String(a.new_string == null ? '' : a.new_string)));
-        return [`edited ${path.relative(cwd, f)}`, false];
+        const out = applyEdit(text, a.old_string, a.new_string, { replaceAll: a.replace_all === true });
+        if (out.error) return [out.error === 'old_string not found' ? `old_string not found${out.hint ? `. ${out.hint}` : ': read the file first'}` : out.error, true];
+        fs.writeFileSync(f, out.text);
+        return [`edited ${path.relative(cwd, f)}${out.count > 1 ? ` (${out.count} places)` : ''}${out.tier !== 'exact' ? ` (matched ignoring ${out.tier === 'unicode' ? 'typographic quotes and dashes' : 'trailing whitespace'})` : ''}`, false];
     }
     return [`unknown tool ${name}`, true];
 }
