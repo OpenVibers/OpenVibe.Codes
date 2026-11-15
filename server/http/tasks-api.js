@@ -810,6 +810,23 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         return res.json({ stopped: gone.length > 0 });
     });
 
+    /**
+     * Rename (plan §AD.8, the session's ⋯ menu): the person names their task; an empty or null title gives it back the
+     * brief's first line. Only the person themself (their own token).
+     *   PATCH /api/v1/tasks/:id { title } → codes.task@1
+     */
+    r.patch('/tasks/:id', guardAny('codes.task.read'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!req.principal.owner) return problem(req, res, 403, 'codes.rename_owner_required', 'only the person themself renames a task');
+        const row = await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours');
+        const raw = req.body && Object.prototype.hasOwnProperty.call(req.body, 'title') ? req.body.title : undefined;
+        if (raw !== null && typeof raw !== 'string') return problem(req, res, 422, 'codes.title_needed', 'send the new name ({ title })');
+        const title = raw == null ? null : (String(raw).replace(/\s+/g, ' ').trim().slice(0, 200) || null);
+        const updated = await db.maybe('UPDATE run_tasks SET title = $1, updated_at = $2 WHERE id = $3 AND subject = $4 RETURNING *', [title, store.now(), row.id, req.principal.subject]);
+        if (!updated) return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours');
+        return res.json({ task: taskStore.present(updated) });
+    });
+
     r.post('/tasks/:id/stop', guardAny('codes.task.cancel'), actorLimits.budget('codes.task.start'), async (req, res) => {
         const row = await mine(req);
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');

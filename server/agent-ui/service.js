@@ -34,7 +34,7 @@ function createRunStream({ store, product, read, clean, fallback, pollMs = 1000,
     const snapshot = async (row) => {
         const s = await project(row);
         const iso = (v) => new Date(typeof v === 'number' || /^\d+$/.test(String(v)) ? Number(v) : v || 0).toISOString();
-        return clean({ id: s.id, product, title: oneLine(row.task || row.prompt || 'Agent run', 240), status: s.status === 'done' ? 'succeeded' : s.status,
+        return clean({ id: s.id, product, title: oneLine((typeof row.title === 'string' && row.title.trim()) || row.task || row.prompt || 'Agent run', 240), status: s.status === 'done' ? 'succeeded' : s.status,
             plan: s.plan.map((p) => ({ title: oneLine(p.title || p.content || 'Step', 240), status: ['todo', 'running', 'waiting', 'needs_you', 'done', 'failed', 'stopped'].includes(p.status) ? p.status : 'todo' })),
             steps: s.steps, sources: s.sources, result: s.result || parse(row.result) || null, started_at: iso(row.started_at || row.created_at), ended_at: s.terminal ? iso(s.endedAt || row.updated_at || row.ended_at || row.created_at) : null, cost_usd: s.cost_usd || Number(row.cost_usd) || null });
     };
