@@ -58,7 +58,7 @@ async function fakeFetch(url, init = {}) {
         await check('every field of every Codes namespace has a title, a 30+ character description and labelled options', async () => {
             const r = await cfg('GET', '/internal/config');
             assert.strictEqual(r.status, 200, r.text.slice(0, 300));
-            assert.deepStrictEqual(r.json().namespaces.map((n) => n.namespace), ['codes.ai', 'codes.accounts', 'codes.publishing']);
+            assert.deepStrictEqual(r.json().namespaces.map((n) => n.namespace), ['codes.ai', 'codes.accounts', 'codes.publishing', 'codes.harnesses']);
             for (const ns of r.json().namespaces) assert.deepStrictEqual(lintSchema(ns.schema), [], `${ns.namespace}: ${lintSchema(ns.schema).join('; ')}`);
         });
 

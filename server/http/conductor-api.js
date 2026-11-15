@@ -224,6 +224,7 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
             return problem(req, res, 422, 'conductor.anthropic_subtask', 'the conductor may start sub-tasks on any agent except an Anthropic one: it is the only Anthropic session here');
         }
         const agent = wanted;
+        if (agent && harnesses.isOff && harnesses.isOff(agent)) return problem(req, res, 422, 'codes.agent_off', 'That coding agent is turned off on OpenVibe; pick another.');
         if (agent && !harnesses.list().some((h) => h.id === agent)) return problem(req, res, 422, 'codes.agent_unknown', `agent is one of GET /api/v1/harnesses, and not an Anthropic one`);
         if (typeof b.repo !== 'string' || !/^https:\/\//.test(b.repo)) return problem(req, res, 422, 'codes.task_invalid', 'a sub-task needs the repository it works in (https://…)');
         let reportPath;

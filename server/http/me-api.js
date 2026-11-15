@@ -158,6 +158,7 @@ function createMeApi({ config, store, sso, keys, run, harnesses, userSettings = 
         delete bodyForValidate.goal;
         const check = validate('codes.task-start-request@1', bodyForValidate);
         if (!check.valid) return problem(req, res, 422, 'codes.task_invalid', check.errors.map((e) => `${e.instancePath || 'body'} ${e.message}`).join('; ').slice(0, 500));
+        if (b.agent && harnesses.isOff && harnesses.isOff(b.agent)) return problem(req, res, 422, 'codes.agent_off', 'That coding agent is turned off on OpenVibe; pick another.');
         if (b.agent && !harnesses.list().some((a) => a.id === b.agent)) return problem(req, res, 422, 'codes.agent_unknown', 'agent is one of GET /api/v1/harnesses, or absent for the router to pick');
         let args;
         try {
