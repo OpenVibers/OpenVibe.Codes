@@ -67,3 +67,23 @@ runtime.fits('mm', { subagents: 'native' });     // false: MiniMax Code declares
   harness does not declare it.
 - `test/harness-runtime.test.js` keeps the manifest, the catalog and both routers in step; a harness added to the
   catalog without a manifest fails it.
+
+## The API rows' own loop
+
+`deepseek`, `openvibe-ai` and `openai-compatible` run Codes' own loop (`harness/adapters/api.js`) over any
+Chat Completions API, and it is kept small and steady:
+
+- **A small fixed prompt.** About 540 tokens before the task (the system message and six tools, in a fixed name
+  order), byte-identical from one task to the next, so a provider's prefix cache holds it.
+- **Asked again when busy.** A 429 or a 503 is asked again twice and a 500, 502, 504, 408 or a dropped connection
+  once (it may have run), after the server's `Retry-After` (at most 30 s) or 2 s and then 6 s; the reader sees a
+  warning each time. Any other refusal ends the run with the server's words.
+- **A bounded conversation.** Past 240,000 characters (about 65k tokens; `OPENVIBE_CODES_CONTEXT_CHARS`, or the
+  run's `adapterOptions.contextChars`) the oldest tool output, and the text of old file writes and edits, become a
+  short note saying how much was dropped, down to 60% in one go, so the cached prefix breaks once a trim and not on
+  every turn. The system message and the last eight messages are never touched.
+- **A valid resume.** The saved conversation keeps the system message and starts at a person's message, never at a
+  tool result whose call was cut off.
+- **grep through ripgrep** where it is installed (`OPENVIBE_CODES_RG` names it, `off` turns it off): the same
+  `path:line: text` answer, 200 matches at most, no `.env`, no symlink followed, and off the server's event loop
+  (the Live repository: 12-17 ms against 324-544 ms). A pattern only JavaScript reads (a look-behind) still works.
