@@ -46,6 +46,8 @@ const TABLES = [
     // them and are erased with them, so a deleted account's replays stop answering.
     { table: 'codes_task_shares', subject: 'subject', file: 'replays.json', order: 'created_at', columns: ['token', 'task_id', 'created_at', 'revoked_at'] },
     { table: 'codes_model_plans', subject: 'subject', file: 'model-plans.json', order: 'updated_at' },
+    // The repositories a person watches for issues to work on (plan §AD.6 (2)): erased with them.
+    { table: 'codes_issue_watches', subject: 'subject', file: 'issue-watches.json', order: 'created_at', columns: ['id', 'repo', 'label', 'created_at', 'checked_at', 'tickets'] },
     // The files a person attached to a message (owner 2026-11-07): what they are and which turn they belong to. The
     // bytes are theirs too, but the export carries the record, not a second copy of every 20 MB file; deletion takes
     // the rows (and their bytes) with the person.
