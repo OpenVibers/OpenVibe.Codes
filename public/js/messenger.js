@@ -24,6 +24,43 @@
       document.head.appendChild(sc);
     });
   }
+  // 11-15 (the owner: the messenger is Actor's; Codes gets "a coding agent harness layout … the same underlying shared
+  // modular powerful system"): openvibe-shared 4.257.0's ov-harness.js draws the same runs as a harness (projects and
+  // their threads, the thread, what it changed). Before Codes serves it, the messenger stays.
+  function loadHarness() {
+    if (window.OpenVibeHarness && window.OpenVibeHarness.page) return Promise.resolve(window.OpenVibeHarness);
+    return new Promise(function (resolve) {
+      var sc = document.createElement('script'); sc.src = '/shared/ov-harness.js'; sc.async = true;
+      sc.onload = function () { resolve(window.OpenVibeHarness && window.OpenVibeHarness.page ? window.OpenVibeHarness : null); };
+      sc.onerror = function () { resolve(null); };
+      document.head.appendChild(sc);
+    });
+  }
+  /** The person's recent repositories, as the server-rendered page lists them (its chips and its repository field). */
+  function recentRepos() {
+    var out = [];
+    app.querySelectorAll('[data-ch-saved-repo]').forEach(function (b) { var t = (b.textContent || '').trim(); if (t && out.indexOf(t) < 0) out.push(t); });
+    var field = app.querySelector('input[name="repo"]');
+    var v = field && field.value ? String(field.value).trim().replace(/^https?:\/\/(www\.)?github\.com\//, '').replace(/\.git$/, '') : '';
+    if (v && out.indexOf(v) < 0) out.unshift(v);
+    return out.slice(0, 8);
+  }
+  /** Where a new task may run: OpenVibe, and the machines the server-rendered page offers (its Runs on picker). */
+  function places() {
+    var out = [{ kind: 'openvibe', name: 'OpenVibe' }];
+    app.querySelectorAll('select[name="machine"] option').forEach(function (o) {
+      var id = String(o.value || ''); if (!/^dev_[A-Za-z0-9_-]{1,80}$/.test(id) || o.disabled) return;
+      out.push({ kind: 'machine', id: id, name: (o.textContent || id).trim().slice(0, 60) });
+    });
+    return out;
+  }
+  /** Every harness Codes runs (its catalog), for the Agent picker; null when it does not answer. */
+  function harnesses() {
+    return fetch('/api/v1/harnesses', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { return j && Array.isArray(j.harnesses) ? j.harnesses.map(function (h) { return { id: h.id, name: h.name || h.id }; }) : null; })
+      .catch(function () { return null; });
+  }
   function tokenSoon() {
     return new Promise(function (resolve) {
       var start = Date.now();
@@ -41,20 +78,45 @@
   Promise.all([loadRun(), tokenSoon()]).then(function (got) {
     var R = got[0], token = got[1];
     if (!token) return;
+    return Promise.all([loadHarness(), harnesses()]).then(function (two) { show(R, two[0], token, two[1]); });
+  }).catch(function () { /* ov-run.js did not load: the server-rendered page stays */ });
+
+  function show(R, H, token, agents) {
+    var repos = recentRepos();
+    var where = places();
     var host = document.createElement('div'); host.className = 'co-messenger';
     app.replaceWith(host);
     document.documentElement.classList.add('co-has-messenger');
+    var opened = /^[a-z][a-z0-9-]{0,30}:[A-Za-z0-9._~-]{1,160}$/.test(open) ? open : null;
+    var place = function (p) {
+      try { if (p && p.ref) history.replaceState(null, '', '/?run=' + encodeURIComponent(p.ref)); else if (p && p.blank) history.replaceState(null, '', '/'); } catch (e) { /* the address stays */ }
+    };
+    if (H) {
+      document.documentElement.classList.add('co-has-harness');
+      var h = H.page(host, {
+        base: 'https://openvibe.network/api/frame',
+        token: function () { var N = window.OpenVibeNavbar; return (N && N.token && N.token()) || token; },
+        sibling: function (file) { return '/shared/' + file; },
+        repos: repos,
+        target: repos[0] ? { repo: repos[0] } : 'new',
+        // 4.258.0: which harness, and where it runs (Link machines from the page's own picker).
+        agents: agents || undefined,
+        places: where.length > 1 ? where : undefined,
+        open: opened,
+        onPlace: place,
+      });
+      if (prompt && h && typeof h.prefill === 'function') h.prefill(prompt);
+      return;
+    }
     var page = R.page(host, {
       base: 'https://openvibe.network/api/frame',
       token: function () { var N = window.OpenVibeNavbar; return (N && N.token && N.token()) || token; },
       agent: true, starters: STARTERS,
       actions: { base: 'https://openvibe.network' },
       sibling: function (file) { return '/shared/' + file; },
-      open: /^[a-z][a-z0-9-]{0,30}:[A-Za-z0-9._~-]{1,160}$/.test(open) ? open : null,
-      onPlace: function (p) {
-        try { if (p && p.ref) history.replaceState(null, '', '/?run=' + encodeURIComponent(p.ref)); else if (p && p.blank) history.replaceState(null, '', '/'); } catch (e) { /* the address stays */ }
-      },
+      open: opened,
+      onPlace: place,
     });
     if (prompt && page.main && page.main.prefill) page.main.prefill(prompt);
-  }, function () { /* ov-run.js did not load: the server-rendered page stays */ });
+  }
 })();
