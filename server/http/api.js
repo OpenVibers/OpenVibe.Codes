@@ -30,6 +30,8 @@ function createApi(ctx) {
     r.get('/harnesses/models', reads, (req, res) => res.set('Cache-Control', 'public, max-age=300').json({ agents: require('../data/models').list(harnesses) }));
 
     r.get('/harnesses', reads, (req, res) => {
+        // ?all=1: every harness, the ones the owner turned off marked off (Network's AI setup lists them to turn back on).
+        if (req.query.all === '1' && typeof harnesses.all === 'function') return res.json({ harnesses: harnesses.all() });
         res.json({ harnesses: harnesses.list().map((h) => ({ ...h, agents: harnesses.agents(h.id) })) });
     });
 

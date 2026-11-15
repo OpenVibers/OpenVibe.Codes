@@ -60,6 +60,7 @@ const { createCodesReadiness } = require('./observability');
 const { createActorLimits } = require('./http/actor-limits');
 const createAiCatalogConfig = require('./ai-catalog-config').create;
 const createOwnerInputs = require('./owner-inputs-config').create;
+const createHarnessConfig = require('./harness-config').create;
 const { createOwnerInputTests } = require('./owner-inputs-tests');
 const { createMachines } = require('./domain/machines');
 const { createMemory } = require('./domain/memory');
@@ -102,12 +103,15 @@ async function createApp(opts = {}) {
     config.github = config.github || {};
     Object.defineProperty(config.github, 'token', { enumerable: true, configurable: true, get: () => fromPanel('github.token', envGithubToken) });
     const findTest = createOwnerInputTests({ ownerInputs, fetchImpl: opts.fetchImpl || globalThis.fetch });
-    const aiCatalogConfig = await createAiCatalogConfig({ db: store.db, keys, config, env: opts.env || process.env, log, also: ownerInputs.stores, test: findTest });
+    // Which coding agents people may use and each one's default model (codes.harnesses; plan §AD.9 step 3).
+    const harnessConfig = await createHarnessConfig({ db: store.db, env: opts.env || process.env, log });
+    const aiCatalogConfig = await createAiCatalogConfig({ db: store.db, keys, config, env: opts.env || process.env, log, also: [...ownerInputs.stores, harnessConfig.store], test: findTest });
     Object.defineProperty(config.aiCatalog, 'enabled', { enumerable: true, configurable: true, get: () => aiCatalogConfig.get('catalog') });
     config.agentUiSetting = () => aiCatalogConfig.get('agentRuns');
     const sso = createSso({ config, keys, fetchImpl: fetchImpl || globalThis.fetch, now: store.now, log });
     // The harness catalog (server/data/harness-offers.json), read once: a bad seed row fails boot.
-    const harnesses = createHarnesses();
+    // The owner's switches apply at once (codes.harnesses): an off agent leaves the catalogue, a default model leads.
+    const harnesses = harnessConfig.gate(createHarnesses());
     // Sessions, the run.job.* consumer and the codes.task.* outbox share one store and one clock.
     const sessions = createSessionLines({ store, config, log, media: require('./media').createMedia({ config, log }) });
     const outbox = createOutbox({ store, log, baseUrl: config.baseUrl });
