@@ -43,6 +43,8 @@ details[open]>summary .ch-caret{rotate:180deg}
 .ch-res-fold li span{color:var(--ch-muted)}
 .ch-res-line a{color:var(--ch-accent);font-weight:600}
 .ch-res-line.ch-muted{font-size:13.5px}
+/* What one turn changed by itself (Codes next (4)): a fold under that turn's reply */
+.ch-turn-files{margin:8px -6px -6px}
 .ch-proof li{flex-wrap:wrap}
 .ch-proof em{font-style:normal;font-size:12px;font-weight:650;color:var(--ch-muted)}
 .ch-proof li.is-ok em{color:var(--ch-ok)}.ch-proof li.is-bad em{color:var(--ch-bad)}

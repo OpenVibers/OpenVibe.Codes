@@ -190,7 +190,7 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
     }
 
     /** An attempt ended: its state, why, what it cost. */
-    async function end(id, { state = 'failed', reason = null, why = null, cost_usd = null, tokens = null, steps = null, turns = null, session = null, model = null, machine = null, budget_hit = null, finished_at = null } = {}) {
+    async function end(id, { state = 'failed', reason = null, why = null, cost_usd = null, tokens = null, steps = null, turns = null, session = null, model = null, machine = null, budget_hit = null, finished_at = null, turn_files = null } = {}) {
         return await db.one(
             `UPDATE codes_attempts SET state = $2,
                 reason = COALESCE($3, reason),
@@ -203,9 +203,11 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
                 machine = COALESCE($10, machine),
                 budget_hit = COALESCE($11, budget_hit),
                 turns = COALESCE($13, turns),
+                turn_files = COALESCE($14::jsonb, turn_files),
                 finished_at = COALESCE($12::timestamptz, finished_at)
              WHERE id = $1 RETURNING *`,
-            [id, state, reason, why, cost_usd == null ? null : String(cost_usd), tokens, steps, session, model, machine, budget_hit, finished_at || store.iso(), turns],
+            [id, state, reason, why, cost_usd == null ? null : String(cost_usd), tokens, steps, session, model, machine, budget_hit, finished_at || store.iso(), turns,
+                turn_files == null ? null : JSON.stringify(turn_files)],
         );
     }
 
@@ -509,6 +511,8 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
             finished_at: iso(a.finished_at),
             created_at: iso(a.created_at),
             end_why: a.reason ? wordsOf(a.reason) : null,
+            // What this attempt changed by itself (migration 0043; null before it, or when nothing was measured).
+            turn_files: require('./turn-files').read(a.turn_files),
         };
     }
 

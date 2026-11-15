@@ -290,6 +290,23 @@ function createChatRoutes(ctx) {
             : live ? '' : `<p class="ovt-muted">${esc(attempt && attempt.end_why ? attempt.end_why : 'It ended without a word.')}</p>`;
         return { who: { ...a, sub: ran }, reply: workHtml(all, ms, { live, liveText }) + body };
     }
+    /**
+     * What one turn changed by itself (plan §AD.6, Codes next (4); the attempt's turn_files): a fold at the end of that
+     * turn's reply, when the task took more than one. A file the turn's own tools did not write (a patch, an install, a
+     * formatter) is marked as from elsewhere.
+     */
+    function turnChanges(a) {
+        const tf = a && a.turn_files;
+        const files = tf && Array.isArray(tf.files) ? tf.files.filter((f) => f && f.path) : [];
+        if (!files.length) return '';
+        const added = files.reduce((n, f) => n + (Number(f.added) || 0), 0), removed = files.reduce((n, f) => n + (Number(f.removed) || 0), 0);
+        const elsewhere = files.filter((f) => f.authored === false).length;
+        const word = { A: 'new', D: 'deleted', R: 'renamed', 'put back': 'put back' };
+        const row = (f) => `<li><code>${esc(f.path)}</code>${word[f.status] ? `<span>${esc(word[f.status])}</span>` : ''}${f.authored === false ? '<span>from elsewhere</span>' : ''}<span class="ch-add">+${esc(f.added ?? '·')}</span><span class="ch-del">−${esc(f.removed ?? '·')}</span></li>`;
+        const hint = tf.source === 'files' ? 'Measured file by file against the turn before.' : (elsewhere ? 'From elsewhere: the turn\'s own tools did not write it (a patch, an install or a formatter).' : '');
+        return `<div class="ch-result ch-turn-files"><details class="ch-res-fold"><summary>${ico('files')}<b>This turn: ${files.length}${tf.truncated ? '+' : ''} file${files.length === 1 ? '' : 's'}</b><span class="ch-add">+${added}</span><span class="ch-del">−${removed}</span>${elsewhere ? `<span class="ch-muted">${elsewhere} from elsewhere</span>` : ''}${ico('chevron', 'ch-caret')}</summary><ul>${files.map(row).join('')}</ul>${hint ? `<p class="ch-res-line ch-muted">${esc(hint)}</p>` : ''}</details></div>`;
+    }
+
     async function taskThread(row) {
         const names = agentNames();
         const attempts = tasks?.attempts ? (await tasks.attempts.list(row.id)).map((a) => ({ ...a, ...(tasks.attempts.present ? tasks.attempts.present(a) : {}) })) : [];
@@ -312,7 +329,9 @@ function createChatRoutes(ctx) {
                 else if (a.why) parts.push({ divider: String(a.why) });
             }
             const isLive = live && n === Number(attempts[attempts.length - 1].n);
-            parts.push({ n, open: isLive, you: mine, ...agentReply(agentOf(a.agent || row.agent, names), byAttempt.get(n) || [], { live: isLive, attempt: a }) });
+            const reply = agentReply(agentOf(a.agent || row.agent, names), byAttempt.get(n) || [], { live: isLive, attempt: a });
+            if (!isLive && attempts.length > 1) reply.reply += turnChanges(a);
+            parts.push({ n, open: isLive, you: mine, ...reply });
             mine = null;
             prev = a;
         }
