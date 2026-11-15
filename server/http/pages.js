@@ -184,7 +184,7 @@ for await (const event of harness.run({ prompt: 'fix the failing test', cwd: '.'
             title: 'Get started with the coding-agent harness',
             description: 'Install openvibe-codes and run coding tasks on Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code, the DeepSeek API or your own model, with hand-offs between them, from your terminal or your own code.',
             crumbs: [{ label: 'Get started' }],
-            body: html`<h1>Get started</h1>
+            body: html`<h1>Get started with coding agents</h1>
 <p><code>openvibe-codes</code> runs a coding task on whichever agent fits it, hands it to the next one when an agent fails, hits its limit or goes quiet, and keeps the whole run. It runs on your machine with the agents and keys you already have: nothing goes through OpenVibe, and it needs no account.</p>
 <h2 id="install">Install</h2>
 <p>Node.js 22 or newer, then:</p>
