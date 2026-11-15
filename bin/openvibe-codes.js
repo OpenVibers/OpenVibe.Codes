@@ -24,6 +24,9 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
   openvibe-codes agents                       which agents this machine can run, and why not the others
   openvibe-codes logins                      the coding CLIs here: installed, signed in, and their limit windows
   openvibe-codes route [--task edit] [--need harness:resume,…]   which agent a task would go to, and why
+  openvibe-codes swarm [--tickets 4] [--concurrency 3] [--agents a,b] [--planner <id>] "goal"
+                                       split a goal into tickets that run at once, each on its own agent and git
+                                       worktree, merged into one branch (yours is untouched)
   openvibe-codes run [options] "what to do"   run a task ("-" reads it from stdin)
       --task edit|review|long|resume   what kind of task (default edit)
       --agent <id>                     skip routing: claude-code, claude-other, codex, opencode, command-code,
@@ -210,6 +213,37 @@ async function main() {
             if (o.forAgent) { for (const l of agentOut.eventLines(run.runId, seq + 1, e)) { seq++; out(l); } }
             else if (o.json) out(JSON.stringify(e));
             else printEvent(e);
+        }
+        return last && last.type === 'result' && !last.is_error ? 0 : 1;
+    }
+    if (cmd === 'swarm') {
+        // One goal, split into tickets that run at once on their own agents and worktrees, merged into one branch.
+        let goal = o._.join(' ');
+        if (goal === '-') goal = await readStdin();
+        if (!goal || !goal.trim()) { out('what should the swarm do? openvibe-codes swarm "…"'); return 1; }
+        const { createSwarm } = require('../harness/swarm');
+        const controller = new AbortController();
+        process.on('SIGINT', () => { controller.abort(); });
+        const agents = String(o.agents || '').split(',').map((a) => a.trim()).filter(Boolean);
+        let swarm;
+        try {
+            swarm = createSwarm({ harness }).run({ goal, cwd: path.resolve(o.cwd || process.cwd()), agents, maxTickets: Number(o.tickets) || 4,
+                concurrency: Number(o.concurrency) || 3, permission: o.permission || 'edit', planner: o.planner || null, signal: controller.signal });
+        } catch (err) { out(`swarm: ${err.message}`); return 1; }
+        if (!o.json) out(dim(`swarm ${swarm.swarmId}`));
+        let last = null;
+        for await (const e of swarm) {
+            last = e;
+            if (o.json) { out(JSON.stringify(e)); continue; }
+            if (e.type === 'system' && e.subtype === 'swarm') {
+                if (e.phase === 'board') { out(e.text); for (const t of e.tickets) out(`  ${t.id} ${t.title}${t.agent ? ` · ${t.agent}` : ''}${t.files.length ? dim(` · ${t.files.join(', ')}`) : ''}`); }
+                else if (e.phase === 'ticket_end') out(`${e.status === 'done' ? '✔' : '✗'} ${e.ticket} ${e.status} (${e.changed} file${e.changed === 1 ? '' : 's'})`);
+                else out(dim(`${e.ticket ? `${e.ticket} ` : ''}${e.text || e.phase}`));
+            } else if (e.type === 'result') {
+                out(e.is_error ? `✗ ${e.result}` : `✔ ${e.result}`);
+            } else if (e.type === 'assistant' && e._ticket) {
+                for (const c of (e.message && e.message.content) || []) if (c.type === 'tool_use') out(dim(`  [${e._ticket}] ${c.name}`));
+            }
         }
         return last && last.type === 'result' && !last.is_error ? 0 : 1;
     }

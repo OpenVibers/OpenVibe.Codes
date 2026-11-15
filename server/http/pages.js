@@ -215,6 +215,7 @@ ${table(['Agent', 'What it needs'], [
 ${table(['Command', 'What it does'], [
                 [html`<code>agents</code>`, 'Which agents this machine can run, and why not the others.'],
                 [html`<code>route [--task edit] [--need harness:resume]</code>`, 'Which agent a task would go to, with the reason for every candidate.'],
+                [html`<code>swarm [--tickets 4] [--concurrency 3] [--agents a,b] "goal"</code>`, 'Split a goal into tickets that run at once, each on its own agent in its own git worktree, and merge them into one branch: yours is never touched.'],
                 [html`<code>run [options] "task"</code>`, html`Run a task. <code>--agent</code> skips routing, <code>--model</code> picks the first agent's model, <code>--cwd</code> sets where it works, <code>--attempts</code> caps the hand-offs (default 3), <code>--no-handoff</code> stops at the first result, <code>--json</code> prints the events. A task of <code>-</code> is read from stdin.`],
                 [html`<code>runs</code>`, 'The latest runs on this machine.'],
                 [html`<code>show &lt;run id&gt; [--json]</code>`, 'One run: each attempt, its session and the result; every event with --json.'],
