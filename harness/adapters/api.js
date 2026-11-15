@@ -42,6 +42,165 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'co
 const MAX_READ = 40_000;
 
 /**
+ * The conversation's size limit, in characters (about 65k tokens), and how much of its end is never trimmed. Every turn
+ * sends the whole conversation again, so a long run's old tool output is paid for on every later turn and, past the
+ * model's window, fails the run. When the conversation passes the limit, the oldest tool output (and the bodies of
+ * old file writes and edits) is replaced by a short note, down to 60% of the limit in one go: the provider's cached
+ * prefix breaks once per trim, not on every turn. OPENVIBE_CODES_CONTEXT_CHARS or the run's adapterOptions.contextChars changes it.
+ */
+const CONTEXT_CHARS = 240_000;
+const KEEP_TAIL = 8;
+const DROPPED = '[dropped:';
+
+function messageSize(m) {
+    let n = typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content || '').length;
+    if (Array.isArray(m.tool_calls)) for (const c of m.tool_calls) n += String((c && c.function && c.function.arguments) || '').length;
+    return n;
+}
+
+/**
+ * Trims messages in place when they pass budget characters: old tool results become a note saying how much was
+ * dropped, and old write_file/edit_file arguments keep their path with the text dropped. The system message and the
+ * last KEEP_TAIL messages are never touched. Answers how many characters were dropped (0: nothing to do).
+ */
+function trimContext(messages, budget, keepTail = KEEP_TAIL) {
+    let total = 0;
+    for (const m of messages) total += messageSize(m);
+    if (total <= budget) return 0;
+    const goal = Math.floor(budget * 0.6);
+    let dropped = 0;
+    for (let i = 1; i < messages.length - keepTail && total > goal; i++) {
+        const m = messages[i];
+        if (m.role === 'tool' && typeof m.content === 'string' && m.content.length > 200 && !m.content.startsWith(DROPPED)) {
+            const note = `${DROPPED} ${m.content.length} characters of earlier output; run the tool again if it is needed]`;
+            total -= m.content.length - note.length;
+            dropped += m.content.length - note.length;
+            m.content = note;
+        } else if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+            for (const c of m.tool_calls) {
+                const args = c && c.function && c.function.arguments;
+                if (typeof args !== 'string' || args.length <= 2000) continue;
+                let a;
+                try { a = JSON.parse(args); } catch { continue; }
+                if (!a || typeof a !== 'object') continue;
+                for (const k of ['content', 'old_string', 'new_string']) {
+                    if (typeof a[k] === 'string' && a[k].length > 500) a[k] = `${DROPPED} ${a[k].length} characters]`;
+                }
+                const short = JSON.stringify(a);
+                if (short.length < args.length) {
+                    total -= args.length - short.length;
+                    dropped += args.length - short.length;
+                    c.function.arguments = short;
+                }
+            }
+        }
+    }
+    return dropped;
+}
+
+/**
+ * The conversation kept for resume: at most max messages, the system message first and the rest starting at a
+ * person's message, so a resumed run never opens on a tool result whose call was cut off (a request the API refuses).
+ */
+function forResume(messages, max = 200) {
+    if (messages.length <= max) return messages;
+    const head = messages[0] && messages[0].role === 'system' ? [messages[0]] : [];
+    let i = messages.length - (max - head.length);
+    while (i < messages.length && messages[i].role !== 'user') i++;
+    return head.concat(messages.slice(i));
+}
+
+/**
+ * How many times a failed turn is asked again: a 429 or a 503 (nothing ran) twice, a 500/502/504/408 or a dropped
+ * connection once (it may have run, so only once), anything else never: a refusal is the answer.
+ */
+function retriesFor(status) {
+    if (status === 429 || status === 503) return 2;
+    if (status == null || status === 408 || status === 500 || status === 502 || status === 504) return 1;
+    return 0;
+}
+
+/** The wait before attempt+1: the server's Retry-After (at most 30 s), else base × 3^attempt. */
+function retryWait(attempt, retryAfter, base) {
+    const ra = Number(retryAfter);
+    if (retryAfter != null && String(retryAfter).trim() !== '' && Number.isFinite(ra) && ra >= 0) return Math.min(30_000, ra * 1000);
+    return Math.min(30_000, base * Math.pow(3, attempt));
+}
+
+function pause(ms, signal) {
+    return new Promise((resolve) => {
+        if (!ms) return resolve();
+        const timer = setTimeout(resolve, ms);
+        if (signal) signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
+}
+
+let rgPath;
+/** ripgrep's path when it is installed (OPENVIBE_CODES_RG names it, "off" turns it off), else null. Looked up once. */
+function findRg() {
+    if (rgPath !== undefined) return rgPath;
+    rgPath = null;
+    const named = process.env.OPENVIBE_CODES_RG;
+    if (named === 'off') return rgPath;
+    const dirs = named ? [] : String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
+    for (const p of named ? [named] : dirs.map((d) => path.join(d, 'rg'))) {
+        try { fs.accessSync(p, fs.constants.X_OK); rgPath = p; break; } catch { /* not here */ }
+    }
+    return rgPath;
+}
+
+/**
+ * grep through ripgrep where it is installed: the same answer as runTool's grep (path:line: text, 200 matches at most,
+ * lines cut at 300 characters, no .env file, no symlink followed, the skipped directories skipped), without reading
+ * every file in JavaScript on the server's event loop; it also leaves out what .gitignore ignores and binary files.
+ * A pattern ripgrep cannot read (JavaScript-only syntax such as a look-behind) and a missing ripgrep go to runTool.
+ */
+function grepTool(args, cwd, signal) {
+    const a = args || {};
+    const rg = findRg();
+    if (!rg) return Promise.resolve(runTool('grep', a, cwd));
+    const base = inside(cwd, a.path);
+    if (base instanceof Error) return Promise.resolve([base.message, true]);
+    const root = fs.realpathSync(cwd);
+    const globs = ['!.env*', ...[...SKIP_DIRS].map((d) => `!${d}/`)];
+    const argv = ['--null', '--line-number', '--no-heading', '--color', 'never', '--hidden', '--max-filesize', '1M',
+        '--max-columns', '2000', ...globs.flatMap((g) => ['-g', g]), '-e', String(a.pattern), '--', path.relative(root, base) || '.'];
+    return new Promise((resolve) => {
+        const child = spawn(rg, argv, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+        const hits = [];
+        let rest = '';
+        let err = '';
+        let full = false;
+        const timer = setTimeout(() => child.kill('SIGKILL'), 30_000);
+        const abort = () => child.kill('SIGKILL');
+        if (signal) signal.addEventListener('abort', abort, { once: true });
+        child.stdout.on('data', (d) => {
+            if (full) return;
+            const lines = (rest + d.toString()).split('\n');
+            rest = lines.pop();
+            for (const line of lines) {
+                const z = line.indexOf('\u0000');
+                const c = line.indexOf(':', z + 1);
+                if (z < 0 || c < 0) continue;
+                const file = path.relative(cwd, path.join(root, line.slice(0, z)));
+                hits.push(`${file}:${line.slice(z + 1, c)}: ${line.slice(c + 1, c + 301)}`);
+                if (hits.length >= 200) { full = true; child.kill('SIGKILL'); break; }
+            }
+        });
+        child.stderr.on('data', (d) => { err = (err + d.toString()).slice(-2000); });
+        const finish = (code) => {
+            clearTimeout(timer);
+            if (signal) signal.removeEventListener('abort', abort);
+            // 2: ripgrep could not read the pattern (or a path): JavaScript's own grep answers instead, as before.
+            if (code === 2 && !full && !hits.length) return resolve(runTool('grep', a, cwd));
+            resolve([hits.join('\n') || 'no matches', false]);
+        };
+        child.on('close', finish);
+        child.on('error', () => { clearTimeout(timer); resolve(runTool('grep', a, cwd)); });
+    });
+}
+
+/**
  * The shell a job may not run (the portal's deny list, enforced where the command would spawn).
  *
  * Every `;`, `&&`, `||`, `|` and `&` segment is checked from its first word (leading `sudo`/`command` skipped),
@@ -376,6 +535,9 @@ function apiAgent(spec) {
             const sessionId = t.resume || `api_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
             const startedAt = Date.now();
             const maxTurns = Math.max(1, Number(t.maxTurns) || 40);
+            const budget = Math.max(20_000, Number(t.contextChars) || Number(t.options && t.options.contextChars) || Number(env.OPENVIBE_CODES_CONTEXT_CHARS) || CONTEXT_CHARS);
+            const retryBase = Number.isFinite(Number(env.OPENVIBE_CODES_RETRY_MS)) && env.OPENVIBE_CODES_RETRY_MS !== undefined
+                ? Math.max(0, Number(env.OPENVIBE_CODES_RETRY_MS)) : 2000;
             let cancelled = false;
             const controller = new AbortController();
             if (t.signal) t.signal.addEventListener('abort', () => { cancelled = true; controller.abort(); }, { once: true });
@@ -399,8 +561,10 @@ function apiAgent(spec) {
                 let receiptId = null;
                 let adviceUsed = 0;
                 try {
-                    while (turns < maxTurns && !cancelled) {
+                    turnLoop: while (turns < maxTurns && !cancelled) {
                         turns++;
+                        const dropped = trimContext(messages, budget);
+                        if (dropped) yield ev.warning(`older tool output (${dropped} characters) was dropped to keep the conversation under ${budget} characters`);
                         const payload = { ...(spec.extra ? spec.extra(env) : {}), model, messages, tools, tool_choice: 'auto',
                             // Codes L31/AI AL3: the reasoning level the caller asked for, and the option to ask
                             // the AI router's advisor for guidance. AI ignores both when its own request does not
@@ -408,27 +572,56 @@ function apiAgent(spec) {
                             ...(t.effort ? { effort: t.effort } : {}), ...(t.advisor ? { advisor: t.advisor } : {}) };
                         let body;
                         let res = null;
-                        if (spec.exchange) {
-                            // The default path: the Exchange's compatible API through the SDK's Exchange client (the
-                            // person's or the service's Exchange key), with the same tool loop as before.
-                            try {
-                                body = await exchangeTurn(spec, { env, doFetch, payload, signal: controller.signal });
-                            } catch (err) {
-                                failure = err.status
-                                    ? `${spec.name} was refused by the Exchange (HTTP ${err.status}${err.code ? `, ${err.code}` : ''}): ${err.message}`
-                                    : `${spec.name} could not reach the Exchange: ${err.message}`;
-                                yield ev.error(failure);
-                                break;
+                        // A busy or briefly broken API is asked again (retriesFor), and the reader is told; a
+                        // refusal, or the last failure, ends the run as before.
+                        for (let attempt = 0; ; attempt++) {
+                            let wait = null;
+                            let why = '';
+                            res = null;
+                            if (spec.exchange) {
+                                // The default path: the Exchange's compatible API through the SDK's Exchange client (the
+                                // person's or the service's Exchange key), with the same tool loop as before.
+                                try {
+                                    body = await exchangeTurn(spec, { env, doFetch, payload, signal: controller.signal });
+                                } catch (err) {
+                                    const status = err.status == null ? null : Number(err.status);
+                                    if (!cancelled && err.code !== 'exchange.no_key' && attempt < retriesFor(status)) {
+                                        wait = retryWait(attempt, err.retryAfter, retryBase);
+                                        why = status ? `HTTP ${status}` : err.message;
+                                    } else {
+                                        failure = err.status
+                                            ? `${spec.name} was refused by the Exchange (HTTP ${err.status}${err.code ? `, ${err.code}` : ''}): ${err.message}`
+                                            : `${spec.name} could not reach the Exchange: ${err.message}`;
+                                        yield ev.error(failure);
+                                        break turnLoop;
+                                    }
+                                }
+                            } else {
+                                const bearer = spec.token ? await spec.token(env, doFetch) : key;
+                                try {
+                                    res = await doFetch(`${base}/chat/completions`, {
+                                        method: 'POST',
+                                        headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...extraHeaders(env) },
+                                        body: JSON.stringify(payload),
+                                        signal: controller.signal,
+                                    });
+                                } catch (err) {
+                                    if (cancelled || attempt >= retriesFor(null)) throw err;
+                                    wait = retryWait(attempt, null, retryBase);
+                                    why = err.message;
+                                }
+                                if (res && !res.ok && attempt < retriesFor(res.status)) {
+                                    wait = retryWait(attempt, res.headers && res.headers.get ? res.headers.get('retry-after') : null, retryBase);
+                                    why = `HTTP ${res.status}`;
+                                    await res.text().catch(() => null);
+                                } else if (res) {
+                                    body = await res.json().catch(() => null);
+                                }
                             }
-                        } else {
-                            const bearer = spec.token ? await spec.token(env, doFetch) : key;
-                            res = await doFetch(`${base}/chat/completions`, {
-                                method: 'POST',
-                                headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...extraHeaders(env) },
-                                body: JSON.stringify(payload),
-                                signal: controller.signal,
-                            });
-                            body = await res.json().catch(() => null);
+                            if (wait == null) break;
+                            yield ev.warning(`${spec.name} answered ${why}; asking again in ${Math.ceil(wait / 1000)} s`);
+                            await pause(wait, controller.signal);
+                            if (cancelled) break turnLoop;
                         }
                         const x = body && body.x_openvibe && typeof body.x_openvibe === 'object' ? body.x_openvibe : null;
                         if (x) {
@@ -503,6 +696,7 @@ function apiAgent(spec) {
                                 out = finished;
                                 }
                             }
+                            else if (name === 'grep') { try { out = await grepTool(args, t.cwd, controller.signal); } catch (err) { out = [err.message, true]; } }
                             else { try { out = runTool(name, args, t.cwd); } catch (err) { out = [err.message, true]; } }
                             yield ev.toolResult(call.id, out[0], out[1]);
                             messages.push({ role: 'tool', tool_call_id: call.id, content: String(out[0]).slice(0, 16_000) });
@@ -513,7 +707,7 @@ function apiAgent(spec) {
                     failure = cancelled ? `${spec.name} was stopped` : `${spec.name} could not be reached: ${err.message}`;
                     yield ev.error(failure);
                 }
-                if (ctx.sessions) ctx.sessions.save(sessionId, { agent: spec.id, model: resolvedModel || model, messages: messages.slice(-200) });
+                if (ctx.sessions) ctx.sessions.save(sessionId, { agent: spec.id, model: resolvedModel || model, messages: forResume(messages, 200) });
                 const cost = reported.any ? reported.usd : (u.input * (spec.priceIn || 0) + u.output * (spec.priceOut || 0)) / 1000;
                 yield ev.result({ ok: !failure && !cancelled, text: failure || lastText, sessionId, model: resolvedModel || model, startedAt, turns, costUsd: cost,
                     ...(resolvedModel ? { resolved_model: resolvedModel } : {}),
@@ -528,4 +722,4 @@ function apiAgent(spec) {
     return adapter;
 }
 
-module.exports = { apiAgent, exchangeTurn, refusalOf, extraHeaders, runTool, inside, refusedCommand, adviceTranscript, TOOL_DEFS, SYSTEM };
+module.exports = { apiAgent, exchangeTurn, refusalOf, extraHeaders, runTool, grepTool, trimContext, forResume, retriesFor, retryWait, inside, refusedCommand, adviceTranscript, TOOL_DEFS, SYSTEM };
