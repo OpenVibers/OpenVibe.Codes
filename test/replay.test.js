@@ -76,6 +76,22 @@ const { boot, check, done } = require('./helpers/boot');
             assert.strictEqual((await t.get(`/r/${again.token}`)).status, 200);
         });
 
+        await check('the person shares from the API too (the session surface on any site), once a task', async () => {
+            const bearer = t.network.userToken(ada);
+            const first = await t.get(`/api/v1/tasks/${TASK}/replay`, { bearer, method: 'POST' });
+            assert.ok([200, 201].includes(first.status), first.text);
+            const out = first.json();
+            const live = await db.one('SELECT token FROM codes_task_shares WHERE task_id = $1 AND revoked_at IS NULL', [TASK]);
+            assert.ok(out.url.endsWith(`/r/${live.token}`), 'the one live link');
+            const again = await t.get(`/api/v1/tasks/${TASK}/replay`, { bearer, method: 'POST' });
+            assert.deepStrictEqual([again.status, again.json().url, again.json().created], [200, out.url, false], 'asking again answers the same link');
+            const other = await t.get(`/api/v1/tasks/${TASK}/replay`, { bearer: t.network.userToken(bo), method: 'POST' });
+            assert.strictEqual(other.status, 404, 'nobody else shares it');
+            const stop = await t.get(`/api/v1/tasks/${TASK}/replay`, { bearer, method: 'DELETE' });
+            assert.deepStrictEqual([stop.status, stop.json().stopped], [200, true]);
+            assert.strictEqual((await t.get(new URL(out.url).pathname)).status, 404, 'a stopped link is gone');
+        });
+
         await check('a malformed link is a plain not-shared page', async () => {
             assert.strictEqual((await t.get('/r/short')).status, 404);
             assert.strictEqual((await t.get(`/r/${'x'.repeat(32)}`)).status, 404);
