@@ -116,3 +116,23 @@ added to its list by hand.
 - **What it needs:** Node.js (`npx`) or uv (`uvx`) on the machine and the agent's own sign-in there; the first run fetches
   the pinned package. Checked 11-15 against the real `claude-acp` (a read-only task: one tool call, the answer, the cost)
   and `codex-acp` (the session opened; the plan's usage limit came back in words).
+## Codes as an agent: `openvibe-codes acp`
+
+The other direction: `openvibe-codes acp` (bin/acp.js) is one Agent Client Protocol agent (v1, JSON-RPC on stdin and
+stdout), so Zed, JetBrains, T3 Code or any ACP client runs the whole harness as one agent: routing, hand-off to the next
+agent when one fails, stalls or hits its limit, every harness and model this machine has, kept runs. In Zed:
+
+```json
+{ "agent_servers": { "OpenVibe Codes": { "command": "openvibe-codes", "args": ["acp"] } } }
+```
+
+- **The model picker is the harness swap:** `auto` (Codes routes each prompt), every available harness (`codex`,
+  `claude-code`, `deepseek`, …) and `<harness>/<model>`. The harnesses that cannot run here come with why, under
+  `models._meta.openvibe.unavailable`.
+- **Modes are the permission level:** read, edit (the default; `--permission` changes it), full.
+- **Updates:** the agents' words (`agent_message_chunk`), their tool calls and results (`tool_call`, `tool_call_update`,
+  with the file's location), which agent runs and every hand-off (`agent_thought_chunk`). The prompt's answer carries
+  `_meta.openvibe` (the run id, the agents tried, ok, the cost).
+- **Turns:** the next prompt resumes the same agent's own session; after a swap the new agent gets the conversation so
+  far. `session/load` replays a saved session (kept under the Codes home, `acp-sessions/`) and resumes its agent;
+  `session/cancel` stops the run. Embedded context from the editor rides the prompt as files.

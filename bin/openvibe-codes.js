@@ -19,6 +19,8 @@ const { probe: probeLogins } = require('../engine/logins');
 const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your terminal
 
   openvibe-codes skills [get|list|path] [name] the guide an agent reads, shipped with this binary
+  openvibe-codes acp [--permission read|edit|full] [--agent <id>]   Codes as one ACP agent on stdin/stdout, for Zed,
+                                       JetBrains, T3 Code and any ACP client: auto or any harness as its models
   openvibe-codes agents                       which agents this machine can run, and why not the others
   openvibe-codes logins                      the coding CLIs here: installed, signed in, and their limit windows
   openvibe-codes route [--task edit] [--need harness:resume,…]   which agent a task would go to, and why
@@ -121,6 +123,8 @@ async function main() {
     if (cmd === 'task') return task(rest);
     // The Codes MCP server (Codes C9b): a conductor's Claude Code session starts it with --mcp-config.
     if (cmd === 'mcp') return require('./mcp').mcp();
+    // Codes as one Agent Client Protocol agent (Zed, JetBrains, T3 Code, …): every harness behind one agent.
+    if (cmd === 'acp') return require('./acp').acp({ argv: rest });
     const o = parse(rest);
     if (cmd === 'skills') return skills(rest.filter((a) => a !== '--json'), { out, json: o.json });
     if (!cmd || cmd === 'help' || o.help || cmd === '--help' || cmd === '-h') { out(USAGE); return 0; }
