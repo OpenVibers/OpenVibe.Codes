@@ -17,6 +17,9 @@ const iso = (ms) => { const t = new Date(Number(ms)); return Number.isFinite(t.g
 
 /** The task's first line, as its title: markdown markers stripped, 200 characters at most, never empty. */
 function titleOf(row) {
+    // The name the person gave it (Rename, migration 0045).
+    const named = row && typeof row.title === 'string' ? row.title.replace(/\s+/g, ' ').trim() : '';
+    if (named) return named.length > 200 ? `${named.slice(0, 199)}…` : named;
     if (row && row.kind === 'conductor' && row.folder) {
         const folder = String(row.folder).replace(/\/+$/, '').split('/').pop() || 'a folder';
         return `Conductor · ${folder}`.slice(0, 200);
