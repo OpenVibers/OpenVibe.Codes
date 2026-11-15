@@ -31,7 +31,12 @@ function createApi(ctx) {
 
     r.get('/harnesses', reads, (req, res) => {
         // ?all=1: every harness, the ones the owner turned off marked off (Network's AI setup lists them to turn back on).
-        if (req.query.all === '1' && typeof harnesses.all === 'function') return res.json({ harnesses: harnesses.all() });
+        if (req.query.all === '1' && typeof harnesses.all === 'function') {
+            // Each with every model it runs (data/models.js), off ones too, for the owner's page to set the default.
+            const all = harnesses.all();
+            const lists = new Map(require('../data/models').list({ list: () => all }).map((a) => [a.agent, a.models]));
+            return res.json({ harnesses: all.map((h) => ({ ...h, models: (lists.get(h.id) || []).filter((m) => m.id) })) });
+        }
         res.json({ harnesses: harnesses.list().map((h) => ({ ...h, agents: harnesses.agents(h.id) })) });
     });
 

@@ -54,6 +54,15 @@ const OWNER = 'usr_01JAB2C3D4E5F6G7H8J9K0MNPQ';
             assert.strictEqual((await catalogue('?all=1')).find((x) => x.id === second.id).default_agent, otherAgent.id);
             assert.ok((await catalogue()).some((x) => x.id === first.id), 'turned back on');
         });
+
+        await check('?all=1 carries every model each agent runs, and the owner\'s default model', async () => {
+            const r = await cfg('POST', '/internal/config/codes.harnesses', { values: { defaults: { 'claude-code': 'opus' } }, reason: 'owner picked a model' });
+            assert.ok(r.status === 200 || r.status === 201, r.text.slice(0, 300));
+            const cc = (await catalogue('?all=1')).find((x) => x.id === 'claude-code');
+            assert.ok(cc, 'Claude Code is in the catalogue');
+            assert.deepStrictEqual(cc.models.slice(0, 3).map((m) => m.id), ['opus', 'sonnet', 'haiku'], 'its models, for the owner to pick from');
+            assert.strictEqual(cc.default_model, 'opus');
+        });
     } finally {
         await done(t);
     }
