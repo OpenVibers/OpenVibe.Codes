@@ -61,6 +61,20 @@
       .then(function (j) { return j && Array.isArray(j.harnesses) ? j.harnesses.map(function (h) { return { id: h.id, name: h.name || h.id }; }) : null; })
       .catch(function () { return null; });
   }
+  // 11-15 night (plan §AD.8; the owner: "a complete rethink and redesign … way smarter, intelligent type system
+  // sessions, kind of like Claude Code … but make it way better"): openvibe-shared 4.265.0's ov-session.js is the one
+  // session surface for every agent: sessions in a drawer (a column on a computer), the thread as a harness draws it
+  // (grouped tools, the files it changed and their diffs, the plan above the box), one box with one context chip, / and @.
+  // Codes opens it on Codes (the chip can pick any agent). Before Codes serves it, the harness above stays.
+  function loadSession() {
+    if (window.OpenVibeSession && window.OpenVibeSession.mount) return Promise.resolve(window.OpenVibeSession);
+    return new Promise(function (resolve) {
+      var sc = document.createElement('script'); sc.src = '/shared/ov-session.js'; sc.async = true;
+      sc.onload = function () { resolve(window.OpenVibeSession && window.OpenVibeSession.mount ? window.OpenVibeSession : null); };
+      sc.onerror = function () { resolve(null); };
+      document.head.appendChild(sc);
+    });
+  }
   function tokenSoon() {
     return new Promise(function (resolve) {
       var start = Date.now();
@@ -75,11 +89,41 @@
   var q = null; try { q = new URLSearchParams(location.search); } catch (e) { q = null; }
   var prompt = q ? String(q.get('prompt') || '').slice(0, 4000) : '';
   var open = q ? String(q.get('run') || '') : '';
-  Promise.all([loadRun(), tokenSoon()]).then(function (got) {
-    var R = got[0], token = got[1];
+  tokenSoon().then(function (token) {
     if (!token) return;
-    return Promise.all([loadHarness(), harnesses()]).then(function (two) { show(R, two[0], token, two[1]); });
-  }).catch(function () { /* ov-run.js did not load: the server-rendered page stays */ });
+    return loadSession().then(function (S) {
+      if (S) return showSession(S, token);
+      return loadRun().then(function (R) {
+        return Promise.all([loadHarness(), harnesses()]).then(function (two) { show(R, two[0], token, two[1]); });
+      });
+    });
+  }).catch(function () { /* nothing loaded: the server-rendered page stays */ });
+
+  var place = function (p) {
+    try { if (p && p.ref) history.replaceState(null, '', '/?run=' + encodeURIComponent(p.ref)); else if (p && p.blank) history.replaceState(null, '', '/'); } catch (e) { /* the address stays */ }
+  };
+  function showSession(S, token) {
+    var repos = recentRepos();
+    var host = document.createElement('div'); host.className = 'co-messenger co-session';
+    app.replaceWith(host);
+    document.documentElement.classList.add('co-has-messenger');
+    var opened = /^[a-z][a-z0-9-]{0,30}:[A-Za-z0-9._~-]{1,160}$/.test(open) ? open : null;
+    var s = S.mount(host, {
+      base: 'https://openvibe.network/api/frame',
+      token: function () { var N = window.OpenVibeNavbar; return (N && N.token && N.token()) || token; },
+      sibling: function (file) { return '/shared/' + file; },
+      agent: 'codes',
+      works: repos.map(function (r) { return { value: r, name: r, line: 'A repository you worked on here' }; }),
+      starters: STARTERS,
+      open: opened,
+      title: 'Codes',
+      helloTitle: 'What should we build?',
+      line: 'Type anything: it writes the code, gives you a space for it, reads a GitHub repository or copies one to OpenVibe.Git. It runs on a shared node or your own computer, never on OpenVibe\'s own server.',
+      placeholder: 'Describe what to build, or ask about code',
+      onEvent: function (type, d) { if (type === 'session.opened' && d && d.ref) place({ ref: d.ref }); else if (type === 'session.blank') place({ blank: true }); },
+    });
+    if (prompt && s && typeof s.prefill === 'function') s.prefill(prompt);
+  }
 
   function show(R, H, token, agents) {
     var repos = recentRepos();
@@ -88,9 +132,6 @@
     app.replaceWith(host);
     document.documentElement.classList.add('co-has-messenger');
     var opened = /^[a-z][a-z0-9-]{0,30}:[A-Za-z0-9._~-]{1,160}$/.test(open) ? open : null;
-    var place = function (p) {
-      try { if (p && p.ref) history.replaceState(null, '', '/?run=' + encodeURIComponent(p.ref)); else if (p && p.blank) history.replaceState(null, '', '/'); } catch (e) { /* the address stays */ }
-    };
     if (H) {
       document.documentElement.classList.add('co-has-harness');
       var h = H.page(host, {
