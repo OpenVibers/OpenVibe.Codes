@@ -45,6 +45,22 @@
     if (v && out.indexOf(v) < 0) out.unshift(v);
     return out.slice(0, 8);
   }
+  /** Where a new task may run: OpenVibe, and the machines the server-rendered page offers (its Runs on picker). */
+  function places() {
+    var out = [{ kind: 'openvibe', name: 'OpenVibe' }];
+    app.querySelectorAll('select[name="machine"] option').forEach(function (o) {
+      var id = String(o.value || ''); if (!/^dev_[A-Za-z0-9_-]{1,80}$/.test(id) || o.disabled) return;
+      out.push({ kind: 'machine', id: id, name: (o.textContent || id).trim().slice(0, 60) });
+    });
+    return out;
+  }
+  /** Every harness Codes runs (its catalog), for the Agent picker; null when it does not answer. */
+  function harnesses() {
+    return fetch('/api/v1/harnesses', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { return j && Array.isArray(j.harnesses) ? j.harnesses.map(function (h) { return { id: h.id, name: h.name || h.id }; }) : null; })
+      .catch(function () { return null; });
+  }
   function tokenSoon() {
     return new Promise(function (resolve) {
       var start = Date.now();
@@ -62,11 +78,12 @@
   Promise.all([loadRun(), tokenSoon()]).then(function (got) {
     var R = got[0], token = got[1];
     if (!token) return;
-    return loadHarness().then(function (H) { show(R, H, token); });
+    return Promise.all([loadHarness(), harnesses()]).then(function (two) { show(R, two[0], token, two[1]); });
   }).catch(function () { /* ov-run.js did not load: the server-rendered page stays */ });
 
-  function show(R, H, token) {
+  function show(R, H, token, agents) {
     var repos = recentRepos();
+    var where = places();
     var host = document.createElement('div'); host.className = 'co-messenger';
     app.replaceWith(host);
     document.documentElement.classList.add('co-has-messenger');
@@ -82,6 +99,9 @@
         sibling: function (file) { return '/shared/' + file; },
         repos: repos,
         target: repos[0] ? { repo: repos[0] } : 'new',
+        // 4.258.0: which harness, and where it runs (Link machines from the page's own picker).
+        agents: agents || undefined,
+        places: where.length > 1 ? where : undefined,
         open: opened,
         onPlace: place,
       });
