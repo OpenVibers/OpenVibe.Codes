@@ -526,6 +526,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                             cost_usd: usage.cost_usd, tokens: usage.tokens, steps: usage.steps, turns: usage.turns, session: usage.session,
                             model: usage.model, machine: machineOf(next.job),
                             budget_hit: hit,
+                            // What this attempt changed by itself (Codes next (4)): the harness's turn diff, or the
+                            // file lists of this result and the one before it.
+                            turn_files: require('./turn-files').of(updated.result, current.result),
                             finished_at: updated.finished_at || store.iso(),
                         });
                     }
