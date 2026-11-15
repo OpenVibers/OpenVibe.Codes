@@ -779,6 +779,37 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
      * gets { ok }; a service keeps the timeline its capability was built on. Another person's task is 404, never
      * a refusal that says it exists.
      */
+    /**
+     * A replay link from the API (plan §AD.6 (6), §AD.8: the session surface shares a coding run from any site): the
+     * same one live link a task as /tasks/:id/share, made or read here by the person themself (their own token, not a
+     * service acting for them). DELETE stops it; a stopped link never comes back. A conductor is not shared.
+     *   POST   /api/v1/tasks/:id/replay  → { url, created_at, created }   (…/share is the uniform share-with-people API)
+     *   DELETE /api/v1/tasks/:id/replay  → { stopped }
+     */
+    const replayUrl = (token) => `${String(config.baseUrl).replace(/\/+$/, '')}/r/${token}`;
+    r.post('/tasks/:id/replay', guardAny('codes.task.read'), actorLimits.budget('codes.task.start'), async (req, res) => {
+        if (!req.principal.owner) return problem(req, res, 403, 'codes.share_owner_required', 'only the person themself shares a task');
+        const row = await mine(req);
+        if (!row || row.kind === 'conductor') return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours to share');
+        let live = await db.maybe('SELECT token, created_at FROM codes_task_shares WHERE task_id = $1 AND revoked_at IS NULL', [row.id]);
+        let created = false;
+        if (!live) {
+            const token = require('crypto').randomBytes(24).toString('base64url');
+            await db.query('INSERT INTO codes_task_shares (token, task_id, subject) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [token, row.id, req.principal.subject]);
+            live = await db.maybe('SELECT token, created_at FROM codes_task_shares WHERE task_id = $1 AND revoked_at IS NULL', [row.id]);
+            created = true;
+        }
+        res.set('Cache-Control', 'private, no-store');
+        return res.status(created ? 201 : 200).json({ url: replayUrl(live.token), created_at: live.created_at, created });
+    });
+    r.delete('/tasks/:id/replay', guardAny('codes.task.read'), actorLimits.budget('codes.task.start'), async (req, res) => {
+        if (!req.principal.owner) return problem(req, res, 403, 'codes.share_owner_required', 'only the person themself stops sharing a task');
+        const row = await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours');
+        const gone = await db.many('UPDATE codes_task_shares SET revoked_at = now() WHERE task_id = $1 AND subject = $2 AND revoked_at IS NULL RETURNING token', [row.id, req.principal.subject]);
+        return res.json({ stopped: gone.length > 0 });
+    });
+
     r.post('/tasks/:id/stop', guardAny('codes.task.cancel'), actorLimits.budget('codes.task.start'), async (req, res) => {
         const row = await mine(req);
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
