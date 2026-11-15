@@ -449,3 +449,19 @@
         es.addEventListener('end', finish);
     }
 })();
+
+/* The replay's Copy (the task's panel, plan §AD.6): the link to the clipboard, or selected when the browser refuses. */
+(function () {
+    'use strict';
+    document.addEventListener('click', function (e) {
+        var b = e.target && e.target.closest ? e.target.closest('[data-ch-copy]') : null;
+        if (!b) return;
+        var box = b.closest('.ch-replay');
+        var input = box && box.querySelector('[data-ch-copy-src]');
+        if (!input) return;
+        var said = function (t) { b.textContent = t; setTimeout(function () { b.textContent = 'Copy'; }, 1600); };
+        var pick = function () { input.focus(); input.select(); said('Selected'); };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(input.value).then(function () { said('Copied'); }, pick);
+        else pick();
+    });
+})();

@@ -42,6 +42,9 @@ const TABLES = [
         columns: ['id', 'project_id', 'source_task_id', 'repo', 'ref', 'prompt', 'permission', 'budget', 'sides', 'shown', 'state', 'match_id', 'match_body', 'match_recorded', 'merged_slot', 'merged_judged', 'error', 'created_at', 'updated_at'],
     },
     { table: 'codes_user_settings', subject: 'subject', file: 'settings.json', order: 'updated_at' },
+    // Replays the person shared (plan §AD.6 (6)): which task, when, and when they stopped it. The links leave with
+    // them and are erased with them, so a deleted account's replays stop answering.
+    { table: 'codes_task_shares', subject: 'subject', file: 'replays.json', order: 'created_at', columns: ['token', 'task_id', 'created_at', 'revoked_at'] },
     { table: 'codes_model_plans', subject: 'subject', file: 'model-plans.json', order: 'updated_at' },
     // The files a person attached to a message (owner 2026-11-07): what they are and which turn they belong to. The
     // bytes are theirs too, but the export carries the record, not a second copy of every 20 MB file; deletion takes

@@ -242,3 +242,15 @@ html[data-ov-motion=reduced] .ch-modes.has-glide::before{transition-duration:.18
    the navbar and above a phone's app bar; each side scrolls on its own. */
 .co-messenger { height: calc(100dvh - var(--ovnav-real-h, 52px) - var(--ovnav-appbar-h, 0px)); min-height: 420px; box-sizing: border-box; }
 html.co-has-messenger, html.co-has-messenger body { overflow: hidden; }
+
+/* Replays (plan §AD.6): the panel's share section, and the note at the top of the public page. */
+.ch-replay { display: grid; gap: 10px; font-size: 14px; }
+.ch-replay p { margin: 0; color: var(--ch-soft, var(--text-secondary)); line-height: 1.45; }
+.ch-replay-link { display: grid; gap: 6px; }
+.ch-replay-link span { font-size: 12.5px; color: var(--ch-soft, var(--text-secondary)); }
+.ch-replay-link input { box-sizing: border-box; width: 100%; min-height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border, rgba(127,127,127,.25)); background: var(--bg-primary, transparent); color: var(--text-primary); font: 13px ui-monospace, monospace; -webkit-appearance: none; appearance: none; }
+.ch-replay-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.ch-replay-acts form { margin: 0; }
+.ch-replay-acts .ovk-btn { min-height: 40px; }
+.ch-replay-note { margin: 0; padding: 8px 16px 10px; font-size: 13.5px; color: var(--ch-soft, var(--text-secondary)); border-bottom: 1px solid var(--border, rgba(127,127,127,.18)); }
+.ch-is-replay .ovt-dock:empty { display: none; }
