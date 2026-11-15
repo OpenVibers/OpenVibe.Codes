@@ -511,6 +511,7 @@ function createChatRoutes(ctx) {
             view && view.usage ? usageSection(view.usage) : null,
             people.length ? { title: 'Agents', rows: people } : null,
             where.length ? { title: 'Where', rows: where } : null,
+            view ? null : await replaySection(row),
         ] });
     }
 
@@ -802,6 +803,64 @@ function createChatRoutes(ctx) {
         if (!row) return res.status(404).send('Not found');
         const out = await tasks.stopTask(row);
         return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}${out.error ? `?error=${encodeURIComponent(out.error)}` : ''}`);
+    });
+
+    // ── Replays (plan §AD.6, Codes next (6)): a link anyone can open to read a task as it happened ──
+    // One live link a task (codes_task_shares). The owner makes it and stops it; a stopped link never comes back.
+    const SHARE_TOKEN = /^[A-Za-z0-9_-]{32}$/;
+    const liveShare = (taskId) => db.maybe('SELECT token, created_at FROM codes_task_shares WHERE task_id = $1 AND revoked_at IS NULL', [taskId]);
+    const replayUrl = (token) => `${String(config.baseUrl || '').replace(/\/+$/, '')}/r/${token}`;
+    async function replaySection(row) {
+        const s = await liveShare(row.id).catch(() => null);
+        const id = encodeURIComponent(row.id);
+        const html = s
+            ? `<div class="ch-replay" id="replay"><label class="ch-replay-link"><span>Anyone with this link can read it</span><input type="text" readonly value="${esc(replayUrl(s.token))}" data-ch-copy-src aria-label="The replay's link"></label>`
+                + `<div class="ch-replay-acts"><button type="button" class="ovk-btn ovk-btn--quiet" data-ch-copy>Copy</button><a class="ovk-btn ovk-btn--quiet" href="/r/${esc(s.token)}" target="_blank" rel="noopener">Open</a>`
+                + `<form method="post" action="/tasks/${id}/unshare"><button class="ovk-btn ovk-btn--quiet" type="submit">Stop sharing</button></form></div></div>`
+            : `<div class="ch-replay" id="replay"><p>A link anyone can open to read this task as it happened: the brief, every turn, the steps and the answers. No sign-in, not in search.</p>`
+                + `<form method="post" action="/tasks/${id}/share"><button class="ovk-btn" type="submit">Share a replay</button></form></div>`;
+        return { title: 'Replay', html };
+    }
+    async function ownTask(req, res) {
+        if (!viewer(req)) { res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`); return null; }
+        if (!sameOrigin(req)) { res.status(403).type('text/plain').send('Cross-site form posts are refused.\n'); return null; }
+        if (!safeId(req.params.id)) { res.status(404).send('Not found'); return null; }
+        const row = await db.maybe("SELECT * FROM run_tasks WHERE id = $1 AND subject = $2 AND kind <> 'conductor'", [req.params.id, req.viewer.subject]);
+        if (!row) { res.status(404).send('Not found'); return null; }
+        return row;
+    }
+    r.post('/tasks/:id/share', form, async (req, res) => {
+        const row = await ownTask(req, res);
+        if (!row) return;
+        if (!(await liveShare(row.id))) {
+            const token = require('crypto').randomBytes(24).toString('base64url');
+            await db.query('INSERT INTO codes_task_shares (token, task_id, subject) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [token, row.id, req.viewer.subject]);
+        }
+        return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}#replay`);
+    });
+    r.post('/tasks/:id/unshare', form, async (req, res) => {
+        const row = await ownTask(req, res);
+        if (!row) return;
+        await db.query('UPDATE codes_task_shares SET revoked_at = now() WHERE task_id = $1 AND subject = $2 AND revoked_at IS NULL', [row.id, req.viewer.subject]);
+        return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}#replay`);
+    });
+    /** The replay: the task's thread, read only, for anyone with the link (no sign-in, noindex, no composer). */
+    r.get('/r/:token', async (req, res) => {
+        const gone = () => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Replay · Codes', styles: ['kit.css'],
+            body: raw(`<div class="ovk-wrap">${kit.empty({ icon: 'code', title: 'This replay is not shared', text: 'Its owner stopped sharing it, or the link is not whole.', action: { href: '/', label: 'Codes' } })}</div>`) });
+        if (!SHARE_TOKEN.test(String(req.params.token || ''))) return gone();
+        const s = await db.maybe('SELECT task_id, subject FROM codes_task_shares WHERE token = $1 AND revoked_at IS NULL', [req.params.token]);
+        if (!s) return gone();
+        const row = await db.maybe("SELECT * FROM run_tasks WHERE id = $1 AND subject = $2 AND kind <> 'conductor'", [s.task_id, s.subject]);
+        if (!row) return gone();
+        const [word, tone] = stateOf(row);
+        const head = thread.head({ title: titleOf(row), actions: `<span class="ch-state is-${esc(tone)}">${esc(word)}</span>` });
+        const note = '<p class="ch-replay-note">A replay its owner shared: the brief, every turn and the answers, as it happened. <a href="/">Make your own on Codes</a></p>';
+        const view = thread.page({ head: head + note, turns: await taskThread(row), label: 'Replay', cls: 'is-replay' });
+        res.set('Cache-Control', 'private, no-store');
+        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${titleOf(row)} · Replay · Codes`,
+            description: 'A coding task on OpenVibe.Codes, shared as a replay.', css: ['css/chat.css'], styles: ['kit.css', 'thread.css'],
+            sharedScripts: ['kit-web.js', 'ov-thread.js'], scripts: ['js/md.js'], body: raw(`<div class="ch ch-is-replay">${view}</div>`) });
     });
 
     return r;
