@@ -56,8 +56,9 @@ const { boot, check, done } = require('./helpers/boot');
                 { path: 'public/css/footer.css', status: 'M', added: 3, removed: 0, authored: true },
                 { path: 'package-lock.json', status: 'M', added: 40, removed: 2, authored: false },
             ] } });
-            const listed = (await store.list(TASK)).map((a) => store.present(a));
-            assert.deepStrictEqual(listed.map((a) => [a.n, a.turn_files && a.turn_files.files.length]), [[1, 1], [2, 2]]);
+            const listed = await store.list(TASK);
+            assert.deepStrictEqual(listed.map((a) => [Number(a.n), turnFiles.read(a.turn_files).files.length]), [[1, 1], [2, 2]]);
+            assert.ok(!('turn_files' in store.present(listed[0])), 'codes.task@1\'s attempts stay as the contract says');
         });
 
         await check('each turn of the conversation shows what it changed by itself', async () => {

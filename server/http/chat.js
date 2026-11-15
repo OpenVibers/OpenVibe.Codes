@@ -296,7 +296,8 @@ function createChatRoutes(ctx) {
      * formatter) is marked as from elsewhere.
      */
     function turnChanges(a) {
-        const tf = a && a.turn_files;
+        // The attempt row's own column (migration 0043): codes.task@1's attempts do not carry it.
+        const tf = require('../domain/turn-files').read(a && a.turn_files);
         const files = tf && Array.isArray(tf.files) ? tf.files.filter((f) => f && f.path) : [];
         if (!files.length) return '';
         const added = files.reduce((n, f) => n + (Number(f.added) || 0), 0), removed = files.reduce((n, f) => n + (Number(f.removed) || 0), 0);

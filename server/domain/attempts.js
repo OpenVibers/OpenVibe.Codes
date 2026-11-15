@@ -511,8 +511,6 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
             finished_at: iso(a.finished_at),
             created_at: iso(a.created_at),
             end_why: a.reason ? wordsOf(a.reason) : null,
-            // What this attempt changed by itself (migration 0043; null before it, or when nothing was measured).
-            turn_files: require('./turn-files').read(a.turn_files),
         };
     }
 
