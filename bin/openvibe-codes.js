@@ -56,6 +56,9 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
                                               OpenVibe Link's job worker runs it on your own machine)
   openvibe-codes task start|list|show|continue|stop   coding tasks on openvibe.codes, as you, on one of
                                               your machines (openvibe-codes task --help)
+  openvibe-codes tools find|run|mine|make      OpenVibe Tools from the terminal: find a tool for a need, run it,
+                                              your own tools, or describe one and a model makes it
+                                              (openvibe-codes tools --help)
   openvibe-codes mcp                          the Codes MCP tools for a Claude Code session: tasks, the fleet,
                                               shipping status, and the conductor's approvals (stdio JSON-RPC)
 
@@ -130,6 +133,7 @@ async function main() {
     if (cmd === 'acp') return require('./acp').acp({ argv: rest });
     const o = parse(rest);
     if (cmd === 'skills') return skills(rest.filter((a) => a !== '--json'), { out, json: o.json });
+    if (cmd === 'tools') return require('./tools').tools(rest, { out, json: o.json });
     if (!cmd || cmd === 'help' || o.help || cmd === '--help' || cmd === '-h') { out(USAGE); return 0; }
     if (cmd === '--version' || cmd === '-v' || cmd === 'version') { out(VERSION); return 0; }
     const harness = createHarness();

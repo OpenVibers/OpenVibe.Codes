@@ -1,0 +1,73 @@
+'use strict';
+// `openvibe-codes tools` (plan 2026-11-13 §AD.12 (f); the owner, 11-15: tools "from gui to cmd"): find and run through
+// openvibe.tools/mcp, the person's own tools, and make: a model drafts a tool from a sentence and it is made, private
+// unless asked. key=value pairs become the input (numbers and JSON read as such); signed out, making asks to sign in.
+const assert = require('assert');
+const { check, done } = require('./helpers/boot');
+const { tools, inputOf, bodyOf } = require('../bin/tools');
+
+function fake() {
+    const calls = [];
+    const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    const fetchImpl = async (url, init = {}) => {
+        const u = new URL(url);
+        const body = init.body ? JSON.parse(init.body) : null;
+        calls.push({ path: u.pathname + u.search, auth: (init.headers || {}).Authorization || null, body });
+        if (u.pathname === '/mcp' && body.params.name === 'find_tools') return reply(200, { jsonrpc: '2.0', id: body.id, result: { content: [{ type: 'text', text: JSON.stringify([{ tool: 'dns', name: 'DNS', summary: 'DNS records', input: { properties: { target: {} } } }]) }] } });
+        if (u.pathname === '/mcp' && body.params.name === 'run_tool') return reply(200, { jsonrpc: '2.0', id: body.id, result: body.params.arguments.tool === 'bad' ? { content: [{ type: 'text', text: 'input.target is required' }], isError: true } : { content: [{ type: 'text', text: '{"records":{"A":["1.2.3.4"]}}' }] } });
+        if (u.pathname === '/api/v1/made-tools/draft') return reply(200, { draft: { name: 'Meeting notes', summary: 'Notes to actions.', instructions: 'Do it.', inputs: [{ label: 'Note', kind: 'long' }, { label: 'People', kind: 'number' }], answer: 'fields', fields: [{ label: 'Actions' }] } });
+        if (u.pathname === '/api/v1/made-tools' && init.method === 'POST') return reply(201, { id: 'mtl_01JCZ3NDEKTSV4RRFFQ69G5FA1', name: body.name, summary: body.summary, visibility: body.visibility, input: body.input });
+        if (u.pathname === '/api/v1/made-tools') return reply(200, { tools: [{ id: 'mtl_01JCZ3NDEKTSV4RRFFQ69G5FA1', name: 'Meeting notes', summary: 'x', visibility: 'private', version: 1, runs: 3 }] });
+        return reply(404, {});
+    };
+    return { calls, fetchImpl };
+}
+
+(async () => {
+    await check('find and run through openvibe.tools/mcp; key=value is the input', async () => {
+        const f = fake(); const lines = [];
+        delete process.env.OPENVIBE_TOOLS_TOKEN; delete process.env.OPENVIBE_TOKEN;
+        assert.strictEqual(await tools(['find', 'dns', 'records'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 0);
+        assert.match(lines.join('\n'), /^dns\n    DNS records\n    takes: target/);
+        assert.deepStrictEqual(f.calls[0].body.params.arguments, { need: 'dns records', limit: 10 });
+        assert.strictEqual(f.calls[0].auth, null, 'signed out: no token');
+        lines.length = 0;
+        assert.strictEqual(await tools(['run', 'dns', 'target=example.com', 'n=3'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 0);
+        assert.deepStrictEqual(f.calls[1].body.params.arguments, { tool: 'dns', input: { target: 'example.com', n: 3 } });
+        assert.match(lines.join('\n'), /"A": \[/, 'the result, pretty');
+        lines.length = 0;
+        assert.strictEqual(await tools(['run', 'bad'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 1, 'a failed run exits 1');
+        assert.match(lines[0], /failed: input.target is required/);
+        assert.deepStrictEqual(inputOf([], '{"a":1}'), { a: 1 }, '--input JSON wins');
+        assert.deepStrictEqual(inputOf(['on=true', 'list=["x"]', 'n=-2.5'], null), { on: true, list: ['x'], n: -2.5 });
+        assert.throws(() => inputOf(['oops'], null), /not key=value/);
+    });
+
+    await check('make: a model drafts it from your words and it is made, private unless asked; mine lists yours', async () => {
+        const f = fake(); const lines = [];
+        delete process.env.OPENVIBE_TOOLS_TOKEN; delete process.env.OPENVIBE_TOKEN;
+        assert.strictEqual(await tools(['make', 'turn meeting notes into actions'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 1);
+        assert.match(lines[0], /Sign in first/, 'making needs a sign-in');
+        process.env.OPENVIBE_TOOLS_TOKEN = 'tok-ada';
+        lines.length = 0;
+        assert.strictEqual(await tools(['make', 'turn meeting notes into actions', '--public'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 0);
+        const made = f.calls.find((c) => c.path === '/api/v1/made-tools' && c.body);
+        assert.strictEqual(made.auth, 'Bearer tok-ada');
+        assert.deepStrictEqual([made.body.visibility, made.body.kind, made.body.prompt.model, Object.keys(made.body.input.properties), made.body.output.kind], ['public', 'prompt', 'auto', ['note', 'people'], 'json']);
+        assert.match(lines.join('\n'), /Made Meeting notes \(mtl_\w+, public\)[\s\S]*try it: openvibe-codes tools run mtl_\w+ note=… people=…/);
+        assert.strictEqual(bodyOf({ name: 'X', inputs: [], answer: 'text' }).visibility, 'private', 'private unless asked');
+        lines.length = 0;
+        assert.strictEqual(await tools(['mine'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 0);
+        assert.match(lines[0], /Meeting notes\s+\(private, v1, 3 runs\)/);
+        delete process.env.OPENVIBE_TOOLS_TOKEN;
+    });
+
+    await check('help and an unknown command', async () => {
+        const lines = [];
+        assert.strictEqual(await tools([], { out: (s) => lines.push(s) }), 0);
+        assert.match(lines[0], /find "<need>"/);
+        lines.length = 0;
+        assert.strictEqual(await tools(['fly'], { out: (s) => lines.push(s) }), 1);
+    });
+    await done();
+})();
