@@ -23,6 +23,7 @@ const { createHarnesses } = require('../server/domain/harnesses');
 const placement = require('../server/domain/harness-placement');
 const cli = require('./adapters/cli');
 const { apiAgent } = require('./adapters/api');
+const acp = require('./adapters/acp');
 const ev = require('./events');
 const { createStore } = require('./sessions');
 
@@ -150,7 +151,21 @@ function adaptersFor(env) {
         // provider (OPENVIBE_AI_PROVIDER_URL, OPENVIBE_AI_PROVIDER_MODEL) with that key, revealed per request by Network.
         'openvibe-ai': apiAgent({ id: 'openvibe-ai', name: 'OpenVibe.AI', baseUrl: env.OPENVIBE_AI_URL || 'https://ai.openvibe.services/v1', token: networkToken(), model: 'openvibe', extra: projectProvider, advisorEndpoint: true }),
         'openai-compatible': apiAgent({ id: 'openai-compatible', name: 'Your own model', baseUrl: env.OPENVIBE_CODES_BASE_URL || 'http://127.0.0.1:8080/v1', keyEnv: 'OPENVIBE_CODES_API_KEY', model: env.OPENVIBE_CODES_MODEL || 'local' }),
+        // The Agent Client Protocol's agents (harness/acp-agents.json, pinned from the public ACP registry): Gemini CLI,
+        // Qwen Code, Kimi Code, Grok, Copilot, Cline, Kilo, deepagents, Claude and Codex through their ACP bridges, …,
+        // all through one client (harness/adapters/acp.js), each with the person's own sign-in on the machine.
+        ...acpAdapters(),
     };
+}
+
+/** One ACP adapter per pinned agent, launched with npx or uvx at its exact version. */
+function acpAdapters() {
+    const out = {};
+    for (const a of require('./acp-agents.json').agents) {
+        const launch = acp.launchOf(a);
+        if (launch) out[a.id] = acp.acpAgent({ id: a.id, name: a.name, cmd: launch.cmd, args: launch.args, env: launch.env });
+    }
+    return out;
 }
 
 /** Is the executable on PATH? (No shell, no `which`.) */
