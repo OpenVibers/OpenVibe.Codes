@@ -10,6 +10,8 @@
  *   openvibe-codes tools mine                           the tools you made
  *   openvibe-codes tools make "<what it should do>"     a model drafts a tool from your words and makes it (yours,
  *                       [--model <id>] [--public|--unlisted]   private unless you say); runs are paid by whoever runs it
+ *   openvibe-codes tools bring <val address>            a Val Town val as your own code tool (Val Town closes
+ *   openvibe-codes tools bring --pipedream <file.js>    2027-01-10), or a Pipedream code step (closes 2027-03-31)
  *
  * Signed out, the catalogue and the public tools work. OPENVIBE_TOOLS_TOKEN (a sign-in for openvibe.tools; else
  * OPENVIBE_TOKEN) adds your own tools and making one. OPENVIBE_TOOLS_URL points elsewhere (default
@@ -28,6 +30,9 @@ const HELP = `openvibe-codes tools — OpenVibe Tools from the terminal
       --code                JavaScript that computes the answer (math, formats, conversions), not a model
       --model <id>          the model it runs on (default auto: the cheapest that does the job)
       --public | --unlisted  who can use it (default: only you)
+  openvibe-codes tools bring <val address>           a Val Town val as your own code tool (its imported vals too)
+  openvibe-codes tools bring --pipedream <file.js>   a Pipedream Node.js code step (- reads it from stdin)
+      --name <name>         a name for a Pipedream step (default: the file's)
   --json                    the answer as JSON
 
 Signed out, the catalogue and the public tools work. OPENVIBE_TOOLS_TOKEN (else OPENVIBE_TOKEN) adds your own tools
@@ -86,7 +91,7 @@ function flags(argv) {
         else if (a === '--public') o.visibility = 'public';
         else if (a === '--unlisted') o.visibility = 'unlisted';
         else if (a === '--code') o.code = true;
-        else if (a === '--model' || a === '--input') o[a.slice(2)] = argv[++i];
+        else if (a === '--model' || a === '--input' || a === '--pipedream' || a === '--name') o[a.slice(2)] = argv[++i];
         else if (a === '--help' || a === '-h') o.help = true;
         else o.rest.push(a);
     }
@@ -174,6 +179,40 @@ async function tools(argv, { out = (s) => process.stdout.write(`${s}\n`), json: 
             if (json) { out(JSON.stringify(made)); return 0; }
             const takes = Object.keys((made.input && made.input.properties) || {});
             out(`Made ${made.name} (${made.id}, ${made.visibility})\n    ${made.summary}\n    takes: ${takes.join(', ')}\n    try it: openvibe-codes tools run ${made.id} ${takes.map((k) => `${k}=…`).join(' ')}\n    change it: ${BASE()}/make#${made.id}`);
+            return 0;
+        }
+        if (sub === 'bring') {
+            // A val (its address) or a Pipedream step (its file): converted by Tools (/import/val, /import/pipedream),
+            // then made as yours, private unless you say; a name you already use gets a short suffix.
+            let path;
+            let body;
+            if (o.pipedream) {
+                const code = require('fs').readFileSync(o.pipedream === '-' ? 0 : o.pipedream, 'utf8');
+                path = '/api/v1/made-tools/import/pipedream';
+                body = { code, name: o.name || (o.pipedream === '-' ? 'pipedream-step' : require('path').basename(o.pipedream).replace(/\.[a-z]+$/i, '')) };
+            } else {
+                const ref = (o.rest[0] || '').trim();
+                if (!ref) throw new ToolsError('Give the val\'s address: openvibe-codes tools bring https://www.val.town/v/you/name', 'tools.input');
+                path = '/api/v1/made-tools/import/val';
+                body = { url: ref };
+            }
+            const brought = await http(path, { method: 'POST', body, auth: true, ...opts });
+            let tool = { ...brought.body, visibility: o.visibility || 'private' };
+            let made = null;
+            let tries = 0;
+            while (!made) {
+                try {
+                    made = await http('/api/v1/made-tools', { method: 'POST', body: tool, auth: true, ...opts });
+                } catch (err) {
+                    if (tries >= 2 || !/already have/i.test(err.message)) throw err;
+                    tries += 1;
+                    tool = { ...tool, slug: slugOf(tool.name) };
+                }
+            }
+            const notes = brought.notes || [];
+            if (json) { out(JSON.stringify({ made, notes })); return 0; }
+            const takes = Object.keys((made.input && made.input.properties) || {});
+            out(`Brought ${made.name} (${made.id}, ${made.visibility})\n    ${made.summary}\n    takes: ${takes.join(', ') || 'nothing'}${notes.map((n) => `\n    note: ${n}`).join('')}\n    try it: openvibe-codes tools run ${made.id} ${takes.map((k) => `${k}=…`).join(' ')}\n    change it: ${BASE()}/make#${made.id}`);
             return 0;
         }
         throw new ToolsError(`No tools command "${sub}". ${HELP.split('\n')[0]}`, 'tools.usage');
