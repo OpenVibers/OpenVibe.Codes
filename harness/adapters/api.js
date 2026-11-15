@@ -100,6 +100,48 @@ function trimContext(messages, budget, keepTail = KEEP_TAIL) {
 }
 
 /**
+ * The second compaction tier (after DeepSeek Harness and Codex, studied 11-15): when dropping old tool output was not
+ * enough, the earlier turns are replaced by a summary the model writes. Which messages: from the third (the system
+ * message and the person's first words, the task itself, always stay) up to a person's message, so every tool call keeps
+ * its result; the current turn (from the last person's message on) is never summarized. The smallest span that brings
+ * the conversation under 80% of the limit, else everything before the current turn. → { from, to } (to exclusive) or
+ * null when there is nothing to summarize.
+ */
+function compactPlan(messages, budget) {
+    let lastUser = -1;
+    for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === 'user') { lastUser = i; break; }
+    if (lastUser <= 2) return null;
+    let total = 0;
+    for (const m of messages) total += messageSize(m);
+    if (total <= budget) return null;
+    const head = messageSize(messages[0]) + messageSize(messages[1]) + 4000;   // room for the summary itself
+    const suffix = new Array(messages.length + 1).fill(0);
+    for (let i = messages.length - 1; i >= 0; i--) suffix[i] = suffix[i + 1] + messageSize(messages[i]);
+    for (let cut = 3; cut <= lastUser; cut++) {
+        if (messages[cut].role !== 'user') continue;
+        if (head + suffix[cut] <= budget * 0.8) return { from: 2, to: cut };
+    }
+    return { from: 2, to: lastUser };
+}
+
+/** The span as a transcript a model can summarize: words as they are, tool calls as lines, results clipped. */
+function spanTranscript(span) {
+    const out = [];
+    for (const m of span) {
+        if (m.role === 'tool') { out.push(`[tool result] ${String(m.content || '').slice(0, 2000)}`); continue; }
+        if (typeof m.content === 'string' && m.content.trim()) out.push(`[${m.role === 'user' ? 'person' : m.role === 'assistant' ? 'agent' : m.role}] ${m.content.slice(0, 6000)}`);
+        if (Array.isArray(m.tool_calls)) for (const c of m.tool_calls) out.push(`[agent called] ${c.function && c.function.name}(${String((c.function && c.function.arguments) || '').slice(0, 300)})`);
+    }
+    return out.join('\n').slice(0, 120_000);
+}
+
+const SUMMARY_SYSTEM = `You compress the earlier part of a coding agent's conversation so it can keep working with less
+context. Write the state of the work, not a story: the task as understood, the facts found (files, functions, commands
+and what they showed), what was changed and where, what failed and why, what is still left. Keep exact names, paths and
+numbers. At most 500 words. No preamble.`;
+const SUMMARY_LABEL = '[The earlier conversation, summarized to save context]';
+
+/**
  * The conversation kept for resume: at most max messages, the system message first and the rest starting at a
  * person's message, so a resumed run never opens on a tool result whose call was cut off (a request the API refuses).
  */
@@ -539,6 +581,7 @@ function apiAgent(spec) {
             const startedAt = Date.now();
             const maxTurns = Math.max(1, Number(t.maxTurns) || 40);
             const budget = Math.max(20_000, Number(t.contextChars) || Number(t.options && t.options.contextChars) || Number(env.OPENVIBE_CODES_CONTEXT_CHARS) || CONTEXT_CHARS);
+            const compact = !(t.options && t.options.compact === false) && env.OPENVIBE_CODES_COMPACT !== 'off';
             const retryBase = Number.isFinite(Number(env.OPENVIBE_CODES_RETRY_MS)) && env.OPENVIBE_CODES_RETRY_MS !== undefined
                 ? Math.max(0, Number(env.OPENVIBE_CODES_RETRY_MS)) : 2000;
             let cancelled = false;
@@ -555,6 +598,25 @@ function apiAgent(spec) {
                 let lastText = '';
                 let turns = 0;
                 let failure = null;
+                /** One call without tools for the summary tier, through the same transport; its tokens and cost count. */
+                const summarize = async (span) => {
+                    const payload = { ...(spec.extra ? spec.extra(env) : {}), model, messages: [{ role: 'system', content: SUMMARY_SYSTEM }, { role: 'user', content: spanTranscript(span) }] };
+                    let body;
+                    if (spec.exchange) body = await exchangeTurn(spec, { env, doFetch, payload, signal: controller.signal });
+                    else {
+                        const bearer = spec.token ? await spec.token(env, doFetch) : key;
+                        const res = await doFetch(`${base}/chat/completions`, { method: 'POST', signal: controller.signal,
+                            headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...extraHeaders(env) }, body: JSON.stringify(payload) });
+                        body = await res.json().catch(() => null);
+                        if (!res.ok) return { error: `HTTP ${res.status}` };
+                    }
+                    const usage = (body && body.usage) || {};
+                    u.input += +usage.prompt_tokens || 0; u.output += +usage.completion_tokens || 0;
+                    const x = body && body.x_openvibe;
+                    if (x && Number.isFinite(+x.cost_usd)) { reported.usd += +x.cost_usd; reported.any = true; }
+                    const text = body && body.choices && body.choices[0] && body.choices[0].message && String(body.choices[0].message.content || '').trim();
+                    return text ? { text: text.slice(0, 8000) } : { error: 'an empty summary' };
+                };
                 // The model AI says ran, and its route disclosure (x_openvibe), recorded on the run's result.
                 let resolvedModel = null;
                 let disclosure = null;
@@ -568,6 +630,18 @@ function apiAgent(spec) {
                         turns++;
                         const dropped = trimContext(messages, budget);
                         if (dropped) yield ev.warning(`older tool output (${dropped} characters) was dropped to keep the conversation under ${budget} characters`);
+                        // The second tier: still over the limit, the earlier turns become a summary the model writes.
+                        const plan = compact ? compactPlan(messages, budget) : null;
+                        if (plan) {
+                            const span = messages.slice(plan.from, plan.to);
+                            const sum = await summarize(span).catch((err) => ({ error: err.message }));
+                            if (sum && sum.text) {
+                                messages.splice(plan.from, plan.to - plan.from, { role: 'user', content: `${SUMMARY_LABEL}\n${sum.text}` });
+                                yield ev.warning(`the earlier conversation (${span.length} messages) was summarized to stay under ${budget} characters`);
+                            } else {
+                                yield ev.warning(`the earlier conversation could not be summarized (${(sum && sum.error) || 'no answer'}): it is sent as it is`);
+                            }
+                        }
                         const payload = { ...(spec.extra ? spec.extra(env) : {}), model, messages, tools, tool_choice: 'auto',
                             // Codes L31/AI AL3: the reasoning level the caller asked for, and the option to ask
                             // the AI router's advisor for guidance. AI ignores both when its own request does not
@@ -725,4 +799,4 @@ function apiAgent(spec) {
     return adapter;
 }
 
-module.exports = { apiAgent, exchangeTurn, refusalOf, extraHeaders, runTool, grepTool, trimContext, forResume, retriesFor, retryWait, inside, refusedCommand, adviceTranscript, TOOL_DEFS, SYSTEM };
+module.exports = { apiAgent, exchangeTurn, refusalOf, extraHeaders, runTool, grepTool, trimContext, compactPlan, spanTranscript, forResume, retriesFor, retryWait, inside, refusedCommand, adviceTranscript, TOOL_DEFS, SYSTEM };
