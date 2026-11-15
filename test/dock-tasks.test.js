@@ -124,6 +124,25 @@ function assertSummary(s) {
             assert.match(String(row.repo), /octocat\/Hello-World/i);
         });
 
+        await check('make takes the composer\'s harness and model, and checks the computer with Link (11-15)', async () => {
+            const url = 'Add a test for the slug helper in https://github.com/octocat/Hello-World';
+            let r = await api('POST', '/tasks', { as: ada, body: { text: url, mode: 'make', harness: 'codex' } });
+            assert.ok(r.status === 200 || r.status === 201, r.text);
+            let row = await t.ctx.store.db.maybe('SELECT agent FROM run_tasks WHERE id = $1', [r.json().id]);
+            assert.strictEqual(row.agent, 'codex', 'the harness the person picked');
+            // A model the harness does not offer (an Exchange id) leaves the harness's own choice; the harness stays.
+            r = await api('POST', '/tasks', { as: ada, body: { text: url, mode: 'make', harness: 'codex', model: 'anthropic/claude-sonnet' } });
+            assert.ok(r.status === 200 || r.status === 201, r.text);
+            row = await t.ctx.store.db.maybe('SELECT agent FROM run_tasks WHERE id = $1', [r.json().id]);
+            assert.strictEqual(row.agent, 'codex');
+            r = await api('POST', '/tasks', { as: ada, body: { text: url, mode: 'make', harness: 'no-such-harness' } });
+            assert.deepStrictEqual([r.status, r.json().code], [422, 'codes.agent_unknown'], 'a harness Codes does not run is refused');
+            const before = Number(await t.ctx.store.db.value('SELECT count(*) FROM run_tasks'));
+            r = await api('POST', '/tasks', { as: ada, body: { text: url, mode: 'make', machine: 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2ZZ' } });
+            assert.ok(r.status === 409 || r.status === 503, `a computer Link does not vouch for is refused (${r.status} ${r.text})`);
+            assert.strictEqual(Number(await t.ctx.store.db.value('SELECT count(*) FROM run_tasks')), before, 'and no task starts');
+        });
+
         await check('openvibe mode works out the project from the words, like the site', async () => {
             const r = await api('POST', '/tasks', { as: ada, body: { text: 'Make Live faster on phones', mode: 'openvibe' } });
             assert.strictEqual(r.status, 201, r.text);

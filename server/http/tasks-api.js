@@ -39,6 +39,7 @@ const childReport = require('../domain/child-report');
 const { readMultipart, isMultipart } = require('./upload');
 const { corsOpenVibe } = require('./openvibe-origins');
 const start = require('./start');
+const models = require('../data/models');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -90,7 +91,7 @@ function runUse(raw) {
     return Object.keys(out).length ? out : bad('use names a model, a harness or an effort');
 }
 
-function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, modelPlans = null, fleet = null, sharing = null, conductor = null, attachments = null, races = null, log = console }) {
+function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, modelPlans = null, fleet = null, sharing = null, conductor = null, attachments = null, races = null, machines = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     /** The repository the words name: a Git address in them, or one of the person's recent repositories by its name. */
@@ -381,9 +382,20 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
                     : 'Pick a repository (owner/name or any Git URL), choose an OpenVibe site, or start something new.');
             }
         }
+        // The composer's choice, through the Frame's run start (openvibe-shared 4.259.0; the owner, 11-15: "choose your
+        // harness … configure your model … choose a node"): a harness from GET /api/v1/harnesses, a model it offers
+        // (one it does not offer leaves the harness's own choice), and the person's computer, checked by Link.
+        const harnessIn = String(first(b.harness) || '').trim().slice(0, 64);
+        const modelIn = String(first(b.model) || '').trim().slice(0, 120);
+        let who = null;
+        if (harnessIn) {
+            const aiCatalog = !!(config.aiCatalog && config.aiCatalog.enabled);
+            who = models.parse(`${harnessIn}|${modelIn}`, harnesses, { aiCatalog }) || models.parse(`${harnessIn}|`, harnesses, { aiCatalog });
+            if (!who || !who.agent) return problem(req, res, 422, 'codes.agent_unknown', 'harness is one of GET /api/v1/harnesses, or absent for the router to pick');
+        }
         let args;
         try {
-            args = parseArgs(JSON.stringify({ repo: repoUrl, prompt: text, permission: 'edit' }));
+            args = parseArgs(JSON.stringify({ repo: repoUrl, prompt: text, permission: 'edit', ...(who && who.agent ? { agent: who.agent } : {}), ...(who && who.model ? { model: who.model } : {}) }));
         } catch (e) {
             return problem(req, res, 422, 'codes.task_invalid', e.message);
         }
@@ -402,7 +414,16 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
                 args = { ...args, plan: selected.plan, plan_source: selected.source, preset: selected.preset, model_fallbacks: selected.fallbacks };
             } catch (e) { return problem(req, res, e.status || 500, e.code || 'codes.model_plan_invalid', e.message); }
         }
-        const jobInput = (repo, prompt) => JSON.stringify({ repo, prompt, permission: 'edit' });
+        const jobInput = (repo, prompt) => JSON.stringify({ repo, prompt, permission: 'edit', ...(who && who.agent ? { agent: who.agent } : {}), ...(who && who.model ? { model: who.model } : {}) });
+        // The person's computer: Link checks it is theirs and can run coding tasks, then the task is pinned to it.
+        let pin = null;
+        const machineIn = String(first(b.machine) || '').trim();
+        if (machineIn) {
+            if (!machines || typeof machines.pick !== 'function') return problem(req, res, 503, 'codes.machines_unavailable', 'Codes cannot reach Link to check that computer right now');
+            const chosen = await machines.pick(token, machineIn).catch(() => null);
+            if (!chosen || !chosen.ok || !chosen.choice || !chosen.choice.id) return problem(req, res, 409, 'codes.machine_unavailable', (chosen && chosen.problem && chosen.problem.detail) || 'Link could not check that computer.');
+            pin = chosen.choice.id;
+        }
         let firstRow = null;
         try {
             if (targets && targets.length > 1) {
@@ -412,11 +433,11 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
                     const note = `\n\n(This request spans ${names.join(', ')}. This task is the ${names[i]} part; the others are separate tasks. Change only what this repository needs, and keep the names and behaviour consistent with the other parts.)`;
                     const each = { ...parseArgs(jobInput(x.url, `${text}${note}`.slice(0, 16000))),
                         ...(args.plan ? { plan: args.plan, plan_source: args.plan_source, preset: args.preset, model_fallbacks: args.model_fallbacks } : {}) };
-                    const row = await taskStore.start({ subject: p.subject, project, args: each, attachmentIds: i === 0 ? ids : [], mode: 'openvibe' });
+                    const row = await taskStore.start({ subject: p.subject, project, args: each, attachmentIds: i === 0 ? ids : [], pin, mode: 'openvibe' });
                     if (!firstRow) firstRow = row;
                 }
             } else {
-                firstRow = await taskStore.start({ subject: p.subject, project, args, attachmentIds: ids, mode: mode === 'openvibe' ? 'openvibe' : 'repo' });
+                firstRow = await taskStore.start({ subject: p.subject, project, args, attachmentIds: ids, pin, mode: mode === 'openvibe' ? 'openvibe' : 'repo' });
             }
         } catch (e) {
             return problem(req, res, e.status || 502, e.code || 'codes.task_failed', String((e && e.message) || 'the task could not start').slice(0, 300));
