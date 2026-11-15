@@ -136,3 +136,22 @@ agent when one fails, stalls or hits its limit, every harness and model this mac
 - **Turns:** the next prompt resumes the same agent's own session; after a swap the new agent gets the conversation so
   far. `session/load` replays a saved session (kept under the Codes home, `acp-sessions/`) and resumes its agent;
   `session/cancel` stops the run. Embedded context from the editor rides the prompt as files.
+
+## Swarm: one goal, many agents at once
+
+`openvibe-codes swarm "goal"` (harness/swarm.js) splits a goal into tickets that run at the same time, each on its
+own agent in its own git worktree, and merges them into one branch. It combines what the open designs do best
+(studied 11-15): DeepSeek Harness's agent teams (a shared task board every worker reads), ClawTeam (a worker per git
+worktree), DeepSeek's Super-Agent (tickets with a fixed scope) and Codes' own routing and hand-off (each worker is a
+whole harness run, so it falls through to the next agent when one fails).
+
+- **Plan:** a lead (`--planner`, any agent, read only) answers the tickets as JSON: a title, a brief and the files each
+  owns, at most `--tickets` (default 4, at most 8); an answer with no plan becomes one ticket for the whole goal.
+- **Board:** `<Codes home>/swarms/<id>/board.json`: every ticket, its agent, branch, status, what it changed.
+- **Work:** each ticket on `ovswarm/<id>/<ticket>` in its own worktree from HEAD, at most `--concurrency` at once (default
+  3), on the agent the plan named, else the next of `--agents`, else routing. Its prompt carries the goal, its ticket
+  and the other tickets with their files, so it stays in its lane. What it changed is committed on its branch.
+- **Merge:** the finished tickets merge one by one into `ovswarm/<id>/merged`; a conflict goes to a resolver run, and a
+  merge that still conflicts is undone and left on its ticket's branch (`conflict`).
+- **Yours is never touched:** the swarm needs a clean working tree, starts from HEAD and leaves HEAD, the working tree
+  and every worktree as they were; look with `git diff HEAD...ovswarm/<id>/merged` and merge it yourself.
