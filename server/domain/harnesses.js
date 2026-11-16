@@ -3,7 +3,9 @@
 /** Static harness catalog. Replace the file reader when offer ownership is settled. */
 const fs = require('fs');
 const path = require('path');
-const contracts = require('openvibe-contracts');
+// Loaded on first use: it reads every schema (about 0.4 s), and the CLI's own start does not need it.
+let contractsLib = null;
+const contracts = () => (contractsLib || (contractsLib = require('openvibe-contracts')));
 
 const DEFAULT_CATALOG = path.join(__dirname, '..', 'data', 'harness-offers.json');
 
@@ -13,7 +15,7 @@ function invalid(detail) {
     return error;
 }
 
-function createHarnesses({ catalogPath = DEFAULT_CATALOG } = {}) {
+function createHarnesses({ catalogPath = DEFAULT_CATALOG, validate = process.env.OPENVIBE_CODES_TRUST_CATALOG !== '1' || catalogPath !== DEFAULT_CATALOG } = {}) {
     let rows;
     try {
         rows = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
@@ -29,7 +31,7 @@ function createHarnesses({ catalogPath = DEFAULT_CATALOG } = {}) {
         const { agents, ...offer } = row;
         // A row is one contract instance: the offer and the agents (models) it runs. platform.harness-offer@1
         // carries the agents (contracts 0.246.0), so the whole row is checked against it in one go.
-        const harnessCheck = contracts.validate('platform.harness-offer@1', row);
+        const harnessCheck = validate ? contracts().validate('platform.harness-offer@1', row) : { valid: true };
         if (!harnessCheck.valid) throw invalid(`row ${index} harness offer: ${JSON.stringify(harnessCheck.errors)}`);
         if (ids.has(offer.id)) throw invalid(`duplicate id ${offer.id}`);
         ids.add(offer.id);
