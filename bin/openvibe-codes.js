@@ -7,7 +7,8 @@
  * https://openvibe.codes/start.
  */
 const path = require('path');
-const { createHarness } = require('../harness');
+const { createHarness, adaptersFor } = require('../harness');
+const provision = require('../harness/provision');
 const { runJob, resultWriter, jobEnv } = require('../harness/job');
 const { task } = require('./task');
 const { skills } = require('./skills');
@@ -21,6 +22,12 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
   openvibe-codes skills [get|list|path] [name] the guide an agent reads, shipped with this binary
   openvibe-codes acp [--permission read|edit|full] [--agent <id>]   Codes as one ACP agent on stdin/stdout, for Zed,
                                        JetBrains, T3 Code and any ACP client: auto or any harness as its models
+  openvibe-codes setup [--profile <actor>] [--agents a,b] [--login own|locker|exchange]
+                                       get this machine ready for an actor in one step: installs the agents, makes the
+                                       actor's own home, its Locker key, and says what is ready and what is left
+  openvibe-codes doctor [--profile <actor>]   every agent here: installed, signed in, ready, and the one command that
+                                       fixes what is missing
+  openvibe-codes install <agent…> | --all     install agents into this runner's own folder (never global, never root)
   openvibe-codes agents                       which agents this machine can run, and why not the others
   openvibe-codes logins                      the coding CLIs here: installed, signed in, and their limit windows
   openvibe-codes route [--task edit] [--need harness:resume,…]   which agent a task would go to, and why
@@ -29,6 +36,12 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
                                        worktree, merged into one branch (yours is untouched)
   openvibe-codes run [options] "what to do"   run a task ("-" reads it from stdin)
       --task edit|review|long|resume   what kind of task (default edit)
+      --profile <actor>                the actor's own homes for every agent: its logins, history and settings, apart
+                                       from every other actor on this machine (OPENVIBE_CODES_PROFILE)
+      --login own|locker|exchange      where the agent's sign-in comes from for this run: its own, the actor's Locker
+                                       login (OPENVIBE_CODES_LOGIN_<AGENT>=locker:<item>, OPENVIBE_LOCKER_TOKEN), or
+                                       OpenVibe.Exchange as the gateway (OPENVIBE_EXCHANGE_KEY)
+      --no-install                     do not install a missing agent (OPENVIBE_CODES_AUTOINSTALL=0)
       --agent <id>                     skip routing: claude-code, claude-other, codex, opencode, command-code,
                                        aider, minimax-code, deepseek, openai-compatible
       --model <name>                   the first agent's model
@@ -79,6 +92,8 @@ function parse(argv) {
         else if (a === '--for-agent') { opts.forAgent = true; agentMode = true; }
         else if (a === '--advisor') opts.advisor = true;
         else if (a === '--no-handoff') opts.handoff = false;
+        else if (a === '--no-install') opts.install = false;
+        else if (a === '--all') opts.all = true;
         else if (a === '--help' || a === '-h') opts.help = true;
         else if (a.startsWith('--')) { const k = a.slice(2); opts[k] = argv[++i]; }
         else opts._.push(a);
@@ -136,7 +151,44 @@ async function main() {
     if (cmd === 'tools') return require('./tools').tools(rest, { out, json: o.json });
     if (!cmd || cmd === 'help' || o.help || cmd === '--help' || cmd === '-h') { out(USAGE); return 0; }
     if (cmd === '--version' || cmd === '-v' || cmd === 'version') { out(VERSION); return 0; }
-    const harness = createHarness();
+    // The actor's own homes and this runner's installed agents (2026-11-16: provisioning).
+    let env = process.env;
+    try { env = provision.profileEnv(env, o.profile || env.OPENVIBE_CODES_PROFILE || null); } catch (e) { out(e.message); return 1; }
+    env = provision.withTools(env);
+    if (o.install === false) env = { ...env, OPENVIBE_CODES_AUTOINSTALL: '0' };
+    const harness = createHarness({ env });
+    if (cmd === 'install') {
+        const ids = o.all ? Object.keys(provision.recipes) : o._;
+        if (!ids.length) { out('which agents? openvibe-codes install claude-code codex …  (or --all)'); return 1; }
+        let bad = 0;
+        for (const id of ids) {
+            const r = provision.install(id, env, { log: (m) => { if (!o.json) out(dim(m)); } });
+            if (o.json) out(JSON.stringify({ id, ...r })); else out(`${r.ok ? '✔' : '✗'} ${id}${r.ok ? dim(` ${[r.where, r.version].filter(Boolean).join(' · ')}`) : ` ${r.error}`}`);
+            if (!r.ok) bad++;
+        }
+        return bad ? 1 : 0;
+    }
+    if (cmd === 'setup' || cmd === 'doctor') {
+        if (cmd === 'setup') {
+            const ids = String(o.agents || 'claude-code,codex,opencode').split(',').map((s) => s.trim()).filter(Boolean);
+            for (const id of ids) {
+                const adapter = adaptersFor(env)[id];
+                const r = adapter ? provision.ensure(adapter, env, { log: (m) => out(dim(m)) }) : provision.install(id, env, { log: (m) => out(dim(m)) });
+                if (!r.ok) out(`✗ ${id} ${r.error}`);
+            }
+            if (o.login === 'locker') {
+                const k = await provision.lockerKeys(env, env.OPENVIBE_CODES_PROFILE || 'default');
+                out(`Locker: share each agent's login with this actor's key (${k.public.fingerprint.join ? k.public.fingerprint.join(' ') : k.public.fingerprint}).`);
+                out(dim(`  its public key: ${k.file.replace(/locker-keys\.json$/, '')} (locker-keys.json keeps the private half, 0600)`));
+                out(dim('  then set OPENVIBE_CODES_LOGIN_<AGENT>=locker:<item id> and OPENVIBE_LOCKER_TOKEN for the runs'));
+            }
+        }
+        const rows = provision.doctor(adaptersFor(env), env, { logins: probeLogins({ home: env.HOME, env }) });
+        if (o.json) { out(JSON.stringify({ profile: env.OPENVIBE_CODES_PROFILE || null, agents: rows }, null, 2)); return 0; }
+        if (env.OPENVIBE_CODES_PROFILE) out(dim(`actor ${env.OPENVIBE_CODES_PROFILE} · ${env.OPENVIBE_CODES_PROFILE_DIR}`));
+        for (const r of rows) out(`${r.ready ? '✔' : r.installed ? '◐' : '·'} ${r.id.padEnd(16)} ${r.ready ? dim(`ready · ${r.login} login`) : dim(r.fix || '')}`);
+        return rows.some((r) => r.ready) ? 0 : 1;
+    }
 
     if (cmd === 'agents') {
         const list = harness.agents();
@@ -151,7 +203,7 @@ async function main() {
     if (cmd === 'logins') {
         // What this machine has: each CLI, whether it is signed in, and the limit windows it can read. Nothing else:
         // no key, no token, no account name.
-        const rows = probeLogins({ home: process.env.HOME });
+        const rows = probeLogins({ home: env.HOME, env });
         if (o.forAgent) {
             for (const r of rows) out(agentOut.line({ event: 'login', id: r.id, installed: !!r.installed, signed_in: !!r.signed_in, windows: r.windows || [] }));
             return 0;
@@ -202,9 +254,27 @@ async function main() {
             else out('what should the agent do? openvibe-codes run "…"');
             return 1;
         }
+        let runHarness = harness;
+        if (agent) {
+            const adapter = adaptersFor(env)[agent];
+            const ready = provision.ensure(adapter, env, { log: (m) => { if (!o.json && !o.forAgent) out(dim(m)); } });
+            if (!ready.ok) { if (o.forAgent) out(agentOut.errorLine('agent_missing', ready.error)); else out(ready.error); return 1; }
+            let login = null;
+            try {
+                if (o.login === 'locker') login = await provision.lockerLogin(agent, env);
+                else if (o.login === 'exchange') login = provision.exchangeLogin(agent, env);
+            } catch (e) { if (o.forAgent) out(agentOut.errorLine(e.code || 'login', e.message)); else out(e.message); return 1; }
+            if ((o.login === 'locker' || o.login === 'exchange') && !login) {
+                const why = o.login === 'exchange' ? 'set OPENVIBE_EXCHANGE_KEY (an Exchange key)' : `set OPENVIBE_CODES_LOGIN_${agent.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}=locker:<item id>`;
+                if (o.forAgent) out(agentOut.errorLine('no_login', why)); else out(why);
+                return 1;
+            }
+            // The login reaches this run's agent only: a harness of its own, never this process's environment.
+            if (login) runHarness = createHarness({ env: { ...env, ...login } });
+        }
         const controller = new AbortController();
         process.on('SIGINT', () => { controller.abort(); });
-        const run = harness.run({
+        const run = runHarness.run({
             prompt, task: o.task || (resume ? 'resume' : 'edit'), agent, model: o.model || null, cwd, resume,
             permission: o.permission || 'edit', handoff: o.handoff !== false && !resume, maxAttempts: Number(o.attempts) || 3, signal: controller.signal,
             effort: o.effort || null, advisor: o.advisor ? (o['advisor-model'] ? { model: o['advisor-model'] } : true) : null,

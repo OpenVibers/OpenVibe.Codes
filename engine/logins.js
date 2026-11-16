@@ -20,8 +20,8 @@ const path = require('path');
 
 /** The CLIs and where their login lives, relative to the home folder. */
 const CLIS = [
-    { id: 'claude-code', bin: 'claude', login: '.claude/.credentials.json', provider: 'Anthropic' },
-    { id: 'codex', bin: 'codex', login: '.codex/auth.json', provider: 'OpenAI' },
+    { id: 'claude-code', bin: 'claude', login: '.claude/.credentials.json', provider: 'Anthropic', dirEnv: 'CLAUDE_CONFIG_DIR', inDir: '.credentials.json' },
+    { id: 'codex', bin: 'codex', login: '.codex/auth.json', provider: 'OpenAI', dirEnv: 'CODEX_HOME', inDir: 'auth.json' },
     { id: 'opencode', bin: 'opencode', login: '.local/share/opencode/auth.json', provider: 'OpenCode' },
     { id: 'command-code', bin: 'cmd', login: '.commandcode/auth.json', provider: 'Command Code' },
     { id: 'minimax-code', bin: 'mcode', login: '.minimax/credentials.json', provider: 'MiniMax' },
@@ -91,7 +91,8 @@ function probe({ home, env = process.env } = {}) {
     const h = home || os.homedir();
     return CLIS.map((c) => {
         const where = onPath(c.bin, env);
-        const file = path.join(h, c.login);
+        // An actor's own home (openvibe-codes --profile) moves Claude Code's and Codex's logins there.
+        const file = c.dirEnv && env[c.dirEnv] ? path.join(env[c.dirEnv], c.inDir) : path.join(h, c.login);
         let login = null;
         try { login = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { login = null; }
         return {
