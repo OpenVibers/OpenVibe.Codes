@@ -62,3 +62,38 @@
   .c4-setup-agent-help{padding-left:0}
   .c4-setup-actions>.c4-button,.c4-setup-actions>.c4-opill{flex:1 1 auto;justify-content:center}
 }
+
+/* 2026-11-16: Sign in on a machine, from here. The steps light up as they happen; the link and the code arrive when the
+   machine gives them; a signed-in agent settles with a check. Calm shortens the moves, Off stops them. */
+.c4-signin { display: grid; gap: 12px; margin-top: 8px; }
+.c4-signin-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.c4-signin-on { color: var(--text-secondary, #a9b6cb); font-size: 14px; }
+.c4-signin-machines { display: flex; flex-wrap: wrap; gap: 6px; }
+.c4-signin-machine { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line, #22304a); background: transparent; color: inherit; font: inherit; font-size: 14px; cursor: pointer; transition: background-color .2s, border-color .2s, transform .12s; }
+.c4-signin-machine.is-on { border-color: var(--accent, #4f7dff); background: color-mix(in srgb, var(--accent, #4f7dff) 14%, transparent); }
+.c4-signin-machine:active { transform: scale(.96); }
+.c4-signin-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted, #7d8ba3); }
+.c4-signin-dot.is-online { background: var(--ok, #22c55e); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok, #22c55e) 25%, transparent); }
+.c4-signin-live { display: grid; gap: 12px; padding: 14px; border-radius: 16px; background: color-mix(in srgb, var(--accent, #4f7dff) 6%, var(--surface, #121a2b)); border: 1px solid color-mix(in srgb, var(--accent, #4f7dff) 22%, var(--line, #22304a)); animation: c4-signin-in .35s cubic-bezier(.2, .9, .3, 1) both; }
+@keyframes c4-signin-in { from { opacity: 0; transform: translateY(calc(8px * var(--ov-move, 1))); } }
+.c4-signin-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; counter-reset: s; }
+.c4-signin-steps li { position: relative; padding-top: 14px; font-size: 12px; color: var(--text-muted, #7d8ba3); counter-increment: s; transition: color .25s; }
+.c4-signin-steps li::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 4px; border-radius: 4px; background: var(--line, #22304a); }
+.c4-signin-steps li::after { content: ""; position: absolute; top: 0; left: 0; height: 4px; width: 0; border-radius: 4px; background: var(--accent, #4f7dff); transition: width .5s cubic-bezier(.2, .9, .3, 1); }
+.c4-signin-steps li.is-now { color: var(--text, #e8edf6); }
+.c4-signin-steps li.is-now::after { width: 45%; animation: c4-signin-work 1.4s ease-in-out infinite alternate; }
+.c4-signin-steps li.is-done { color: var(--text-secondary, #a9b6cb); }
+.c4-signin-steps li.is-done::after { width: 100%; }
+@keyframes c4-signin-work { to { width: 85%; } }
+.c4-signin-say { margin: 0; font-size: 14px; line-height: 1.45; }
+.c4-signin-say.is-bad { color: var(--bad, #ef4444); }
+.c4-signin-link.is-in { animation: c4-signin-pop .42s cubic-bezier(.2, 1.3, .4, 1) both; }
+@keyframes c4-signin-pop { from { opacity: 0; transform: scale(.92); } }
+.c4-signin-code { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.c4-signin-code label { display: grid; gap: 6px; flex: 1 1 220px; min-width: 0; font-size: 13px; color: var(--text-secondary, #a9b6cb); }
+.c4-signin-code input { min-height: 44px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line, #22304a); background: var(--bg, #0b0f1a); color: inherit; font: 15px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.c4-signin.is-done .c4-signin-live { border-color: color-mix(in srgb, var(--ok, #22c55e) 45%, transparent); background: color-mix(in srgb, var(--ok, #22c55e) 8%, var(--surface, #121a2b)); }
+.c4-signin.is-done .c4-signin-code, .c4-signin.is-done .c4-signin-link { display: none; }
+.c4-signin-terminal { margin-top: 6px; font-size: 13px; color: var(--text-secondary, #a9b6cb); }
+.c4-signin-terminal summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; }
+html[data-ov-motion="off"] .c4-signin-live, html[data-ov-motion="off"] .c4-signin-link.is-in, html[data-ov-motion="off"] .c4-signin-steps li::after { animation: none; transition: none; }
