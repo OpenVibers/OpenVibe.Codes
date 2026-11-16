@@ -4,7 +4,8 @@
  * Harness placement: each harness × agent pair from the catalog (server/domain/harnesses.js) becomes one
  * openvibe-sdk/placement Offer, and the SDK planner picks where a coding task runs. Pure: no I/O.
  */
-const contracts = require('openvibe-contracts');
+let contractsLib = null;
+const contracts = () => (contractsLib || (contractsLib = require('openvibe-contracts')));   // on first use (0.4 s to load)
 const { place, optionKey } = require('openvibe-sdk/placement');
 const runtime = require('../../engine/runtime');
 
@@ -132,7 +133,7 @@ function route({ task, extra = {}, harnesses, opts = {}, now = Date.now(), conte
     const result = placed.result;
     // The Contracts compat gate refused widening placement-result@1 `selected` to null: a plan with nothing selected skips the check.
     if (result.selected !== null) {
-        const check = contracts.validate('platform.placement-result@1', JSON.parse(JSON.stringify(result)));
+        const check = contracts().validate('platform.placement-result@1', JSON.parse(JSON.stringify(result)));
         if (!check.valid) {
             const error = new Error(`invalid placement result: ${JSON.stringify(check.errors)}`);
             error.code = 'harness.placement_invalid';

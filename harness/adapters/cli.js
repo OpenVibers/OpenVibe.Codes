@@ -339,6 +339,7 @@ const minimaxCode = {
 const muse = {
     id: 'muse', name: 'Muse Code', kind: 'cli', bin: 'muse',
     version: (env) => versionOf('muse', env),
+    checkTtlMs: 120_000,   // the check asks Meta for its usage (0.35 s): it holds two minutes
     check(env = {}) {
         try {
             const raw = execFileSync('muse', ['usage', '--json'], { env: { ...process.env, ...env }, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] });
