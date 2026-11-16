@@ -219,4 +219,7 @@ function doctor(adapters, env, { logins = [] } = {}) {
     });
 }
 
-module.exports = { recipes, recipeOf, home, withTools, profileEnv, install, ensure, lockerKeys, lockerLogin, exchangeLogin, doctor, LOGIN_ENV };
+// Each agent's own sign-in, run inside the actor's homes (`openvibe-codes login <agent> --profile <actor>`).
+const LOGIN_ARGS = { 'claude-code': ['auth', 'login'], codex: ['login'], opencode: ['auth', 'login'], 'command-code': ['login'] };
+
+module.exports = { LOGIN_ARGS, recipes, recipeOf, home, withTools, profileEnv, install, ensure, lockerKeys, lockerLogin, exchangeLogin, doctor, LOGIN_ENV };

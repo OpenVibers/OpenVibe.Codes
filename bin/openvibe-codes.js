@@ -28,6 +28,7 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
   openvibe-codes doctor [--profile <actor>]   every agent here: installed, signed in, ready, and the one command that
                                        fixes what is missing
   openvibe-codes install <agent…> | --all     install agents into this runner's own folder (never global, never root)
+  openvibe-codes login <agent> [--profile <actor>]   the agent's own sign-in, kept in that actor's homes
   openvibe-codes agents                       which agents this machine can run, and why not the others
   openvibe-codes logins                      the coding CLIs here: installed, signed in, and their limit windows
   openvibe-codes route [--task edit] [--need harness:resume,…]   which agent a task would go to, and why
@@ -167,6 +168,18 @@ async function main() {
             if (!r.ok) bad++;
         }
         return bad ? 1 : 0;
+    }
+    if (cmd === 'login') {
+        // The agent's own sign-in, in the actor's homes: the login lands in that actor's profile and nowhere else.
+        const id = o._[0];
+        const adapter = id && adaptersFor(env)[id];
+        const args = id && provision.LOGIN_ARGS[id];
+        if (!adapter || !args) { out(`sign in which agent? openvibe-codes login ${Object.keys(provision.LOGIN_ARGS).join('|')} [--profile <actor>]`); return 1; }
+        const ready = provision.ensure(adapter, env, { log: (m) => out(dim(m)) });
+        if (!ready.ok) { out(ready.error); return 1; }
+        if (env.OPENVIBE_CODES_PROFILE) out(dim(`signing ${adapter.name} in for actor ${env.OPENVIBE_CODES_PROFILE}`));
+        const r = require('child_process').spawnSync(ready.where || adapter.bin, args, { env, stdio: 'inherit' });
+        return r.status || 0;
     }
     if (cmd === 'setup' || cmd === 'doctor') {
         if (cmd === 'setup') {
