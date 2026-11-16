@@ -12,7 +12,7 @@ const { spawn } = require('child_process');
 
 const BIN = path.join(__dirname, '..', 'bin', 'openvibe-codes.js');
 
-function runJob(args, typed, env) {
+function runJob(args, typed, env, { close = false } = {}) {
     return new Promise((resolve) => {
         const child = spawn(process.execPath, [BIN, 'job'], { env, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] });
         let out = '';
@@ -22,7 +22,7 @@ function runJob(args, typed, env) {
         child.stdio[3].on('data', (d) => { result += d; });
         child.stdin.write(`${JSON.stringify(args)}\n`);
         // The code arrives later, as the page sends it: the stdin stays open meanwhile (an interactive job).
-        setTimeout(() => { child.stdin.write(typed); }, 300);
+        setTimeout(() => { child.stdin.write(typed); if (close) child.stdin.end(); }, 300);
         child.on('close', (code) => resolve({ code, out, result }));
     });
 }
@@ -61,6 +61,28 @@ echo "Login successful."
     const w = JSON.parse(wrong.result || '{}');
     assert.strictEqual(w.ok, false, wrong.out);
     assert.match(wrong.out, /did not sign in/);
+
+    // An agent that never gives up waiting (Claude Code after a wrong code, on ov-node-01): the page's input closing
+    // gives it a moment, then the job ends with a result, never killed silently at Link's limit.
+    const stuck = path.join(box, 'stuck');
+    fs.mkdirSync(stuck);
+    fs.writeFileSync(path.join(stuck, 'claude'), `#!/bin/sh
+case "$1" in --version) echo "2.1.325 (Claude Code)"; exit 0;; esac
+echo "If the browser didn't open, visit: https://claude.example/oauth/authorize?code=true"
+exec tail -f /dev/null
+`, { mode: 0o755 });
+    const stuckEnv = { ...env, PATH: `${stuck}:${process.env.PATH}`, OPENVIBE_SANDBOX: path.join(box, 'stuck-box'), OPENVIBE_CODES_LOGIN_GRACE_MS: '200' };
+    fs.mkdirSync(stuckEnv.OPENVIBE_SANDBOX);
+    const t0 = Date.now();
+    const closed = await runJob({ mode: 'login', agent: 'claude-code' }, 'wrong\n', stuckEnv, { close: true });
+    const c = JSON.parse(closed.result || '{}');
+    assert.deepStrictEqual([c.ok, c.signed_in], [false, false], `input closed: a result (${closed.out})`);
+    assert.ok(Date.now() - t0 < 8000, 'ended soon after the input closed');
+    // Input left open: the job's own deadline ends it, with a result.
+    const late = await runJob({ mode: 'login', agent: 'claude-code' }, 'wrong\n', { ...stuckEnv, OPENVIBE_CODES_LOGIN_GRACE_MS: '60000', OPENVIBE_CODES_LOGIN_DEADLINE_MS: '700' });
+    const l = JSON.parse(late.result || '{}');
+    assert.strictEqual(l.ok, false, `deadline: a result (${late.out})`);
+    assert.match(late.out, /did not sign in/);
 
     const unknown = await runJob({ mode: 'login', agent: 'no-such-agent' }, '\n', env);
     assert.strictEqual(JSON.parse(unknown.result).error, 'unknown_agent');

@@ -192,7 +192,19 @@ async function loginJob(input, rest, env) {
     if (rest) child.stdin.write(rest);
     process.stdin.resume();
     process.stdin.pipe(child.stdin);
-    const code = await new Promise((resolve) => child.on('close', (c) => resolve(c)));
+    // 2026-11-16 (a real sign-in on ov-node-01): Claude Code keeps waiting after its input closes, so the job would end
+    // only at Link's limit, killed, with no result for the page. The page's input closing gives the agent a few seconds
+    // to finish; the job's own deadline (before Link's 10 minutes) ends it with a result either way.
+    const stop = () => { if (child.exitCode == null && child.signalCode == null) child.kill('SIGTERM'); };
+    const graceMs = Number(env.OPENVIBE_CODES_LOGIN_GRACE_MS) || 5000;
+    const deadlineMs = Number(env.OPENVIBE_CODES_LOGIN_DEADLINE_MS) || 9 * 60 * 1000;
+    let grace = null;
+    const onEnd = () => { grace = setTimeout(stop, graceMs); };
+    process.stdin.once('end', onEnd);
+    const deadline = setTimeout(stop, deadlineMs);
+    const code = await new Promise((resolve) => child.on('close', (c, sig) => resolve(c == null ? (sig || 'stopped') : c)));
+    clearTimeout(deadline); if (grace) clearTimeout(grace);
+    process.stdin.off('end', onEnd);
     process.stdin.unpipe(child.stdin);
     const now = probeLogins({ home: env.HOME, env }).find((x) => x.id === id) || {};
     const signedIn = now.signed_in === true;
