@@ -110,6 +110,23 @@ function createMeApi({ config, store, sso, keys, run, harnesses, fleet = null, u
      * (the Dock asks with 8). A session cookie or the person's own Network bearer token; another person's tasks
      * are never in the answer.
      */
+    /**
+     * The map of OpenVibe (openvibe-contracts' system map): every service, repository and library, and how they fit
+     * → { libraries, services, repositories, spine }. ?task= adds the repositories that task likely needs, with why
+     * (→ { picks }), and ?format=md answers the brief a coding job reads as .openvibe/OPENVIBE.md. Signed in only.
+     */
+    r.get('/me/system-map', actorLimits.reads('codes.read'), async (req, res) => {
+        const subject = await subjectOf(req);
+        if (!subject) return problem(req, res, 401, 'auth.required', 'sign in to read the map');
+        let map = null;
+        try { map = require('openvibe-contracts/lib/system-map'); } catch { map = null; }
+        if (!map) return problem(req, res, 503, 'system_map.unavailable', 'this server\'s openvibe-contracts has no system map yet');
+        const task = String(req.query.task || '').slice(0, 4000);
+        if (req.query.format === 'md') return res.type('text/markdown; charset=utf-8').send(map.markdown(task));
+        if (task) return res.json(map.reposFor(task, { limit: Math.min(Math.max(Number(req.query.limit) || 6, 1), 12) }));
+        return res.json(map.systemMap());
+    });
+
     r.get('/me/tasks', actorLimits.reads('codes.read'), async (req, res) => {
         const subject = await subjectOf(req);
         if (!subject) return problem(req, res, 401, 'auth.required', 'sign in to see your tasks');
