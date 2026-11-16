@@ -12,6 +12,9 @@
  *                       [--model <id>] [--public|--unlisted]   private unless you say); runs are paid by whoever runs it
  *   openvibe-codes tools bring <val address>            a Val Town val as your own code tool (Val Town closes
  *   openvibe-codes tools bring --pipedream <file.js>    2027-01-10), or a Pipedream code step (closes 2027-03-31)
+ *   openvibe-codes tools automate <tool> --every day --at 09:00 [key=value …]   any tool on a schedule (UTC), as you
+ *   openvibe-codes tools automate <tool> --link [key=value …]                   or from a private link (a webhook)
+ *   openvibe-codes tools automations                    every schedule and link you have, on any tool
  *
  * Signed out, the catalogue and the public tools work. OPENVIBE_TOOLS_TOKEN (a sign-in for openvibe.tools; else
  * OPENVIBE_TOKEN) adds your own tools and making one. OPENVIBE_TOOLS_URL points elsewhere (default
@@ -33,6 +36,10 @@ const HELP = `openvibe-codes tools — OpenVibe Tools from the terminal
   openvibe-codes tools bring <val address>           a Val Town val as your own code tool (its imported vals too)
   openvibe-codes tools bring --pipedream <file.js>   a Pipedream Node.js code step (- reads it from stdin)
       --name <name>         a name for a Pipedream step (default: the file's)
+  openvibe-codes tools automate <tool> [key=value …] any tool on its own, as you: a catalogue tool or one you made
+      --every hour|day      a schedule (default day), --at HH:MM in UTC (default 09:00), --quiet: not told each run
+      --link                a private link instead: GET or POST it (a webhook, a form, a shortcut) and the tool runs
+  openvibe-codes tools automations                   every schedule and link you have, with the next and last run
   --json                    the answer as JSON
 
 Signed out, the catalogue and the public tools work. OPENVIBE_TOOLS_TOKEN (else OPENVIBE_TOKEN) adds your own tools
@@ -91,7 +98,9 @@ function flags(argv) {
         else if (a === '--public') o.visibility = 'public';
         else if (a === '--unlisted') o.visibility = 'unlisted';
         else if (a === '--code') o.code = true;
-        else if (a === '--model' || a === '--input' || a === '--pipedream' || a === '--name') o[a.slice(2)] = argv[++i];
+        else if (a === '--link') o.link = true;
+        else if (a === '--quiet') o.quiet = true;
+        else if (a === '--model' || a === '--input' || a === '--pipedream' || a === '--name' || a === '--every' || a === '--at') o[a.slice(2)] = argv[++i];
         else if (a === '--help' || a === '-h') o.help = true;
         else o.rest.push(a);
     }
@@ -213,6 +222,31 @@ async function tools(argv, { out = (s) => process.stdout.write(`${s}\n`), json: 
             if (json) { out(JSON.stringify({ made, notes })); return 0; }
             const takes = Object.keys((made.input && made.input.properties) || {});
             out(`Brought ${made.name} (${made.id}, ${made.visibility})\n    ${made.summary}\n    takes: ${takes.join(', ') || 'nothing'}${notes.map((n) => `\n    note: ${n}`).join('')}\n    try it: openvibe-codes tools run ${made.id} ${takes.map((k) => `${k}=…`).join(' ')}\n    change it: ${BASE()}/make#${made.id}`);
+            return 0;
+        }
+        if (sub === 'automate') {
+            // Any tool on its own (one tool system, 11-15): POST /api/v1/tools/:id/triggers, as you.
+            const [tool, ...pairs] = o.rest;
+            if (!tool) throw new ToolsError('Name the tool: openvibe-codes tools automate dns --every day --at 09:00 target=example.com', 'tools.input');
+            if (o.every && !['hour', 'day'].includes(o.every)) throw new ToolsError('--every is hour or day', 'tools.input');
+            if (o.at && !/^([01]\d|2[0-3]):[0-5]\d$/.test(o.at)) throw new ToolsError('--at is a time, HH:MM (UTC)', 'tools.input');
+            const input = inputOf(pairs, o.input);
+            const body = o.link ? { kind: 'link', input } : { kind: 'schedule', every: o.every || 'day', at: o.at || '09:00', input, ...(o.quiet ? { notify: false } : {}) };
+            const t = await http(`/api/v1/tools/${encodeURIComponent(tool)}/triggers`, { method: 'POST', body, auth: true, ...opts });
+            if (json) { out(JSON.stringify(t)); return 0; }
+            if (t.url) out(`${tool}: a private link, shown once; keep it\n    ${t.url}\n    curl -X POST '${t.url}' -H 'Content-Type: application/json' -d '{…}'`);
+            else out(`${tool}: ${t.says}${t.next_run_at ? `, next ${t.next_run_at.slice(0, 16).replace('T', ' ')} UTC` : ''}${t.notify ? ', and you are told what it answered' : ''}`);
+            return 0;
+        }
+        if (sub === 'automations') {
+            const d = await http('/api/v1/me/triggers', { auth: true, ...opts });
+            const list = (d && d.triggers) || [];
+            if (json) { out(JSON.stringify(list)); return 0; }
+            if (!list.length) { out('No automations yet: openvibe-codes tools automate <tool> --every day --at 09:00'); return 0; }
+            for (const t of list) {
+                const last = t.last_run_at ? `${t.last_state === 'succeeded' ? 'ran' : 'failed'} ${t.last_run_at.slice(0, 16).replace('T', ' ')}` : 'not run yet';
+                out(`${t.tool_name || t.tool}  ${t.says}${t.enabled ? '' : '  (paused)'}\n    ${last}${t.enabled && t.next_run_at ? ` · next ${t.next_run_at.slice(0, 16).replace('T', ' ')} UTC` : ''} · ${t.runs || 0} runs · ${t.page || ''}`);
+            }
             return 0;
         }
         throw new ToolsError(`No tools command "${sub}". ${HELP.split('\n')[0]}`, 'tools.usage');

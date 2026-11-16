@@ -18,6 +18,10 @@ function fake() {
         if (u.pathname === '/api/v1/made-tools/draft' && body.kind === 'code') return reply(200, { draft: { kind: 'code', name: 'Price with tax' }, body: { slug: 'price-with-tax', name: 'Price with tax', summary: 'Adds tax.', kind: 'code', input: { type: 'object', properties: { price: { type: 'number' } } }, output: { kind: 'text' }, source_code: 'function run(input) { return String(input.price * 1.1); }', net: 'deny', hosting: 'openvibe', visibility: 'private' } });
         if (u.pathname === '/api/v1/made-tools/draft') return reply(200, { draft: { name: 'Meeting notes', summary: 'Notes to actions.', instructions: 'Do it.', inputs: [{ label: 'Note', kind: 'long' }, { label: 'People', kind: 'number' }], answer: 'fields', fields: [{ label: 'Actions' }] } });
         if (u.pathname === '/api/v1/made-tools/import/val' || u.pathname === '/api/v1/made-tools/import/pipedream') return reply(200, { draft: { kind: 'code', name: 'Greet' }, notes: ['It reads Deno.env (its secrets on Val Town).'], net: 'deny', body: { slug: body.url ? 'greet' : 'step', name: body.url ? 'Greet' : 'Step', summary: 'Greets.', kind: 'code', net: 'deny', input: { type: 'object', properties: { name: { type: 'string' } } }, output: { kind: 'text' }, source_code: 'async function run(input) { return "hi"; }', visibility: 'private' } });
+        if (u.pathname === '/api/v1/tools/dns/triggers' && body.kind === 'link') return reply(201, { id: 'mtt_1', tool: 'dns', kind: 'link', says: 'A link …k3Zq', url: 'https://openvibe.tools/hooks/mth_secret', input: body.input, notify: false });
+        if (u.pathname === '/api/v1/tools/dns/triggers') return reply(201, { id: 'mtt_2', tool: 'dns', kind: 'schedule', says: `Every ${body.every} at ${body.at} UTC`, next_run_at: '2026-11-16T09:00:00.000Z', input: body.input, notify: body.notify !== false });
+        if (u.pathname === '/api/v1/tools/portscan/triggers') return reply(422, { code: 'tools.trigger.unsupported', detail: 'This tool needs you signed in for each run, so it cannot run on its own yet' });
+        if (u.pathname === '/api/v1/me/triggers') return reply(200, { triggers: [{ id: 'mtt_2', tool: 'dns', tool_name: 'DNS lookup', kind: 'schedule', says: 'Every day at 09:00 UTC', enabled: true, runs: 4, last_state: 'succeeded', last_run_at: '2026-11-15T09:00:05.000Z', next_run_at: '2026-11-16T09:00:00.000Z', page: 'https://openvibe.tools/make#automate=dns' }], count: 1 });
         if (u.pathname === '/api/v1/made-tools' && init.method === 'POST' && body.slug === 'greet') return reply(409, { title: 'You already have a tool called greet' });
         if (u.pathname === '/api/v1/made-tools' && init.method === 'POST') return reply(201, { id: 'mtl_01JCZ3NDEKTSV4RRFFQ69G5FA1', name: body.name, summary: body.summary, visibility: body.visibility, input: body.input });
         if (u.pathname === '/api/v1/made-tools') return reply(200, { tools: [{ id: 'mtl_01JCZ3NDEKTSV4RRFFQ69G5FA1', name: 'Meeting notes', summary: 'x', visibility: 'private', version: 1, runs: 3 }] });
@@ -92,6 +96,27 @@ function fake() {
         assert.deepStrictEqual([g.calls[0].path, g.calls[0].body.name, /defineComponent/.test(g.calls[0].body.code), g.calls[1].body.visibility], ['/api/v1/made-tools/import/pipedream', `pd-step-${process.pid}`, true, 'public']);
         require('fs').unlinkSync(file);
         assert.strictEqual(await tools(['bring'], { out: () => {}, fetchImpl: g.fetchImpl }), 1, 'an address is needed');
+        delete process.env.OPENVIBE_TOOLS_TOKEN;
+    });
+
+    await check('automate: any tool on a schedule or from a private link, as you; automations lists them', async () => {
+        const f = fake(); const lines = [];
+        delete process.env.OPENVIBE_TOOLS_TOKEN; delete process.env.OPENVIBE_TOKEN;
+        assert.strictEqual(await tools(['automate', 'dns', '--every', 'day', '--at', '09:00'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 1, 'signed in only');
+        process.env.OPENVIBE_TOOLS_TOKEN = 'tok-ada';
+        lines.length = 0;
+        assert.strictEqual(await tools(['automate', 'dns', '--every', 'day', '--at', '09:00', '--quiet', 'target=example.com'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 0);
+        assert.deepStrictEqual([f.calls.at(-1).path, f.calls.at(-1).auth, f.calls.at(-1).body], ['/api/v1/tools/dns/triggers', 'Bearer tok-ada', { kind: 'schedule', every: 'day', at: '09:00', input: { target: 'example.com' }, notify: false }]);
+        assert.strictEqual(lines.at(-1), 'dns: Every day at 09:00 UTC, next 2026-11-16 09:00 UTC');
+        assert.strictEqual(await tools(['automate', 'dns', '--link'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 0);
+        assert.match(lines.at(-1), /a private link, shown once[\s\S]*https:\/\/openvibe\.tools\/hooks\/mth_secret/);
+        assert.strictEqual(await tools(['automate', 'portscan', '--link'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 1);
+        assert.match(lines.at(-1), /signed in for each run/, 'the refusal in its own words');
+        assert.strictEqual(await tools(['automate', 'dns', '--every', 'week'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 1);
+        assert.strictEqual(await tools(['automate', 'dns', '--at', '25:00'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 1);
+        lines.length = 0;
+        assert.strictEqual(await tools(['automations'], { out: (s) => lines.push(s), fetchImpl: f.fetchImpl }), 0);
+        assert.match(lines.join('\n'), /^DNS lookup {2}Every day at 09:00 UTC\n {4}ran 2026-11-15 09:00 · next 2026-11-16 09:00 UTC · 4 runs · https:\/\/openvibe\.tools\/make#automate=dns$/);
         delete process.env.OPENVIBE_TOOLS_TOKEN;
     });
 
