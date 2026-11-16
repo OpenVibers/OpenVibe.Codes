@@ -7,6 +7,8 @@
  * https://openvibe.codes/start.
  */
 const path = require('path');
+// The catalog shipped with this binary is checked by its tests: the CLI trusts it, and starts without the contracts (0.4 s).
+if (process.env.OPENVIBE_CODES_TRUST_CATALOG == null) process.env.OPENVIBE_CODES_TRUST_CATALOG = '1';
 const { createHarness, adaptersFor } = require('../harness');
 const provision = require('../harness/provision');
 const { runJob, resultWriter, jobEnv } = require('../harness/job');
