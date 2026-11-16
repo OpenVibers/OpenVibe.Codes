@@ -575,6 +575,38 @@ async function writeAttachments(job, { dir, env, fetchImpl, say, root = null }) 
     return out;
 }
 
+/**
+ * The map of the network for an OpenVibe repository's task (2026-11-16; the owner: agents should know "all the
+ * different repositories and how they're interconnected … which repositories it needs"): openvibe-contracts' system
+ * map writes the repositories this task likely needs, how the network fits and every service into
+ * .openvibe/OPENVIBE.md, kept out of git like the attachments. Another repository's task gets nothing; an older
+ * openvibe-contracts without the map, nothing either.
+ */
+function loadSystemMap() {
+    // Only the map, not the whole package: the runner loads contracts on first use (0.10.0, the 5x faster start).
+    try { return require('openvibe-contracts/lib/system-map'); } catch { return null; }
+}
+function systemBrief(job, work, env = process.env, map = loadSystemMap()) {
+    if (env.OPENVIBE_CODES_SYSTEM_MAP === '0') return null;
+    const ours = /(^|[/:])OpenVibers\//i.test(String(job.repo || '')) || /git\.openvibe\.codes\//i.test(String(job.repo || ''));
+    if (!ours && env.OPENVIBE_CODES_SYSTEM_MAP !== '1') return null;
+    if (!map || typeof map.markdown !== 'function') return null;
+    try {
+        const dir = path.join(work, '.openvibe');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'OPENVIBE.md'), map.markdown(job.prompt || ''));
+        try { fs.appendFileSync(path.join(work, '.git', 'info', 'exclude'), '\n.openvibe/\n'); } catch { /* not a git checkout */ }
+        const picks = map.reposFor(job.prompt || '', { limit: 4 }).picks.map((p) => p.name);
+        return { rel: '.openvibe/OPENVIBE.md', picks };
+    } catch { return null; }
+}
+
+/** The line a turn's prompt gets for the map. */
+function briefPrompt(brief) {
+    if (!brief) return '';
+    return `\n\n---\nThis repository is part of OpenVibe, a network of services that work together. Before you start, read \`${brief.rel}\`: the repositories this task likely needs${brief.picks.length ? ` (${brief.picks.join(', ')})` : ''}, how they connect, and every service. A fix often belongs in a shared library (openvibe-shared, openvibe-sdk, openvibe-contracts) rather than in this repository: say so in your summary when it does.`;
+}
+
 /** The lines a turn's prompt gets for its files: exactly where they are in the workspace. */
 function attachmentPrompt(files) {
     const list = Array.isArray(files) ? files.filter((f) => f && f.rel) : [];
@@ -783,6 +815,11 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                     result.base_patch = 'failed';
                     say({ t: 'note', level: 'warning', text: 'The earlier turns\' changes no longer apply to the branch; this turn starts from the branch as it is.' });
                 }
+            }
+            const brief = systemBrief(job, work, env);
+            if (brief) {
+                job = { ...job, prompt: job.prompt + briefPrompt(brief) };
+                say({ t: 'step', text: `The map of OpenVibe for this task${brief.picks.length ? `: ${brief.picks.join(', ')}` : ''}` });
             }
             // The owner's files are part of the workspace, not of the change: .openvibe/ stays out of git.
             const files = await writeAttachments(job, { dir, env, fetchImpl, say, root: work });
@@ -1018,4 +1055,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, localGitSource, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments, attachmentPrompt, agentPrompt, jobAttachments };
+module.exports = { systemBrief, briefPrompt, CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, localGitSource, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments, attachmentPrompt, agentPrompt, jobAttachments };
