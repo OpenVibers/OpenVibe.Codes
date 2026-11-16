@@ -65,6 +65,11 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
             assert.match(res.text, /class="c4-card c4-setup-step is-done" id="step-agents"/);
             assert.match(res.text, /class="c4-card c4-setup-step is-next" id="step-choices"/, 'the choices are next');
             assert.match(res.text, /opencode auth login/, 'a signed-out agent says how to sign in');
+            // 2026-11-16: and signs in from here, on her machine (the commands fold away for a terminal).
+            assert.match(res.text, /data-c4-signin="opencode"/, 'a Sign in button for the signed-out agent');
+            assert.match(res.text, /data-c4-signin-start>Sign in<\/button>/);
+            assert.match(res.text, new RegExp(`data-c4-signin-machine="${NODE}"`), 'on her own machine, by the id Codes knows it by');
+            assert.match(res.text, /<details class="c4-signin-terminal"><summary>Or in a terminal on the machine<\/summary>/);
             assert.match(res.text, /<option value="claude-code"[^>]*data-state="ok" data-badge="41% used"/, 'the default agent picker says what is ready');
             assert.match(res.text, /<option value="opencode"[^>]*data-state="bad" data-badge="Sign in"[^>]*data-href="\/setup#agent-opencode"/);
             assert.match(res.text, /data-ov-machines[^>]*data-needs="worker"[^>]*data-name="default_machine"/);

@@ -338,7 +338,7 @@ async function createApp(opts = {}) {
     app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, modelPlans, fleet: ctx.fleet, conductor: ctx.conductor, attachments: ctx.attachments, actorLimits: ctx.actorLimits, sharing, races: ctx.races, machines: ctx.machines, log }));
     // The composer's files: upload before send (with progress), or as the multipart form without JavaScript.
     app.use('/api/v1', createAttachmentsApi({ attachments: ctx.attachments, actorLimits: ctx.actorLimits, config, keys, log }));
-    app.use('/api/v1', createMeApi({ config, store, sso, keys, run, harnesses, tasks, userSettings: ctx.userSettings, github: ctx.github, approvals: ctx.approvals, repoPicker: ctx.repoPicker, forge: ctx.forge, actorLimits: ctx.actorLimits, log }));
+    app.use('/api/v1', createMeApi({ config, store, sso, keys, run, harnesses, tasks, fleet: () => ctx.fleet, userSettings: ctx.userSettings, github: ctx.github, approvals: ctx.approvals, repoPicker: ctx.repoPicker, forge: ctx.forge, actorLimits: ctx.actorLimits, log }));
     // The owner's repository sources (ask 348): the dropdown's sources and their order.
     ctx.adminRepos = require('./http/admin-repos').createAdminRepos(ctx);
     app.use('/api/v1', ctx.adminRepos.api);

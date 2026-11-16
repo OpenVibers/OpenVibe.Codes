@@ -139,6 +139,67 @@ async function readStdin() {
     return s;
 }
 
+/**
+ * A Link job's args: its first line (Link writes the args and a newline). An interactive job's stdin stays open after
+ * them (Link v0.72.0), so the runner reads that line and not to the end; what came with it after the newline is kept
+ * for the agent the job hands its stdin to (a sign-in's code). → { line, rest }
+ */
+function readJobLine(stream = process.stdin) {
+    return new Promise((resolve) => {
+        let buf = '';
+        const done = () => { stream.removeListener('data', onData); stream.removeListener('end', onEnd); stream.pause(); };
+        const onData = (chunk) => {
+            buf += chunk;
+            const i = buf.indexOf('\n');
+            if (i >= 0) { done(); resolve({ line: buf.slice(0, i), rest: buf.slice(i + 1) }); }
+        };
+        const onEnd = () => { done(); resolve({ line: buf, rest: '' }); };
+        stream.setEncoding('utf8');
+        stream.on('data', onData);
+        stream.once('end', onEnd);
+    });
+}
+
+/**
+ * The person's own homes for a job on a machine (Link v0.72.0): with their persistent sandbox (OPENVIBE_SANDBOX), the
+ * runner's folder is in it (the agents it installs) and the job runs as the actor `me` there (their sign-ins). Without
+ * one, nothing changes.
+ */
+function sandboxEnv(env = process.env) {
+    if (!env.OPENVIBE_SANDBOX) return env;
+    const inBox = { ...env, OPENVIBE_CODES_HOME: path.join(env.OPENVIBE_SANDBOX, 'codes') };
+    return provision.withTools(provision.profileEnv(inBox, 'me'));
+}
+
+/**
+ * Sign an agent in on this machine, in the person's sandbox (a Link job of mode 'login', interactive): the agent's
+ * own sign-in runs with the job's stdin, so the code its sign-in page shows reaches it from the page (job_stdin). It
+ * installs the agent first when it is missing. The result says whether it is signed in now.
+ */
+async function loginJob(input, rest, env) {
+    const id = String(input.agent || '');
+    const adapter = adaptersFor(env)[id];
+    const args = provision.LOGIN_ARGS[id];
+    const result = (doc) => resultWriter(out)({ mode: 'login', agent: id, ...doc });
+    if (!adapter || !args) { out(`No sign-in here for ${id || 'that agent'}.`); result({ ok: false, error: 'unknown_agent' }); return 0; }
+    const ready = provision.ensure(adapter, env, { log: (m) => out(m) });
+    if (!ready.ok) { out(ready.error); result({ ok: false, error: 'install_failed' }); return 0; }
+    out(`Signing ${adapter.name} in on this machine…`);
+    const { spawn } = require('child_process');
+    const child = spawn(ready.where || adapter.bin, args, { env: { ...env, BROWSER: 'true' }, stdio: ['pipe', 'inherit', 'inherit'] });
+    if (rest) child.stdin.write(rest);
+    process.stdin.resume();
+    process.stdin.pipe(child.stdin);
+    const code = await new Promise((resolve) => child.on('close', (c) => resolve(c)));
+    process.stdin.unpipe(child.stdin);
+    const now = probeLogins({ home: env.HOME, env }).find((x) => x.id === id) || {};
+    const signedIn = now.signed_in === true;
+    out(signedIn ? `${adapter.name} is signed in.` : `${adapter.name} did not sign in (exit ${code}).`);
+    result({ ok: signedIn, signed_in: signedIn, exit: code });
+    process.stdin.destroy();
+    return 0;
+}
+
 async function main() {
     const [cmd, ...rest] = process.argv.slice(2);
     // Tasks on openvibe.codes: the person's own token, the server's API. Nothing here runs an agent.
@@ -337,13 +398,17 @@ async function main() {
     if (cmd === 'job') {
         // The job ends 0 whenever it handed over a result, ok or not (the document says which): OpenVibe Run keeps a
         // result only from a job that exited 0, and the person needs the summary and the patch either way.
-        const input = await readStdin();
+        const { line: input, rest } = await readJobLine();
         // The job's own environment (Codes C3): the run token the harness carries and where the model APIs are. The
         // harness is built with it, so the agent's process gets the token and never the job's other input.
         let wanted = {};
-        try { wanted = jobEnv(JSON.parse(input)); } catch { wanted = {}; }
+        let parsed = {};
+        try { parsed = JSON.parse(input); wanted = jobEnv(parsed); } catch { wanted = {}; }
         // A forge credential line is for git alone (the clone and the push): the agent's environment never has it.
-        const { OPENVIBE_GIT_CREDENTIALS: gitCredentials, ...forAgents } = { ...process.env, ...wanted };
+        // The person's sandbox, when the machine gives one: their agents and sign-ins live there (sandboxEnv).
+        const { OPENVIBE_GIT_CREDENTIALS: gitCredentials, ...forAgents } = sandboxEnv({ ...process.env, ...wanted });
+        if (parsed && parsed.mode === 'login') return loginJob(parsed, rest, forAgents);
+        process.stdin.destroy();   // a coding job reads nothing more: an interactive job's open stdin is closed here
         const jobHarness = createHarness({ env: forAgents });
         // The proof adapters: the repo's own tests, its pages in a browser, its diff, and the second model. The review
         // spends the same run token the attempt already carries, so it names the same person.

@@ -75,11 +75,13 @@ function createRunClient({ config, fetchImpl = globalThis.fetch, now = () => Dat
     }
     const read = (jobId, who) => call('GET', `/api/v1/jobs/${encodeURIComponent(jobId)}`, who);
     const cancel = (jobId, who) => call('POST', `/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, who);
+    /** What the person typed to their running job (Run's job_stdin, 2026-11-16): a sign-in's code. → { job_id, sent } */
+    const stdin = (jobId, who, input) => call('POST', `/api/v1/jobs/${encodeURIComponent(jobId)}/stdin`, { ...who, body: input });
     async function streamUrl(jobId, who) {
         const t = await call('POST', `/api/v1/jobs/${encodeURIComponent(jobId)}/stream/ticket`, who);
         return `${base}/api/v1/jobs/${encodeURIComponent(jobId)}/stream?ticket=${encodeURIComponent(t.ticket)}`;
     }
-    return { submit, read, cancel, streamUrl, enabled: !!tokens };
+    return { submit, read, cancel, stdin, streamUrl, enabled: !!tokens };
 }
 
 module.exports = { createRunClient, RunError, SCOPE };

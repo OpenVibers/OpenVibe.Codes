@@ -69,6 +69,16 @@ function windowsOf(login) {
 /** Is a login file a usable session? (the file's content is never reported). */
 function signedIn(login) {
     if (!login || typeof login !== 'object') return false;
+    if (usable(login)) return true;
+    // Claude Code 2.x keeps the plan session nested: { "claudeAiOauth": { "accessToken": …, "refreshToken": … } }
+    // (2026-11-16: the same rule as OpenVibe.Link's codesSignedIn, which this one had drifted from).
+    if (login.claudeAiOauth && typeof login.claudeAiOauth === 'object' && usable(login.claudeAiOauth)) return true;
+    // Muse Code nests one session per provider; the plan that runs a job is Meta's.
+    const meta = login.providers && login.providers.meta;
+    return !!(meta && typeof meta === 'object' && usable(meta));
+}
+
+function usable(login) {
     const keys = ['access_token', 'accessToken', 'api_key', 'apiKey', 'refresh_token', 'refreshToken', 'token', 'tokens', 'account'];
     return keys.some((k) => {
         const v = login[k];

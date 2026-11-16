@@ -85,6 +85,22 @@ const { boot, check, done } = require('./helpers/boot');
             const r = await call('POST', '/tasks', { as: ada, body: ask, origin: 'https://evil.example' });
             assert.strictEqual(r.status, 403);
         });
+
+        await check('signing an agent in on a machine: only yours, only a known agent, and only by its person (2026-11-16)', async () => {
+            const codeOf = (r) => { try { return JSON.parse(r.text).code; } catch { return undefined; } };   // problem+json
+            assert.strictEqual((await call('POST', '/agents/claude-code/sign-in', { body: { machine: 'lnk_x' } })).status, 401, 'a guest');
+            const unknown = await call('POST', '/agents/no-such-agent/sign-in', { as: ada, body: { machine: 'lnk_x' } });
+            assert.deepStrictEqual([unknown.status, codeOf(unknown)], [422, 'codes.agent_unknown']);
+            const none = await call('POST', '/agents/claude-code/sign-in', { as: ada, body: {} });
+            assert.deepStrictEqual([none.status, codeOf(none)], [422, 'codes.machine_required']);
+            const notHers = await call('POST', '/agents/claude-code/sign-in', { as: ada, body: { machine: 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2ZZ' } });
+            assert.ok([404, 503].includes(notHers.status), `a machine that is not hers is never pinned (${notHers.status} ${notHers.text})`);
+            assert.ok(!calls.some((c) => c[0] === 'submit' && c[1] && c[1].args && c[1].args.mode === 'login'), 'nothing was started');
+            const cross = await call('POST', '/agents/claude-code/sign-in', { as: ada, body: { machine: 'lnk_x' }, origin: 'https://evil.example' });
+            assert.strictEqual(cross.status, 403);
+            const code = await call('POST', '/agents/sign-in/job_01J8Z3Q4R5S6T7V8W9X0Y1Z2J9/code', { as: bo, body: { code: 'x' } });
+            assert.deepStrictEqual([code.status, codeOf(code)], [404, 'codes.sign_in_not_found'], 'nobody types to a sign-in that is not theirs');
+        });
     } finally {
         await t.close();
     }
