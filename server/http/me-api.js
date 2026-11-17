@@ -33,7 +33,7 @@ const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const DELEGABLE = new Set(['owner', 'admin']);
 
-function createMeApi({ config, store, sso, keys, run, harnesses, fleet = null, userSettings = null, actorLimits, tasks = null, github = null, approvals = null, repoPicker = null, forge = null, homes = null, log = console }) {
+function createMeApi({ config, store, sso, keys, run, harnesses, fleet = null, userSettings = null, actorLimits, tasks = null, github = null, approvals = null, repoPicker = null, forge = null, homes = null, actorTasks = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
@@ -355,6 +355,35 @@ function createMeApi({ config, store, sso, keys, run, harnesses, fleet = null, u
             return res.json({ sent: !!(out && out.sent) });
         } catch (e) {
             return problem(req, res, e.status && e.status < 500 ? e.status : 503, e.code || 'codes.run_unavailable', e.message || 'OpenVibe.Run did not answer');
+        }
+    });
+
+    // ── Desktop and browser work, handed to the person's Actor (plan §AD.22) ───────────────────────────────────────
+    // A conductor (codes_actor_task) or the person asks Actor to look at a page, click through a site or drive a desktop
+    // app; Actor runs it on their own machine or an OpenVibe shared node, at their own level, and Codes follows it.
+    const { summary: actorSummary } = require('../domain/actor-tasks');
+    r.post('/me/actor/tasks', actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to ask your Actor');
+        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site posts are refused');
+        if (!actorTasks || !actorTasks.enabled) return problem(req, res, 503, 'actor.off', 'Actor is not open from Codes here');
+        const b = req.body || {};
+        try {
+            const t = await actorTasks.start(req.viewer.subject, { task: b.task, mode: b.mode || 'balanced' });
+            log.info(`[Codes] ${req.viewer.subject} handed ${t && t.id} to Actor`);
+            return res.status(201).json({ task: actorSummary(t) });
+        } catch (e) {
+            return problem(req, res, e.status || 502, e.code || 'actor.refused', e.message);
+        }
+    });
+    r.get('/me/actor/tasks/:id', actorLimits.reads('codes.read'), async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in first');
+        if (!actorTasks || !actorTasks.enabled) return problem(req, res, 503, 'actor.off', 'Actor is not open from Codes here');
+        try {
+            const t = await actorTasks.get(req.viewer.subject, String(req.params.id || ''));
+            if (!t) return problem(req, res, 404, 'actor.task_not_found', 'no such task of yours that Codes started');
+            return res.json({ task: actorSummary(t) });
+        } catch (e) {
+            return problem(req, res, e.status || 502, e.code || 'actor.read_failed', e.message);
         }
     });
 
