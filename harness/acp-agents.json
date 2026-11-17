@@ -209,13 +209,13 @@
       "id": "codebuddy-code",
       "registry_id": "codebuddy-code",
       "name": "Codebuddy Code",
-      "version": "2.184.0",
+      "version": "2.185.0",
       "description": "Tencent Cloud's official intelligent coding tool",
       "repository": null,
       "license": "Proprietary",
       "distribution": {
         "npx": {
-          "package": "@tencent-ai/codebuddy-code@2.184.0",
+          "package": "@tencent-ai/codebuddy-code@2.185.0",
           "args": [
             "--acp"
           ]
