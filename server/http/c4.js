@@ -90,7 +90,7 @@ const YOUR_AI = 'https://ai.openvibe.services/you';
 
 function createC4Routes(ctx) {
     const r = asyncRouter();
-    const { config, store, harnesses, tasks, sso, connections, machines, userSettings, github, usage, conductor, approvals, fleet, attachments } = ctx;
+    const { config, store, harnesses, tasks, sso, connections, machines, userSettings, github, usage, conductor, approvals, fleet, attachments, sessionImports = null } = ctx;
     const db = store.db;
     const form = formBody({ maxBytes: attachments ? attachments.MAX_MESSAGE_BYTES : 50 * 1024 * 1024 });
     const page = (req, res, title, body, extra = {}) => {
@@ -562,15 +562,21 @@ ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h
         const list = existing.map((row) => `<a class="c4-task" href="${taskHref(row)}"><span class="c4-status-dot c4-${esc(row.state)}" aria-label="${esc(conductorState(row))}"></span><span class="c4-task-title">${esc(row.folder || 'Conductor')}</span><span class="c4-task-meta">${esc([failoverNames[row.agent] || row.agent, modelLabel(row.model), conductorState(row), age(row.created_at)].join(' · '))}</span></a>`).join('');
         const fleetRows = fleet ? await fleet.agents(req.viewer.subject, harnesses).catch(() => []) : [];
         const aware = agentReadiness(fleetRows);
+        // Sessions carried here with `openvibe-codes import` (plan §AD.22): one named in ?import= continues in this
+        // conductor, resumed on the machine with its whole context.
+        const imports = sessionImports ? await sessionImports.list(req.viewer.subject).catch(() => []) : [];
+        const chosen = req.query.import ? imports.find((i) => i.id === String(req.query.import)) || null : null;
+        const importCard = chosen ? `<p class="c4-import-pick"><strong>Continuing your imported session:</strong> ${esc(chosen.title)} <small>(${chosen.messages} messages${chosen.source_cwd ? `, from ${esc(chosen.source_cwd)}` : ''}; ${chosen.resumable ? `${esc(chosen.harness)} resumes it with its whole context` : 'read here and handed over'})</small></p><input type="hidden" name="import_id" value="${esc(chosen.id)}">` : '';
+        const importList = imports.length ? `<section class="c4-card"><div class="c4-card-head"><h2>Your imported sessions</h2><span class="c4-hint">openvibe-codes import</span></div>${imports.slice(0, 8).map((i) => `<a class="c4-task" href="/conductor?import=${encodeURIComponent(i.id)}"><span class="c4-task-title">${esc(i.title)}</span><span class="c4-task-meta">${esc(i.harness)} · ${i.messages} messages${i.resumable ? ' · continue it' : ''}</span></a>`).join('')}</section>` : '';
         const content = `${header('Conductor', 'Your orchestrator, running here: the agent you choose on your own machine, carrying the plan forward through the other agents.')}${flash(req)}
-<section class="c4-card c4-composer"><form method="post" action="/conductor">
+<section class="c4-card c4-composer"><form method="post" action="/conductor">${importCard}
 <label for="c4-folder">Working folder</label><div class="c4-folder-row"><input id="c4-folder" name="folder" placeholder="/home/you/project" value="${esc(String(req.query.folder || ''))}" list="c4-folders" autocomplete="off" spellcheck="false"><select name="folder_pick" data-c4-folder-pick aria-label="Folders this machine has worked in"><option value="">A recent folder…</option>${folderChoices}</select></div><datalist id="c4-folders">${folders.map((f) => `<option value="${esc(f.folder)}"></option>`).join('')}</datalist>
 <div class="c4-controls"><div data-ov-machines data-needs="worker" data-name="machine" data-auto-label="Your default" data-value="${esc(req.query.machine || '')}" data-c4-machine></div><label>Who leads this task <select name="who" data-c4-model><option value="">${esc(`Your setting: ${savedLeadName(settings)}`)}</option>${leadChoices(settings, aware, null, false)}</select></label><label>Safety <select name="safety">${[['ask', 'Ask me'], ['project', 'Auto in the project'], ['full', 'Full access']].map(([v, l]) => `<option value="${v}"${settings.safety === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div>
 <label class="c4-note-field" for="c4-conductor-note">What should it pick up? <small>Optional. It starts from the hand-over note and the plan; say here what you want first.</small></label><textarea id="c4-conductor-note" name="note" rows="2" placeholder="e.g. carry on with the next piece of the plan"></textarea>
 <p class="c4-hint">It opens that folder, so it loads that project's memory and AGENTS.md. It runs with your own login on that machine, and never with a key of ours.${mine.problem ? ` ${esc(mine.problem.detail || '')}` : ''}</p>
 <div class="c4-conductor-actions"><span class="c4-hint">One conductor is enough: it hands the work to the other agents through the Codes tools.</span><button class="c4-button" type="submit">Start your conductor</button></div>
 </form></section>
-${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors</h2><a href="/tasks">All tasks</a></div>${list}</section>` : ''}`;
+${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors</h2><a href="/tasks">All tasks</a></div>${list}</section>` : ''}${importList}`;
         page(req, res, 'Conductor', wrap(content));
     });
 
@@ -584,8 +590,14 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
             if (agent && !(harnesses?.list?.() || []).some((a) => a.id === agent)) throw Object.assign(new Error('choose who leads this task from the list'), { status: 400 });
             const project = await conductor.projectFor(req.viewer.token || null, req.viewer.subject);
             if (!project) throw Object.assign(new Error(`start one task at ${config.baseUrl}/run first: a conductor runs in your project, on your machine`), { status: 409 });
+            let imported = null;
+            if (b.import_id) {
+                imported = sessionImports ? await sessionImports.get(req.viewer.subject, String(b.import_id)) : null;
+                if (!imported) throw Object.assign(new Error('that imported session is not yours, or is gone'), { status: 404 });
+                if (!imported.resumable) throw Object.assign(new Error(`a ${imported.harness} session is read here and handed over, not resumed`), { status: 422 });
+            }
             const made = await conductor.create({
-                subject: req.viewer.subject, project,
+                subject: req.viewer.subject, project, imported,
                 folder, machine: b.machine || null,
                 ...(agent ? { agent, model } : {}),
                 safety: b.safety || 'ask', note: b.note || null,

@@ -196,10 +196,11 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
      * `pin`, its OpenVibe.Bot device id (`dev_…`, Codes C9c): every turn is pinned to it on Run, so the session runs
      * where its folder and its memory are.
      */
-    async function create({ subject, project, folder, machine = null, pin = null, agent = null, model = undefined, safety = 'ask', note = null, key = null, attachmentIds = [] } = {}) {
+    async function create({ subject, project, folder, machine = null, pin = null, agent = null, model = undefined, safety = 'ask', note = null, key = null, attachmentIds = [], imported = null } = {}) {
         const work = validFolder(folder);
         if (!work) throw Object.assign(new Error('the working folder must be an absolute path'), { status: 422, code: 'conductor.folder_invalid' });
-        const lead = await leadFor(subject, agent, model);
+        // A session carried here (plan §AD.22): its own agent leads, and the first turn resumes it on the machine.
+        const lead = imported ? { agent: imported.harness, model: model === undefined ? null : model } : await leadFor(subject, agent, model);
         if (!lead.agent || (harnesses && !harnesses.list().some((h) => h.id === lead.agent))) {
             throw Object.assign(new Error('the agent that leads this conductor is one Codes offers'), { status: 422, code: 'conductor.agent_invalid' });
         }
@@ -216,14 +217,15 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
         let row;
         await store.tx(async () => {
             row = await db.one(
-                `INSERT INTO run_tasks (id, subject, project_id, repo, prompt, agent, model, kind, folder, machine, pin, safety, state, idempotency_key, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'conductor', $8, $9, $10, $11, 'queued', $12, $13, $13) RETURNING *`,
-                [id, subject, project, repo, first.slice(0, 16000), lead.agent, lead.model == null ? null : String(lead.model).slice(0, 100), work, machine || null, pin || null, safety, key || null, at],
+                `INSERT INTO run_tasks (id, subject, project_id, repo, prompt, agent, model, kind, folder, machine, pin, safety, state, idempotency_key, created_at, updated_at, import_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'conductor', $8, $9, $10, $11, 'queued', $12, $13, $13, $14) RETURNING *`,
+                [id, subject, project, repo, first.slice(0, 16000), lead.agent, lead.model == null ? null : String(lead.model).slice(0, 100), work, machine || null, pin || null, safety, key || null, at, imported ? imported.id : null],
             );
         });
         await attempts.create({
             task: row, agent: lead.agent, model: lead.model == null ? null : String(lead.model).slice(0, 100), machine: machine || null,
-            why: 'the conductor session starts here', kind: 'first', state: 'queued',
+            ...(imported ? { session: imported.session_id } : {}),
+            why: imported ? 'the imported session continues here' : 'the conductor session starts here', kind: 'first', state: 'queued',
         });
         const message = await enqueue(row, { text: first, attachments: [], attachmentIds, first: true });
         const started = await startNext(id);
@@ -293,6 +295,9 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
             mcp: true,
             codes_url: baseUrl,
             ...(resume ? { resume } : {}),
+            // A session carried here (plan §AD.22): the machine places it for its agent, once, before it resumes it; a
+            // later turn finds it already there (and grown) and leaves it alone.
+            ...(task.import_id && resume ? { import: { url: `${baseUrl}/api/v1/sessions/imports/${encodeURIComponent(task.import_id)}/document`, session: resume } } : {}),
             // The file's bytes stay in the database: the job fetches it with the person's token and writes it under
             // .openvibe/attachments/<message>/<name> on the machine, so a turn's input stays far inside Run's limit.
             ...(files.length
