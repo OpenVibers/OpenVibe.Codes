@@ -41,6 +41,7 @@ const { createImportsApi } = require('./http/imports-api');
 const { createRunnerApi } = require('./http/runner-api');
 const { createSessionImports } = require('./domain/session-imports');
 const { createHomes } = require('./domain/homes');
+const { createActorTasks } = require('./domain/actor-tasks');
 const { createRunClient } = require('./domain/run-client');
 const { createRunTasks } = require('./domain/run-tasks');
 const { createRaces } = require('./domain/races');
@@ -138,6 +139,7 @@ async function createApp(opts = {}) {
     const attachments = createAttachments({ store, log });
     const sessionImports = createSessionImports({ store, log });
     const homes = createHomes({ store });
+    const actorTasks = createActorTasks({ config, log });
     const notify = opts.notify || createNotify({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     const notices = createNotices({ store, config, notify, userSettings, log });
     const benchPublisher = createBenchPublisher({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -152,7 +154,7 @@ async function createApp(opts = {}) {
     // The skills hub (Compute plan §5, E6): versioned skills, rules and MCP servers, shared through the same SDK.
     const skills = opts.skills || createSkills({ store, sharing, log });
     const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, attachments, modelPlans, goalVerifier: opts.goalVerifier || null, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
-    const ctx = { sessionImports, homes, config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, modelPlans, runTokens, attempts, fleet, notices, notify, userSettings, attachments, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
+    const ctx = { sessionImports, homes, actorTasks, config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, modelPlans, runTokens, attempts, fleet, notices, notify, userSettings, attachments, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The person's own memory store (OpenVibe Memory M2b): the notes live in OpenVibe.AI, sealed there, and only the
@@ -346,7 +348,7 @@ async function createApp(opts = {}) {
     app.use('/api/v1', createAttachmentsApi({ attachments: ctx.attachments, actorLimits: ctx.actorLimits, config, keys, log }));
     app.use('/api/v1', createRunnerApi());
     app.use('/api/v1', createImportsApi({ sessionImports: ctx.sessionImports, actorLimits: ctx.actorLimits, config, keys, log }));
-    app.use('/api/v1', createMeApi({ config, store, sso, keys, run, harnesses, tasks, fleet: () => ctx.fleet, userSettings: ctx.userSettings, github: ctx.github, approvals: ctx.approvals, repoPicker: ctx.repoPicker, forge: ctx.forge, homes: ctx.homes, actorLimits: ctx.actorLimits, log }));
+    app.use('/api/v1', createMeApi({ config, store, sso, keys, run, harnesses, tasks, fleet: () => ctx.fleet, userSettings: ctx.userSettings, github: ctx.github, approvals: ctx.approvals, repoPicker: ctx.repoPicker, forge: ctx.forge, homes: ctx.homes, actorTasks: ctx.actorTasks, actorLimits: ctx.actorLimits, log }));
     // The owner's repository sources (ask 348): the dropdown's sources and their order.
     ctx.adminRepos = require('./http/admin-repos').createAdminRepos(ctx);
     app.use('/api/v1', ctx.adminRepos.api);
