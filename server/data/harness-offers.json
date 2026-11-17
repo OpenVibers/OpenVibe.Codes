@@ -1222,17 +1222,17 @@
   },
   {
     "id": "codebuddy-code",
-    "name": "Codebuddy Code",
+    "name": "CodeBuddy Code (WorkBuddy)",
     "provider": "tencent",
     "capabilities": {
       "host_access": true,
-      "mcp": false,
+      "mcp": true,
       "long_autonomy": false,
       "resume": true,
       "edit": true,
       "review": true,
       "tools": true,
-      "vision": false,
+      "vision": true,
       "browser": false,
       "computer_use": false,
       "runtimes": [
@@ -1250,7 +1250,7 @@
     "limits": {
       "max_duration_seconds": 7200,
       "max_concurrent_runs": 2,
-      "max_context_tokens": 128000
+      "max_context_tokens": 1048576
     },
     "agents": [
       {
@@ -1261,6 +1261,40 @@
         "context_limits": {
           "input_tokens": 128000,
           "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      },
+      {
+        "id": "codebuddy-code-hy4-flash",
+        "harness": "codebuddy-code",
+        "provider": "tencent",
+        "model": "hy4-flash",
+        "context_limits": {
+          "input_tokens": 983040,
+          "output_tokens": 65536
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      },
+      {
+        "id": "codebuddy-code-hy4",
+        "harness": "codebuddy-code",
+        "provider": "tencent",
+        "model": "hy4",
+        "context_limits": {
+          "input_tokens": 960000,
+          "output_tokens": 64000
         },
         "concurrency": 2,
         "price_per_1k_tokens": {
