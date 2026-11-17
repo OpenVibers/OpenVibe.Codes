@@ -2,7 +2,7 @@
 
 /**
  * The guided setup (owner 2026-11-03: "a guided setup which is intuitive and very user friendly for the user to configure
- * their API keys, accounts, harnesses, etc."): /setup, one page of five steps, each read live from where it lives —
+ * their API keys, accounts, harnesses, etc."): /setup, one page of six steps (your agent home since 2026-11-17), each read live from where it lives —
  *
  *   1 Your machine      paired and online (Network, with the person's token)
  *   2 Your agents       installed and signed in on it, with what each has left (the fleet, read from Bot now)
@@ -30,7 +30,7 @@ const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><pa
 
 function createSetupRoutes(ctx, kit) {
     const { page, wrap, pill, flash, sameOrigin, viewer, form, signIn, note, machinesOf, computeOf, usageMeter, SAFETY_OPTIONS = [], YOUR_AI, PROVIDER_NAMES = {} } = kit;
-    const { store, fleet, harnesses, connections, sso, forge, userSettings } = ctx;
+    const { store, fleet, harnesses, connections, sso, forge, userSettings, homes } = ctx;
     const db = store.db;
     const r = asyncRouter();
 
@@ -56,7 +56,8 @@ function createSetupRoutes(ctx, kit) {
         try { git = forge && forge.enabled ? await forge.repos({ subject, username: req.viewer.username || '' }) : null; } catch { git = null; }
         const settings = await userSettings.get(subject);
         const saved = !!(await db.maybe('SELECT 1 AS one FROM codes_user_settings WHERE subject = $1', [subject]));
-        return { machines: machineList, compute, rows, fleetProblem, keys, git, settings, saved };
+        const home = homes ? await homes.get(subject).catch(() => null) : null;
+        return { machines: machineList, compute, rows, fleetProblem, keys, git, settings, saved, home };
     }
 
     function stepsOf(d) {
@@ -67,6 +68,7 @@ function createSetupRoutes(ctx, kit) {
         return [
             { id: 'machine', title: 'Pick where it runs', short: 'Runs on', done: online.length > 0, warn: !online.length && live.length > 0, required: true },
             { id: 'agents', title: 'Your agents', short: 'Agents', done: ready.length > 0, required: true },
+            { id: 'home', title: 'Your agent home', short: 'Home', done: !!(d.home && d.home.saved && Object.keys(d.home.applied || {}).length), optional: true },
             { id: 'keys', title: 'Your AI keys', short: 'AI keys', done: credentials.some((k) => k.status !== 'failing'), optional: true },
             { id: 'accounts', title: 'Your accounts', short: 'Accounts', done: !!(d.git && d.git.length), optional: true },
             { id: 'choices', title: 'Your choices', short: 'Choices', done: d.saved, required: true },
@@ -137,6 +139,38 @@ function createSetupRoutes(ctx, kit) {
 <div class="c4-setup-actions"><a class="c4-opill" href="/setup#step-agents">Check again</a><a class="c4-opill" href="/agents">All agents and their usage</a></div>`;
     }
 
+    // 2026-11-17 (plan §AD.22): your agent home. One description of what your agents need on a machine (tools pinned
+    // with mise, the agent CLIs, git's name, your repositories), saved here and set up on the machine you pick by a
+    // Codes job in your sandbox there: Link does it, nobody logs in. Setting it up again only fetches what is there.
+    const HOME_AGENTS = [['claude-code', 'Claude Code'], ['codex', 'Codex'], ['opencode', 'OpenCode'], ['command-code', 'Command Code']];
+    function homeBody(d) {
+        if (!homes) return '';
+        const h = d.home || { spec: { tools: {}, agents: ['claude-code'], repos: [], git: null }, applied: {}, saved: false };
+        const s = h.spec || {};
+        const live = ((d.machines && d.machines.machines) || []).filter((m) => m.id && m.state !== 'revoked').sort((a, b) => (b.state === 'online') - (a.state === 'online'));
+        const tools = Object.entries(s.tools || {}).map(([k, v]) => `${k} ${v}`).join(', ');
+        const chosen = new Set(s.agents || []);
+        const agents = HOME_AGENTS.map(([id, name]) => `<button type="button" class="c4-signin-machine c4-home-agent${chosen.has(id) ? ' is-on' : ''}" data-c4-home-agent="${esc(id)}" aria-pressed="${chosen.has(id)}">${esc(name)}</button>`).join('');
+        const where = Object.values(h.applied || {}).map((a) => {
+            const m = live.find((x) => a && x.id === a.machine);
+            return `<li><span class="c4-signin-dot is-online" aria-hidden="true"></span>${esc((m && m.name) || (a && a.name) || 'A machine')} <span class="c4-hint">set up ${esc(String((a && a.at) || '').slice(0, 10))}</span></li>`;
+        }).join('');
+        const chips = live.map((m, i) => `<button type="button" class="c4-signin-machine${i === 0 ? ' is-on' : ''}" data-c4-home-machine="${esc(m.id)}" aria-pressed="${i === 0}"><span class="c4-signin-dot${m.state === 'online' ? ' is-online' : ''}" aria-hidden="true"></span>${esc(m.name || 'Your machine')}</button>`).join('');
+        return `<form class="c4-form c4-home" data-c4-home>
+<label class="c4-home-wide">Your repositories<textarea name="repos" rows="4" spellcheck="false" autocapitalize="off" placeholder="OpenVibers/OpenVibe.Live&#10;https://git.openvibe.codes/you/site">${esc((s.repos || []).join('\n'))}</textarea><span class="c4-hint">One a line: owner/name for GitHub, or the https address. They are cloned once and fetched after.</span></label>
+<div class="c4-form-grid">
+<label>Tools<input name="tools" value="${esc(tools)}" spellcheck="false" autocapitalize="off" placeholder="node 24.19.0, go 1.27.1, rust 1.96.0"><span class="c4-hint">Pinned with mise, in your home only.</span></label>
+<div class="c4-home-field"><span class="c4-home-label" id="c4-home-agents">Agents</span><div class="c4-signin-machines" role="group" aria-labelledby="c4-home-agents">${agents}</div></div>
+<label>Git name<input name="git_name" value="${esc((s.git && s.git.name) || '')}" autocomplete="name"></label>
+<label>Git email<input name="git_email" type="email" value="${esc((s.git && s.git.email) || '')}" autocomplete="email"></label>
+</div>
+${where ? `<ul class="c4-home-where" aria-label="Set up on">${where}</ul>` : ''}
+<div class="c4-signin-row">${live.length ? `<div class="c4-signin-machines" role="group" aria-label="Which machine">${chips}</div>` : '<span class="c4-hint">Pair a machine first (step 1); the home is kept until then.</span>'}
+<button type="submit" class="c4-button" data-c4-home-go>${live.length ? (where ? 'Save and set up again' : 'Save and set up') : 'Save'}</button></div>
+<div class="c4-signin-live c4-home-live" hidden><p class="c4-signin-say" aria-live="polite"></p><ol class="c4-home-log"></ol></div>
+</form>`;
+    }
+
     function keysBody(d) {
         const list = (d.keys && d.keys.credentials) || [];
         const rows = list.map((k) => `<li class="c4-row c4-row-flat"><span class="c4-row-dot${k.status === 'ok' ? ' c4-dot-ok' : k.status === 'failing' ? ' c4-dot-bad' : ''}" aria-hidden="true"></span><span class="c4-row-label">${esc(PROVIDER_NAMES[k.provider] || k.provider)}</span><span class="c4-row-note">…${esc(k.hint || '????')}</span>${k.status === 'ok' ? pill('Working', 'ok') : k.status === 'failing' ? pill('Not working', 'bad') : pill('Not tested', 'skip')}</li>`).join('');
@@ -181,7 +215,7 @@ ${rows ? `<ul class="c4-rows">${rows}</ul>` : d.keys ? ovkKit.empty({ icon: 'key
     }
 
     r.get('/setup', async (req, res) => {
-        if (!viewer(req)) return page(req, res, 'Set up Codes', wrap(`<div class="c4-title"><div><h1>Set up Codes</h1><p>Your machine, your agents, your keys: five short steps.</p></div></div>${signIn(req)}`));
+        if (!viewer(req)) return page(req, res, 'Set up Codes', wrap(`<div class="c4-title"><div><h1>Set up Codes</h1><p>Your machine, your agents, your home, your keys: six short steps.</p></div></div>${signIn(req)}`));
         const d = await readAll(req, res);
         const steps = stepsOf(d);
         const next = (steps.find((s) => !s.done && s.required) || steps.find((s) => !s.done && !s.optional) || {}).id || null;
@@ -191,11 +225,12 @@ ${rows ? `<ul class="c4-rows">${rows}</ul>` : d.keys ? ovkKit.empty({ icon: 'key
         const subs = {
             machine: 'Your Link machines, OpenVibe cloud, Exchange rentals and community machines.',
             agents: 'The coding agents on it, signed in with your own plans.',
+            home: 'Tools, agents and repositories, set up on your machine by Link.',
             keys: 'Keys for the models you pay for by use.',
             accounts: 'Where your work is pushed.',
             choices: 'What Codes uses when you do not say.',
         };
-        const bodies = { machine: machineBody(d), agents: agentsBody(d), keys: keysBody(d), accounts: accountsBody(d), choices: choicesBody(d, d.machines, String(req.query.machine || '')) };
+        const bodies = { machine: machineBody(d), agents: agentsBody(d), home: homeBody(d), keys: keysBody(d), accounts: accountsBody(d), choices: choicesBody(d, d.machines, String(req.query.machine || '')) };
         const nav = steps.map((s, i) => `<li><a class="c4-setup-chip${s.done ? ' is-done' : ''}${s.id === next ? ' is-next' : ''}" href="#step-${s.id}"><span class="c4-setup-chip-n" aria-hidden="true">${s.done ? CHECK : i + 1}</span>${esc(s.short)}<span class="c4-sr-only">${s.done ? ', done' : s.optional ? ', optional' : ''}</span></a></li>`).join('');
         const ready = requiredLeft === 0
             ? `<section class="c4-card c4-setup-ready"><h2>You are set</h2><p>Your machine, an agent and your choices are in place.${steps.some((s) => s.optional && !s.done) ? ' The optional steps can wait.' : ''}</p><div class="c4-setup-actions"><a class="c4-button" href="/">Start a task</a><a class="c4-opill" href="/conductor">Start your conductor</a></div></section>`

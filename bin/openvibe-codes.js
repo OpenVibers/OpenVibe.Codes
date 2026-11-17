@@ -7,6 +7,8 @@
  * https://openvibe.codes/start.
  */
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 // The catalog shipped with this binary is checked by its tests: the CLI trusts it, and starts without the contracts (0.4 s).
 if (process.env.OPENVIBE_CODES_TRUST_CATALOG == null) process.env.OPENVIBE_CODES_TRUST_CATALOG = '1';
 const { createHarness, adaptersFor } = require('../harness');
@@ -70,6 +72,7 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
   openvibe-codes resume <run id> "follow-up"  continue a run's last session with its agent
   openvibe-codes job                          one task as an OpenVibe Run job (JSON input on stdin; the
                                               OpenVibe Link's job worker runs it on your own machine)
+  openvibe-codes home apply <spec.json> | show   your agent home here: tools (mise), agent CLIs, git, repositories
   openvibe-codes import [--session <id> | --file <f> | --codex <f>]   carry a coding agent's session to openvibe.codes,
                                               to continue on any of your machines (openvibe-codes import --help)
   openvibe-codes task start|list|show|continue|stop   coding tasks on openvibe.codes, as you, on one of
@@ -180,6 +183,30 @@ function sandboxEnv(env = process.env) {
  * own sign-in runs with the job's stdin, so the code its sign-in page shows reaches it from the page (job_stdin). It
  * installs the agent first when it is missing. The result says whether it is signed in now.
  */
+/**
+ * The person's agent home on this machine (plan §AD.22, openvibe.home@1), as a Link job of mode 'home': tools by mise,
+ * the agent CLIs, git's identity and the repositories, made real in their persistent sandbox (or this account's home
+ * when the machine gives none). Ends with the result document; it ends 0 either way, as every job here does.
+ */
+async function homeJob(input, env, gitCredentials = null) {
+    const home = require('../engine/home');
+    const result = (doc) => resultWriter(out)({ mode: 'home', ...doc });
+    process.stdin.destroy();
+    const root = env.OPENVIBE_SANDBOX || env.HOME;
+    try {
+        const doc = await home.apply(input.spec, {
+            root, env, say: (text) => out(text),
+            installAgent: async (id) => { const a = adaptersFor(env)[id]; return a ? provision.ensure(a, env, { log: (m) => out(m) }) : provision.install(id, env, { log: (m) => out(m) }); },
+            gitAuth: (url) => require('../harness/job').gitAuthFor(url, { ...env, ...(gitCredentials ? { OPENVIBE_GIT_CREDENTIALS: gitCredentials } : {}) }),
+        });
+        result(doc);
+    } catch (e) {
+        out(`The home could not be set up: ${e.message}`);
+        result({ ok: false, error: String(e.message).slice(0, 500) });
+    }
+    return 0;
+}
+
 async function loginJob(input, rest, env) {
     const id = String(input.agent || '');
     const adapter = adaptersFor(env)[id];
@@ -258,6 +285,24 @@ async function main() {
         if (env.OPENVIBE_CODES_PROFILE) out(dim(`signing ${adapter.name} in for actor ${env.OPENVIBE_CODES_PROFILE}`));
         const r = require('child_process').spawnSync(ready.where || adapter.bin, args, { env, stdio: 'inherit' });
         return r.status || 0;
+    }
+    if (cmd === 'home') {
+        // An agent home here (plan §AD.22): `openvibe-codes home apply <spec.json>` or `home show`.
+        const home = require('../engine/home');
+        const root = path.resolve(o.root || env.OPENVIBE_SANDBOX || env.HOME || os.homedir());
+        if (rest[0] === 'show') {
+            try { out(fs.readFileSync(path.join(root, '.openvibe-home.json'), 'utf8')); } catch { out(`No agent home applied in ${root} yet.`); }
+            return 0;
+        }
+        if (rest[0] !== 'apply' || !rest[1]) { out('openvibe-codes home apply <spec.json | -> [--root <folder>] · openvibe-codes home show'); return 2; }
+        const raw = rest[1] === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(path.resolve(rest[1]), 'utf8');
+        const doc = await home.apply(raw, {
+            root, env, say: (text) => out(dim(text)),
+            installAgent: async (id) => { const a = adaptersFor(env)[id]; return a ? provision.ensure(a, env, { log: (m) => out(dim(m)) }) : provision.install(id, env, { log: (m) => out(dim(m)) }); },
+            gitAuth: (url) => require('../harness/job').gitAuthFor(url, env),
+        });
+        out(JSON.stringify(doc, null, 2));
+        return doc.ok ? 0 : 1;
     }
     if (cmd === 'setup' || cmd === 'doctor') {
         if (cmd === 'setup') {
@@ -425,6 +470,7 @@ async function main() {
         // The person's sandbox, when the machine gives one: their agents and sign-ins live there (sandboxEnv).
         const { OPENVIBE_GIT_CREDENTIALS: gitCredentials, ...forAgents } = sandboxEnv({ ...process.env, ...wanted });
         if (parsed && parsed.mode === 'login') return loginJob(parsed, rest, forAgents);
+        if (parsed && parsed.mode === 'home') return homeJob(parsed, forAgents, gitCredentials);
         process.stdin.destroy();   // a coding job reads nothing more: an interactive job's open stdin is closed here
         const jobHarness = createHarness({ env: forAgents });
         // The proof adapters: the repo's own tests, its pages in a browser, its diff, and the second model. The review

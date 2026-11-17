@@ -113,3 +113,77 @@
         });
     });
 })();
+
+// Your agent home (plan §AD.22, 2026-11-17): save the description, then the machine you picked sets it up (a Codes job
+// in your sandbox there) and every step it takes appears here as it happens.
+(function () {
+    var form = document.querySelector('[data-c4-home]');
+    if (!form) return;
+    function pressed(sel) { return Array.prototype.slice.call(form.querySelectorAll(sel)).filter(function (b) { return b.getAttribute('aria-pressed') === 'true'; }); }
+    form.addEventListener('click', function (e) {
+        var agent = e.target.closest && e.target.closest('[data-c4-home-agent]');
+        if (agent) { var on = agent.getAttribute('aria-pressed') !== 'true'; agent.setAttribute('aria-pressed', String(on)); agent.classList.toggle('is-on', on); return; }
+        var chip = e.target.closest && e.target.closest('[data-c4-home-machine]');
+        if (chip) form.querySelectorAll('[data-c4-home-machine]').forEach(function (b) { var me = b === chip; b.classList.toggle('is-on', me); b.setAttribute('aria-pressed', String(me)); });
+    });
+    var live = form.querySelector('.c4-home-live');
+    var sayEl = form.querySelector('.c4-signin-say');
+    var log = form.querySelector('.c4-home-log');
+    function say(text, bad) { live.hidden = false; sayEl.textContent = text; sayEl.classList.toggle('is-bad', !!bad); }
+    function line(text) {
+        var li = document.createElement('li');
+        li.textContent = text;
+        log.appendChild(li);
+        while (log.children.length > 12) log.removeChild(log.firstChild);
+    }
+    function spec() {
+        var tools = {};
+        (form.elements.tools.value || '').split(/[,\n]/).forEach(function (t) {
+            var m = t.trim().match(/^([a-z][a-z0-9-]*)[\s@]+(\S+)$/i);
+            if (m) tools[m[1].toLowerCase()] = m[2];
+        });
+        var name = form.elements.git_name.value.trim(), email = form.elements.git_email.value.trim();
+        return {
+            format: 'openvibe.home@1',
+            tools: tools,
+            agents: pressed('[data-c4-home-agent]').map(function (b) { return b.getAttribute('data-c4-home-agent'); }),
+            repos: (form.elements.repos.value || '').split('\n').map(function (x) { return x.trim(); }).filter(Boolean),
+            git: name || email ? { name: name, email: email } : null,
+        };
+    }
+    function call(method, url, body) {
+        return fetch(url, { method: method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) })
+            .then(function (r) { return r.json().catch(function () { return {}; }).then(function (doc) { if (!r.ok) throw new Error(doc.detail || doc.title || 'That did not work'); return doc; }); });
+    }
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var go = form.querySelector('[data-c4-home-go]');
+        go.disabled = true;
+        log.textContent = '';
+        say('Saving your agent home\u2026');
+        var machine = (pressed('[data-c4-home-machine]')[0] || form.querySelector('[data-c4-home-machine]') || { getAttribute: function () { return ''; } }).getAttribute('data-c4-home-machine');
+        call('PUT', '/api/v1/me/home', { spec: spec() }).then(function () {
+            if (!machine) { say('Saved. Pair a machine and it can be set up there.'); go.disabled = false; return; }
+            say('Asking your machine to set it up\u2026');
+            return call('POST', '/api/v1/me/home/apply', { machine: machine }).then(function (doc) {
+                var source = new EventSource('/api/v1/me/home/apply/' + encodeURIComponent(doc.job_id) + '/events');
+                var text = '';
+                source.addEventListener('state', function (ev) {
+                    try { if (JSON.parse(ev.data).state === 'running') say('Setting up on ' + (doc.name || 'your machine') + '\u2026'); } catch (err) { /* */ }
+                });
+                source.addEventListener('output', function (ev) {
+                    try { text += (JSON.parse(ev.data).chunk || ''); } catch (err) { return; }
+                    var parts = text.split('\n'); text = parts.pop();
+                    parts.forEach(function (l) { l = l.trim(); if (l && l.charAt(0) !== '{') line(l); });
+                });
+                source.addEventListener('end', function () {
+                    source.close();
+                    go.disabled = false;
+                    var last = log.lastChild ? log.lastChild.textContent : '';
+                    say(/ready/.test(last) ? 'Your agent home is ready on ' + (doc.name || 'your machine') + '.' : 'Set up, with what failed listed below.', !/ready/.test(last));
+                });
+                source.onerror = function () { if (source.readyState === 2) { go.disabled = false; } };
+            });
+        }).catch(function (err) { go.disabled = false; say(err.message, true); });
+    });
+})();

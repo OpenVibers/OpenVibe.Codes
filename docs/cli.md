@@ -52,6 +52,37 @@ openvibe-codes task stop tsk_01J…
 `GET /api/v1/tasks/:id/events` and prints the session's lines, each attempt and why it happened, ending when the
 outcome is decided.
 
+## Your agent home: `home apply`
+
+What your agents need on a machine, written once (`openvibe.home@1`):
+
+```json
+{
+  "format": "openvibe.home@1",
+  "tools": { "node": "24.19.0", "go": "1.27.1", "rust": "1.96.0" },
+  "agents": ["claude-code", "codex"],
+  "repos": ["OpenVibers/OpenVibe.Live", "https://git.openvibe.codes/you/site"],
+  "git": { "name": "Your Name", "email": "you@example.com" }
+}
+```
+
+```bash
+openvibe-codes home apply home.json      # set it up here (in your sandbox, or this account's home)
+openvibe-codes home show                 # what was set up, and what failed
+```
+
+- **Tools** are pinned with [mise](https://mise.jdx.dev). mise itself is fetched from its release, with its SHA-256
+  checked against the release's list. Everything lands in your home, nothing global.
+- **Agents** are installed by Codes' own installer, as `openvibe-codes setup` does.
+- **Repositories** are partial clones (`--filter=blob:none`) under `work/`. When one is there already, it is fetched.
+  A private one uses the machine's token (`GITHUB_TOKEN`), or your OpenVibe Git token when it is on
+  git.openvibe.codes. An address with a user or password in it is refused.
+- **Every step runs**, even when one fails. The failures are listed, and `.openvibe-home.json` keeps the result.
+
+You can also save it once on <https://openvibe.codes/setup#step-home> and press **Set up**. The machine you pick
+does it as a Codes job (mode `home`) in your sandbox there, and every step appears on the page as it happens. Nobody
+logs in to the machine. The runner needs 0.12.0 or later.
+
 ## For an agent: `--for-agent` and `skills get`
 
 A supervising agent should not read the human log. `--for-agent` is the machine face of every command in this

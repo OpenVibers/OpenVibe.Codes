@@ -10,6 +10,7 @@
  * - their workspace choices (codes_user_settings, C4b) and their placement rules;
  * - the files they attached to a message (codes_attachments, owner 2026-11-07): names, types and sizes, never bytes;
  * - the coding-agent sessions they imported (codes_session_imports, plan §AD.22): what each is, not its conversation;
+ * - their agent home (codes_homes, plan §AD.22): the tools, agents, repositories and git identity their machines get;
  * - the placement counts learned about their tasks (placement_outcomes, A1): option keys and weights, never text;
  * - their conductor's turns (codes_conductor_messages, C9b) and the approvals it asked them (codes_approvals);
  * - the events Codes sent about them (codes_outbox);
@@ -55,6 +56,8 @@ const TABLES = [
     { table: 'codes_attachments', subject: 'subject', file: 'attachments.json', order: 'created_at', columns: ['id', 'task_id', 'attempt_n', 'message_id', 'name', 'mime', 'size', 'created_at', 'linked_at'] },
     // The sessions a person carried here (plan §AD.22, `openvibe-codes import`): what each one is; the conversation
     // itself is theirs too and leaves with them on deletion. The export carries the record, not the whole session.
+    // Their agent home (plan §AD.22, openvibe.home@1): tools, agents, repositories and git's name, and where it was set up.
+    { table: 'codes_homes', subject: 'subject', file: 'agent-home.json', order: 'updated_at', columns: ['spec', 'applied', 'updated_at'] },
     { table: 'codes_session_imports', subject: 'subject', file: 'session-imports.json', order: 'created_at', columns: ['id', 'harness', 'session_id', 'title', 'source_cwd', 'resumable', 'messages', 'records', 'size', 'created_at'] },
     // Placement A1's learned counts: the person's rows leave and are erased with them. No text, no payload.
     { table: 'placement_outcomes', subject: 'person_id', file: 'placement-outcomes.json', order: 'updated_at', columns: ['person_id', 'option_key', 'step_kind', 'ok_w', 'n_w', 'updated_at'] },

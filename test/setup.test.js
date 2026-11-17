@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * The guided setup (owner 2026-11-03): /setup's five steps, each read live; the pickers that say what each agent is
+ * The guided setup (owner 2026-11-03): /setup's steps (six since your agent home, 2026-11-17), each read live; the pickers that say what each agent is
  * ready for; the choices it saves; the home's line to it while it is unfinished.
  */
 const assert = require('assert');
@@ -37,7 +37,9 @@ const DEVICE = 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2S1';
             const res = await t.get('/setup', { as: ada });
             assert.strictEqual(res.status, 200, res.text);
             for (const id of ['machine', 'agents', 'keys', 'accounts', 'choices']) assert.match(res.text, new RegExp(`id="step-${id}"`));
-            assert.match(res.text, /0 of 5 done/);
+            assert.match(res.text, /0 of 6 done/);   // six since your agent home (2026-11-17)
+            assert.match(res.text, /id="step-home"/, "your agent home is a step");
+            assert.match(res.text, /data-c4-home/, "with its form");
             assert.match(res.text, /class="c4-card c4-setup-step is-next" id="step-machine"/, 'the machine is next');
             assert.match(res.text, /curl -fsSL https:\/\/openvibe\.link\/install \| sh -s -- --worker/);
             assert.match(res.text, /npm install -g @openai\/codex/, 'an agent that is not there says how to install it');
