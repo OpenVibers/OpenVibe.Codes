@@ -37,6 +37,8 @@ const { createConnectionsApi } = require('./http/connections-api');
 const { createActionsApi } = require('./http/actions-api');
 const { createConductorApi } = require('./http/conductor-api');
 const { createAttachmentsApi } = require('./http/attachments-api');
+const { createImportsApi } = require('./http/imports-api');
+const { createSessionImports } = require('./domain/session-imports');
 const { createRunClient } = require('./domain/run-client');
 const { createRunTasks } = require('./domain/run-tasks');
 const { createRaces } = require('./domain/races');
@@ -132,6 +134,7 @@ async function createApp(opts = {}) {
     const userSettings = createUserSettings({ store, harnesses });
     // The files a person attaches to a message (owner 2026-11-07): their own store, linked to a turn when it is sent.
     const attachments = createAttachments({ store, log });
+    const sessionImports = createSessionImports({ store, log });
     const notify = opts.notify || createNotify({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     const notices = createNotices({ store, config, notify, userSettings, log });
     const benchPublisher = createBenchPublisher({ config, store, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -146,7 +149,7 @@ async function createApp(opts = {}) {
     // The skills hub (Compute plan §5, E6): versioned skills, rules and MCP servers, shared through the same SDK.
     const skills = opts.skills || createSkills({ store, sharing, log });
     const tasks = createRunTasks({ store, run, config, log, sessions, outbox, runTokens, connections, attempts, fleet, notices, placementContext, harnesses, knowledge, sharing, attachments, modelPlans, goalVerifier: opts.goalVerifier || null, benchAttemptEnded: opts.benchAttemptEnded || benchPublisher.onTaskTerminal });
-    const ctx = { config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, modelPlans, runTokens, attempts, fleet, notices, notify, userSettings, attachments, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
+    const ctx = { sessionImports, config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, modelPlans, runTokens, attempts, fleet, notices, notify, userSettings, attachments, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // The person's own memory store (OpenVibe Memory M2b): the notes live in OpenVibe.AI, sealed there, and only the
@@ -338,6 +341,7 @@ async function createApp(opts = {}) {
     app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, tasks, modelPlans, fleet: ctx.fleet, conductor: ctx.conductor, attachments: ctx.attachments, actorLimits: ctx.actorLimits, sharing, races: ctx.races, machines: ctx.machines, log }));
     // The composer's files: upload before send (with progress), or as the multipart form without JavaScript.
     app.use('/api/v1', createAttachmentsApi({ attachments: ctx.attachments, actorLimits: ctx.actorLimits, config, keys, log }));
+    app.use('/api/v1', createImportsApi({ sessionImports: ctx.sessionImports, actorLimits: ctx.actorLimits, config, keys, log }));
     app.use('/api/v1', createMeApi({ config, store, sso, keys, run, harnesses, tasks, fleet: () => ctx.fleet, userSettings: ctx.userSettings, github: ctx.github, approvals: ctx.approvals, repoPicker: ctx.repoPicker, forge: ctx.forge, actorLimits: ctx.actorLimits, log }));
     // The owner's repository sources (ask 348): the dropdown's sources and their order.
     ctx.adminRepos = require('./http/admin-repos').createAdminRepos(ctx);
@@ -354,7 +358,7 @@ async function createApp(opts = {}) {
     // The conductor's own routes (Codes C9b): its turns, sub-tasks, and the approvals inbox the MCP tools speak to.
     app.use('/api/v1', createConductorApi({
         config, store, keys, harnesses, tasks, conductor: ctx.conductor, approvals: ctx.approvals,
-        machines: ctx.machines, fleet: ctx.fleet, userSettings: ctx.userSettings, attachments: ctx.attachments,
+        machines: ctx.machines, fleet: ctx.fleet, userSettings: ctx.userSettings, attachments: ctx.attachments, sessionImports: ctx.sessionImports,
         actorLimits: ctx.actorLimits, log,
     }));
     app.use('/api', (req, res) => contracts.http.sendProblem(res, 404, 'route.not_found', { detail: 'No such API route', ctx: req.ov }));

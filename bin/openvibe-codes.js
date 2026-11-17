@@ -70,6 +70,8 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
   openvibe-codes resume <run id> "follow-up"  continue a run's last session with its agent
   openvibe-codes job                          one task as an OpenVibe Run job (JSON input on stdin; the
                                               OpenVibe Link's job worker runs it on your own machine)
+  openvibe-codes import [--session <id> | --file <f> | --codex <f>]   carry a coding agent's session to openvibe.codes,
+                                              to continue on any of your machines (openvibe-codes import --help)
   openvibe-codes task start|list|show|continue|stop   coding tasks on openvibe.codes, as you, on one of
                                               your machines (openvibe-codes task --help)
   openvibe-codes tools find|run|mine|make      OpenVibe Tools from the terminal: find a tool for a need, run it,
@@ -218,6 +220,7 @@ async function main() {
     const [cmd, ...rest] = process.argv.slice(2);
     // Tasks on openvibe.codes: the person's own token, the server's API. Nothing here runs an agent.
     if (cmd === 'task') return task(rest);
+    if (cmd === 'import') return require('./import').importCommand(rest, { out });
     // The Codes MCP server (Codes C9b): a conductor's Claude Code session starts it with --mcp-config.
     if (cmd === 'mcp') return require('./mcp').mcp();
     // Codes as one Agent Client Protocol agent (Zed, JetBrains, T3 Code, …): every harness behind one agent.

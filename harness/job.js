@@ -215,6 +215,10 @@ function parseArgs(raw, env = process.env) {
         const resume = typeof resumeIn === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(resumeIn) ? resumeIn : null;
         const wanted = jobEnv(a);
         const agent = CONDUCTOR_AGENTS.includes(a.agent) ? a.agent : 'claude-code';
+        // A session carried to openvibe.codes (plan §AD.22): where to read it (the person's server, https or this
+        // machine's own) and the session it is, which this turn resumes.
+        const imported = a.import && typeof a.import === 'object' && typeof a.import.url === 'string' && /^https?:\/\/[^\s]{1,500}$/.test(a.import.url)
+            && typeof a.import.session === 'string' && /^[A-Za-z0-9-]{8,80}$/.test(a.import.session) ? { url: a.import.url, session: a.import.session } : null;
         // Claude Code asks the owner through its permission prompt tool; Codex and OpenCode have none, so "ask" and
         // "project" run them with edits only (their own sandbox), and "full" with the whole computer.
         const permission = agent !== 'claude-code' && safety === 'full' ? 'full' : 'edit';
@@ -227,6 +231,7 @@ function parseArgs(raw, env = process.env) {
             agent,
             ...(files.length ? { attachments: files } : {}),
             ...(resume ? { resume } : {}),
+            ...(imported ? { import: imported } : {}),
             ...(Object.keys(wanted).length ? { env: wanted } : {}),
         };
     }
@@ -533,6 +538,32 @@ function conductorMcpLauncher(file, job, env) {
 function opencodeConfig(file, server) {
     const config = { $schema: 'https://opencode.ai/config.json', mcp: { [server.name]: { type: 'local', command: [server.command, ...server.args], enabled: true } } };
     fs.writeFileSync(file, JSON.stringify(config, null, 2), { mode: 0o600 });
+    return file;
+}
+
+/**
+ * A session carried to openvibe.codes (plan §AD.22), placed where this machine's Claude Code finds it, before the turn
+ * resumes it: `<CLAUDE_CONFIG_DIR>/projects/<folder slug>/<session>.jsonl`, every record's folder moved to this one.
+ * Once there it is the agent's own and grows with each turn, so a later turn leaves it alone. → the file, or null.
+ */
+async function placeImport(job, { work, env, fetchImpl, say }) {
+    if (!job.import) return null;
+    const portable = require('../engine/portable');
+    const configDir = env.CLAUDE_CONFIG_DIR || path.join(env.HOME || os.homedir(), '.claude');
+    const target = path.join(configDir, 'projects', portable.slug(work), `${job.import.session}.jsonl`);
+    if (fs.existsSync(target)) return target;
+    const token = codesToken(env);
+    say({ t: 'step', text: 'Bringing your imported session to this machine' });
+    const response = await fetchImpl(job.import.url, {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), Accept: 'application/gzip' },
+        signal: AbortSignal.timeout(120_000),
+    });
+    if (!response.ok) throw new Error(`the imported session could not be read (the server answered ${response.status})`);
+    const gz = Buffer.from(await response.arrayBuffer());
+    const doc = JSON.parse(require('zlib').gunzipSync(gz, { maxOutputLength: 200 * 1024 * 1024 }).toString('utf8'));
+    if (doc.session_id !== job.import.session) throw new Error('the imported session is not the one this turn resumes');
+    const file = portable.placeClaude(doc, { configDir, cwd: work });
+    say({ t: 'step', text: `Your session is here: ${doc.counts ? doc.counts.messages : '?'} messages, resumed in ${work}` });
     return file;
 }
 
@@ -857,6 +888,10 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                 job = { ...job, prompt: job.prompt + attachmentPrompt(files) };
                 say({ t: 'step', text: `${files.length} file${files.length === 1 ? '' : 's'} attached` });
             }
+            if (job.import && (job.agent === 'claude-code' || job.agent === 'claude-other')) {
+                await placeImport(job, { work, env, fetchImpl, say });
+                job = { ...job, resume: job.import.session };
+            }
             if (job.agent === 'claude-code' || job.agent === 'claude-other') {
                 adapterOptions = {
                     // "ask" is Claude Code's own default mode, where every risky call goes to the permission prompt tool
@@ -1055,4 +1090,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { systemBrief, briefPrompt, CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, localGitSource, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments, attachmentPrompt, agentPrompt, jobAttachments };
+module.exports = { placeImport, systemBrief, briefPrompt, CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, localGitSource, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments, attachmentPrompt, agentPrompt, jobAttachments };
