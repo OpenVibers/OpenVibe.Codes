@@ -43,12 +43,14 @@ const fail = (message) => Object.assign(new Error(message), { status: 422, code:
 /** A repository as an https URL and the folder name it is cloned into. */
 function repoOf(value) {
     const v = String(value || '').trim();
+    // A refusal names the address without any user or password in it: the words go back to a page and a log.
+    const shown = v.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/\s]*@/i, '$1').slice(0, 80);
     if (SLUG.test(v)) return { url: `https://github.com/${v}.git`, name: v.split('/')[1] };
     let u;
-    try { u = new URL(v); } catch { throw fail(`not a repository: ${v.slice(0, 80)}`); }
-    if (u.protocol !== 'https:' || u.username || u.password) throw fail(`a repository is an https address without credentials: ${v.slice(0, 80)}`);
+    try { u = new URL(v); } catch { throw fail(`not a repository: ${shown}`); }
+    if (u.protocol !== 'https:' || u.username || u.password) throw fail(`a repository is an https address without credentials: ${shown}`);
     const name = path.basename(u.pathname).replace(/\.git$/, '');
-    if (!/^[A-Za-z0-9_.-]+$/.test(name) || name === '.' || name === '..') throw fail(`not a repository: ${v.slice(0, 80)}`);
+    if (!/^[A-Za-z0-9_.-]+$/.test(name) || name === '.' || name === '..') throw fail(`not a repository: ${shown}`);
     return { url: u.toString(), name };
 }
 

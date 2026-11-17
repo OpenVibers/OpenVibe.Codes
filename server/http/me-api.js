@@ -33,7 +33,7 @@ const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const DELEGABLE = new Set(['owner', 'admin']);
 
-function createMeApi({ config, store, sso, keys, run, harnesses, fleet = null, userSettings = null, actorLimits, tasks = null, github = null, approvals = null, repoPicker = null, forge = null, log = console }) {
+function createMeApi({ config, store, sso, keys, run, harnesses, fleet = null, userSettings = null, actorLimits, tasks = null, github = null, approvals = null, repoPicker = null, forge = null, homes = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
@@ -356,6 +356,79 @@ function createMeApi({ config, store, sso, keys, run, harnesses, fleet = null, u
         } catch (e) {
             return problem(req, res, e.status && e.status < 500 ? e.status : 503, e.code || 'codes.run_unavailable', e.message || 'OpenVibe.Run did not answer');
         }
+    });
+
+    // ── Your agent home (plan §AD.22, openvibe.home@1) ────────────────────────────────────────────────────────────────
+    // The owner, 2026-11-17: "Instead of sshing into the local OV node yourself you should make it so link can do all
+    // this". What the person's agents need on a machine (tools by mise, agent CLIs, git's identity, repositories) is kept
+    // here once; "Set up" sends a Codes job of mode 'home' to the machine they choose (runner 0.12.0), which makes it
+    // real in their sandbox there and says what it did. Only their own machines, only their own home.
+    const homeJobs = new Map();   // job id → { subject, project, machine, at }
+    r.get('/me/home', actorLimits.reads('codes.read'), async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to see your agent home');
+        if (!homes) return problem(req, res, 503, 'codes.homes_unavailable', 'agent homes are not set up here');
+        return res.json(await homes.get(req.viewer.subject));
+    });
+    r.put('/me/home', actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to keep your agent home');
+        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site posts are refused');
+        if (!homes) return problem(req, res, 503, 'codes.homes_unavailable', 'agent homes are not set up here');
+        try {
+            const spec = await homes.save(req.viewer.subject, (req.body || {}).spec);
+            return res.json({ spec });
+        } catch (e) {
+            if (e.status === 422) return problem(req, res, 422, e.code || 'home.invalid', e.message);
+            throw e;
+        }
+    });
+    r.post('/me/home/apply', actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to set a machine up');
+        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site posts are refused');
+        if (!homes) return problem(req, res, 503, 'codes.homes_unavailable', 'agent homes are not set up here');
+        const machine = String((req.body || {}).machine || '').slice(0, 128);
+        if (!machine) return problem(req, res, 422, 'codes.machine_required', 'choose one of your machines');
+        const h = await homes.get(req.viewer.subject);
+        if (!h.saved) return problem(req, res, 409, 'codes.home_unsaved', 'save your agent home first');
+        const f = typeof fleet === 'function' ? fleet() : fleet;
+        let device = null;
+        try { device = f ? await sso.asViewer(req, res, (token) => f.deviceFor(token, machine)) : null; } catch (e) {
+            return problem(req, res, e.status === 401 ? 401 : 503, e.code || 'codes.machines_unavailable', 'your machines could not be read just now');
+        }
+        if (!device) return problem(req, res, 404, 'codes.machine_not_found', 'that is not one of your machines');
+        let project;
+        try { project = await ensureProject(req, res); } catch (e) { return problem(req, res, 503, 'codes.projects_unavailable', 'your projects could not be read: sign in again'); }
+        if (!project) return problem(req, res, 409, 'codes.no_project', 'you have no project to run jobs in yet');
+        // A repository on OpenVibe Git comes with the person's own clone token (two hours); GitHub's come from the
+        // machine's own token (GITHUB_TOKEN), as a coding job's do.
+        let env = null;
+        const onForge = (h.spec.repos || []).find((x) => forge && forge.host && /^https:/.test(String(x)) && String(x).includes(`//${forge.host}/`));
+        if (onForge && forge.jobEnv) env = await forge.jobEnv(req.viewer.subject, onForge).catch(() => null);
+        let job;
+        try {
+            job = await run.submit({ subject: req.viewer.subject, project, args: { mode: 'home', spec: h.spec, ...(env ? { env } : {}) }, node: device.device,
+                key: `home:${machine}:${Math.floor(Date.now() / 60_000)}`, limits: { wall_ms: 60 * 60_000 }, ttlMs: 30 * 60_000 });
+        } catch (e) {
+            return problem(req, res, e.status && e.status < 500 ? e.status : 503, e.code || 'codes.run_unavailable', e.message || 'OpenVibe.Run did not answer');
+        }
+        await homes.applying(req.viewer.subject, device.device, job.id, { machine, name: device.name || null });
+        homeJobs.set(job.id, { subject: req.viewer.subject, project, machine: device.device, at: Date.now() });
+        for (const [id, s] of homeJobs) if (Date.now() - s.at > 2 * 60 * 60_000) homeJobs.delete(id);
+        log.info(`[Codes] ${req.viewer.subject} sets their agent home up on ${device.device} (job ${job.id})`);
+        return res.status(201).json({ job_id: job.id, machine: device.device, name: device.name });
+    });
+    r.get('/me/home/apply/:job/events', actorLimits.reads('codes.read'), async (req, res) => {
+        const s = homeJobs.get(String(req.params.job || ''));
+        if (!s || !signedIn(req) || s.subject !== req.viewer.subject) return res.status(404).end();
+        let url;
+        try { url = await run.streamUrl(req.params.job, { subject: s.subject, project: s.project }); } catch (e) { return res.status(e.status === 404 ? 404 : 503).end(); }
+        const upstream = new AbortController();
+        req.on('close', () => upstream.abort());
+        let resp;
+        try { resp = await fetch(url, { headers: { Accept: 'text/event-stream' }, signal: upstream.signal }); } catch { return res.status(503).end(); }
+        if (!resp.ok || !resp.body) return res.status(resp.status === 404 ? 404 : 503).end();
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
+        try { for await (const chunk of resp.body) res.write(chunk); } catch { /* the page went away */ }
+        res.end();
     });
 
     return r;
