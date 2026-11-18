@@ -52,6 +52,14 @@ function prUrlOf(row) {
     return typeof url === 'string' && /^https:\/\//.test(url) ? url.slice(0, 2000) : null;
 }
 
+/** The repository Codes made for the task (migration 0051), as codes.task-summary@1 1.1.0 made_repo, or null. */
+function madeRepoOf(row) {
+    let m = row && row.made_repo;
+    if (typeof m === 'string') { try { m = JSON.parse(m); } catch { return null; } }
+    if (!m || typeof m !== 'object' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(String(m.full_name || '')) || !/^https:\/\//.test(String(m.url || ''))) return null;
+    return { full_name: String(m.full_name), url: String(m.url).slice(0, 500) };
+}
+
 function summarize(rows, { stepsByTask = {}, waitingIds = new Set(), openvibeUrls = new Set(), baseUrl = 'https://openvibe.codes' } = {}) {
     const base = String(baseUrl).replace(/\/+$/, '');
     return (Array.isArray(rows) ? rows : []).map((row) => ({
@@ -66,7 +74,9 @@ function summarize(rows, { stepsByTask = {}, waitingIds = new Set(), openvibeUrl
         url: `${base}/tasks/${encodeURIComponent(row.id)}`,
         preview_url: null,
         pr_url: prUrlOf(row),
+        // Only when there is one: a reader of 1.0.0 (additionalProperties false) sees the shape it knows otherwise.
+        ...(madeRepoOf(row) ? { made_repo: madeRepoOf(row) } : {}),
     }));
 }
 
-module.exports = { summarize, titleOf, statusOf, modeOf, LIVE };
+module.exports = { summarize, titleOf, statusOf, modeOf, madeRepoOf, LIVE };

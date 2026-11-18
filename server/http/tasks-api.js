@@ -520,6 +520,11 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, forg
             return problem(req, res, e.status || 502, e.code || 'codes.task_failed', String((e && e.message) || 'the task could not start').slice(0, 300));
         }
         log.info(`[Codes] task ${firstRow.id} started from the Dock for ${p.subject} (${mode}${madeRepo ? `, new repository ${madeRepo.full_name}` : ''})`);
+        // The repository made for it, kept with the task (migration 0051) so its summary keeps saying so.
+        if (madeRepo && /^https:\/\//.test(String(madeRepo.html_url || ''))) {
+            await db.query('UPDATE run_tasks SET made_repo = $2::jsonb WHERE id = $1', [firstRow.id, JSON.stringify({ full_name: String(madeRepo.full_name).slice(0, 164), url: String(madeRepo.html_url).slice(0, 500) })])
+                .catch((e) => log.warn(`[Codes] task ${firstRow.id}: the made repository was not kept: ${String((e && e.message) || e).slice(0, 160)}`));
+        }
         return res.status(201).json({ id: firstRow.id, url: `${config.baseUrl}/tasks/${firstRow.id}`, ...(madeRepo ? { repository: { full_name: madeRepo.full_name, html_url: madeRepo.html_url, private: madeRepo.private } } : {}) });
     }
 
