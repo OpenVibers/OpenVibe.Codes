@@ -320,4 +320,90 @@ function hintFor({ strict = false, permission = 'edit' } = {}) {
             : 'When a change takes more than two reads, searches, edits or commands, do them in one execute call instead of separate tool calls.');
 }
 
-module.exports = { createRepoTools, createServer, serveStdio, mcpOptions, hintFor, ready, PERMISSIONS, LIMITS, INSTRUCTIONS };
+/**
+ * How each harness takes code mode (runner 0.14.0; the owner, 11-18: "Give all harnesses code mode"). Measured 11-18 on
+ * this workstation with the three-file rename:
+ *   claude      --mcp-config + --append-system-prompt; strict turns Read/Edit/Write/Grep/Glob/Bash off (2 scripts)
+ *   opencode    the project's opencode.json (v2: mcp.servers, instructions, and its own tools denied); strict holds
+ *               under --auto only through the `permission` object (it then ran execute and nothing else).
+ *               OPENCODE_CONFIG and OPENCODE_CONFIG_CONTENT were not read by v2.2.6.
+ *   codex       -c mcp_servers.ov_code.*; beside its own tools: with shell_tool and unified_exec off it hangs, and its
+ *               own code_mode/code_mode_only flags are unfinished (one script, two commands and a patch: done)
+ *   mcp-json    Command Code and Muse read the project's .mcp.json; beside their own tools (the hint is in the prompt)
+ *   acp         session/new's mcpServers, for every ACP agent; beside its own tools
+ *   loop        Codes' own API loop (DeepSeek, OpenVibe AI): execute is one of its tools; strict offers only it
+ *   own         MiniMax Code has its own (--ptc, run_code), always on
+ *   null        Aider: no tools of its own to script
+ */
+const PLANS = Object.freeze({
+    'claude-code': { via: 'claude', strict: true },
+    'claude-other': { via: 'claude', strict: true },
+    opencode: { via: 'opencode', strict: true },
+    codex: { via: 'codex', strict: false, note: 'beside its own tools (its shell cannot be turned off)' },
+    'command-code': { via: 'mcp-json', strict: false, note: 'beside its own tools' },
+    muse: { via: 'mcp-json', strict: false, note: 'beside its own tools' },
+    'minimax-code': { via: 'own', strict: false, note: 'MiniMax Code has its own code mode (run_code), always on' },
+    aider: { via: null, strict: false, note: 'Aider has no tools of its own to script' },
+});
+
+/** The plan for a harness: the table above, then by kind (an API harness runs Codes' own loop, an ACP agent ACP). */
+function planFor(agent, kind = null) {
+    if (agent && PLANS[agent]) return PLANS[agent];
+    if (kind === 'api') return { via: 'loop', strict: true };
+    if (kind === 'acp') return { via: 'acp', strict: false, note: 'beside its own tools' };
+    return { via: null, strict: false, note: 'this harness takes no MCP server' };
+}
+
+/** The server a harness starts: `openvibe-codes code-mode --root ROOT --permission P`. */
+function serverSpec({ root, permission, bin = path.join(__dirname, '..', 'bin', 'openvibe-codes.js') }) {
+    return { name: 'ov_code', command: process.execPath, args: [bin, 'code-mode', '--root', root, '--permission', permission] };
+}
+
+/**
+ * A project file the harness reads (opencode.json, .mcp.json), with code mode's part merged in: what was there is kept,
+ * a new file stays out of git (.git/info/exclude), and restore() puts the folder back as it was after the run.
+ *   withProjectFile(root, name, mutate) → restore()
+ */
+function withProjectFile(root, name, mutate) {
+    const file = path.join(root, name);
+    let before = null;
+    try { before = fs.readFileSync(file); } catch { before = null; }
+    let json = {};
+    if (before) { try { json = JSON.parse(before.toString('utf8')); } catch { json = {}; } }
+    const next = mutate(json && typeof json === 'object' && !Array.isArray(json) ? json : {}) || json;
+    fs.writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
+    if (!before) {
+        const exclude = path.join(root, '.git', 'info', 'exclude');
+        try {
+            if (fs.existsSync(path.dirname(exclude))) {
+                const now = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
+                if (!now.split('\n').includes(`/${name}`)) fs.appendFileSync(exclude, `${now && !now.endsWith('\n') ? '\n' : ''}/${name}\n`);
+            }
+        } catch { /* not a checkout: nothing to keep out */ }
+    }
+    let done = false;
+    return () => {
+        if (done) return; done = true;
+        try { if (before) fs.writeFileSync(file, before); else fs.rmSync(file, { force: true }); } catch { /* the folder went away */ }
+    };
+}
+
+/**
+ * Code mode as a job hands it to the harness (adapterOptions.codeMode): the server, how strict, the line for the agent,
+ * and the restores the adapters register (a project file each), run by cleanup() when the job ends. A harness reads it
+ * its own way (PLANS); one that takes no MCP server ignores it.
+ */
+function descriptor({ root, permission, strict = null, bin }) {
+    const server = serverSpec({ root, permission, ...(bin ? { bin } : {}) });
+    const restores = [];
+    return {
+        server, permission, strict, restores,
+        hint: (isStrict) => hintFor({ strict: !!isStrict, permission }),
+        cleanup() { while (restores.length) { try { restores.pop()(); } catch { /* best effort */ } } },
+    };
+}
+
+/** The hint before a prompt, for a harness with no system prompt of its own to add to. */
+const withHint = (cm, prompt, strict = false) => (cm ? `${cm.hint(strict)}\n\n${prompt || ''}` : prompt);
+
+module.exports = { createRepoTools, createServer, serveStdio, mcpOptions, hintFor, ready, planFor, serverSpec, withProjectFile, descriptor, withHint, PLANS, PERMISSIONS, LIMITS, INSTRUCTIONS };

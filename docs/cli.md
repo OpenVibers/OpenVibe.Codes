@@ -150,6 +150,25 @@ What the portal had and Codes does not (yet): a *named machine* per task, a tran
 event stream (the stream carries the session's lines), and fencing a whole chain of jobs — here the **task** is
 the unit, and a continue is an attempt on the same task.
 
+## Code mode for every harness (runner 0.14.0)
+
+Each harness takes code mode its own way (harness/code-mode.js PLANS), measured 11-18 on a rename across three files:
+
+| Harness | How | Its own tools |
+|---|---|---|
+| Claude Code, Claude Code on another provider | `--mcp-config`, the line in `--append-system-prompt` | off (strict): 2 scripts, 3 turns |
+| OpenCode (v2) | the project's `opencode.json`: `mcp.servers`, `instructions`, and `permission` denies | off (strict): only execute ran |
+| Codex | `-c mcp_servers.ov_code.*`, the line before the prompt | on (its shell cannot be turned off: it hangs): 2 scripts and nothing else |
+| Command Code, Muse | the project's `.mcp.json`, the line before the prompt | on |
+| every ACP agent | `mcpServers` in `session/new` | on |
+| Codes' own API loop (DeepSeek, OpenVibe AI, your own model) | `execute` is one of its tools | off (strict): only execute is offered |
+| MiniMax Code | its own code mode (`--ptc`, run_code), always on | — |
+| Aider | none: it has no tools of its own to script | — |
+
+A project file is merged into what the project has, kept out of git, and put back when the agent is done (before the
+diff and the push). A job with no fixed agent hands code mode to whichever harness runs. `code_mode: 'beside'` keeps every
+harness's own tools on.
+
 ## Code mode (runner 0.13.0)
 
 Claude Code's own Code Mode works only in an interactive terminal, and every Codes run is headless. A job with

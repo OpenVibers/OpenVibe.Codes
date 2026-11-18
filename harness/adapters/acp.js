@@ -185,6 +185,9 @@ function acpAgent(spec) {
             };
             if (t.signal) { if (t.signal.aborted) cancelled = true; else t.signal.addEventListener('abort', stop, { once: true }); }
 
+            // Code mode (runner 0.14.0): the ov_code server at session start, as ACP passes MCP servers to any agent.
+            const acpCm = t.options && t.options.codeMode && t.options.codeMode.server ? t.options.codeMode : null;
+            const acpServers = acpCm ? [{ name: acpCm.server.name, command: acpCm.server.command, args: acpCm.server.args, env: [] }] : [];
             async function run() {
                 try {
                     child = spawn(spec.cmd, spec.args || [], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -206,10 +209,10 @@ function acpAgent(spec) {
                     if (t.resume && caps.loadSession) {
                         replaying = true;
                         sessionId = String(t.resume);
-                        try { await call('session/load', { sessionId, cwd, mcpServers: [] }); } finally { replaying = false; }
+                        try { await call('session/load', { sessionId, cwd, mcpServers: acpServers }); } finally { replaying = false; }
                     } else {
                         if (t.resume) emit(ev.warning(`${spec.name} cannot load an earlier session: it starts a new one`));
-                        session = await call('session/new', { cwd, mcpServers: [] });
+                        session = await call('session/new', { cwd, mcpServers: acpServers });
                         sessionId = String((session && session.sessionId) || '');
                         if (!sessionId) throw new Error(`${spec.name} did not open a session`);
                     }
@@ -221,7 +224,7 @@ function acpAgent(spec) {
                         emit(ev.warning(`${spec.name} does not offer the model ${t.model} here: it runs its own`));
                     }
                     if (cancelled) { stopReason = 'cancelled'; return; }
-                    const answer = await call('session/prompt', { sessionId, prompt: [{ type: 'text', text: String(t.prompt || '') }] });
+                    const answer = await call('session/prompt', { sessionId, prompt: [{ type: 'text', text: String(require('../code-mode').withHint(acpCm, t.prompt || '', false)) }] });
                     stopReason = String((answer && answer.stopReason) || 'end_turn');
                 } catch (err) {
                     // What the agent said before it failed is often the real reason (a plan's usage limit, a missing

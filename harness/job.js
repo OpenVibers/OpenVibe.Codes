@@ -27,6 +27,14 @@ const { validatePlan } = require('../engine/model-plan');
 const { repositoryPlan, selectPlan, resolveRepositoryPlan, runModelPlan } = require('./model-plan');
 const skills = require('../engine/skills');
 const codeMode = require('./code-mode');
+/** A harness's kind for code mode's plan: one of the CLIs, an ACP agent, or an API harness (Codes' own loop). */
+function harnessKind(agent) {
+    if (!agent) return null;
+    const cli = require('./adapters/cli');
+    if (Object.values(cli).some((x) => x && typeof x === 'object' && x.id === agent)) return 'cli';
+    try { if (require('./acp-agents.json').agents.some((a) => a.id === agent)) return 'acp'; } catch { /* no registry */ }
+    return 'api';
+}
 
 const JOB_PROTOCOL = '1.0.0';
 /** The agents a conductor's turn may run on: every harness Codes offers. */
@@ -820,6 +828,10 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
     let work = path.join(dir, 'repo');
     const result = { protocol: JOB_PROTOCOL, ok: false, kind: job.kind, repo: job.repo ? scrub(job.repo) : null, ref: job.ref, agents: [], summary: '' };
     let base = null;
+    // Code mode's project files (opencode.json, .mcp.json) go back as they were when the agent is done (runner 0.14.0).
+    let codeModeRun = null;
+    const conductorRestores = [];
+    const putBack = () => { if (codeModeRun) codeModeRun.cleanup(); while (conductorRestores.length) { try { conductorRestores.pop()(); } catch { /* best effort */ } } };
     try {
         let adapterOptions = null;
         if (job.kind === 'code') {
@@ -908,7 +920,7 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                 // The same Codes tools, started by a launcher script for an agent that takes no MCP config argument.
                 const server = job.mcp ? conductorMcpLauncher(path.join(dir, 'codes-mcp.sh'), job, env) : null;
                 adapterOptions = server
-                    ? (job.agent === 'codex' ? { mcpServer: server } : { configFile: opencodeConfig(path.join(dir, 'opencode.json'), server) })
+                    ? (job.agent === 'codex' ? { mcpServer: server } : { mcpServers: [server], restores: conductorRestores })
                     : {};
                 say({ t: 'step', text: `This turn runs on ${job.agent === 'codex' ? 'Codex' : 'OpenCode'}` });
             } else {
@@ -924,7 +936,10 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         // Code mode (2026-11-18): Claude Code's own works only in an interactive terminal, so a job that asks for it
         // gets Codes' ov_code server beside the agent (harness/code-mode.js): one script for many reads, searches and
         // edits, within the job's own permission.
-        if (job.codeMode && (!job.agent || job.agent === 'claude-code' || job.agent === 'claude-other')) {
+        const plan = job.codeMode ? (job.agent ? codeMode.planFor(job.agent, harnessKind(job.agent)) : { via: 'any', strict: true }) : null;
+        if (plan && !plan.via) say({ t: 'note', text: `Code mode does not apply to ${job.agent}: ${plan.note}` });
+        else if (plan && plan.via === 'own') say({ t: 'step', text: `Code mode: ${plan.note}` });
+        if (plan && plan.via && plan.via !== 'own') {
             const why = codeMode.ready();
             if (why) say({ t: 'note', level: 'warning', text: `Code mode is off for this run: ${why}` });
             else {
@@ -934,14 +949,20 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                 // Strict on a cloned repository and at "full" (nothing asks the owner there): the agent's own file and
                 // shell tools are off and the work goes through scripts. A conductor at "ask" or "project" keeps its
                 // own tools, whose risky calls ask the owner, and has code mode beside them.
-                const strict = job.kind !== 'conductor' || job.safety === 'full';
+                // job.codeMode 'beside' never turns the agent's own tools off; true or 'strict' does where the harness
+                // can (PLANS) and nothing asks the owner (a repository task, or a conductor at "full").
+                const strict = job.codeMode !== 'beside' && plan.strict && (job.kind !== 'conductor' || job.safety === 'full');
                 const cm = codeMode.mcpOptions({ file: path.join(dir, 'mcp-code.json'), root: work, permission, existing: adapterOptions && adapterOptions.mcpConfig });
+                codeModeRun = codeMode.descriptor({ root: work, permission, strict });
+                codeModeRun.hintText = codeMode.hintFor({ strict, permission });
                 adapterOptions = {
-                    ...(adapterOptions || {}), mcpConfig: cm.mcpConfig,
+                    ...(adapterOptions || {}),
+                    // Claude Code: a config file and the allow list; every other harness reads codeMode.server its own way.
+                    mcpConfig: cm.mcpConfig,
                     allowedTools: [...((adapterOptions && adapterOptions.allowedTools) || []), cm.tool],
-                    codeMode: { strict, hint: codeMode.hintFor({ strict, permission }) },
+                    codeMode: { ...codeModeRun, hint: codeModeRun.hint, strict, claudeHint: codeModeRun.hintText },
                 };
-                result.code_mode = { permission, strict };
+                result.code_mode = { permission, strict, via: plan.via };
                 say({ t: 'step', text: `Code mode: the agent works in scripts${strict ? '' : ' beside its own tools'} (${permission})` });
             }
         }
@@ -999,6 +1020,8 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             for (const line of Array.isArray(c) ? c : c ? [c] : []) say(line);
             if (e.type === 'system' && e.subtype === 'init' && e.agent && !result.agents.includes(e.agent)) result.agents.push(e.agent);
         }
+        // The agent is done: code mode's project files go back before the diff and the push see the tree.
+        putBack();
         result.ok = !!(last && last.type === 'result' && !last.is_error);
         const answer = last && typeof last.result === 'string' ? last.result : '';
         result.summary = answer.slice(0, 4000);
@@ -1097,6 +1120,7 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         result.error = scrub(e.message);
         say({ t: 'note', text: result.error });
     } finally {
+        putBack();
         result.duration_ms = Date.now() - started;
         fs.rmSync(dir, { recursive: true, force: true });
     }
