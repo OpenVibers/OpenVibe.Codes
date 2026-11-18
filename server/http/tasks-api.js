@@ -93,7 +93,7 @@ function runUse(raw) {
     return Object.keys(out).length ? out : bad('use names a model, a harness or an effort');
 }
 
-function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, modelPlans = null, fleet = null, sharing = null, conductor = null, attachments = null, races = null, machines = null, log = console }) {
+function createTasksApi({ config, store, keys, run, harnesses, actorLimits, forge = null, tasks = null, modelPlans = null, fleet = null, sharing = null, conductor = null, attachments = null, races = null, machines = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     /** The repository the words name: a Git address in them, or one of the person's recent repositories by its name. */
@@ -187,28 +187,32 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
      * (openvibe.network) and, when the Network is asked for the Codes audience, for openvibe.codes: either is accepted
      * here. A person token carries no capability claim: being that person is what authorizes their own tasks.
      */
-    const personOf = async (token) => {
+    /** A person's Network access token → { subject, username } (the username is their OpenVibe Git namespace), or null. */
+    const personInfo = async (token) => {
         if (!keys.loaded()) await keys.ensure();
         const v = await keys.verifyUser(token, { issuer: config.networkIssuer, audience: [config.oauth.sessionAudience, config.serviceAudience] });
         if (!v.ok) return null;
         const subject = typeof v.claims.subject_id === 'string' ? v.claims.subject_id : null;
-        return USER.test(subject || '') ? subject : null;
+        if (!USER.test(subject || '')) return null;
+        const username = typeof v.claims.username === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/.test(v.claims.username) ? v.claims.username : null;
+        return { subject, username };
     };
+    const personOf = async (token) => { const who = await personInfo(token); return who ? who.subject : null; };
 
     const guardAny = (cap) => async (req, res, next) => {
         const header = String(req.headers.authorization || '');
         if (header.startsWith('Bearer ')) {
             const token = header.slice(7).trim();
             if (principalToken(token)) return guard(cap)(req, res, next);
-            const subject = await personOf(token);
-            if (subject) {
-                req.principal = { sub: `user:${subject}`, subject, via: 'user', owner: true };
+            const who = await personInfo(token);
+            if (who) {
+                req.principal = { sub: `user:${who.subject}`, subject: who.subject, username: who.username, via: 'user', owner: true };
                 return next();
             }
             return problem(req, res, 401, 'token.invalid', 'that token is not a person’s Network access token');
         }
         if (signedIn(req)) {
-            req.principal = { sub: `user:${req.viewer.subject}`, subject: req.viewer.subject, via: null, owner: true };
+            req.principal = { sub: `user:${req.viewer.subject}`, subject: req.viewer.subject, username: req.viewer.username || null, via: null, owner: true };
             return next();
         }
         return problem(req, res, 401, 'token.required', `${cap} needs a Network service token for ${config.serviceAudience}, or a signed-in owner`);
@@ -333,6 +337,42 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
      * codes.task-start-request@1 shape below. The checks, limits and quota are the site's own (POST /chat): the
      * words, the repository, the project, and the files — all refused before any task is started.
      */
+    /**
+     * A repository name from the person's words (Code mode with no repository, plan §AD.28 item 3): their first few
+     * plain words, lowercase, joined by dashes, at most 40 characters; "scratch-<date>" when the words give none.
+     */
+    function scratchName(text, today = new Date()) {
+        const STOP = new Set(['a', 'an', 'the', 'me', 'my', 'i', 'we', 'us', 'our', 'for', 'to', 'of', 'and', 'or', 'with', 'that', 'this', 'it', 'is', 'be',
+            'please', 'can', 'you', 'make', 'build', 'create', 'write', 'code', 'some', 'new', 'in', 'on', 'from', 'into', 'up', 'just', 'like']);
+        const words = String(text || '').toLowerCase().replace(/https?:\/\/\S+/g, ' ').split(/[^a-z0-9]+/)
+            .filter((w) => w.length > 1 && w.length < 30 && !STOP.has(w)).slice(0, 5);
+        const name = words.join('-').slice(0, 40).replace(/-+$/, '');
+        return name.length >= 3 ? name : `scratch-${today.toISOString().slice(0, 10).replace(/-/g, '')}`;
+    }
+
+    /**
+     * A private repository on OpenVibe Git, in the person's name, for words that name none (the owner, 11-18: Code mode
+     * without a repository "Codes should take it"): the name from the words, the next free one when it is taken.
+     * → { repo: { full_name, html_url, clone_url, private } } or { problem: { code, detail } } (never throws).
+     */
+    async function makeScratchRepo(p, text) {
+        if (!forge || !forge.enabled) return { problem: { code: 'repo.git_off', detail: 'OpenVibe Git is not open from Codes right now.' } };
+        if (!p.username) return { problem: { code: 'repo.no_username', detail: 'Your OpenVibe account has no username yet, so a new repository has no address. Choose one on your account page.' } };
+        const base = scratchName(text);
+        for (let i = 0; i < 6; i++) {
+            const name = i === 0 ? base : `${base.slice(0, 37).replace(/-+$/, '')}-${i + 1}`;
+            try {
+                const made = await forge.createRepo({ subject: p.subject, username: p.username }, { name, description: String(text || '').replace(/\s+/g, ' ').trim().slice(0, 200), isPrivate: true });
+                return { repo: made };
+            } catch (e) {
+                if (e && e.status === 409 && e.code === 'git.name_taken') continue;   // that name is taken: the next one
+                log.warn(`[Codes] scratch repository for ${p.subject} refused: ${String((e && e.message) || e).slice(0, 160)}`);
+                return { problem: { code: e && e.code === 'git.unlinked' ? 'repo.no_username' : 'repo.create_failed', detail: String((e && e.message) || 'OpenVibe Git did not make the repository.').slice(0, 200) } };
+            }
+        }
+        return { problem: { code: 'repo.name_taken', detail: `You already have repositories called ${base} and ${base}-2 to -6.` } };
+    }
+
     async function dockCreate(req, res) {
         const p = req.principal;
         if (!p.owner) return problem(req, res, 422, 'codes.task_invalid', 'services start tasks with codes.task-start-request@1 (a prompt and a repo)');
@@ -359,6 +399,16 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
             if (!repoIn) repoIn = await repoFromWords(p.subject, text);
             mode = repoIn ? 'repo' : 'create';
         }
+        // Code mode with no repository (the Frame sends scratch: plan §AD.28 item 3): Codes takes it on a new private
+        // repository of the person's on OpenVibe Git. Without OpenVibe Git or a username, the answer is the handover below
+        // and says why. The site's own "Something new" (mode create, no scratch) keeps its handover.
+        let madeRepo = null, scratchProblem = null;
+        const scratch = first(b.scratch) === true || ['1', 'true', 'yes', 'on'].includes(String(first(b.scratch) ?? '').toLowerCase());
+        if (mode === 'create' && scratch) {
+            const out = await makeScratchRepo(p, text);
+            if (out.repo) { madeRepo = out.repo; repoIn = out.repo.clone_url; mode = 'repo'; }
+            else scratchProblem = out.problem;
+        }
         const named = [
             ...(Array.isArray(b.attachments) ? b.attachments : b.attachments ? [b.attachments] : []),
             ...(Array.isArray(b.attachment_ids) ? b.attachment_ids : b.attachment_ids ? [b.attachment_ids] : []),
@@ -369,7 +419,7 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
             if (repoIn || named.length || uploaded.length || b.plan != null || b.preset != null) {
                 return problem(req, res, 422, 'codes.create_invalid', 'Something new starts in OpenVibe AI, where you can add the repository and the files there.');
             }
-            return res.json({ id: null, url: start.spaceHref({ text }) });
+            return res.json({ id: null, url: start.spaceHref({ text }), ...(scratchProblem ? { scratch: scratchProblem } : {}) });
         }
         // The files this task carries: uploaded before send by their ids, or posted with the form now (no
         // JavaScript). A limit or a program is refused before any task is started; an id from outside Codes names
@@ -469,8 +519,8 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         } catch (e) {
             return problem(req, res, e.status || 502, e.code || 'codes.task_failed', String((e && e.message) || 'the task could not start').slice(0, 300));
         }
-        log.info(`[Codes] task ${firstRow.id} started from the Dock for ${p.subject} (${mode})`);
-        return res.status(201).json({ id: firstRow.id, url: `${config.baseUrl}/tasks/${firstRow.id}` });
+        log.info(`[Codes] task ${firstRow.id} started from the Dock for ${p.subject} (${mode}${madeRepo ? `, new repository ${madeRepo.full_name}` : ''})`);
+        return res.status(201).json({ id: firstRow.id, url: `${config.baseUrl}/tasks/${firstRow.id}`, ...(madeRepo ? { repository: { full_name: madeRepo.full_name, html_url: madeRepo.html_url, private: madeRepo.private } } : {}) });
     }
 
     r.post('/tasks', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
