@@ -192,7 +192,7 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
 
     /**
      * Create the conductor: the task row, its one attempt and the hand-over turn. The first turn starts at once
-     * (startNext), so a person who pressed "Start your conductor" sees it begin to work. A chosen machine is also
+     * (startNext), so a person who pressed "Start your orchestrator" sees it begin to work. A chosen machine is also
      * `pin`, its OpenVibe.Bot device id (`dev_…`, Codes C9c): every turn is pinned to it on Run, so the session runs
      * where its folder and its memory are.
      */
