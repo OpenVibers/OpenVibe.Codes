@@ -149,3 +149,30 @@ const { task } = await res.json();
 What the portal had and Codes does not (yet): a *named machine* per task, a transcript endpoint separate from the
 event stream (the stream carries the session's lines), and fencing a whole chain of jobs — here the **task** is
 the unit, and a continue is an attempt on the same task.
+
+## Code mode (runner 0.13.0)
+
+Claude Code's own Code Mode works only in an interactive terminal, and every Codes run is headless. A job with
+`code_mode: true` brings Codes' own instead: `openvibe-codes code-mode` (harness/code-mode.js), an MCP server started
+beside Claude Code with two tools.
+
+- `search { query }`: the repository tools a script may call, with their input types.
+- `execute { code }`: one JavaScript script in openvibe-sdk/code-mode's sandbox. Its only way out is
+  `await tools.<name>(input)`: `read`, `grep` (ripgrep when there is one), `glob`, `ls`, and as the job allows `edit`,
+  `write` and `sh`. Only what it returns (32 KB) and its console lines come back; ten minutes and 300 calls at most.
+
+Every tool stays inside the job's folder, never touches a `.env` file, and keeps the job's permission:
+
+| Job | Code mode may | Claude's own file and shell tools |
+|---|---|---|
+| a task on a repository (`edit`) | read, edit, write, run commands (no git push/commit/reset/clean/stash, sudo, rm -rf) | off (strict) |
+| `read` | read, grep, glob, ls | off (strict) |
+| `full` | everything but git push | off (strict) |
+| a conductor turn at `ask` | read only | on, and they ask the owner |
+| a conductor turn at `project` | read and change files, no commands | on |
+| a conductor turn at `full` | everything but git push | off (strict) |
+
+Measured on Claude Code 2.1 with Haiku (11-18, a rename across three files): with its own tools it took 4 to 7 turns;
+in strict code mode, two `execute` calls in three turns. The system prompt says how to use it, and Claude Code's tool
+search is off for the run so `execute` is visible from the start. Node.js 22.13 or newer is needed for the sandbox; an
+older runner says code mode is off and runs as before.

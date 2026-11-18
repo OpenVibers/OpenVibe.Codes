@@ -250,6 +250,14 @@ async function main() {
     if (cmd === 'import') return require('./import').importCommand(rest, { out });
     // The Codes MCP server (Codes C9b): a conductor's Claude Code session starts it with --mcp-config.
     if (cmd === 'mcp') return require('./mcp').mcp();
+    // Code mode (2026-11-18): the ov_code MCP server a job starts beside its agent (harness/code-mode.js).
+    if (cmd === 'code-mode') {
+        const why = require('../harness/code-mode').ready();
+        if (why) { process.stderr.write(`${why}\n`); return 1; }
+        const co = parse(rest);
+        require('../harness/code-mode').serveStdio({ root: co.root || process.cwd(), permission: co.permission || 'read', version: VERSION });
+        return new Promise(() => {});   // serves until the agent closes its stdin
+    }
     // Codes as one Agent Client Protocol agent (Zed, JetBrains, T3 Code, …): every harness behind one agent.
     if (cmd === 'acp') return require('./acp').acp({ argv: rest });
     const o = parse(rest);
