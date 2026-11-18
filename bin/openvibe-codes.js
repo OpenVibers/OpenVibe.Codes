@@ -7,7 +7,12 @@
  * https://openvibe.codes/start.
  */
 const path = require('path');
-const { createHarness } = require('../harness');
+const fs = require('fs');
+const os = require('os');
+// The catalog shipped with this binary is checked by its tests: the CLI trusts it, and starts without the contracts (0.4 s).
+if (process.env.OPENVIBE_CODES_TRUST_CATALOG == null) process.env.OPENVIBE_CODES_TRUST_CATALOG = '1';
+const { createHarness, adaptersFor } = require('../harness');
+const provision = require('../harness/provision');
 const { runJob, resultWriter, jobEnv } = require('../harness/job');
 const { task } = require('./task');
 const { skills } = require('./skills');
@@ -21,6 +26,13 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
   openvibe-codes skills [get|list|path] [name] the guide an agent reads, shipped with this binary
   openvibe-codes acp [--permission read|edit|full] [--agent <id>]   Codes as one ACP agent on stdin/stdout, for Zed,
                                        JetBrains, T3 Code and any ACP client: auto or any harness as its models
+  openvibe-codes setup [--profile <actor>] [--agents a,b] [--login own|locker|exchange]
+                                       get this machine ready for an actor in one step: installs the agents, makes the
+                                       actor's own home, its Locker key, and says what is ready and what is left
+  openvibe-codes doctor [--profile <actor>]   every agent here: installed, signed in, ready, and the one command that
+                                       fixes what is missing
+  openvibe-codes install <agent…> | --all     install agents into this runner's own folder (never global, never root)
+  openvibe-codes login <agent> [--profile <actor>]   the agent's own sign-in, kept in that actor's homes
   openvibe-codes agents                       which agents this machine can run, and why not the others
   openvibe-codes logins                      the coding CLIs here: installed, signed in, and their limit windows
   openvibe-codes route [--task edit] [--need harness:resume,…]   which agent a task would go to, and why
@@ -29,6 +41,12 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
                                        worktree, merged into one branch (yours is untouched)
   openvibe-codes run [options] "what to do"   run a task ("-" reads it from stdin)
       --task edit|review|long|resume   what kind of task (default edit)
+      --profile <actor>                the actor's own homes for every agent: its logins, history and settings, apart
+                                       from every other actor on this machine (OPENVIBE_CODES_PROFILE)
+      --login own|locker|exchange      where the agent's sign-in comes from for this run: its own, the actor's Locker
+                                       login (OPENVIBE_CODES_LOGIN_<AGENT>=locker:<item>, OPENVIBE_LOCKER_TOKEN), or
+                                       OpenVibe.Exchange as the gateway (OPENVIBE_EXCHANGE_KEY)
+      --no-install                     do not install a missing agent (OPENVIBE_CODES_AUTOINSTALL=0)
       --agent <id>                     skip routing: claude-code, claude-other, codex, opencode, command-code,
                                        aider, minimax-code, deepseek, openai-compatible
       --model <name>                   the first agent's model
@@ -54,8 +72,14 @@ const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your term
   openvibe-codes resume <run id> "follow-up"  continue a run's last session with its agent
   openvibe-codes job                          one task as an OpenVibe Run job (JSON input on stdin; the
                                               OpenVibe Link's job worker runs it on your own machine)
+  openvibe-codes home apply <spec.json> | show   your agent home here: tools (mise), agent CLIs, git, repositories
+  openvibe-codes import [--session <id> | --file <f> | --codex <f>]   carry a coding agent's session to openvibe.codes,
+                                              to continue on any of your machines (openvibe-codes import --help)
   openvibe-codes task start|list|show|continue|stop   coding tasks on openvibe.codes, as you, on one of
                                               your machines (openvibe-codes task --help)
+  openvibe-codes tools find|run|mine|make      OpenVibe Tools from the terminal: find a tool for a need, run it,
+                                              your own tools, or describe one and a model makes it
+                                              (openvibe-codes tools --help)
   openvibe-codes mcp                          the Codes MCP tools for a Claude Code session: tasks, the fleet,
                                               shipping status, and the conductor's approvals (stdio JSON-RPC)
 
@@ -76,6 +100,8 @@ function parse(argv) {
         else if (a === '--for-agent') { opts.forAgent = true; agentMode = true; }
         else if (a === '--advisor') opts.advisor = true;
         else if (a === '--no-handoff') opts.handoff = false;
+        else if (a === '--no-install') opts.install = false;
+        else if (a === '--all') opts.all = true;
         else if (a === '--help' || a === '-h') opts.help = true;
         else if (a.startsWith('--')) { const k = a.slice(2); opts[k] = argv[++i]; }
         else opts._.push(a);
@@ -120,19 +146,193 @@ async function readStdin() {
     return s;
 }
 
+/**
+ * A Link job's args: its first line (Link writes the args and a newline). An interactive job's stdin stays open after
+ * them (Link v0.72.0), so the runner reads that line and not to the end; what came with it after the newline is kept
+ * for the agent the job hands its stdin to (a sign-in's code). → { line, rest }
+ */
+function readJobLine(stream = process.stdin) {
+    return new Promise((resolve) => {
+        let buf = '';
+        const done = () => { stream.removeListener('data', onData); stream.removeListener('end', onEnd); stream.pause(); };
+        const onData = (chunk) => {
+            buf += chunk;
+            const i = buf.indexOf('\n');
+            if (i >= 0) { done(); resolve({ line: buf.slice(0, i), rest: buf.slice(i + 1) }); }
+        };
+        const onEnd = () => { done(); resolve({ line: buf, rest: '' }); };
+        stream.setEncoding('utf8');
+        stream.on('data', onData);
+        stream.once('end', onEnd);
+    });
+}
+
+/**
+ * The person's own homes for a job on a machine (Link v0.72.0): with their persistent sandbox (OPENVIBE_SANDBOX), the
+ * runner's folder is in it (the agents it installs) and the job runs as the actor `me` there (their sign-ins). Without
+ * one, nothing changes.
+ */
+function sandboxEnv(env = process.env) {
+    if (!env.OPENVIBE_SANDBOX) return env;
+    const inBox = { ...env, OPENVIBE_CODES_HOME: path.join(env.OPENVIBE_SANDBOX, 'codes') };
+    return provision.withTools(provision.profileEnv(inBox, 'me'));
+}
+
+/**
+ * Sign an agent in on this machine, in the person's sandbox (a Link job of mode 'login', interactive): the agent's
+ * own sign-in runs with the job's stdin, so the code its sign-in page shows reaches it from the page (job_stdin). It
+ * installs the agent first when it is missing. The result says whether it is signed in now.
+ */
+/**
+ * The person's agent home on this machine (plan §AD.22, openvibe.home@1), as a Link job of mode 'home': tools by mise,
+ * the agent CLIs, git's identity and the repositories, made real in their persistent sandbox (or this account's home
+ * when the machine gives none). Ends with the result document; it ends 0 either way, as every job here does.
+ */
+async function homeJob(input, env, gitCredentials = null) {
+    const home = require('../engine/home');
+    const result = (doc) => resultWriter(out)({ mode: 'home', ...doc });
+    process.stdin.destroy();
+    const root = env.OPENVIBE_SANDBOX || env.HOME;
+    try {
+        const doc = await home.apply(input.spec, {
+            root, env, say: (text) => out(text),
+            installAgent: async (id) => { const a = adaptersFor(env)[id]; return a ? provision.ensure(a, env, { log: (m) => out(m) }) : provision.install(id, env, { log: (m) => out(m) }); },
+            gitAuth: (url) => require('../harness/job').gitAuthFor(url, { ...env, ...(gitCredentials ? { OPENVIBE_GIT_CREDENTIALS: gitCredentials } : {}) }),
+        });
+        result(doc);
+    } catch (e) {
+        out(`The home could not be set up: ${e.message}`);
+        result({ ok: false, error: String(e.message).slice(0, 500) });
+    }
+    return 0;
+}
+
+async function loginJob(input, rest, env) {
+    const id = String(input.agent || '');
+    const adapter = adaptersFor(env)[id];
+    const args = provision.LOGIN_ARGS[id];
+    const result = (doc) => resultWriter(out)({ mode: 'login', agent: id, ...doc });
+    if (!adapter || !args) { out(`No sign-in here for ${id || 'that agent'}.`); result({ ok: false, error: 'unknown_agent' }); return 0; }
+    const ready = provision.ensure(adapter, env, { log: (m) => out(m) });
+    if (!ready.ok) { out(ready.error); result({ ok: false, error: 'install_failed' }); return 0; }
+    out(`Signing ${adapter.name} in on this machine…`);
+    const { spawn } = require('child_process');
+    const child = spawn(ready.where || adapter.bin, args, { env: { ...env, BROWSER: 'true' }, stdio: ['pipe', 'inherit', 'inherit'] });
+    if (rest) child.stdin.write(rest);
+    process.stdin.resume();
+    process.stdin.pipe(child.stdin);
+    // 2026-11-16 (a real sign-in on ov-node-01): Claude Code keeps waiting after its input closes, so the job would end
+    // only at Link's limit, killed, with no result for the page. The page's input closing gives the agent a few seconds
+    // to finish; the job's own deadline (before Link's 10 minutes) ends it with a result either way.
+    const stop = () => { if (child.exitCode == null && child.signalCode == null) child.kill('SIGTERM'); };
+    const graceMs = Number(env.OPENVIBE_CODES_LOGIN_GRACE_MS) || 5000;
+    const deadlineMs = Number(env.OPENVIBE_CODES_LOGIN_DEADLINE_MS) || 9 * 60 * 1000;
+    let grace = null;
+    const onEnd = () => { grace = setTimeout(stop, graceMs); };
+    process.stdin.once('end', onEnd);
+    const deadline = setTimeout(stop, deadlineMs);
+    const code = await new Promise((resolve) => child.on('close', (c, sig) => resolve(c == null ? (sig || 'stopped') : c)));
+    clearTimeout(deadline); if (grace) clearTimeout(grace);
+    process.stdin.off('end', onEnd);
+    process.stdin.unpipe(child.stdin);
+    const now = probeLogins({ home: env.HOME, env }).find((x) => x.id === id) || {};
+    const signedIn = now.signed_in === true;
+    out(signedIn ? `${adapter.name} is signed in.` : `${adapter.name} did not sign in (exit ${code}).`);
+    result({ ok: signedIn, signed_in: signedIn, exit: code });
+    process.stdin.destroy();
+    return 0;
+}
+
 async function main() {
     const [cmd, ...rest] = process.argv.slice(2);
     // Tasks on openvibe.codes: the person's own token, the server's API. Nothing here runs an agent.
     if (cmd === 'task') return task(rest);
+    if (cmd === 'import') return require('./import').importCommand(rest, { out });
     // The Codes MCP server (Codes C9b): a conductor's Claude Code session starts it with --mcp-config.
     if (cmd === 'mcp') return require('./mcp').mcp();
+    // Code mode (2026-11-18): the ov_code MCP server a job starts beside its agent (harness/code-mode.js).
+    if (cmd === 'code-mode') {
+        const why = require('../harness/code-mode').ready();
+        if (why) { process.stderr.write(`${why}\n`); return 1; }
+        const co = parse(rest);
+        require('../harness/code-mode').serveStdio({ root: co.root || process.cwd(), permission: co.permission || 'read', version: VERSION });
+        return new Promise(() => {});   // serves until the agent closes its stdin
+    }
     // Codes as one Agent Client Protocol agent (Zed, JetBrains, T3 Code, …): every harness behind one agent.
     if (cmd === 'acp') return require('./acp').acp({ argv: rest });
     const o = parse(rest);
     if (cmd === 'skills') return skills(rest.filter((a) => a !== '--json'), { out, json: o.json });
+    if (cmd === 'tools') return require('./tools').tools(rest, { out, json: o.json });
     if (!cmd || cmd === 'help' || o.help || cmd === '--help' || cmd === '-h') { out(USAGE); return 0; }
     if (cmd === '--version' || cmd === '-v' || cmd === 'version') { out(VERSION); return 0; }
-    const harness = createHarness();
+    // The actor's own homes and this runner's installed agents (2026-11-16: provisioning).
+    let env = process.env;
+    try { env = provision.profileEnv(env, o.profile || env.OPENVIBE_CODES_PROFILE || null); } catch (e) { out(e.message); return 1; }
+    env = provision.withTools(env);
+    if (o.install === false) env = { ...env, OPENVIBE_CODES_AUTOINSTALL: '0' };
+    const harness = createHarness({ env });
+    if (cmd === 'install') {
+        const ids = o.all ? Object.keys(provision.recipes) : o._;
+        if (!ids.length) { out('which agents? openvibe-codes install claude-code codex …  (or --all)'); return 1; }
+        let bad = 0;
+        for (const id of ids) {
+            const r = provision.install(id, env, { log: (m) => { if (!o.json) out(dim(m)); } });
+            if (o.json) out(JSON.stringify({ id, ...r })); else out(`${r.ok ? '✔' : '✗'} ${id}${r.ok ? dim(` ${[r.where, r.version].filter(Boolean).join(' · ')}`) : ` ${r.error}`}`);
+            if (!r.ok) bad++;
+        }
+        return bad ? 1 : 0;
+    }
+    if (cmd === 'login') {
+        // The agent's own sign-in, in the actor's homes: the login lands in that actor's profile and nowhere else.
+        const id = o._[0];
+        const adapter = id && adaptersFor(env)[id];
+        const args = id && provision.LOGIN_ARGS[id];
+        if (!adapter || !args) { out(`sign in which agent? openvibe-codes login ${Object.keys(provision.LOGIN_ARGS).join('|')} [--profile <actor>]`); return 1; }
+        const ready = provision.ensure(adapter, env, { log: (m) => out(dim(m)) });
+        if (!ready.ok) { out(ready.error); return 1; }
+        if (env.OPENVIBE_CODES_PROFILE) out(dim(`signing ${adapter.name} in for actor ${env.OPENVIBE_CODES_PROFILE}`));
+        const r = require('child_process').spawnSync(ready.where || adapter.bin, args, { env, stdio: 'inherit' });
+        return r.status || 0;
+    }
+    if (cmd === 'home') {
+        // An agent home here (plan §AD.22): `openvibe-codes home apply <spec.json>` or `home show`.
+        const home = require('../engine/home');
+        const root = path.resolve(o.root || env.OPENVIBE_SANDBOX || env.HOME || os.homedir());
+        if (rest[0] === 'show') {
+            try { out(fs.readFileSync(path.join(root, '.openvibe-home.json'), 'utf8')); } catch { out(`No agent home applied in ${root} yet.`); }
+            return 0;
+        }
+        if (rest[0] !== 'apply' || !rest[1]) { out('openvibe-codes home apply <spec.json | -> [--root <folder>] · openvibe-codes home show'); return 2; }
+        const raw = rest[1] === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(path.resolve(rest[1]), 'utf8');
+        const doc = await home.apply(raw, {
+            root, env, say: (text) => out(dim(text)),
+            installAgent: async (id) => { const a = adaptersFor(env)[id]; return a ? provision.ensure(a, env, { log: (m) => out(dim(m)) }) : provision.install(id, env, { log: (m) => out(dim(m)) }); },
+            gitAuth: (url) => require('../harness/job').gitAuthFor(url, env),
+        });
+        out(JSON.stringify(doc, null, 2));
+        return doc.ok ? 0 : 1;
+    }
+    if (cmd === 'setup' || cmd === 'doctor') {
+        if (cmd === 'setup') {
+            const ids = String(o.agents || 'claude-code,codex,opencode').split(',').map((s) => s.trim()).filter(Boolean);
+            for (const id of ids) {
+                const adapter = adaptersFor(env)[id];
+                const r = adapter ? provision.ensure(adapter, env, { log: (m) => out(dim(m)) }) : provision.install(id, env, { log: (m) => out(dim(m)) });
+                if (!r.ok) out(`✗ ${id} ${r.error}`);
+            }
+            if (o.login === 'locker') {
+                const k = await provision.lockerKeys(env, env.OPENVIBE_CODES_PROFILE || 'default');
+                out(`Locker: share each agent's login with this actor's key (${k.public.fingerprint.join ? k.public.fingerprint.join(' ') : k.public.fingerprint}).`);
+                out(dim(`  its public key: ${k.file.replace(/locker-keys\.json$/, '')} (locker-keys.json keeps the private half, 0600)`));
+                out(dim('  then set OPENVIBE_CODES_LOGIN_<AGENT>=locker:<item id> and OPENVIBE_LOCKER_TOKEN for the runs'));
+            }
+        }
+        const rows = provision.doctor(adaptersFor(env), env, { logins: probeLogins({ home: env.HOME, env }) });
+        if (o.json) { out(JSON.stringify({ profile: env.OPENVIBE_CODES_PROFILE || null, agents: rows }, null, 2)); return 0; }
+        if (env.OPENVIBE_CODES_PROFILE) out(dim(`actor ${env.OPENVIBE_CODES_PROFILE} · ${env.OPENVIBE_CODES_PROFILE_DIR}`));
+        for (const r of rows) out(`${r.ready ? '✔' : r.installed ? '◐' : '·'} ${r.id.padEnd(16)} ${r.ready ? dim(`ready · ${r.login} login`) : dim(r.fix || '')}`);
+        return rows.some((r) => r.ready) ? 0 : 1;
+    }
 
     if (cmd === 'agents') {
         const list = harness.agents();
@@ -147,7 +347,7 @@ async function main() {
     if (cmd === 'logins') {
         // What this machine has: each CLI, whether it is signed in, and the limit windows it can read. Nothing else:
         // no key, no token, no account name.
-        const rows = probeLogins({ home: process.env.HOME });
+        const rows = probeLogins({ home: env.HOME, env });
         if (o.forAgent) {
             for (const r of rows) out(agentOut.line({ event: 'login', id: r.id, installed: !!r.installed, signed_in: !!r.signed_in, windows: r.windows || [] }));
             return 0;
@@ -198,9 +398,27 @@ async function main() {
             else out('what should the agent do? openvibe-codes run "…"');
             return 1;
         }
+        let runHarness = harness;
+        if (agent) {
+            const adapter = adaptersFor(env)[agent];
+            const ready = provision.ensure(adapter, env, { log: (m) => { if (!o.json && !o.forAgent) out(dim(m)); } });
+            if (!ready.ok) { if (o.forAgent) out(agentOut.errorLine('agent_missing', ready.error)); else out(ready.error); return 1; }
+            let login = null;
+            try {
+                if (o.login === 'locker') login = await provision.lockerLogin(agent, env);
+                else if (o.login === 'exchange') login = provision.exchangeLogin(agent, env);
+            } catch (e) { if (o.forAgent) out(agentOut.errorLine(e.code || 'login', e.message)); else out(e.message); return 1; }
+            if ((o.login === 'locker' || o.login === 'exchange') && !login) {
+                const why = o.login === 'exchange' ? 'set OPENVIBE_EXCHANGE_KEY (an Exchange key)' : `set OPENVIBE_CODES_LOGIN_${agent.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}=locker:<item id>`;
+                if (o.forAgent) out(agentOut.errorLine('no_login', why)); else out(why);
+                return 1;
+            }
+            // The login reaches this run's agent only: a harness of its own, never this process's environment.
+            if (login) runHarness = createHarness({ env: { ...env, ...login } });
+        }
         const controller = new AbortController();
         process.on('SIGINT', () => { controller.abort(); });
-        const run = harness.run({
+        const run = runHarness.run({
             prompt, task: o.task || (resume ? 'resume' : 'edit'), agent, model: o.model || null, cwd, resume,
             permission: o.permission || 'edit', handoff: o.handoff !== false && !resume, maxAttempts: Number(o.attempts) || 3, signal: controller.signal,
             effort: o.effort || null, advisor: o.advisor ? (o['advisor-model'] ? { model: o['advisor-model'] } : true) : null,
@@ -250,13 +468,18 @@ async function main() {
     if (cmd === 'job') {
         // The job ends 0 whenever it handed over a result, ok or not (the document says which): OpenVibe Run keeps a
         // result only from a job that exited 0, and the person needs the summary and the patch either way.
-        const input = await readStdin();
+        const { line: input, rest } = await readJobLine();
         // The job's own environment (Codes C3): the run token the harness carries and where the model APIs are. The
         // harness is built with it, so the agent's process gets the token and never the job's other input.
         let wanted = {};
-        try { wanted = jobEnv(JSON.parse(input)); } catch { wanted = {}; }
+        let parsed = {};
+        try { parsed = JSON.parse(input); wanted = jobEnv(parsed); } catch { wanted = {}; }
         // A forge credential line is for git alone (the clone and the push): the agent's environment never has it.
-        const { OPENVIBE_GIT_CREDENTIALS: gitCredentials, ...forAgents } = { ...process.env, ...wanted };
+        // The person's sandbox, when the machine gives one: their agents and sign-ins live there (sandboxEnv).
+        const { OPENVIBE_GIT_CREDENTIALS: gitCredentials, ...forAgents } = sandboxEnv({ ...process.env, ...wanted });
+        if (parsed && parsed.mode === 'login') return loginJob(parsed, rest, forAgents);
+        if (parsed && parsed.mode === 'home') return homeJob(parsed, forAgents, gitCredentials);
+        process.stdin.destroy();   // a coding job reads nothing more: an interactive job's open stdin is closed here
         const jobHarness = createHarness({ env: forAgents });
         // The proof adapters: the repo's own tests, its pages in a browser, its diff, and the second model. The review
         // spends the same run token the attempt already carries, so it names the same person.

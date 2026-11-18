@@ -12,6 +12,8 @@
  *   codes_fleet         {}                                  each coding CLI here: installed, signed in, limit windows
  *   codes_ship_status   { repo, pr }                        a pull request's CI and merge state, from GitHub
  *   codes_approve       { tool_name, input?, summary? }     what Claude Code asks when the owner's safety level is ask
+ *   codes_actor_task    { task, mode?, wait_s? }            desktop or browser work, handed to the person's Actor (§AD.22)
+ *   codes_actor_show    { id }                              that task: state, what it found, what it cost
  *
  * Who it acts as: the person whose Codes token is on the machine — OPENVIBE_TOKEN, or ~/.config/openvibe/token. The
  * server address is OPENVIBE_CODES_URL. The conductor's task is OPENVIBE_CONDUCTOR_TASK: sub-tasks run in its project,
@@ -108,6 +110,25 @@ const TOOLS = [
         inputSchema: { type: 'object', properties: { repo: { type: 'string' }, pr: { type: 'number', description: 'The pull request number' } }, required: ['repo', 'pr'], additionalProperties: true },
     },
     {
+        name: 'codes_actor_task',
+        description: 'Hand desktop or browser work to the owner\'s Actor: look at a page, click through a site, check what a deployed change looks like, drive a desktop app. Actor runs it on the owner\'s own machine or an OpenVibe shared node, at the owner\'s own approval level, and answers with what it found. Use it for anything a coding agent cannot see from the repository. Waits up to wait_s seconds (default 300) for the answer; a longer task keeps running and codes_actor_show reads it later.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                task: { type: 'string', description: 'What Actor should do and what to report back, in plain words' },
+                mode: { type: 'string', enum: ['cheapest', 'balanced', 'best', 'fastest', 'private'], description: 'How Actor picks its model (default balanced)' },
+                wait_s: { type: 'number', description: 'How long to wait for the answer, 0 to 900 seconds (default 300)' },
+            },
+            required: ['task'],
+            additionalProperties: true,
+        },
+    },
+    {
+        name: 'codes_actor_show',
+        description: 'An Actor task this session handed over: its state, what it found, any error, and what it cost.',
+        inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: true },
+    },
+    {
         name: 'codes_approve',
         description: 'Ask the owner to approve a tool call (Claude Code calls this; the owner answers on openvibe.codes or their phone). Returns {behavior: "allow"|"deny", updatedInput?, message?}.',
         inputSchema: {
@@ -163,6 +184,32 @@ async function listTasks(args) {
             brief: String(t.prompt || '').split('\n')[0].slice(0, 160),
         })),
     });
+}
+
+// ── Desktop and browser work through the owner's Actor (plan §AD.22) ─────────────────────────────────────────────
+const ACTOR_TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
+const ACTOR_DONE = new Set(['succeeded', 'failed', 'cancelled', 'expired']);
+
+async function actorTask(args) {
+    const task = String(args.task || '').trim();
+    if (!task) return failed('say what Actor should do');
+    const c = auth();
+    const started = await call(c, 'POST', '/api/v1/me/actor/tasks', { task, mode: args.mode || 'balanced' });
+    let t = started.task;
+    const waitMs = Math.min(900, Math.max(0, args.wait_s == null ? 300 : Number(args.wait_s) || 0)) * 1000;
+    const until = Date.now() + waitMs;
+    while (t && !ACTOR_DONE.has(t.state) && Date.now() < until) {
+        await sleep(POLL_MS);
+        try { t = (await call(c, 'GET', `/api/v1/me/actor/tasks/${encodeURIComponent(t.id)}`)).task || t; } catch { /* read again next time */ }
+    }
+    return text({ ...t, ...(t && !ACTOR_DONE.has(t.state) ? { note: 'still running: read it with codes_actor_show' } : {}) });
+}
+
+async function actorShow(args) {
+    const id = String(args.id || '');
+    if (!ACTOR_TASK.test(id)) return failed('that is not an Actor task id (tsk_…)');
+    const c = auth();
+    return text((await call(c, 'GET', `/api/v1/me/actor/tasks/${encodeURIComponent(id)}`)).task);
 }
 
 async function showTask(args) {
@@ -338,6 +385,8 @@ const RUNNERS = {
     codes_fleet: fleet,
     codes_ship_status: shipStatus,
     codes_approve: approve,
+    codes_actor_task: actorTask,
+    codes_actor_show: actorShow,
 };
 
 // ── JSON-RPC over stdio ─────────────────────────────────────────────────────────────────────────────────────────

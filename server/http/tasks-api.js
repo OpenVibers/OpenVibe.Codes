@@ -40,6 +40,8 @@ const { readMultipart, isMultipart } = require('./upload');
 const { corsOpenVibe } = require('./openvibe-origins');
 const start = require('./start');
 const models = require('../data/models');
+const roads = require('openvibe-sdk/agents/roads');
+const { roadFacts } = require('../domain/fleet');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -264,6 +266,31 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         const agents = await fleet.agents(subject, harnesses);
         const latest = await fleet.latest(subject);
         return res.json({ ok: out.ok !== false, machines: latest.machines, agents, at: latest.at, ...(out.problem ? { problem: out.problem } : {}) });
+    });
+
+    /**
+     * What would run the person's next coding task (SDK 0.186.0 roads' coding order, plan §AD.28 item 4): their pick
+     * (?harness=), a coding agent signed in with their own plan on an online machine, their key, the free AI. The same
+     * reading as /fleet; the answer is roads' result and its sentence, for the Frame and the Code chip.
+     */
+    r.get('/me/road', actorLimits.reads('codes.read'), async (req, res) => {
+        let subject = null;
+        let token = null;
+        if (signedIn(req)) { subject = req.viewer.subject; token = req.viewer.token || null; }
+        else {
+            const header = String(req.headers.authorization || '');
+            if (header.startsWith('Bearer ') && !principalToken(header.slice(7).trim())) { token = header.slice(7).trim(); subject = await personOf(token); }
+        }
+        if (!subject) return problem(req, res, 401, 'token.required', 'sign in, or send your own Network access token, to read what would run your work');
+        let rows = [];
+        if (fleet) {
+            try { if (token) await fleet.refresh(subject, token); } catch { /* the kept reading answers */ }
+            rows = await fleet.agents(subject, harnesses).catch(() => []);
+        }
+        const asked = String(req.query.harness || '').trim().toLowerCase();
+        const choice = /^[a-z][a-z0-9-]{0,63}$/.test(asked) ? { harness: asked } : null;
+        const result = roads.pick({ mode: 'code', fleet: roadFacts(rows), choice, keys: [], allowance: null, app: 'codes' });
+        return res.json({ ...result, say: roads.say(result) });
     });
 
     // One read for a coding harness on the person's machines. Attempts, not the task's initial agent, decide
@@ -779,6 +806,54 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
      * gets { ok }; a service keeps the timeline its capability was built on. Another person's task is 404, never
      * a refusal that says it exists.
      */
+    /**
+     * A replay link from the API (plan §AD.6 (6), §AD.8: the session surface shares a coding run from any site): the
+     * same one live link a task as /tasks/:id/share, made or read here by the person themself (their own token, not a
+     * service acting for them). DELETE stops it; a stopped link never comes back. A conductor is not shared.
+     *   POST   /api/v1/tasks/:id/replay  → { url, created_at, created }   (…/share is the uniform share-with-people API)
+     *   DELETE /api/v1/tasks/:id/replay  → { stopped }
+     */
+    const replayUrl = (token) => `${String(config.baseUrl).replace(/\/+$/, '')}/r/${token}`;
+    r.post('/tasks/:id/replay', guardAny('codes.task.read'), actorLimits.budget('codes.task.start'), async (req, res) => {
+        if (!req.principal.owner) return problem(req, res, 403, 'codes.share_owner_required', 'only the person themself shares a task');
+        const row = await mine(req);
+        if (!row || row.kind === 'conductor') return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours to share');
+        let live = await db.maybe('SELECT token, created_at FROM codes_task_shares WHERE task_id = $1 AND revoked_at IS NULL', [row.id]);
+        let created = false;
+        if (!live) {
+            const token = require('crypto').randomBytes(24).toString('base64url');
+            await db.query('INSERT INTO codes_task_shares (token, task_id, subject) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [token, row.id, req.principal.subject]);
+            live = await db.maybe('SELECT token, created_at FROM codes_task_shares WHERE task_id = $1 AND revoked_at IS NULL', [row.id]);
+            created = true;
+        }
+        res.set('Cache-Control', 'private, no-store');
+        return res.status(created ? 201 : 200).json({ url: replayUrl(live.token), created_at: live.created_at, created });
+    });
+    r.delete('/tasks/:id/replay', guardAny('codes.task.read'), actorLimits.budget('codes.task.start'), async (req, res) => {
+        if (!req.principal.owner) return problem(req, res, 403, 'codes.share_owner_required', 'only the person themself stops sharing a task');
+        const row = await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours');
+        const gone = await db.many('UPDATE codes_task_shares SET revoked_at = now() WHERE task_id = $1 AND subject = $2 AND revoked_at IS NULL RETURNING token', [row.id, req.principal.subject]);
+        return res.json({ stopped: gone.length > 0 });
+    });
+
+    /**
+     * Rename (plan §AD.8, the session's ⋯ menu): the person names their task; an empty or null title gives it back the
+     * brief's first line. Only the person themself (their own token).
+     *   PATCH /api/v1/tasks/:id { title } → codes.task@1
+     */
+    r.patch('/tasks/:id', guardAny('codes.task.read'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!req.principal.owner) return problem(req, res, 403, 'codes.rename_owner_required', 'only the person themself renames a task');
+        const row = await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours');
+        const raw = req.body && Object.prototype.hasOwnProperty.call(req.body, 'title') ? req.body.title : undefined;
+        if (raw !== null && typeof raw !== 'string') return problem(req, res, 422, 'codes.title_needed', 'send the new name ({ title })');
+        const title = raw == null ? null : (String(raw).replace(/\s+/g, ' ').trim().slice(0, 200) || null);
+        const updated = await db.maybe('UPDATE run_tasks SET title = $1, updated_at = $2 WHERE id = $3 AND subject = $4 RETURNING *', [title, store.now(), row.id, req.principal.subject]);
+        if (!updated) return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours');
+        return res.json({ task: taskStore.present(updated) });
+    });
+
     r.post('/tasks/:id/stop', guardAny('codes.task.cancel'), actorLimits.budget('codes.task.start'), async (req, res) => {
         const row = await mine(req);
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');

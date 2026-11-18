@@ -93,6 +93,26 @@ const { boot, check, done } = require('./helpers/boot');
             assert.strictEqual((await t.ctx.userSettings.get(bo.subject)).no_cloud, false, 'another person keeps the default');
         });
 
+        // Code mode (2026-11-18, runner 0.13): the person's switch on the Settings page, carried in every job they start.
+        await check('code mode: a switch on the Settings page, off by default, in the job args when on', async () => {
+            const page = await t.get('/settings', { as: ada });
+            assert.ok(page.text.includes('Code mode for every coding agent') && page.text.includes('name="code_mode"'));
+            assert.strictEqual((await t.ctx.userSettings.get(ada.subject)).code_mode, false, 'off until they turn it on');
+            const before = await startTask(ada.subject);
+            const offJob = [...jobs.values()].pop();
+            assert.strictEqual(offJob.args.code_mode, undefined, `off: not in the job (${before.id})`);
+            const saved = await t.get('/settings', { as: ada, method: 'POST', form: { code_mode: '1', notify_done: '1', notify_needs: '1', safety: 'ask' } });
+            assert.strictEqual(saved.status, 303);
+            assert.strictEqual((await t.ctx.userSettings.get(ada.subject)).code_mode, true);
+            await startTask(ada.subject);
+            assert.strictEqual([...jobs.values()].pop().args.code_mode, true, 'on: every job they start carries it');
+            await startTask(bo.subject);
+            assert.strictEqual([...jobs.values()].pop().args.code_mode, undefined, 'another person keeps the default');
+            const { parseArgs } = require('../harness/job');
+            assert.strictEqual(parseArgs(JSON.stringify({ repo: 'https://github.com/a/b', prompt: 'x', codeMode: true }), {}).codeMode, true, 'the runner reads either name');
+            await t.ctx.userSettings.save(ada.subject, { code_mode: false });
+        });
+
         await check('noCloud keeps the task on the person’s own machine; with none, the line says nothing can run it', async () => {
             const { route } = require('../server/domain/harness-placement');
             const { createHarnesses } = require('../server/domain/harnesses');

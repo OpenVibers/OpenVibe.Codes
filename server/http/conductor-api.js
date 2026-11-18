@@ -42,7 +42,7 @@ const ANTHROPIC_MODEL = /(^|[^a-z])(claude|opus|sonnet|haiku|anthropic)([^a-z]|$
 const WAIT_MS = 20_000;
 const WAIT_POLL_MS = 750;
 
-function createConductorApi({ config, store, keys, harnesses, tasks, conductor, approvals, machines = null, fleet = null, actorLimits, log = console }) {
+function createConductorApi({ config, store, keys, harnesses, tasks, conductor, approvals, machines = null, fleet = null, actorLimits, log = console, sessionImports = null }) {
     const r = asyncRouter();
     const db = store.db;
     const problem = (req, res, status, code, detail) => http.sendProblem(res, status, code, { detail, ctx: req.ov });
@@ -145,9 +145,17 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
         const pin = machine ? await pinFor(req, machine) : { device: null };
         if (pin.problem) return problem(req, res, pin.problem.status, pin.problem.code, pin.problem.detail);
         const project = await projectFor(req);
-        if (!project) return problem(req, res, 409, 'codes.no_project', 'start one task at ' + config.baseUrl + '/run first: a conductor runs in your project, on your machine');
+        if (!project) return problem(req, res, 409, 'codes.no_project', 'start one task at ' + config.baseUrl + '/run first: an orchestrator runs in your project, on your machine');
+        // A session carried here with `openvibe-codes import` (plan §AD.22): it continues on the machine, resumed.
+        let imported = null;
+        if (b.import_id != null) {
+            imported = sessionImports ? await sessionImports.get(req.person.subject, String(b.import_id)) : null;
+            if (!imported) return problem(req, res, 404, 'import.not_found', 'no such import of yours');
+            if (!imported.resumable) return problem(req, res, 422, 'import.not_resumable', `a ${imported.harness} session is read here and handed over, not resumed`);
+        }
         try {
             const made = await conductor.create({
+                imported,
                 subject: req.person.subject, project, folder, machine, pin: pin.device,
                 // Who leads it: the picker's choice, else the person's "Who leads your tasks" setting.
                 agent: typeof b.agent === 'string' && b.agent ? b.agent : null,
@@ -159,7 +167,7 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
             log.info(`[Codes] conductor ${made.task.id} started for ${req.person.subject}`);
             return res.status(201).json(await conductor.view(made.task));
         } catch (e) {
-            return problem(req, res, e.status || 500, e.code || 'conductor.failed', String((e && e.message) || 'the conductor could not start'));
+            return problem(req, res, e.status || 500, e.code || 'conductor.failed', String((e && e.message) || 'the orchestrator could not start'));
         }
     });
 

@@ -276,7 +276,7 @@ function assertSummary(s) {
             const [ov] = summarize([{ ...base, state: 'queued', mode: null, repo: 'https://github.com/OpenVibers/OpenVibe.Live' }], { openvibeUrls: new Set(['https://github.com/OpenVibers/OpenVibe.Live']) });
             assert.strictEqual(ov.mode, 'openvibe');
             const [cond] = summarize([{ ...base, state: 'queued', kind: 'conductor', prompt: '', folder: '/home/you/work' }], {});
-            assert.strictEqual(cond.title, 'Conductor \u00b7 work');
+            assert.strictEqual(cond.title, 'Orchestrator \u00b7 work');
             const [pr] = summarize([{ ...base, state: 'succeeded', result: JSON.stringify({ ok: true, push: { pushed: true, pull_request: 'https://github.com/o/r/pull/1' } }) }], {});
             assert.strictEqual(pr.status, 'done');
             assert.strictEqual(pr.pr_url, 'https://github.com/o/r/pull/1');

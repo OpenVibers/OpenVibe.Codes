@@ -573,7 +573,17 @@ function apiAgent(spec) {
             // advise joins the list only when the run asked for an advisor (off unless asked) and this adapter is
             // OpenVibe.AI's: the other API paths have no advice endpoint. It stays for every turn, asked out or not,
             // so the prefix stays stable; past its budget it answers a refusal instead of calling.
-            const defs = spec.advisorEndpoint === true && t.advisor ? { ...TOOL_DEFS, advise: ADVISE } : TOOL_DEFS;
+            // Code mode (runner 0.14.0): execute runs one script over the repository's tools (harness/code-mode.js), at
+            // this loop's own levels (read; edit = files, no commands; full = commands too). Strict offers only it.
+            const cmo = t.options && t.options.codeMode && t.options.codeMode.server ? t.options.codeMode : null;
+            const cmRepo = cmo ? require('../code-mode').createRepoTools({ root: t.cwd, permission: { read: 'read', edit: 'files', full: 'full' }[t.permission] || 'read' }) : null;
+            const cmBase = cmo && cmo.strict !== false ? {} : TOOL_DEFS;
+            const withCode = cmo ? { ...cmBase, execute: {
+                level: 'read',
+                description: `Run one JavaScript script that calls \`await tools.<name>(input)\` (${cmRepo.defs.map((d) => d.name).join(', ')}) in the working directory, and return a value; only the value and console.log lines come back. Do several steps in one script. ${cmRepo.defs.map((d) => `${d.name}: ${d.description}`).join(' ')}`,
+                parameters: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] },
+            } } : TOOL_DEFS;
+            const defs = spec.advisorEndpoint === true && t.advisor ? { ...withCode, advise: ADVISE } : withCode;
             const tools = Object.entries(defs).filter(([, d]) => LEVELS[d.level] <= level)
                 .sort(([a], [b]) => a.localeCompare(b))
                 .map(([name, d]) => ({ type: 'function', function: { name, description: d.description, parameters: d.parameters } }));
@@ -772,6 +782,10 @@ function apiAgent(spec) {
                                 if (chunks.length) yield ev.toolProgress(call.id, chunks.splice(0).join(''));
                                 out = finished;
                                 }
+                            }
+                            else if (name === 'execute' && cmRepo) {
+                                const r = await require('openvibe-sdk/code-mode').runCode(String(args.code || ''), { tools: cmRepo.defs.map((d) => d.name), call: (kind, toolName, input) => (kind === 'tool' ? cmRepo.call(toolName, input) : { ok: false, error: 'no functions here' }), limits: require('../code-mode').LIMITS });
+                                out = [JSON.stringify({ ok: r.ok, ...(r.ok ? { value: r.value } : { error: r.error }), logs: (r.logs || []).slice(0, 60), calls: r.calls }), !r.ok];
                             }
                             else if (name === 'grep') { try { out = await grepTool(args, t.cwd, controller.signal); } catch (err) { out = [err.message, true]; } }
                             else { try { out = runTool(name, args, t.cwd); } catch (err) { out = [err.message, true]; } }

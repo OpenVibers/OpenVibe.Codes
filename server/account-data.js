@@ -9,6 +9,8 @@
  * - the run tokens minted for their attempts (codes_run_tokens, C3: ids and expiry, never the token);
  * - their workspace choices (codes_user_settings, C4b) and their placement rules;
  * - the files they attached to a message (codes_attachments, owner 2026-11-07): names, types and sizes, never bytes;
+ * - the coding-agent sessions they imported (codes_session_imports, plan §AD.22): what each is, not its conversation;
+ * - their agent home (codes_homes, plan §AD.22): the tools, agents, repositories and git identity their machines get;
  * - the placement counts learned about their tasks (placement_outcomes, A1): option keys and weights, never text;
  * - their conductor's turns (codes_conductor_messages, C9b) and the approvals it asked them (codes_approvals);
  * - the events Codes sent about them (codes_outbox);
@@ -42,11 +44,23 @@ const TABLES = [
         columns: ['id', 'project_id', 'source_task_id', 'repo', 'ref', 'prompt', 'permission', 'budget', 'sides', 'shown', 'state', 'match_id', 'match_body', 'match_recorded', 'merged_slot', 'merged_judged', 'error', 'created_at', 'updated_at'],
     },
     { table: 'codes_user_settings', subject: 'subject', file: 'settings.json', order: 'updated_at' },
+    // Replays the person shared (plan §AD.6 (6)): which task, when, and when they stopped it. The links leave with
+    // them and are erased with them, so a deleted account's replays stop answering.
+    { table: 'codes_task_shares', subject: 'subject', file: 'replays.json', order: 'created_at', columns: ['token', 'task_id', 'created_at', 'revoked_at'] },
     { table: 'codes_model_plans', subject: 'subject', file: 'model-plans.json', order: 'updated_at' },
+    // The repositories a person watches for issues to work on (plan §AD.6 (2)): erased with them.
+    { table: 'codes_issue_watches', subject: 'subject', file: 'issue-watches.json', order: 'created_at', columns: ['id', 'repo', 'label', 'created_at', 'checked_at', 'tickets'] },
     // The files a person attached to a message (owner 2026-11-07): what they are and which turn they belong to. The
     // bytes are theirs too, but the export carries the record, not a second copy of every 20 MB file; deletion takes
     // the rows (and their bytes) with the person.
     { table: 'codes_attachments', subject: 'subject', file: 'attachments.json', order: 'created_at', columns: ['id', 'task_id', 'attempt_n', 'message_id', 'name', 'mime', 'size', 'created_at', 'linked_at'] },
+    // The sessions a person carried here (plan §AD.22, `openvibe-codes import`): what each one is; the conversation
+    // itself is theirs too and leaves with them on deletion. The export carries the record, not the whole session.
+    // Their agent home (plan §AD.22, openvibe.home@1): tools, agents, repositories and git's name, and where it was set up.
+    { table: 'codes_homes', subject: 'subject', file: 'agent-home.json', order: 'updated_at', columns: ['spec', 'applied', 'updated_at'] },
+    { table: 'codes_session_imports', subject: 'subject', file: 'session-imports.json', order: 'created_at', columns: ['id', 'harness', 'session_id', 'title', 'source_cwd', 'resumable', 'messages', 'records', 'size', 'created_at'] },
+    // One-time import links (/import): when each was made, used and what it made. The token is only a hash, never exported.
+    { table: 'codes_session_import_links', subject: 'subject', file: 'session-import-links.json', order: 'created_at', columns: ['created_at', 'expires_at', 'used_at', 'import_id'] },
     // Placement A1's learned counts: the person's rows leave and are erased with them. No text, no payload.
     { table: 'placement_outcomes', subject: 'person_id', file: 'placement-outcomes.json', order: 'updated_at', columns: ['person_id', 'option_key', 'step_kind', 'ok_w', 'n_w', 'updated_at'] },
     // What each of the person's machines reported with its heartbeat (Codes C9c): labels, numbers and times only, no

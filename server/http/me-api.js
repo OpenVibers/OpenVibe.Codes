@@ -12,6 +12,9 @@
  *   GET  /me/repos?q=&limit=    → { sections: [{ id, label, items }], create }: the repository dropdown (ask 348)
  *   POST /repos { name, private } → { url, label }: a repository made on OpenVibe Git in the person's name
  *   GET  /me/settings           → { settings }: the person's choices, including who leads their tasks
+ *   POST /me/agents/:agent/sign-in { machine } → { job_id }: the agent's own sign-in, on that machine of yours, in your sandbox
+ *   GET  /me/agents/sign-in/:job/events        → text/event-stream: what it prints (its sign-in link) and how it ended
+ *   POST /me/agents/sign-in/:job/code { code } → { sent }: the code its sign-in page showed you
  *   PUT  /me/settings           → { settings }: save any of them (a field left out keeps what it had)
  */
 const express = require('express');
@@ -30,7 +33,7 @@ const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 const DELEGABLE = new Set(['owner', 'admin']);
 
-function createMeApi({ config, store, sso, keys, run, harnesses, userSettings = null, actorLimits, tasks = null, github = null, approvals = null, repoPicker = null, forge = null, log = console }) {
+function createMeApi({ config, store, sso, keys, run, harnesses, fleet = null, userSettings = null, actorLimits, tasks = null, github = null, approvals = null, repoPicker = null, forge = null, homes = null, actorTasks = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     const taskStore = tasks || createRunTasks({ store, run, config, log });
@@ -107,6 +110,23 @@ function createMeApi({ config, store, sso, keys, run, harnesses, userSettings = 
      * (the Dock asks with 8). A session cookie or the person's own Network bearer token; another person's tasks
      * are never in the answer.
      */
+    /**
+     * The map of OpenVibe (openvibe-contracts' system map): every service, repository and library, and how they fit
+     * → { libraries, services, repositories, spine }. ?task= adds the repositories that task likely needs, with why
+     * (→ { picks }), and ?format=md answers the brief a coding job reads as .openvibe/OPENVIBE.md. Signed in only.
+     */
+    r.get('/me/system-map', actorLimits.reads('codes.read'), async (req, res) => {
+        const subject = await subjectOf(req);
+        if (!subject) return problem(req, res, 401, 'auth.required', 'sign in to read the map');
+        let map = null;
+        try { map = require('openvibe-contracts/lib/system-map'); } catch { map = null; }
+        if (!map) return problem(req, res, 503, 'system_map.unavailable', 'this server\'s openvibe-contracts has no system map yet');
+        const task = String(req.query.task || '').slice(0, 4000);
+        if (req.query.format === 'md') return res.type('text/markdown; charset=utf-8').send(map.markdown(task));
+        if (task) return res.json(map.reposFor(task, { limit: Math.min(Math.max(Number(req.query.limit) || 6, 1), 12) }));
+        return res.json(map.systemMap());
+    });
+
     r.get('/me/tasks', actorLimits.reads('codes.read'), async (req, res) => {
         const subject = await subjectOf(req);
         if (!subject) return problem(req, res, 401, 'auth.required', 'sign in to see your tasks');
@@ -267,6 +287,177 @@ function createMeApi({ config, store, sso, keys, run, harnesses, userSettings = 
             row = await taskStore.refresh(row, { force: true });
         }
         return res.json(taskStore.present(row));
+    });
+
+    // ── Your agents, signed in where they run (2026-11-16) ──────────────────────────────────────────────────────────
+    // The owner: the agents' sign-ins done "in the user interface", and installed "when the user goes to use
+    // openvibe.computer or openvibe.link … their sandbox". A sign-in is a Codes job of mode 'login' pinned to the machine
+    // (runner 0.10.0): it installs the agent in the person's sandbox when it is missing, runs the agent's own sign-in, and
+    // takes the code from the page (Run's job_stdin, Link v0.72.0). Only the job's person reaches it.
+    const SIGN_IN_AGENTS = new Set(['claude-code', 'codex', 'opencode', 'command-code']);
+    const signIns = new Map();   // job id → { subject, project, agent, machine, at }: this process's own sign-ins
+    const ownSignIn = (req) => {
+        const s = signIns.get(String(req.params.job || ''));
+        return s && signedIn(req) && s.subject === req.viewer.subject ? s : null;
+    };
+    r.post('/me/agents/:agent/sign-in', actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to sign your agents in');
+        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site posts are refused');
+        const agent = String(req.params.agent || '');
+        if (!SIGN_IN_AGENTS.has(agent)) return problem(req, res, 422, 'codes.agent_unknown', `no sign-in here for ${agent.slice(0, 40)}`);
+        const machine = String((req.body || {}).machine || '').slice(0, 128);
+        if (!machine) return problem(req, res, 422, 'codes.machine_required', 'choose one of your machines');
+        // The machine by the id Codes knows it by, to its Bot device: only one of the person's own (fleet.deviceFor).
+        const f = typeof fleet === 'function' ? fleet() : fleet;
+        let device = null;
+        try { device = f ? await sso.asViewer(req, res, (token) => f.deviceFor(token, machine)) : null; } catch (e) {
+            return problem(req, res, e.status === 401 ? 401 : 503, e.code || 'codes.machines_unavailable', 'your machines could not be read just now');
+        }
+        if (!device) return problem(req, res, 404, 'codes.machine_not_found', 'that is not one of your machines');
+        let project;
+        try { project = await ensureProject(req, res); } catch (e) { return problem(req, res, 503, 'codes.projects_unavailable', 'your projects could not be read: sign in again'); }
+        if (!project) return problem(req, res, 409, 'codes.no_project', 'you have no project to run jobs in yet');
+        let job;
+        try {
+            job = await run.submit({ subject: req.viewer.subject, project, args: { mode: 'login', agent }, node: device.device,
+                key: `signin:${agent}:${machine}:${Math.floor(Date.now() / 60_000)}`, limits: { wall_ms: 10 * 60_000 }, ttlMs: 10 * 60_000 });
+        } catch (e) {
+            return problem(req, res, e.status && e.status < 500 ? e.status : 503, e.code || 'codes.run_unavailable', e.message || 'OpenVibe.Run did not answer');
+        }
+        signIns.set(job.id, { subject: req.viewer.subject, project, agent, machine: device.device, at: Date.now() });
+        for (const [id, s] of signIns) if (Date.now() - s.at > 60 * 60_000) signIns.delete(id);
+        log.info(`[Codes] ${req.viewer.subject} signs ${agent} in on ${device.device} (job ${job.id})`);
+        return res.status(201).json({ job_id: job.id, agent, machine: device.device, name: device.name });
+    });
+    r.get('/me/agents/sign-in/:job/events', actorLimits.reads('codes.read'), async (req, res) => {
+        const s = ownSignIn(req);
+        if (!s) return res.status(404).end();
+        let url;
+        try { url = await run.streamUrl(req.params.job, { subject: s.subject, project: s.project }); } catch (e) { return res.status(e.status === 404 ? 404 : 503).end(); }
+        const upstream = new AbortController();
+        req.on('close', () => upstream.abort());
+        let resp;
+        try { resp = await fetch(url, { headers: { Accept: 'text/event-stream' }, signal: upstream.signal }); } catch { return res.status(503).end(); }
+        if (!resp.ok || !resp.body) return res.status(resp.status === 404 ? 404 : 503).end();
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
+        try { for await (const chunk of resp.body) res.write(chunk); } catch { /* the page went away */ }
+        res.end();
+    });
+    r.post('/me/agents/sign-in/:job/code', actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in first');
+        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site posts are refused');
+        const s = ownSignIn(req);
+        if (!s) return problem(req, res, 404, 'codes.sign_in_not_found', 'no such sign-in of yours');
+        const code = String((req.body || {}).code || '').trim();
+        if (!code || code.length > 2000 || /[\r\n]/.test(code)) return problem(req, res, 422, 'codes.code_invalid', 'paste the code the sign-in page showed you');
+        try {
+            const out = await run.stdin(req.params.job, { subject: s.subject, project: s.project }, { data: `${code}\n` });
+            return res.json({ sent: !!(out && out.sent) });
+        } catch (e) {
+            return problem(req, res, e.status && e.status < 500 ? e.status : 503, e.code || 'codes.run_unavailable', e.message || 'OpenVibe.Run did not answer');
+        }
+    });
+
+    // ── Desktop and browser work, handed to the person's Actor (plan §AD.22) ───────────────────────────────────────
+    // A conductor (codes_actor_task) or the person asks Actor to look at a page, click through a site or drive a desktop
+    // app; Actor runs it on their own machine or an OpenVibe shared node, at their own level, and Codes follows it.
+    const { summary: actorSummary } = require('../domain/actor-tasks');
+    r.post('/me/actor/tasks', actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to ask your Actor');
+        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site posts are refused');
+        if (!actorTasks || !actorTasks.enabled) return problem(req, res, 503, 'actor.off', 'Actor is not open from Codes here');
+        const b = req.body || {};
+        try {
+            const t = await actorTasks.start(req.viewer.subject, { task: b.task, mode: b.mode || 'balanced' });
+            log.info(`[Codes] ${req.viewer.subject} handed ${t && t.id} to Actor`);
+            return res.status(201).json({ task: actorSummary(t) });
+        } catch (e) {
+            return problem(req, res, e.status || 502, e.code || 'actor.refused', e.message);
+        }
+    });
+    r.get('/me/actor/tasks/:id', actorLimits.reads('codes.read'), async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in first');
+        if (!actorTasks || !actorTasks.enabled) return problem(req, res, 503, 'actor.off', 'Actor is not open from Codes here');
+        try {
+            const t = await actorTasks.get(req.viewer.subject, String(req.params.id || ''));
+            if (!t) return problem(req, res, 404, 'actor.task_not_found', 'no such task of yours that Codes started');
+            return res.json({ task: actorSummary(t) });
+        } catch (e) {
+            return problem(req, res, e.status || 502, e.code || 'actor.read_failed', e.message);
+        }
+    });
+
+    // ── Your agent home (plan §AD.22, openvibe.home@1) ────────────────────────────────────────────────────────────────
+    // The owner, 2026-11-17: "Instead of sshing into the local OV node yourself you should make it so link can do all
+    // this". What the person's agents need on a machine (tools by mise, agent CLIs, git's identity, repositories) is kept
+    // here once; "Set up" sends a Codes job of mode 'home' to the machine they choose (runner 0.12.0), which makes it
+    // real in their sandbox there and says what it did. Only their own machines, only their own home.
+    const homeJobs = new Map();   // job id → { subject, project, machine, at }
+    r.get('/me/home', actorLimits.reads('codes.read'), async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to see your agent home');
+        if (!homes) return problem(req, res, 503, 'codes.homes_unavailable', 'agent homes are not set up here');
+        return res.json(await homes.get(req.viewer.subject));
+    });
+    r.put('/me/home', actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to keep your agent home');
+        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site posts are refused');
+        if (!homes) return problem(req, res, 503, 'codes.homes_unavailable', 'agent homes are not set up here');
+        try {
+            const spec = await homes.save(req.viewer.subject, (req.body || {}).spec);
+            return res.json({ spec });
+        } catch (e) {
+            if (e.status === 422) return problem(req, res, 422, e.code || 'home.invalid', e.message);
+            throw e;
+        }
+    });
+    r.post('/me/home/apply', actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!signedIn(req)) return problem(req, res, 401, 'auth.required', 'sign in to set a machine up');
+        if (!sameOrigin(req)) return problem(req, res, 403, 'cross_site', 'cross-site posts are refused');
+        if (!homes) return problem(req, res, 503, 'codes.homes_unavailable', 'agent homes are not set up here');
+        const machine = String((req.body || {}).machine || '').slice(0, 128);
+        if (!machine) return problem(req, res, 422, 'codes.machine_required', 'choose one of your machines');
+        const h = await homes.get(req.viewer.subject);
+        if (!h.saved) return problem(req, res, 409, 'codes.home_unsaved', 'save your agent home first');
+        const f = typeof fleet === 'function' ? fleet() : fleet;
+        let device = null;
+        try { device = f ? await sso.asViewer(req, res, (token) => f.deviceFor(token, machine)) : null; } catch (e) {
+            return problem(req, res, e.status === 401 ? 401 : 503, e.code || 'codes.machines_unavailable', 'your machines could not be read just now');
+        }
+        if (!device) return problem(req, res, 404, 'codes.machine_not_found', 'that is not one of your machines');
+        let project;
+        try { project = await ensureProject(req, res); } catch (e) { return problem(req, res, 503, 'codes.projects_unavailable', 'your projects could not be read: sign in again'); }
+        if (!project) return problem(req, res, 409, 'codes.no_project', 'you have no project to run jobs in yet');
+        // A repository on OpenVibe Git comes with the person's own clone token (two hours); GitHub's come from the
+        // machine's own token (GITHUB_TOKEN), as a coding job's do.
+        let env = null;
+        const onForge = (h.spec.repos || []).find((x) => forge && forge.host && /^https:/.test(String(x)) && String(x).includes(`//${forge.host}/`));
+        if (onForge && forge.jobEnv) env = await forge.jobEnv(req.viewer.subject, onForge).catch(() => null);
+        let job;
+        try {
+            job = await run.submit({ subject: req.viewer.subject, project, args: { mode: 'home', spec: h.spec, ...(env ? { env } : {}) }, node: device.device,
+                key: `home:${machine}:${Math.floor(Date.now() / 60_000)}`, limits: { wall_ms: 60 * 60_000 }, ttlMs: 30 * 60_000 });
+        } catch (e) {
+            return problem(req, res, e.status && e.status < 500 ? e.status : 503, e.code || 'codes.run_unavailable', e.message || 'OpenVibe.Run did not answer');
+        }
+        await homes.applying(req.viewer.subject, device.device, job.id, { machine, name: device.name || null });
+        homeJobs.set(job.id, { subject: req.viewer.subject, project, machine: device.device, at: Date.now() });
+        for (const [id, s] of homeJobs) if (Date.now() - s.at > 2 * 60 * 60_000) homeJobs.delete(id);
+        log.info(`[Codes] ${req.viewer.subject} sets their agent home up on ${device.device} (job ${job.id})`);
+        return res.status(201).json({ job_id: job.id, machine: device.device, name: device.name });
+    });
+    r.get('/me/home/apply/:job/events', actorLimits.reads('codes.read'), async (req, res) => {
+        const s = homeJobs.get(String(req.params.job || ''));
+        if (!s || !signedIn(req) || s.subject !== req.viewer.subject) return res.status(404).end();
+        let url;
+        try { url = await run.streamUrl(req.params.job, { subject: s.subject, project: s.project }); } catch (e) { return res.status(e.status === 404 ? 404 : 503).end(); }
+        const upstream = new AbortController();
+        req.on('close', () => upstream.abort());
+        let resp;
+        try { resp = await fetch(url, { headers: { Accept: 'text/event-stream' }, signal: upstream.signal }); } catch { return res.status(503).end(); }
+        if (!resp.ok || !resp.body) return res.status(resp.status === 404 ? 404 : 503).end();
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
+        try { for await (const chunk of resp.body) res.write(chunk); } catch { /* the page went away */ }
+        res.end();
     });
 
     return r;
