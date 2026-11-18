@@ -27,6 +27,11 @@ const { validatePlan } = require('../engine/model-plan');
 const { repositoryPlan, selectPlan, resolveRepositoryPlan, runModelPlan } = require('./model-plan');
 const skills = require('../engine/skills');
 const codeMode = require('./code-mode');
+/** A job's code mode: true (strict where the harness can), 'strict', 'beside' (its own tools stay), or none. */
+function codeModeArg(a) {
+    const v = a.code_mode !== undefined ? a.code_mode : a.codeMode;
+    return v === true ? true : v === 'strict' || v === 'beside' ? v : null;
+}
 /** A harness's kind for code mode's plan: one of the CLIs, an ACP agent, or an API harness (Codes' own loop). */
 function harnessKind(agent) {
     if (!agent) return null;
@@ -234,7 +239,7 @@ function parseArgs(raw, env = process.env) {
         return {
             kind, repo: null, ref: null, prompt, permission, push: null,
             folder, safety, mcp: a.mcp === true, codesUrl,
-            ...(a.code_mode === true || a.codeMode === true ? { codeMode: true } : {}),
+            ...(codeModeArg(a) ? { codeMode: codeModeArg(a) } : {}),
             taskId: typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? a.task_id : null,
             model: typeof a.model === 'string' && a.model.length <= 100 ? a.model : null,
             ...(effort ? { effort } : {}),
@@ -298,7 +303,7 @@ function parseArgs(raw, env = process.env) {
     return {
         kind, repo: repo ? repo.toString() : null, ref, prompt, permission, push,
         // Code mode (2026-11-18, harness/code-mode.js): the agent may run one script for many steps.
-        ...(a.code_mode === true || a.codeMode === true ? { codeMode: true } : {}),
+        ...(codeModeArg(a) ? { codeMode: codeModeArg(a) } : {}),
         // The task this job is an attempt of, when the server names it: the checkpoint refs carry it.
         ...(typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? { taskId: a.task_id } : {}),
         ...(attached.length ? { attachments: attached } : {}),

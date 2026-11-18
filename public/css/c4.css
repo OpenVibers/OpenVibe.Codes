@@ -447,3 +447,16 @@
 .c4-issue-watch small{color:var(--c4-muted);font-size:12.5px}
 .c4-issue-watch .ovk-btn{min-height:44px}
 .c4-issue-watch .c4-bad{color:var(--c4-bad-ink)}
+
+/* Settings → Coding agents (2026-11-18): one fold per agent, in the model plan's cards. */
+.ag-fold > summary { cursor: pointer; list-style: none; }
+.ag-fold > summary::-webkit-details-marker { display: none; }
+.ag-fold > summary::after { content: ""; width: 10px; height: 10px; margin-left: auto; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); transition: transform .18s ease; opacity: .6; flex: none; }
+.ag-fold[open] > summary::after { transform: rotate(-135deg); }
+.ag-fold .mp-role-h p { overflow-wrap: anywhere; }
+.ag-instructions { display: grid; gap: 6px; margin-top: 10px; }
+.ag-instructions small { color: var(--text-secondary, #9aa4b2); font-weight: 400; }
+.ag-instructions textarea { width: 100%; box-sizing: border-box; min-height: 72px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border, #1f2937); background: var(--bg-input, #0f1626); color: inherit; font: inherit; resize: vertical; }
+html[data-ov-motion="off"] .ag-fold > summary::after { transition: none; }
+.ag-fold .mp-fields > .c4-hint { grid-column: 1 / -1; margin: 0; }
+@media (max-width: 30rem) { .ag-fold .mp-fields { grid-template-columns: minmax(0, 1fr); } }

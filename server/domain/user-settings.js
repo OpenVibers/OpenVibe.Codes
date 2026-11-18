@@ -19,6 +19,7 @@
  * Only a usr_ subject is accepted: a service token has no preferences of its own to keep.
  */
 const failover = require('./conductor-failover');
+const harnessPrefs = require('./harness-prefs');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const SAFETY = ['ask', 'project', 'full'];
@@ -38,6 +39,8 @@ const DEFAULTS = Object.freeze({
     conductor_fallbacks: [], conductor_switch_pct: failover.DEFAULT_SWITCH_PCT,
     // Code mode (2026-11-18, migration 0049): Claude Code works in scripts through Codes' ov_code server. Off by default.
     code_mode: false,
+    // Each coding agent's own settings (2026-11-18, migration 0050, ./harness-prefs.js): none until set.
+    harness_prefs: {},
 });
 
 /** A nullable limit from a form or an API: '' / 'off' / 0 / null mean no limit; a negative or silly number is refused. */
@@ -70,6 +73,7 @@ function present(row) {
         conductor_fallbacks: failover.storedFallbacks(row.conductor_fallbacks),
         conductor_switch_pct: row.conductor_switch_pct == null ? failover.DEFAULT_SWITCH_PCT : Number(row.conductor_switch_pct),
         code_mode: row.code_mode === true,
+        harness_prefs: harnessPrefs.present(row.harness_prefs),
     };
 }
 
@@ -121,6 +125,8 @@ function createUserSettings({ store, harnesses = null }) {
         if (patch.no_cloud !== undefined) next.no_cloud = patch.no_cloud === true || patch.no_cloud === '1';
         if (patch.only_free !== undefined) next.only_free = patch.only_free === true || patch.only_free === '1';
         if (patch.code_mode !== undefined) next.code_mode = patch.code_mode === true || patch.code_mode === '1';
+        // Each named agent's entry is replaced; the others stay (/settings/agents, PUT /api/v1/me/settings).
+        if (patch.harness_prefs !== undefined) next.harness_prefs = harnessPrefs.merge(next.harness_prefs, patch.harness_prefs, knownAgent);
         if (patch.safety !== undefined) {
             const v = String(patch.safety);
             if (!SAFETY.includes(v)) throw Object.assign(new Error(`the safety level is one of ${SAFETY.join(', ')}`), { status: 422, code: 'settings.safety_unknown' });
@@ -139,16 +145,18 @@ function createUserSettings({ store, harnesses = null }) {
         if (switchPct !== undefined) next.conductor_switch_pct = switchPct == null ? failover.DEFAULT_SWITCH_PCT : switchPct;
         await db.exec(
             `INSERT INTO codes_user_settings (subject, default_agent, default_machine, notify_done, notify_needs, safety,
-                 steps, minutes, no_cloud, only_free, conductor_agent, conductor_model, conductor_fallbacks, conductor_switch_pct, code_mode, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, now())
+                 steps, minutes, no_cloud, only_free, conductor_agent, conductor_model, conductor_fallbacks, conductor_switch_pct, code_mode, harness_prefs, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16::jsonb, now())
              ON CONFLICT (subject) DO UPDATE SET default_agent = EXCLUDED.default_agent, default_machine = EXCLUDED.default_machine,
                  notify_done = EXCLUDED.notify_done, notify_needs = EXCLUDED.notify_needs, safety = EXCLUDED.safety,
                  steps = EXCLUDED.steps, minutes = EXCLUDED.minutes, no_cloud = EXCLUDED.no_cloud,
                  only_free = EXCLUDED.only_free, conductor_agent = EXCLUDED.conductor_agent,
                  conductor_model = EXCLUDED.conductor_model, conductor_fallbacks = EXCLUDED.conductor_fallbacks,
-                 conductor_switch_pct = EXCLUDED.conductor_switch_pct, code_mode = EXCLUDED.code_mode, updated_at = now()`,
+                 conductor_switch_pct = EXCLUDED.conductor_switch_pct, code_mode = EXCLUDED.code_mode,
+                 harness_prefs = EXCLUDED.harness_prefs, updated_at = now()`,
             [subject, next.default_agent, next.default_machine, next.notify_done, next.notify_needs, next.safety, next.steps, next.minutes, next.no_cloud, next.only_free,
-                next.conductor_agent || null, next.conductor_model || null, JSON.stringify(next.conductor_fallbacks || []), next.conductor_switch_pct, next.code_mode === true],
+                next.conductor_agent || null, next.conductor_model || null, JSON.stringify(next.conductor_fallbacks || []), next.conductor_switch_pct, next.code_mode === true,
+                JSON.stringify(next.harness_prefs || {})],
         );
         return next;
     }
