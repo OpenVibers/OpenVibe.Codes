@@ -96,7 +96,7 @@ const { boot, check, done } = require('./helpers/boot');
         // Code mode (2026-11-18, runner 0.13): the person's switch on the Settings page, carried in every job they start.
         await check('code mode: a switch on the Settings page, off by default, in the job args when on', async () => {
             const page = await t.get('/settings', { as: ada });
-            assert.ok(page.text.includes('Code mode for Claude Code') && page.text.includes('name="code_mode"'));
+            assert.ok(page.text.includes('Code mode for every coding agent') && page.text.includes('name="code_mode"'));
             assert.strictEqual((await t.ctx.userSettings.get(ada.subject)).code_mode, false, 'off until they turn it on');
             const before = await startTask(ada.subject);
             const offJob = [...jobs.values()].pop();

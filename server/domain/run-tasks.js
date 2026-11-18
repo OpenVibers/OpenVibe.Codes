@@ -298,10 +298,16 @@ function createRunTasks({ store, run, config, log = console, userSettings = null
     async function withEnv(subject, args, env) {
         const git = forge && args && args.repo ? await forge.jobEnv(subject, args.repo).catch(() => null) : null;
         const all = { ...(env || {}), ...(git || {}) };
-        // Code mode (2026-11-18, runner 0.13.0): every job of a person who turned it on, first turns and follow-ups.
-        let codeMode = false;
-        if (userSettings && subject) { try { codeMode = (await userSettings.get(subject)).code_mode === true; } catch { codeMode = false; } }
-        const out = codeMode ? { ...args, code_mode: true } : args;
+        // The person's settings for the job's agent (2026-11-18, server/domain/harness-prefs.js): code mode (the agent's
+        // own choice, else their switch), the model and reasoning when the task named none, and standing instructions.
+        let out = args;
+        if (userSettings && subject) {
+            try {
+                const settings = await userSettings.get(subject);
+                const offer = args && args.agent && harnesses && harnesses.get ? harnesses.get(args.agent) : null;
+                out = require('./harness-prefs').applyPrefs(args, settings, { name: offer && offer.name });
+            } catch { out = args; }
+        }
         return Object.keys(all).length ? { ...out, env: all } : out;
     }
 

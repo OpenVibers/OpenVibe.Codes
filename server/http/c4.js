@@ -944,7 +944,7 @@ ${watches.length ? `<ul class="c4-issue-watches">${watches.map(row).join('')}</u
 <div class="c4-checks">
   <label class="c4-check"><input type="checkbox" name="no_cloud" value="1"${settings.no_cloud ? ' checked' : ''}><span><b>Never send my code to the cloud</b><small>Keep every task on your own machine. With no machine of yours available, nothing can run it.</small></span></label>
   <label class="c4-check"><input type="checkbox" name="only_free" value="1"${settings.only_free ? ' checked' : ''}><span><b>Only free</b><small>Use free allowances and your own machine; never a paid option.</small></span></label>
-  <label class="c4-check"><input type="checkbox" name="code_mode" value="1"${settings.code_mode ? ' checked' : ''}><span><b>Code mode for Claude Code</b><small>Claude Code works in scripts: one step reads, searches, edits and tests many files, so a task takes fewer turns. It stays inside the task's folder and its permission.</small></span></label>
+  <label class="c4-check"><input type="checkbox" name="code_mode" value="1"${settings.code_mode ? ' checked' : ''}><span><b>Code mode for every coding agent</b><small>Each agent works in scripts its own way: one step reads, searches, edits and tests many files, so a task takes fewer turns, inside the task's folder and permission. <a href="/settings/agents">Set each agent up</a>.</small></span></label>
 </div>
 <h3 class="c4-subhead">Notifications</h3>
 <div class="c4-checks">
@@ -955,7 +955,7 @@ ${watches.length ? `<ul class="c4-issue-watches">${watches.map(row).join('')}</u
 <div class="c4-safety" role="group" aria-label="Safety level">${SAFETY_OPTIONS.map(([value, title, desc]) => `<label class="c4-safety-card"><input type="radio" name="safety" value="${value}"${settings.safety === value ? ' checked' : ''}><span><b>${title}</b><small>${desc}</small></span></label>`).join('')}</div>
 ${conductorSection}
 <button class="c4-button" type="submit">Save settings</button>
-</form></section><section class="c4-card"><h2>Model plan</h2><p>Set a default for planning, building and checking tasks.</p><a class="ovk-btn ovk-btn--quiet" href="/settings/model-plan">Edit model plan</a></section>${issuesCard}` : signIn(req)}`;
+</form></section><section class="c4-card"><h2>Coding agents</h2><p>Each agent's code mode, the model and reasoning it starts on, and standing instructions.</p><a class="ovk-btn ovk-btn--quiet" href="/settings/agents">Set up agents</a></section><section class="c4-card"><h2>Model plan</h2><p>Set a default for planning, building and checking tasks.</p><a class="ovk-btn ovk-btn--quiet" href="/settings/model-plan">Edit model plan</a></section>${issuesCard}` : signIn(req)}`;
         page(req, res, 'Settings', wrap(content));
     });
     r.post('/settings', form, async (req, res) => {
@@ -987,6 +987,8 @@ ${conductorSection}
         }
     });
     r.use(require('./model-plan-settings').createModelPlanSettings(ctx, { page, wrap, header, flash, sameOrigin, viewer, form, signIn }));
+    // Settings → Coding agents (2026-11-18): each agent's code mode, model, reasoning and standing instructions.
+    r.use(require('./agent-settings').createAgentSettings(ctx, { page, wrap, header, flash, sameOrigin, viewer, form, signIn }));
 
     // The Memory page (OpenVibe Memory M2b): the person's own notes, in Codes' own kit. The routes live in their own
     // module and borrow this one's kit (the page, the frame, the card, the pill, the flash and the same-origin check).
