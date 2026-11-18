@@ -566,8 +566,8 @@ ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h
         // conductor, resumed on the machine with its whole context.
         const imports = sessionImports ? await sessionImports.list(req.viewer.subject).catch(() => []) : [];
         const chosen = req.query.import ? imports.find((i) => i.id === String(req.query.import)) || null : null;
-        const importCard = chosen ? `<p class="c4-import-pick"><strong>Continuing your imported session:</strong> ${esc(chosen.title)} <small>(${chosen.messages} messages${chosen.source_cwd ? `, from ${esc(chosen.source_cwd)}` : ''}; ${chosen.resumable ? `${esc(chosen.harness)} resumes it with its whole context` : 'read here and handed over'})</small></p><input type="hidden" name="import_id" value="${esc(chosen.id)}">` : '';
-        const importList = imports.length ? `<section class="c4-card"><div class="c4-card-head"><h2>Your imported sessions</h2><span class="c4-hint">openvibe-codes import</span></div>${imports.slice(0, 8).map((i) => `<a class="c4-task" href="/conductor?import=${encodeURIComponent(i.id)}"><span class="c4-task-title">${esc(i.title)}</span><span class="c4-task-meta">${esc(i.harness)} · ${i.messages} messages${i.resumable ? ' · continue it' : ''}</span></a>`).join('')}</section>` : '';
+        const importCard = chosen ? `<p class="c4-import-pick"><strong>Continuing your imported session:</strong> ${esc(chosen.title)} <small>(${chosen.messages} messages${chosen.source_cwd ? `, from ${esc(chosen.source_cwd)}` : ''}; ${chosen.resumable ? 'Claude Code resumes it with its whole context' : 'the agent you choose reads the whole conversation first, then carries on'})</small></p><input type="hidden" name="import_id" value="${esc(chosen.id)}">` : '';
+        const importList = imports.length ? `<section class="c4-card"><div class="c4-card-head"><h2>Your imported sessions</h2><a href="/import">Bring another</a></div>${imports.slice(0, 8).map((i) => `<a class="c4-task" href="/conductor?import=${encodeURIComponent(i.id)}"><span class="c4-task-title">${esc(i.title)}</span><span class="c4-task-meta">${esc(HARNESS_NAME[i.harness] || i.harness)} · ${i.messages} messages · continue it</span></a>`).join('')}</section>` : `<section class="c4-card"><div class="c4-card-head"><h2>Continue a session from another agent</h2><a href="/import">Bring a session</a></div><p class="c4-hint">Claude Code, Codex, Gemini CLI, OpenCode or any agent: bring its conversation here and carry on with it.</p></section>`;
         const content = `${header('Conductor', 'Your orchestrator, running here: the agent you choose on your own machine, carrying the plan forward through the other agents.')}${flash(req)}
 <section class="c4-card c4-composer"><form method="post" action="/conductor">${importCard}
 <label for="c4-folder">Working folder</label><div class="c4-folder-row"><input id="c4-folder" name="folder" placeholder="/home/you/project" value="${esc(String(req.query.folder || ''))}" list="c4-folders" autocomplete="off" spellcheck="false"><select name="folder_pick" data-c4-folder-pick aria-label="Folders this machine has worked in"><option value="">A recent folder…</option>${folderChoices}</select></div><datalist id="c4-folders">${folders.map((f) => `<option value="${esc(f.folder)}"></option>`).join('')}</datalist>
@@ -578,6 +578,80 @@ ${signedIn ? '' : `<section class="c4-reasons"><h2>Built for the way you work</h
 </form></section>
 ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors</h2><a href="/tasks">All tasks</a></div>${list}</section>` : ''}${importList}`;
         page(req, res, 'Conductor', wrap(content));
+    });
+
+    // ── Bring a session here (plan §AD.24; the owner, 11-18: "a prompt method they can just send their agent and a
+    // manual method"): a one-time link for one upload, the message to send one's own agent, the command to run oneself,
+    // a drop for a session file, and the sessions already here, each continued in a conductor. ─────────────────────
+    const importKit = require('./import-kit');
+    const HARNESS_NAME = { 'claude-code': 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', opencode: 'OpenCode', handover: 'Hand-over' };
+    r.get(['/import.cjs', '/import.js'], (req, res) => {
+        res.set('Content-Type', 'text/javascript; charset=utf-8');
+        res.set('Cache-Control', 'public, max-age=300');
+        res.set('X-Content-Type-Options', 'nosniff');
+        res.send(importKit.importerScript(config.baseUrl));
+    });
+    async function importPage(req, res, { link = null, problem: oops = null } = {}) {
+        if (!viewer(req)) return page(req, res, 'Bring a session', wrap(`${header('Bring a session here')}${signIn(req)}`));
+        const mine = sessionImports ? await sessionImports.list(req.viewer.subject).catch(() => []) : [];
+        const cmd = link ? importKit.commandFor(config.baseUrl, link.token) : null;
+        const ask = link
+            ? `<div class="c4-imp-made" data-imp-made><textarea class="c4-imp-text" id="c4-imp-prompt" rows="9" readonly aria-label="The message for your agent">${esc(importKit.promptFor(config.baseUrl, link.token, link.expires_at))}</textarea>
+<div class="c4-imp-row"><button type="button" class="c4-button c4-imp-copy" data-imp-copy="#c4-imp-prompt" hidden><i data-ov-icon="copy" aria-hidden="true"></i>Copy the message</button><span class="c4-hint" data-imp-until>Works once, until ${esc(importKit.untilText(link.expires_at))}.</span></div></div>`
+            : `<form method="post" action="/import/link" data-imp-link><button class="c4-button" type="submit"><i data-ov-icon="link" aria-hidden="true"></i>Make a link</button></form>`;
+        const yourself = cmd
+            ? `<label class="c4-imp-label" for="c4-imp-unix">macOS and Linux</label><div class="c4-imp-cmd"><input id="c4-imp-unix" class="c4-imp-line" readonly value="${esc(cmd.unix)}"><button type="button" class="c4-button c4-button-light" data-imp-copy="#c4-imp-unix" hidden>Copy</button></div>
+<label class="c4-imp-label" for="c4-imp-win">Windows (PowerShell)</label><div class="c4-imp-cmd"><input id="c4-imp-win" class="c4-imp-line" readonly value="${esc(cmd.windows)}"><button type="button" class="c4-button c4-button-light" data-imp-copy="#c4-imp-win" hidden>Copy</button></div>`
+            : '<p class="c4-hint">Make a link above, and its command shows here.</p>';
+        const rows = mine.map((i) => `<li class="c4-imp-item"><div class="c4-imp-main"><strong>${esc(i.title)}</strong><span class="c4-hint">${esc(HARNESS_NAME[i.harness] || i.harness)} · ${Number(i.messages) || 0} messages${i.source_cwd ? ` · ${esc(i.source_cwd)}` : ''}</span></div>
+<div class="c4-imp-actions"><a class="c4-button" href="/conductor?import=${esc(i.id)}">Continue</a><form method="post" action="/import/${esc(i.id)}/remove"><button class="c4-button c4-button-light" type="submit" aria-label="Remove ${esc(i.title)}">Remove</button></form></div></li>`).join('');
+        const content = `${header('Bring a session here', 'Carry a conversation from Claude Code, Codex, Gemini CLI, OpenCode or any agent, and continue it on your own machine.')}${flash(req)}${oops ? `<div class="notice c4-notice c4-notice-bad" role="alert">${esc(oops)}</div>` : ''}
+<div class="c4-imp-two"><section class="c4-card c4-imp-card" aria-labelledby="c4-imp-ask"><div class="c4-card-head"><h2 id="c4-imp-ask"><i data-ov-icon="chat" aria-hidden="true"></i>Ask your agent</h2></div>
+<p class="c4-imp-lead">Send this message to the agent you are talking to now. It moves the conversation here and gives you the link to continue.</p>${ask}</section>
+<section class="c4-card c4-imp-card" aria-labelledby="c4-imp-self"><div class="c4-card-head"><h2 id="c4-imp-self"><i data-ov-icon="terminal" aria-hidden="true"></i>Do it yourself</h2></div>
+<p class="c4-imp-lead">Run this in the folder the session worked in: it finds the session on its own.</p>${yourself}
+<div class="c4-imp-drop" data-imp-drop><input type="file" id="c4-imp-file" class="c4-imp-file" accept=".jsonl,.json,.md,.txt,.gz,.markdown"><label for="c4-imp-file" class="c4-imp-droplabel"><i data-ov-icon="upload" aria-hidden="true"></i><span><strong>Or drop a session file</strong><small>A big Claude Code file is read from its last compaction: only that part is sent.</small></span></label><p class="c4-hint" data-imp-status role="status"></p></div>
+<details class="c4-imp-where"><summary>Where each agent keeps its sessions</summary><ul>
+<li><strong>Claude Code</strong> <code class="c4-code-inline">~/.claude/projects/&lt;folder&gt;/&lt;id&gt;.jsonl</code></li>
+<li><strong>Codex</strong> <code class="c4-code-inline">~/.codex/sessions/YYYY/MM/DD/rollout-….jsonl</code></li>
+<li><strong>Gemini CLI</strong> <code class="c4-code-inline">~/.gemini/tmp/&lt;project&gt;/chats/session-….json</code></li>
+<li><strong>OpenCode</strong> <code class="c4-code-inline">opencode export &lt;id&gt; &gt; session.json</code></li>
+<li><strong>Any other agent</strong>: ask it to write the conversation to a Markdown file, under "## User" and "## Assistant".</li></ul></details></section></div>
+<section class="c4-card" aria-labelledby="c4-imp-mine"><div class="c4-card-head"><h2 id="c4-imp-mine">Your sessions</h2></div>
+${mine.length ? `<ul class="c4-imp-list" data-imp-list>${rows}</ul><p class="c4-hint">Claude Code sessions resume whole. The others start a new session that reads the whole conversation first.</p>` : '<p class="c4-hint" data-imp-list-empty>Nothing yet: the sessions you bring show here, ready to continue.</p>'}</section>`;
+        res.set('Cache-Control', 'no-store');
+        return page(req, res, 'Bring a session', wrap(content), { css: ['css/import.css'], scripts: ['js/import.js'] });
+    }
+    /** An import's whole conversation as a Markdown file for a conductor to read first: { name, buffer } or null. */
+    async function handoverFile(subject, imp) {
+        const data = sessionImports ? await sessionImports.data(subject, imp.id) : null;
+        if (!data) return null;
+        let doc;
+        try { doc = JSON.parse(require('zlib').gunzipSync(data.gz, { maxOutputLength: 200 * 1024 * 1024 }).toString('utf8')); } catch { return null; }
+        const turns = (Array.isArray(doc.transcript) && doc.transcript.length ? doc.transcript : Array.isArray(doc.messages) ? doc.messages : [])
+            .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string');
+        const lines = [`# ${String(doc.title || imp.title).replace(/\n/g, ' ')}`, '',
+            `Carried from ${HARNESS_NAME[imp.harness] || imp.harness}${doc.source && doc.source.cwd ? `, where it ran in ${doc.source.cwd}` : ''}. ${turns.length} messages, oldest first.`, ''];
+        for (const m of turns) lines.push(`## ${m.role === 'user' ? 'User' : 'Assistant'}${m.at ? ` (${String(m.at).slice(0, 19).replace('T', ' ')})` : ''}`, '', m.text, '');
+        const safe = String(imp.session_id || 'session').replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 60);
+        return { name: `handover-${imp.harness}-${safe}.md`, buffer: Buffer.from(lines.join('\n'), 'utf8').subarray(0, 19 * 1024 * 1024) };
+    }
+    r.get('/import', (req, res) => importPage(req, res));
+    r.post('/import/link', form, async (req, res) => {
+        if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/import')}`);
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
+        try {
+            const link = await sessionImports.createLink(req.viewer.subject);
+            return importPage(req, res, { link });
+        } catch (e) {
+            return importPage(req, res, { problem: String((e && e.message) || 'no link could be made') });
+        }
+    });
+    r.post('/import/:id/remove', form, async (req, res) => {
+        if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/import')}`);
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
+        await sessionImports.remove(req.viewer.subject, req.params.id);
+        return res.redirect(303, `/import?ok=${encodeURIComponent('Removed.')}`);
     });
 
     r.post('/conductor', form, async (req, res) => {
@@ -594,13 +668,27 @@ ${list ? `<section class="c4-card"><div class="c4-card-head"><h2>Your conductors
             if (b.import_id) {
                 imported = sessionImports ? await sessionImports.get(req.viewer.subject, String(b.import_id)) : null;
                 if (!imported) throw Object.assign(new Error('that imported session is not yours, or is gone'), { status: 404 });
-                if (!imported.resumable) throw Object.assign(new Error(`a ${imported.harness} session is read here and handed over, not resumed`), { status: 422 });
+            }
+            // Only Claude Code's own --resume takes a carried session whole. Any other agent's conversation is handed
+            // over: the whole of it as a file the conductor's first turn reads, and the agent chosen here leads.
+            let handoverIds = [];
+            let handoverNote = null;
+            if (imported && !imported.resumable) {
+                const file = await handoverFile(req.viewer.subject, imported);
+                if (attachments && file) {
+                    const saved = await attachments.save(req.viewer.subject, file);
+                    handoverIds = [saved.id];
+                }
+                handoverNote = `You are continuing a conversation that started in ${HARNESS_NAME[imported.harness] || imported.harness} ("${imported.title}"). `
+                    + `The attached ${file ? file.name : 'hand-over'} holds it, oldest first: read it whole before anything else, then carry on from where it stopped.`;
+                imported = null;
             }
             const made = await conductor.create({
                 subject: req.viewer.subject, project, imported,
                 folder, machine: b.machine || null,
                 ...(agent ? { agent, model } : {}),
-                safety: b.safety || 'ask', note: b.note || null,
+                safety: b.safety || 'ask', note: [handoverNote, b.note].filter(Boolean).join('\n\n') || null,
+                ...(handoverIds.length ? { attachmentIds: handoverIds } : {}),
             });
             await userSettings.save(req.viewer.subject, { safety: b.safety || 'ask', ...(b.machine ? { default_machine: b.machine } : {}) }).catch(() => {});
             return res.redirect(303, `/tasks/${encodeURIComponent(made.task.id)}`);
