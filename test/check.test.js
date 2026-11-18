@@ -13,7 +13,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { runJob } = require('../harness/job');
 const {
-    ACT_VERSION, ACT_URL, ACT_SHA256, parseCheckArgs, skipReason, parseActLine, outputText, prepareAct, runCheck, tail,
+    ACT_VERSION, ACT_URL, ACT_SHA256, parseCheckArgs, skipReason, parseActLine, outputText, prepareAct, runCheck, tail, calledRef,
 } = require('../harness/check');
 const { check, done } = require('./helpers/boot');
 
@@ -167,6 +167,78 @@ const checkInput = (repo, extra = {}) => JSON.stringify({
         assert.deepStrictEqual(docs, [doc]);
         const bad = await runJob({ input: '{"kind":"check","repo":"http://x"}', harness: {}, emit: () => {}, writeResult: () => {}, env });
         assert.deepStrictEqual([bad.kind, bad.ok, bad.conclusion], ['check', false, 'failure']);
+    });
+
+    const SHARED_SHA = 'a'.repeat(40);
+    const callerOf = (uses, extra = '') => `name: ci
+on: push
+jobs:
+  test:
+    uses: ${uses}
+${extra}    with:
+      syntax-dirs: server
+`;
+    const reusable = workflow().replace('on: push', 'on:\n  workflow_call:');
+
+    await check('a job that calls another workflow is judged by the jobs it calls (11-18: Live and MediaHub were always skipped)', () => {
+        const key = `OpenVibers/OpenVibe.Shared/.github/workflows/test.yml@${SHARED_SHA}`;
+        const caller = callerOf(key);
+        const called = (source) => new Map([[key, source]]);
+        assert.strictEqual(skipReason(caller, 'test', {}, called(reusable)), null, 'every called job can run here');
+        assert.match(skipReason(caller, 'test'), /could not be read here/, 'not read: left to Actions');
+        assert.match(skipReason(caller, 'test', {}, called(reusable.replace('    runs-on:', '    services:\n      pg:\n        image: postgres\n    runs-on:'))),
+            /whose job test cannot run here \(it uses services:/);
+        assert.match(skipReason(caller, 'test', {}, called(workflow({ runsOn: 'macos-latest' }))), /macos-latest/);
+        assert.match(skipReason(caller, 'test', {}, called(workflow({ steps: '- run: echo "${{ secrets.NPM_TOKEN }}"' }))), /NPM_TOKEN/);
+        assert.match(skipReason(callerOf(key, '    secrets: inherit\n'), 'test', {}, called(reusable)), /passes secrets/);
+        assert.match(skipReason(caller.replace('syntax-dirs: server', 'token: ${{ secrets.DEPLOY_KEY }}'), 'test', {}, called(reusable)), /DEPLOY_KEY/);
+        assert.match(skipReason(caller, 'test', {}, called('name: n\non: workflow_call\njobs:\n  inner:\n    uses: ./.github/workflows/other.yml\n')), /calls another workflow in turn/);
+        assert.match(skipReason(caller, 'test', {}, called('name: n\non: workflow_call\njobs: {}\n')), /has no jobs/);
+        for (const bad of ['https://evil.example/x.yml', `OpenVibers/OpenVibe.Shared/.github/workflows/test.yml@../../x`, 'OpenVibers/OpenVibe.Shared/.github/workflows/test.yml@-x', 'docker://alpine:3', './x.yml']) {
+            assert.match(skipReason(callerOf(bad), 'test', {}, new Map([[bad, reusable]])), /not a workflow a node can read/, bad);
+        }
+        assert.deepStrictEqual(calledRef({ uses: './.github/workflows/t.yml' }), { key: './.github/workflows/t.yml', local: true, file: '.github/workflows/t.yml' });
+        assert.deepStrictEqual(calledRef({ uses: `o/r/.github/workflows/t.yaml@v1.2.3` }), { key: 'o/r/.github/workflows/t.yaml@v1.2.3', owner: 'o', repo: 'r', file: '.github/workflows/t.yaml', ref: 'v1.2.3' });
+        assert.strictEqual(calledRef({ 'runs-on': 'ubuntu-latest' }), null);
+    });
+
+    await check('a calling job runs: the called workflow is fetched at its ref, act is given the caller, discovery picks it', async () => {
+        // "GitHub" here is a directory of repositories: <base>/octo/lib holds the workflow ci.yml calls.
+        const base = tmpDir('codes-check-called-');
+        const lib = path.join(base, 'octo', 'lib');
+        fs.mkdirSync(path.join(lib, '.github', 'workflows'), { recursive: true });
+        sh(lib, 'init', '-q', '-b', 'main');
+        fs.writeFileSync(path.join(lib, '.github', 'workflows', 'test.yml'), reusable);
+        sh(lib, 'add', '-A');
+        sh(lib, 'commit', '-q', '-m', 'lib');
+        const libSha = sh(lib, 'rev-parse', 'HEAD').toString().trim();
+        const repo = repository({ 'ci.yml': callerOf(`octo/lib/.github/workflows/test.yml@${libSha}`) });
+        const stub = stubAct({ output: '[ci/test/test] ⭐ Run Main say hello\n[ci/test/test]   ✅  Success - Main say hello [3ms]\n[ci/test/test] 🏁  Job succeeded\n' });
+        const jobEnv = { ...process.env, OPENVIBE_CODES_ALLOW_FILE_REPO: '1', OPENVIBE_CODES_ACT_BIN: stub.script, OPENVIBE_CODES_CALLED_BASE: `file://${base}` };
+        const lines = [];
+        const result = await runCheck({ input: checkInput(repo), emit: (l) => lines.push(JSON.parse(l)), env: jobEnv, tmp: tmpDir('codes-check-tmp-') });
+        assert.strictEqual(result.conclusion, 'success', result.reason);
+        assert.ok(lines.some((l) => /Read octo\/lib\/\.github\/workflows\/test\.yml@/.test(l.text || '')), 'the read is in the log');
+        const argv = stub.read().argv;
+        assert.strictEqual(argv[argv.indexOf('-j') + 1], 'test');
+        assert.strictEqual(argv[argv.indexOf('-P') + 1], 'ubuntu-latest=-self-hosted');
+
+        // Without a job named, discovery picks the calling job too.
+        const found = await runCheck({ input: JSON.stringify({ kind: 'check', repo: repo.url, sha: repo.sha, event: 'push' }), env: jobEnv, tmp: tmpDir('codes-check-tmp-') });
+        assert.strictEqual(found.conclusion, 'success', found.reason);
+
+        // A called workflow that cannot be fetched: skipped with the reason, act never started.
+        const missing = repository({ 'ci.yml': callerOf('octo/gone/.github/workflows/test.yml@main') });
+        const idle = stubAct();
+        const skipped = await runCheck({ input: checkInput(missing), env: { ...jobEnv, OPENVIBE_CODES_ACT_BIN: idle.script }, tmp: tmpDir('codes-check-tmp-') });
+        assert.strictEqual(skipped.conclusion, 'skipped');
+        assert.match(skipped.reason, /could not be read here/);
+        assert.ok(!fs.existsSync(idle.record), 'act is not started for a skipped check');
+
+        // One in the same repository is read from the checkout.
+        const local = repository({ 'ci.yml': callerOf('./.github/workflows/reuse.yml'), 'reuse.yml': reusable });
+        const ran = await runCheck({ input: checkInput(local), env: jobEnv, tmp: tmpDir('codes-check-tmp-') });
+        assert.strictEqual(ran.conclusion, 'success', ran.reason);
     });
 
     await check('act runs with a pinned binary, the expected argv, and no GITHUB_TOKEN or job environment variable', async () => {
