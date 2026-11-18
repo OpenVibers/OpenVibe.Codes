@@ -12,7 +12,9 @@
  * `{ ok, kind: 'check', conclusion, reason?, steps, log_tail, ms }`.
  *
  * A job that needs services, a container, a secret other than `GITHUB_TOKEN`, a Docker action or a runner that is not
- * an ubuntu label is `skipped` with the reason: the scheduler leaves it to Actions. No secret reaches a step: act gets
+ * an ubuntu label is `skipped` with the reason: the scheduler leaves it to Actions. A job that calls another workflow
+ * (`jobs.<id>.uses`, in the same repository or on GitHub at a ref) is judged by the jobs of the workflow it calls, read
+ * before the check starts; act runs those itself. No secret reaches a step: act gets
  * a fixed, small environment, never `GITHUB_TOKEN` nor the Codes runner's own variables.
  *
  * The act release is pinned here and checked against its sha256 before it is started; the binary is fetched into the
@@ -36,6 +38,7 @@ const MAX_ACT_UNPACKED = 64 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 const MAX_WORKFLOW_BYTES = 1024 * 1024;
+const MAX_CALLED = 6;            // workflows on GitHub that this checkout's jobs call (`jobs.<id>.uses`), fetched per check
 const MAX_LINE = 4_000;          // one live line (a task's step output is capped the same way)
 const MAX_LOG_TAIL = 16 * 1024;  // the result's log tail
 const MAX_RAW_LOG = 128 * 1024;
@@ -215,7 +218,7 @@ function workflowTriggers(wf) {
  * check. When nothing is runnable the first job is still named: the check's own skip reason says why it was left out.
  * → { workflow, job } or null when the repository has no workflow.
  */
-function discoverWorkflow(work) {
+function discoverWorkflow(work, called = null) {
     const dir = path.join(work, '.github', 'workflows');
     let names;
     try { names = fs.readdirSync(dir); } catch { return null; }
@@ -238,7 +241,7 @@ function discoverWorkflow(work) {
     for (const p of ordered) {
         const jobs = Object.keys(p.wf.jobs || {}).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
         const runnable = jobs.find((id) => {
-            try { return skipReason(p.source, id) === null; } catch { return false; }
+            try { return skipReason(p.source, id, {}, called) === null; } catch { return false; }
         });
         if (runnable) return { workflow: p.workflow, job: runnable };
     }
@@ -255,8 +258,9 @@ function workflowJob(source, jobId) {
 /**
  * Why this job must be left to Actions (`services:`, `container:`, another secret, a non-ubuntu runner, a Docker
  * action), or null when act host mode can run it. The scheduler reads `skipped` and does not retry another node.
+ * `called` maps a calling job's `uses` to the source of the workflow it calls (readCalled).
  */
-function skipReason(source, jobId, matrix = {}) {
+function skipReason(source, jobId, matrix = {}, called = null) {
     const wf = parsedWorkflow(source);
     const job = jobIn(wf, jobId);
     if (has(job, 'services')) return 'the job uses services:, which act in host mode cannot run';
@@ -265,11 +269,130 @@ function skipReason(source, jobId, matrix = {}) {
     // A workflow-level env applies to every job: a secret there reaches this job's steps too.
     const secret = secretUse(job) || secretUse(wf.env);
     if (secret) return secret.name ? `the job uses the secret ${secret.name}, not only GITHUB_TOKEN` : 'the job uses a secret whose name it computes, not only GITHUB_TOKEN';
+    const ref = calledRef(job);
+    if (ref) return calledSkip(ref, called);
     const runner = runnerCheck(job, matrix);
     if (!runner.ok) return runner.reason;
     const docker = dockerUse(job);
     if (docker) return `the job uses the Docker action ${docker}, which act in host mode cannot run`;
     return null;
+}
+
+const CALLED_LOCAL = /^\.\/(\.github\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml)$/;
+const CALLED_REMOTE = /^([A-Za-z0-9][A-Za-z0-9-]{0,38})\/([A-Za-z0-9._-]{1,100})\/(\.github\/workflows\/[A-Za-z0-9._-]{1,100}\.ya?ml)@([A-Za-z0-9._/-]{1,200})$/;
+
+/**
+ * The workflow a job calls (`jobs.<id>.uses`; 11-18: Live and MediaHub run Shared's test.yml this way, and every one of
+ * their checks was skipped): { key, local: true, file } in the same repository, { key, owner, repo, file, ref } on
+ * GitHub, { key, bad: true } for anything else, null for a job that runs its own steps.
+ */
+function calledRef(job) {
+    const uses = job && typeof job === 'object' && typeof job.uses === 'string' ? job.uses.trim() : '';
+    if (!uses) return null;
+    let m = CALLED_LOCAL.exec(uses);
+    if (m && !m[1].includes('..')) return { key: uses, local: true, file: m[1] };
+    m = CALLED_REMOTE.exec(uses);
+    if (m && !m[2].includes('..') && !m[3].includes('..') && !m[4].includes('..') && !/^[-/]/.test(m[4])) {
+        return { key: uses, owner: m[1], repo: m[2], file: m[3], ref: m[4] };
+    }
+    return { key: uses, bad: true };
+}
+
+/**
+ * A calling job runs here when every job of the workflow it calls could run here by itself (the same rules) and that
+ * workflow calls no other in turn: act runs the called jobs, the caller only names them and passes `with:`.
+ */
+function calledSkip(ref, called) {
+    if (ref.bad) return `the job calls ${ref.key}, which is not a workflow a node can read`;
+    const source = called && typeof called.get === 'function' ? called.get(ref.key) : undefined;
+    if (typeof source !== 'string') return `the job calls ${ref.key}, which could not be read here`;
+    let wf;
+    try { wf = parsedWorkflow(source); } catch { return `the job calls ${ref.key}, which is not a workflow act can read`; }
+    const ids = Object.keys((wf && wf.jobs) || {});
+    if (!ids.length) return `the job calls ${ref.key}, which has no jobs`;
+    for (const id of ids) {
+        if (calledRef(jobIn(wf, id))) return `the job calls ${ref.key}, which calls another workflow in turn`;
+        const why = skipReason(source, id);
+        if (why) return `the job calls ${ref.key}, whose job ${id} cannot run here (${why.replace(/^the job /, 'it ')})`;
+    }
+    return null;
+}
+
+/** The runner labels act must map for a check: the job's own, or for a calling job, every called job's. */
+function checkLabels(source, jobId, matrix, called) {
+    const job = workflowJob(source, jobId);
+    const ref = calledRef(job);
+    if (!ref) {
+        const platform = runnerCheck(job, matrix);
+        return platform.ok ? platform.labels : ['ubuntu-latest'];
+    }
+    const inner = !ref.bad && called && typeof called.get === 'function' ? called.get(ref.key) : undefined;
+    const out = new Set(['ubuntu-latest']);
+    if (typeof inner !== 'string') return [...out];
+    const wf = parsedWorkflow(inner);
+    for (const id of Object.keys((wf && wf.jobs) || {})) {
+        const platform = runnerCheck(jobIn(wf, id), {});
+        if (platform.ok) platform.labels.forEach((label) => out.add(label));
+    }
+    return [...out];
+}
+
+/** Where a workflow on GitHub is fetched from: github.com, as Actions reads it; a test may point it at local repositories. */
+function calledUrl(ref, env) {
+    const base = env.OPENVIBE_CODES_ALLOW_FILE_REPO === '1' && env.OPENVIBE_CODES_CALLED_BASE
+        ? String(env.OPENVIBE_CODES_CALLED_BASE).replace(/\/+$/, '') : 'https://github.com';
+    return `${base}/${ref.owner}/${ref.repo}`;
+}
+
+/**
+ * The workflows this checkout's jobs call, read before any job is judged: one in the checkout from the checkout, one on
+ * GitHub fetched at its ref (depth 1, with the same per-host credential as the clone). → Map(uses → source). One that
+ * could not be read is left out, and its caller is skipped saying so. At most MAX_CALLED are fetched.
+ */
+async function readCalled(work, { env = process.env, dir, say = () => {} } = {}) {
+    const called = new Map();
+    const wfDir = path.join(work, '.github', 'workflows');
+    let names;
+    try { names = fs.readdirSync(wfDir).filter((n) => /\.ya?ml$/i.test(n)).sort(); } catch { return called; }
+    const refs = new Map();
+    for (const name of names) {
+        let wf;
+        try {
+            const file = path.join(wfDir, name);
+            const st = fs.statSync(file);
+            if (!st.isFile() || st.size > MAX_WORKFLOW_BYTES) continue;
+            wf = parsedWorkflow(fs.readFileSync(file, 'utf8'));
+        } catch { continue; }
+        for (const job of Object.values((wf && wf.jobs) || {})) {
+            const ref = calledRef(job);
+            if (ref && !ref.bad && !refs.has(ref.key)) refs.set(ref.key, ref);
+        }
+    }
+    const root = fs.realpathSync(work);
+    let fetched = 0;
+    for (const ref of refs.values()) {
+        try {
+            if (ref.local) {
+                const real = fs.realpathSync(path.join(work, ref.file));
+                if (!real.startsWith(`${root}${path.sep}`)) continue;
+                const st = fs.statSync(real);
+                if (st.isFile() && st.size <= MAX_WORKFLOW_BYTES) called.set(ref.key, fs.readFileSync(real, 'utf8'));
+                continue;
+            }
+            if (fetched >= MAX_CALLED) continue;
+            fetched += 1;
+            const url = calledUrl(ref, env);
+            const into = path.join(dir, `called-${fetched}`);
+            await git(['init', '-q', into], { timeout: 60_000 });
+            const auth = gitAuthFor(url, env);
+            await git(['fetch', '--depth', '1', '--no-tags', url, ref.ref], { cwd: into, timeout: 120_000, ...(auth.env ? { env: auth.env } : {}) });
+            const source = await git(['show', `FETCH_HEAD:${ref.file}`], { cwd: into, timeout: 30_000 });
+            if (Buffer.byteLength(source) > MAX_WORKFLOW_BYTES) continue;
+            called.set(ref.key, source);
+            say({ t: 'step', text: `Read ${scrub(ref.key)}, the workflow a job calls` });
+        } catch { /* left out: its caller is skipped with "could not be read here" */ }
+    }
+    return called;
 }
 
 /** Whether a job reads `secrets.*` (or `secrets[...]`) other than GITHUB_TOKEN; walks every string it may evaluate. */
@@ -669,10 +792,18 @@ async function runCheck({ input, emit = () => {}, writeResult = () => {}, env = 
         const head = (await git(['rev-parse', 'HEAD'], { cwd: work })).trim().toLowerCase();
         if (job.sha && head !== job.sha) throw new Error('the cloned commit is not the one asked for');
         job.sha = head;
+        // act copies the checkout into the job file by file and leaves empty directories out. A detached clone has
+        // nothing under .git/refs, so the job's copy had no refs/ and git there said "not a git repository" (11-18:
+        // Live's and Codes' tests that ask git failed on the node). One branch at the commit keeps refs/ in the copy.
+        const branch = typeof job.ref === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(job.ref.replace(/^refs\/heads\//, ''))
+            && !/\.\.|\/\/|\.lock$|\/$|@\{/.test(job.ref) ? job.ref.replace(/^refs\/heads\//, '') : 'check';
+        await git(['update-ref', `refs/heads/${branch}`, head], { cwd: work })
+            .catch(() => git(['update-ref', 'refs/heads/check', head], { cwd: work }));
         if (auth.env) say({ t: 'step', text: 'Cloned with this machine\'s token for a private repository' });
+        const called = await readCalled(work, { env, dir, say });
 
         if (!job.workflow) {
-            const found = discoverWorkflow(work);
+            const found = discoverWorkflow(work, called);
             if (!found) throw new Error('the repository has no workflow under .github/workflows/');
             job.workflow = found.workflow;
             job.job = found.job;
@@ -686,7 +817,7 @@ async function runCheck({ input, emit = () => {}, writeResult = () => {}, env = 
         if (!st.isFile()) throw new Error(`the workflow ${job.workflow} is not a file`);
         if (st.size > MAX_WORKFLOW_BYTES) throw new Error(`the workflow ${job.workflow} is over 1 MiB`);
         const source = fs.readFileSync(realWorkflow, 'utf8');
-        const skip = skipReason(source, job.job, job.matrix);
+        const skip = skipReason(source, job.job, job.matrix, called);
         if (skip) {
             conclusion = 'skipped';
             reason = skip;
@@ -706,8 +837,7 @@ async function runCheck({ input, emit = () => {}, writeResult = () => {}, env = 
         const eventPath = path.join(dir, 'event.json');
         fs.writeFileSync(eventPath, JSON.stringify(eventPayload(job)), { mode: 0o600 });
 
-        const platform = runnerCheck(workflowJob(source, job.job), job.matrix);
-        const labels = platform.ok ? platform.labels : ['ubuntu-latest'];
+        const labels = checkLabels(source, job.job, job.matrix, called);
         const args = [
             job.event, '-W', job.workflow, '-j', job.job,
             '-P', 'ubuntu-latest=-self-hosted',
@@ -763,5 +893,6 @@ function tail(raw) {
 module.exports = {
     ACT_VERSION, ACT_URL, ACT_SHA256, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS,
     parseCheckArgs, parseArgs: parseCheckArgs, skipReason, workflowJob, discoverWorkflow, eventPayload, parseActLine, outputText, prepareAct,
+    calledRef, readCalled,
     runCheck, tail,
 };
