@@ -204,8 +204,8 @@ ${rows ? `<ul class="c4-rows">${rows}</ul>` : d.keys ? ovkKit.empty({ icon: 'key
 <label>Default agent <select name="default_agent" data-ov-title="Default agent"><option value="" data-desc="Codes picks the agent with room for each task">Auto</option>${agents}</select></label>
 <div data-ov-machines data-needs="worker" data-name="default_machine" data-auto-label="Auto" data-value="${esc(pickedMachine || s.default_machine || '')}"></div>
 </div>
-<h3 class="c4-subhead">When your conductor's agent runs low</h3>
-<p class="c4-hint">Your conductor runs Claude Code. When it nears a usage limit, the next turn moves to the first fallback with room, and comes back once the window frees.</p>
+<h3 class="c4-subhead">When your orchestrator's agent runs low</h3>
+<p class="c4-hint">Your orchestrator runs Claude Code. When it nears a usage limit, the next turn moves to the first fallback with room, and comes back once the window frees.</p>
 <div class="c4-fallbacks">${[0, 1, 2].map(fallbackRow).join('')}</div>
 <div class="c4-form-grid"><label>Switch at <select name="conductor_switch_pct">${[70, 80, 85, 90, 95].map((v) => `<option value="${v}"${pct === v ? ' selected' : ''}>${v}% of a window</option>`).join('')}</select></label></div>
 <h3 class="c4-subhead">Safety</h3>
@@ -233,7 +233,7 @@ ${rows ? `<ul class="c4-rows">${rows}</ul>` : d.keys ? ovkKit.empty({ icon: 'key
         const bodies = { machine: machineBody(d), agents: agentsBody(d), home: homeBody(d), keys: keysBody(d), accounts: accountsBody(d), choices: choicesBody(d, d.machines, String(req.query.machine || '')) };
         const nav = steps.map((s, i) => `<li><a class="c4-setup-chip${s.done ? ' is-done' : ''}${s.id === next ? ' is-next' : ''}" href="#step-${s.id}"><span class="c4-setup-chip-n" aria-hidden="true">${s.done ? CHECK : i + 1}</span>${esc(s.short)}<span class="c4-sr-only">${s.done ? ', done' : s.optional ? ', optional' : ''}</span></a></li>`).join('');
         const ready = requiredLeft === 0
-            ? `<section class="c4-card c4-setup-ready"><h2>You are set</h2><p>Your machine, an agent and your choices are in place.${steps.some((s) => s.optional && !s.done) ? ' The optional steps can wait.' : ''}</p><div class="c4-setup-actions"><a class="c4-button" href="/">Start a task</a><a class="c4-opill" href="/conductor">Start your conductor</a></div></section>`
+            ? `<section class="c4-card c4-setup-ready"><h2>You are set</h2><p>Your machine, an agent and your choices are in place.${steps.some((s) => s.optional && !s.done) ? ' The optional steps can wait.' : ''}</p><div class="c4-setup-actions"><a class="c4-button" href="/">Start a task</a><a class="c4-opill" href="/conductor">Start your orchestrator</a></div></section>`
             : '';
         const content = `<div class="c4-setup">
 <div class="c4-setup-head"><div class="c4-title"><div><h1>Set up Codes</h1><p>${requiredLeft ? `${requiredLeft} step${requiredLeft === 1 ? '' : 's'} left before your first task.` : 'Everything your tasks need is ready.'} Each step checks itself; come back any time.</p></div></div>

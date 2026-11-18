@@ -22,7 +22,7 @@ function titleOf(row) {
     if (named) return named.length > 200 ? `${named.slice(0, 199)}…` : named;
     if (row && row.kind === 'conductor' && row.folder) {
         const folder = String(row.folder).replace(/\/+$/, '').split('/').pop() || 'a folder';
-        return `Conductor · ${folder}`.slice(0, 200);
+        return `Orchestrator · ${folder}`.slice(0, 200);
     }
     const line = String((row && row.prompt) || '').split('\n').map((l) => l.replace(/^#+\s*/, '').trim()).find(Boolean) || '';
     return (line.length > 200 ? `${line.slice(0, 199)}…` : line) || 'New task';

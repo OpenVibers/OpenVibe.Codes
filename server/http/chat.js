@@ -116,7 +116,7 @@ const firstLine = (s, n = 64) => {
     return line.length > n ? `${line.slice(0, n - 1)}…` : line;
 };
 const folderName = (f) => String(f || '').replace(/\/+$/, '').split('/').pop() || 'a folder';
-const titleOf = (row) => (row.kind === 'conductor' ? `Conductor · ${folderName(row.folder)}` : (row.title || firstLine(row.prompt) || 'New task'));
+const titleOf = (row) => (row.kind === 'conductor' ? `Orchestrator · ${folderName(row.folder)}` : (row.title || firstLine(row.prompt) || 'New task'));
 const stateOf = (row) => {
     if (LIVE.includes(row.state)) return row.state === 'queued' ? ['Getting ready', 'busy'] : ['Working', 'busy'];
     if (row.outcome === 'stopped' || row.state === 'cancelled') return ['Stopped', 'idle'];
@@ -190,7 +190,7 @@ function createChatRoutes(ctx) {
         const item = (row) => {
             const [, tone] = stateOf(row);
             const dot = waitingIds.has(row.id) ? 'needs' : tone === 'busy' ? 'busy' : tone === 'bad' ? 'bad' : null;
-            const mark = row.kind === 'conductor' ? thread.face({ name: 'Conductor', mark: ico('conductor'), color: 'var(--accent)' }) : avatar(agentOf(row.agent, names));
+            const mark = row.kind === 'conductor' ? thread.face({ name: 'Orchestrator', mark: ico('conductor'), color: 'var(--accent)' }) : avatar(agentOf(row.agent, names));
             return { href: `/tasks/${encodeURIComponent(row.id)}`, label: titleOf(row), mark, meta: dot ? '' : ago(row.updated_at || row.created_at), here: row.id === currentId, dot };
         };
         const pinned = rows.filter((x) => x.kind === 'conductor' && x.outcome !== 'stopped').slice(0, 2);
@@ -206,7 +206,7 @@ function createChatRoutes(ctx) {
             action: { href: '/', label: 'New chat', icon: 'pencil' },
             find: { action: '/tasks', name: 'q', placeholder: 'Search conversations', label: 'Search your conversations' },
             nav: [
-                place('Conductor', '/conductor', 'conductor'),
+                place('Orchestrator', '/orchestrator', 'conductor'),
                 place('Agents', '/agents', 'agents'),
                 place('Machines', 'https://openvibe.link/machines', 'machines'),
                 place('OpenVibe Git', '/git', 'repo'),
@@ -766,7 +766,7 @@ function createChatRoutes(ctx) {
             const pickers = `<span class="ch-chip ch-chip-static" title="${esc(`The next turn runs ${nextAgent.name} on your machine`)}">${avatar(nextAgent)}${esc(String(next.model || 'its default model'))}</span>`;
             const options = whoPicker(`${next.agent}|${next.model || ''}`, { label: 'Who leads this task', ready: await readyFor(req), catalog: await aiModels() });
             return frame(req, res, {
-                currentId: row.id, title: 'Conductor', heading: titleOf(row), state, panel: await sideHtml(row, view),
+                currentId: row.id, title: 'Orchestrator', heading: titleOf(row), state, panel: await sideHtml(row, view),
                 turns: [...errorTurns, ...await conductorThread(row, view)],
                 streamUrl: `/api/v1/tasks/${encodeURIComponent(row.id)}/events?last_event_id=${last && last.seq != null ? Number(last.seq) : 0}`,
                 composerHtml: row.outcome === 'stopped' ? '' : composer({ action: `/tasks/${encodeURIComponent(row.id)}/messages`, api: `/api/v1/conductor/${encodeURIComponent(row.id)}/messages`, placeholder: live ? 'Say something: it is the next turn' : 'What next?', pickers, options, files: true, note: live ? 'A message waits until the current turn ends; it is not lost.' : '' }),

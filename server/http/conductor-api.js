@@ -145,7 +145,7 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
         const pin = machine ? await pinFor(req, machine) : { device: null };
         if (pin.problem) return problem(req, res, pin.problem.status, pin.problem.code, pin.problem.detail);
         const project = await projectFor(req);
-        if (!project) return problem(req, res, 409, 'codes.no_project', 'start one task at ' + config.baseUrl + '/run first: a conductor runs in your project, on your machine');
+        if (!project) return problem(req, res, 409, 'codes.no_project', 'start one task at ' + config.baseUrl + '/run first: an orchestrator runs in your project, on your machine');
         // A session carried here with `openvibe-codes import` (plan §AD.22): it continues on the machine, resumed.
         let imported = null;
         if (b.import_id != null) {
@@ -167,7 +167,7 @@ function createConductorApi({ config, store, keys, harnesses, tasks, conductor, 
             log.info(`[Codes] conductor ${made.task.id} started for ${req.person.subject}`);
             return res.status(201).json(await conductor.view(made.task));
         } catch (e) {
-            return problem(req, res, e.status || 500, e.code || 'conductor.failed', String((e && e.message) || 'the conductor could not start'));
+            return problem(req, res, e.status || 500, e.code || 'conductor.failed', String((e && e.message) || 'the orchestrator could not start'));
         }
     });
 
