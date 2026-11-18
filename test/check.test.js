@@ -13,7 +13,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { runJob } = require('../harness/job');
 const {
-    ACT_VERSION, ACT_URL, ACT_SHA256, parseCheckArgs, skipReason, parseActLine, outputText, prepareAct, runCheck, tail, calledRef,
+    ACT_VERSION, ACT_URL, ACT_SHA256, parseCheckArgs, skipReason, parseActLine, outputText, prepareAct, runCheck, tail, calledRef, idleCommand,
 } = require('../harness/check');
 const { check, done } = require('./helpers/boot');
 
@@ -239,6 +239,35 @@ ${extra}    with:
         const local = repository({ 'ci.yml': callerOf('./.github/workflows/reuse.yml'), 'reuse.yml': reusable });
         const ran = await runCheck({ input: checkInput(local), env: jobEnv, tmp: tmpDir('codes-check-tmp-') });
         assert.strictEqual(ran.conclusion, 'success', ran.reason);
+    });
+
+    await check('act runs at idle priority, so a check never takes a machine from live work (11-18: captions were lost)', async () => {
+        const all = () => true;
+        if (process.platform === 'linux') {
+            assert.deepStrictEqual(idleCommand('/x/act', ['push', '-j', 'test'], {}, all), ['/usr/bin/chrt', ['--idle', '0', '/usr/bin/ionice', '-c', '3', '/x/act', 'push', '-j', 'test']]);
+            assert.deepStrictEqual(idleCommand('/x/act', ['push'], {}, (p) => p === '/usr/bin/ionice'), ['/usr/bin/ionice', ['-c', '3', '/x/act', 'push']], 'without chrt: idle I/O only');
+        }
+        assert.deepStrictEqual(idleCommand('/x/act', ['push'], { OPENVIBE_CODES_CHECK_PRIORITY: 'normal' }, all), ['/x/act', ['push']], 'normal: as before');
+        assert.deepStrictEqual(idleCommand('/x/act', ['push'], {}, () => false), ['/x/act', ['push']], 'neither tool: as before');
+        // In a real run the stand-in act sees its own scheduling policy: SCHED_IDLE is 5 in /proc/self/stat.
+        if (process.platform !== 'linux' || !idleCommand('a', [], {})[0].endsWith('chrt')) return;
+        const dir = tmpDir('codes-check-stub-');
+        const record = path.join(dir, 'policy.json');
+        const script = path.join(dir, 'act');
+        fs.writeFileSync(script, `#!${process.execPath}
+const fs = require('fs');
+const stat = fs.readFileSync('/proc/self/stat', 'utf8');
+const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify({ policy: Number(fields[38]) }));
+process.stdout.write('[ci/test] \u2b50 Run Main x\\n[ci/test]   \u2705  Success - Main x [1ms]\\n[ci/test] \ud83c\udfc1  Job succeeded\\n');
+`, { mode: 0o755 });
+        const repo = repository({ 'ci.yml': workflow() });
+        const jobEnv = { ...process.env, OPENVIBE_CODES_ALLOW_FILE_REPO: '1', OPENVIBE_CODES_ACT_BIN: script };
+        const idle = await runCheck({ input: checkInput(repo), env: jobEnv, tmp: tmpDir('codes-check-tmp-') });
+        assert.strictEqual(idle.conclusion, 'success', idle.reason);
+        assert.strictEqual(JSON.parse(fs.readFileSync(record, 'utf8')).policy, 5, 'act ran under SCHED_IDLE');
+        await runCheck({ input: checkInput(repo), env: { ...jobEnv, OPENVIBE_CODES_CHECK_PRIORITY: 'normal' }, tmp: tmpDir('codes-check-tmp-') });
+        assert.strictEqual(JSON.parse(fs.readFileSync(record, 'utf8')).policy, 0, 'normal: SCHED_OTHER');
     });
 
     await check('the checkout act copies keeps a ref, so git in the job finds its repository (11-18: act leaves empty refs/ out)', async () => {

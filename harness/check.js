@@ -642,14 +642,32 @@ function stopGroup(child, signal) {
 }
 
 /**
+ * A check yields the machine to everything else on it (11-18: Live's and AI's suites on the shared node took its CPU from
+ * live captions, and 64 of that hour's 259 caption pieces were lost). On Linux act, and every step it starts, runs under
+ * SCHED_IDLE (`chrt --idle 0`) with idle I/O (`ionice -c 3`): it gets only time nothing else wants. A machine without
+ * them, or OPENVIBE_CODES_CHECK_PRIORITY=normal, runs act as before. → [command, argv]
+ */
+function idleCommand(binary, args, env = process.env, exists = fs.existsSync) {
+    if (process.platform !== 'linux' || String(env.OPENVIBE_CODES_CHECK_PRIORITY || '').toLowerCase() === 'normal') return [binary, args];
+    const chrt = ['/usr/bin/chrt', '/bin/chrt'].find((p) => exists(p));
+    const ionice = ['/usr/bin/ionice', '/bin/ionice'].find((p) => exists(p));
+    let cmd = binary;
+    let argv = args;
+    if (ionice) { argv = ['-c', '3', cmd, ...argv]; cmd = ionice; }
+    if (chrt) { argv = ['--idle', '0', cmd, ...argv]; cmd = chrt; }
+    return [cmd, argv];
+}
+
+/**
  * Run act and stream its output line by line. Resolves with the exit code/signal, whether this call timed it out, or
  * the error that kept it from starting. The timeout starts when act starts, not while the clone/download runs.
  */
-function runAct(binary, args, { cwd, env, timeout_ms, onLine }) {
+function runAct(binary, args, { cwd, env, timeout_ms, onLine, priorityEnv = process.env }) {
     return new Promise((resolve) => {
         let child;
         try {
-            child = spawn(binary, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+            const [cmd, argv] = idleCommand(binary, args, priorityEnv);
+            child = spawn(cmd, argv, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
         } catch (e) {
             resolve({ error: e });
             return;
@@ -851,7 +869,7 @@ async function runCheck({ input, emit = () => {}, writeResult = () => {}, env = 
             ...Object.entries(job.matrix).flatMap(([key, value]) => ['--matrix', `${key}:${value}`]),
         ];
         say({ t: 'step', text: `Running ${job.workflow} job ${job.job} with act ${ACT_VERSION}` });
-        const child = await runAct(binary, args, { cwd: work, env: actEnvironment(env, dir), timeout_ms: job.timeout_ms, onLine });
+        const child = await runAct(binary, args, { cwd: work, env: actEnvironment(env, dir), timeout_ms: job.timeout_ms, onLine, priorityEnv: env });
         if (child.error) throw new Error(`act could not start: ${child.error.message}`);
         if (child.timedOut) {
             conclusion = 'timed_out';
@@ -893,6 +911,6 @@ function tail(raw) {
 module.exports = {
     ACT_VERSION, ACT_URL, ACT_SHA256, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS,
     parseCheckArgs, parseArgs: parseCheckArgs, skipReason, workflowJob, discoverWorkflow, eventPayload, parseActLine, outputText, prepareAct,
-    calledRef, readCalled,
+    calledRef, readCalled, idleCommand,
     runCheck, tail,
 };
