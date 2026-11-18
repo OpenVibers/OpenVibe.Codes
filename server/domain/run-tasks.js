@@ -166,7 +166,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null, modelPlans = null, goalVerifier = null, raceSideEnded = null }) {
+function createRunTasks({ store, run, config, log = console, userSettings = null, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null, modelPlans = null, goalVerifier = null, raceSideEnded = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -298,7 +298,11 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     async function withEnv(subject, args, env) {
         const git = forge && args && args.repo ? await forge.jobEnv(subject, args.repo).catch(() => null) : null;
         const all = { ...(env || {}), ...(git || {}) };
-        return Object.keys(all).length ? { ...args, env: all } : args;
+        // Code mode (2026-11-18, runner 0.13.0): every job of a person who turned it on, first turns and follow-ups.
+        let codeMode = false;
+        if (userSettings && subject) { try { codeMode = (await userSettings.get(subject)).code_mode === true; } catch { codeMode = false; } }
+        const out = codeMode ? { ...args, code_mode: true } : args;
+        return Object.keys(all).length ? { ...out, env: all } : out;
     }
 
     async function attemptEnv({ subject, taskId, attemptId = null, agent = null, budget = null }) {

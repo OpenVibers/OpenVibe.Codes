@@ -226,7 +226,7 @@ function parseArgs(raw, env = process.env) {
         return {
             kind, repo: null, ref: null, prompt, permission, push: null,
             folder, safety, mcp: a.mcp === true, codesUrl,
-            ...(a.code_mode === true ? { codeMode: true } : {}),
+            ...(a.code_mode === true || a.codeMode === true ? { codeMode: true } : {}),
             taskId: typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? a.task_id : null,
             model: typeof a.model === 'string' && a.model.length <= 100 ? a.model : null,
             ...(effort ? { effort } : {}),
@@ -290,7 +290,7 @@ function parseArgs(raw, env = process.env) {
     return {
         kind, repo: repo ? repo.toString() : null, ref, prompt, permission, push,
         // Code mode (2026-11-18, harness/code-mode.js): the agent may run one script for many steps.
-        ...(a.code_mode === true ? { codeMode: true } : {}),
+        ...(a.code_mode === true || a.codeMode === true ? { codeMode: true } : {}),
         // The task this job is an attempt of, when the server names it: the checkpoint refs carry it.
         ...(typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? { taskId: a.task_id } : {}),
         ...(attached.length ? { attachments: attached } : {}),

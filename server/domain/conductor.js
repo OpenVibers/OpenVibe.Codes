@@ -455,6 +455,8 @@ function createConductor({ store, config = {}, log = console, run, attempts, tas
             // Who leads can be an API harness too (DeepSeek, OpenVibe.AI, a local model): that turn is funded like a
             // coding task, with the person's own key or a run token. A plan CLI needs nothing here.
             const args = turnArgs(task, turn, attempt, over);
+            // Code mode (2026-11-18, runner 0.13.0): the person's switch, for this turn too.
+            if (userSettings) { try { if ((await userSettings.get(task.subject)).code_mode === true) args.code_mode = true; } catch { /* the turn runs without it */ } }
             let funding = null;
             try { funding = await tasks.fundTurn({ subject: task.subject, taskId: task.id, attemptId: attempt ? attempt.id : null, agent: args.agent }); } catch (e) {
                 log.warn(`[Codes] conductor ${task.id}: the turn could not be funded (${String(e && e.message).slice(0, 160)})`);
