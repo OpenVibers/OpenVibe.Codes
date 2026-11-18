@@ -59,6 +59,8 @@ const TABLES = [
     // Their agent home (plan §AD.22, openvibe.home@1): tools, agents, repositories and git's name, and where it was set up.
     { table: 'codes_homes', subject: 'subject', file: 'agent-home.json', order: 'updated_at', columns: ['spec', 'applied', 'updated_at'] },
     { table: 'codes_session_imports', subject: 'subject', file: 'session-imports.json', order: 'created_at', columns: ['id', 'harness', 'session_id', 'title', 'source_cwd', 'resumable', 'messages', 'records', 'size', 'created_at'] },
+    // One-time import links (/import): when each was made, used and what it made. The token is only a hash, never exported.
+    { table: 'codes_session_import_links', subject: 'subject', file: 'session-import-links.json', order: 'created_at', columns: ['created_at', 'expires_at', 'used_at', 'import_id'] },
     // Placement A1's learned counts: the person's rows leave and are erased with them. No text, no payload.
     { table: 'placement_outcomes', subject: 'person_id', file: 'placement-outcomes.json', order: 'updated_at', columns: ['person_id', 'option_key', 'step_kind', 'ok_w', 'n_w', 'updated_at'] },
     // What each of the person's machines reported with its heartbeat (Codes C9c): labels, numbers and times only, no
