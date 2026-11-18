@@ -135,11 +135,38 @@ function readFrom(file, offset) {
 
 /** The resumable tail of a Claude Code session file: { meta, records }. */
 function claudeTail(file) {
-    const records = readFrom(file, lastBoundaryOffset(file)).filter(inChain);
+    return tailOf(readFrom(file, lastBoundaryOffset(file)), path.basename(file, '.jsonl'));
+}
+
+/** The lines of a JSONL text as records (a broken line is skipped). */
+function linesOf(text) {
+    const out = [];
+    for (const line of String(text).split('\n')) {
+        if (!line.trim()) continue;
+        try { out.push(JSON.parse(line)); } catch { /* a line cut by a crash, or by the page's slice: not conversation */ }
+    }
+    return out;
+}
+
+/**
+ * The resumable tail of a Claude Code session given as text (an upload: the whole file, or the page's slice of it from
+ * its last compaction): the records from the last compaction boundary on. → { meta, records }
+ */
+function claudeTailText(text, { name = null } = {}) {
+    const all = linesOf(text);
+    let from = 0;
+    for (let i = all.length - 1; i >= 0; i--) {
+        if (all[i] && all[i].type === 'system' && all[i].subtype === 'compact_boundary') { from = i; break; }
+    }
+    return tailOf(all.slice(from), name ? String(name).replace(/\.jsonl$/, '') : null);
+}
+
+function tailOf(all, fallbackId) {
+    const records = all.filter(inChain);
     if (!records.length) throw new Error('the session has no conversation to carry');
     const withCwd = records.find((r) => typeof r.cwd === 'string');
     const last = records[records.length - 1];
-    const sessionId = String((last && last.sessionId) || path.basename(file, '.jsonl'));
+    const sessionId = String((last && last.sessionId) || fallbackId || 'session');
     return {
         meta: {
             harness: 'claude-code',
@@ -211,7 +238,15 @@ function placeClaude(doc, { configDir, cwd }) {
 
 /** A Codex rollout (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`) as conversation.import@1 to read. */
 function codexSession(file) {
-    const items = readFrom(file, 0);
+    return codexDoc(readFrom(file, 0), path.basename(file, '.jsonl'));
+}
+
+/** A Codex rollout given as text. */
+function codexSessionText(text, { name = null } = {}) {
+    return codexDoc(linesOf(text), name ? String(name).replace(/\.jsonl$/, '') : 'codex');
+}
+
+function codexDoc(items, fallbackId) {
     const meta = items.find((i) => i && i.type === 'session_meta') || {};
     const payload = meta.payload || {};
     const said = [];
@@ -221,19 +256,213 @@ function codexSession(file) {
         const text = (Array.isArray(p.content) ? p.content : []).map((c) => c && (c.text || '')).join('\n').trim();
         if (text && !text.startsWith('<')) said.push({ role: p.role, text: text.slice(0, MAX_TEXT), at: i.timestamp || null });
     }
-    const firstAsk = said.find((m) => m.role === 'user');
+    return handover('codex', said, {
+        session_id: payload.id || fallbackId, title: 'An imported Codex session',
+        source: { cwd: payload.cwd || null, git_branch: (payload.git && payload.git.branch) || null, version: payload.cli_version || null },
+        started_at: payload.timestamp || null, updated_at: (items[items.length - 1] || {}).timestamp || null, records: items.length,
+    });
+}
+
+// ── Sessions that are read and handed over (every harness but Claude Code) ─────────────────────────────────────────
+// Only Claude Code's own --resume takes a carried session whole. Any other agent's conversation travels as its
+// messages: the page shows them, and "Continue" starts a conductor that gets the whole conversation as a hand-over
+// file to read first (server/http/c4.js). `transcript` is every message (each clipped), `messages` the last ones.
+
+const MAX_TRANSCRIPT_TEXT = 8000;
+const MAX_TRANSCRIPT_BYTES = 4 * 1024 * 1024;
+const SAFE_ID = /[^A-Za-z0-9._-]/g;
+
+/** conversation.import@1 to read and hand over, from a harness's messages ({ role, text, at }). */
+function handover(harness, said, { session_id, title, source = {}, started_at = null, updated_at = null, records = null }) {
+    const clean = said.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', text: String(m.text || '').trim(), at: m.at || null })).filter((m) => m.text);
+    const firstAsk = clean.find((m) => m.role === 'user');
+    const transcript = [];
+    let bytes = 0;
+    for (let i = clean.length - 1; i >= 0; i--) {         // the newest first, so a cut keeps the end of the conversation
+        const m = { ...clean[i], text: clean[i].text.slice(0, MAX_TRANSCRIPT_TEXT) };
+        bytes += m.text.length + 40;
+        if (bytes > MAX_TRANSCRIPT_BYTES) break;
+        transcript.unshift(m);
+    }
+    let id = String(session_id || '').replace(SAFE_ID, '-').slice(0, 100);
+    if (id.length < 4) id = `${harness}-${crypto.createHash('sha256').update(JSON.stringify(clean.slice(0, 3))).digest('hex').slice(0, 16)}`;
     return {
         format: FORMAT,
-        harness: 'codex',
-        session_id: String(payload.id || path.basename(file, '.jsonl')),
-        title: String((firstAsk && firstAsk.text.split('\n')[0]) || 'An imported Codex session').slice(0, 200),
-        source: { cwd: payload.cwd || null, git_branch: (payload.git && payload.git.branch) || null, version: payload.cli_version || null },
-        started_at: payload.timestamp || null,
-        updated_at: (items[items.length - 1] || {}).timestamp || null,
-        counts: { records: items.length, messages: said.length },
-        messages: said.slice(-MAX_PREVIEW),
+        harness,
+        session_id: id,
+        title: String((firstAsk && firstAsk.text.split('\n')[0].replace(/^#+\s*/, '')) || title).slice(0, 200),
+        source: { cwd: source.cwd || null, git_branch: source.git_branch || null, version: source.version || null },
+        started_at, updated_at,
+        counts: { records: records == null ? clean.length : records, messages: clean.length },
+        messages: clean.slice(-MAX_PREVIEW).map((m) => ({ ...m, text: m.text.slice(0, MAX_TEXT) })),
+        transcript,
         resume: null,
     };
 }
 
-module.exports = { FORMAT, slug, claudeSessionFile, claudeTail, lastBoundaryOffset, portable, placeClaude, codexSession, textOf };
+/** The words of a Gemini message's content: a string, a Part, or a list of Parts ({ text }). */
+function geminiText(content) {
+    if (typeof content === 'string') return content;
+    const parts = Array.isArray(content) ? content : content && typeof content === 'object' ? (Array.isArray(content.parts) ? content.parts : [content]) : [];
+    return parts.map((p) => (typeof p === 'string' ? p : p && typeof p.text === 'string' && !p.thought ? p.text : p && p.functionCall ? `[${p.functionCall.name}]` : '')).filter(Boolean).join('\n');
+}
+
+/**
+ * A Gemini CLI conversation as conversation.import@1 to read: its saved session (`~/.gemini/tmp/<project hash>/chats/
+ * session-*.json`: { sessionId, startTime, lastUpdated, messages: [{ type: user|gemini|…, content }] }) or a checkpoint
+ * that `/chat save` wrote (a list of { role: user|model, parts }).
+ */
+function geminiSession(value, { name = null } = {}) {
+    let said = [];
+    let meta = {};
+    if (Array.isArray(value)) {
+        said = value.filter((c) => c && (c.role === 'user' || c.role === 'model'))
+            .map((c) => ({ role: c.role === 'model' ? 'assistant' : 'user', text: geminiText(c.parts) }));
+    } else if (value && Array.isArray(value.messages)) {
+        meta = value;
+        said = value.messages.filter((m) => m && (m.type === 'user' || m.type === 'gemini' || m.type === 'model'))
+            .map((m) => ({ role: m.type === 'user' ? 'user' : 'assistant', text: geminiText(m.content), at: m.timestamp || null }));
+    } else throw new Error('not a Gemini CLI session');
+    return handover('gemini', said.filter((m) => m.text && !m.text.startsWith('<')), {
+        session_id: meta.sessionId || (name ? String(name).replace(/\.json$/, '') : null), title: 'An imported Gemini CLI session',
+        started_at: meta.startTime || null, updated_at: meta.lastUpdated || null,
+    });
+}
+
+/** The newest Gemini CLI session for a folder (its project hash is the folder's sha256), else the newest anywhere. */
+function geminiSessionFile({ home, cwd }) {
+    const tmp = path.join(home, '.gemini', 'tmp');
+    const newest = (dirs) => {
+        let best = null;
+        for (const dir of dirs) {
+            let names = [];
+            try { names = fs.readdirSync(dir); } catch { continue; }
+            for (const n of names) {
+                if (!/^session-.*\.json$/.test(n)) continue;
+                const file = path.join(dir, n);
+                const st = fs.statSync(file);
+                if (!best || st.mtimeMs > best.mtimeMs) best = { file, mtimeMs: st.mtimeMs };
+            }
+        }
+        return best;
+    };
+    const own = newest([path.join(tmp, crypto.createHash('sha256').update(String(cwd)).digest('hex'), 'chats')]);
+    if (own) return own;
+    let projects = [];
+    try { projects = fs.readdirSync(tmp); } catch { return null; }
+    return newest(projects.map((d) => path.join(tmp, d, 'chats')));
+}
+
+/** An OpenCode session as `opencode export <session>` writes it: { info, messages: [{ info: { role }, parts }] }. */
+function opencodeExport(value) {
+    if (!value || !Array.isArray(value.messages)) throw new Error('not an OpenCode export');
+    const info = value.info || {};
+    const said = value.messages.map((m) => {
+        const role = (m && m.info && m.info.role) || (m && m.role);
+        const parts = (m && Array.isArray(m.parts)) ? m.parts : [];
+        const text = parts.map((p) => (p && p.type === 'text' && typeof p.text === 'string' && !p.synthetic ? p.text : p && p.type === 'tool' ? `[${p.tool || 'tool'}]` : '')).filter(Boolean).join('\n');
+        const at = m && m.info && m.info.time && m.info.time.created ? new Date(m.info.time.created).toISOString() : null;
+        return { role: role === 'assistant' ? 'assistant' : role === 'user' ? 'user' : null, text, at };
+    }).filter((m) => m.role && m.text);
+    return handover('opencode', said, {
+        session_id: info.id, title: info.title || 'An imported OpenCode session', source: { cwd: info.directory || null, version: info.version || null },
+        started_at: info.time && info.time.created ? new Date(info.time.created).toISOString() : null,
+        updated_at: info.time && info.time.updated ? new Date(info.time.updated).toISOString() : null,
+    });
+}
+
+/**
+ * A hand-over any agent can write (Markdown or plain text): turns under headings or prefixes that name the speaker
+ * ("## User" / "## Assistant", "User:" / "Assistant:", "Human:", "AI:" …); text with none is one hand-over message.
+ */
+function handoverText(text, { name = null } = {}) {
+    const body = String(text || '').replace(/\r\n/g, '\n').trim();
+    if (!body) throw new Error('the hand-over is empty');
+    const said = [];
+    const NAMES = 'user|human|owner|assistant|ai|agent|claude|codex|gemini|model';
+    const heading = new RegExp(`^#{1,6}\\s*(${NAMES})\\s*:?\\s*$`, 'i');           // "## User"
+    const bold = new RegExp(`^\\*\\*(${NAMES})\\*\\*\\s*:?\\s*(.*)$`, 'i');      // "**Assistant:** text"
+    const prefix = new RegExp(`^(${NAMES})\\s*:\\s*(.*)$`, 'i');                  // "User: text"
+    let cur = null;
+    for (const line of body.split('\n')) {
+        const t = line.trim();
+        const m = heading.exec(t) || bold.exec(t) || prefix.exec(t);
+        if (m) {
+            if (cur) said.push(cur);
+            const who = m[1].toLowerCase();
+            cur = { role: ['user', 'human', 'owner'].includes(who) ? 'user' : 'assistant', text: m[2] || '' };
+        } else if (cur) cur.text += `\n${line}`;
+        else cur = { role: 'user', text: line };
+    }
+    if (cur) said.push(cur);
+    const turns = said.length > 1 ? said : [{ role: 'user', text: body }];
+    const doc = handover('handover', turns, { session_id: name ? `handover-${String(name).replace(/\.(md|txt|markdown)$/i, '')}` : null, title: 'A conversation handed over' });
+    if (said.length <= 1) doc.title = String(body.split('\n').find((l) => l.trim()) || 'A conversation handed over').replace(/^#+\s*/, '').slice(0, 200);
+    return doc;
+}
+
+/**
+ * Any session file's text, recognised by what it holds: a conversation.import@1 document, a Claude Code session
+ * (JSONL with uuid and sessionId), a Codex rollout (JSONL with session_meta), a Gemini CLI session or checkpoint, an
+ * OpenCode export, else a hand-over in Markdown or plain text. → conversation.import@1
+ */
+function fromText(text, { name = null, title = null } = {}) {
+    const body = String(text || '');
+    const trimmed = body.trim();
+    let doc = null;
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        let value;
+        try { value = JSON.parse(trimmed); } catch { value = undefined; }
+        if (value !== undefined) {
+            if (value && value.format === FORMAT) doc = value;
+            else if (value && !Array.isArray(value) && value.info && Array.isArray(value.messages)) doc = opencodeExport(value);
+            else if (Array.isArray(value) || (value && Array.isArray(value.messages))) doc = geminiSession(value, { name });
+        }
+    }
+    if (!doc && (trimmed.startsWith('{'))) {
+        const first = linesOf(body.slice(0, 2 * 1024 * 1024)).slice(0, 50);
+        if (first.some((r) => r && r.type === 'session_meta')) doc = codexSessionText(body, { name });
+        else if (first.some((r) => r && typeof r.uuid === 'string' && typeof r.sessionId === 'string')) {
+            const { meta, records } = claudeTailText(body, { name });
+            doc = portable(records, meta);
+        }
+    }
+    if (!doc) doc = handoverText(body, { name });
+    if (title) doc.title = String(title).slice(0, 200);
+    return doc;
+}
+
+/** The newest Codex rollout, preferring one that ran in `cwd`; null when there is none. */
+function codexSessionFile({ home, cwd = null }) {
+    const root = path.join(home, '.codex', 'sessions');
+    const files = [];
+    const walk = (dir, depth) => {
+        let names = [];
+        try { names = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const d of names) {
+            const p = path.join(dir, d.name);
+            if (d.isDirectory() && depth < 3) walk(p, depth + 1);
+            else if (d.isFile() && /^rollout-.*\.jsonl$/.test(d.name)) files.push({ file: p, mtimeMs: fs.statSync(p).mtimeMs });
+        }
+    };
+    walk(root, 0);
+    files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    if (cwd) {
+        for (const f of files.slice(0, 20)) {
+            try {
+                const fd = fs.openSync(f.file, 'r');
+                const head = Buffer.alloc(64 * 1024);
+                const n = fs.readSync(fd, head, 0, head.length, 0);
+                fs.closeSync(fd);
+                const meta = linesOf(head.subarray(0, n).toString('utf8')).find((r) => r && r.type === 'session_meta');
+                if (meta && meta.payload && meta.payload.cwd === cwd) return f;
+            } catch { /* unreadable: the next */ }
+        }
+    }
+    return files[0] || null;
+}
+
+module.exports = {
+    FORMAT, slug, claudeSessionFile, claudeTail, claudeTailText, lastBoundaryOffset, portable, placeClaude, codexSession, codexSessionText,
+    codexSessionFile, geminiSession, geminiSessionFile, opencodeExport, handoverText, fromText, handover, textOf, linesOf,
+};

@@ -14,12 +14,17 @@
  * Every query is scoped to the person: another person's import is not found, never forbidden.
  */
 const zlib = require('zlib');
+const crypto = require('crypto');
 const { FORMAT } = require('../../engine/portable');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const ID = /^imp_[0-9A-HJKMNP-TV-Z]{26}$/;
 const SESSION = /^[A-Za-z0-9._-]{4,100}$/;
-const HARNESSES = new Set(['claude-code', 'codex', 'opencode', 'gemini']);
+// `handover`: a conversation an agent wrote down (any harness without a file to read: Markdown or plain text).
+const HARNESSES = new Set(['claude-code', 'codex', 'opencode', 'gemini', 'handover']);
+const LINK_RE = /^cdi_[A-Za-z0-9_-]{32}$/;
+const LINK_MINUTES = 30;
+const MAX_LIVE_LINKS = 10;
 /** The upload, gzipped: a Claude Code tail of 6 MB is about 1 MB. */
 const MAX_BYTES = 40 * 1024 * 1024;
 /** The document once unpacked. */
@@ -119,7 +124,37 @@ function createSessionImports({ store, log = console }) {
         return { removed: true };
     }
 
-    return { save, list, get, data, remove, MAX_BYTES };
+    // ── One-time import links (migration 0048): one upload of one session into the person's account ──────────────
+    const hashOf = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
+
+    /** A new link: { token, expires_at }. The token is shown once; only its hash is kept. */
+    async function createLink(subject) {
+        requireUser(subject);
+        const live = await db.one('SELECT count(*)::int AS n FROM codes_session_import_links WHERE subject = $1 AND used_at IS NULL AND expires_at > now()', [subject]);
+        if (live.n >= MAX_LIVE_LINKS) throw fail(429, 'import.links', `at most ${MAX_LIVE_LINKS} unused links at a time: use one, or wait ${LINK_MINUTES} minutes`);
+        await db.exec("DELETE FROM codes_session_import_links WHERE subject = $1 AND expires_at < now() - interval '7 days'", [subject]);
+        const token = `cdi_${crypto.randomBytes(24).toString('base64url')}`;
+        const expires = new Date(Date.now() + LINK_MINUTES * 60_000);
+        await db.exec('INSERT INTO codes_session_import_links (token_hash, subject, expires_at) VALUES ($1, $2, $3)', [hashOf(token), subject, expires.toISOString()]);
+        return { token, expires_at: expires.toISOString() };
+    }
+
+    /** Claims a link for one upload: its person, or null (unknown, used or expired). Atomic: two uploads race, one wins. */
+    async function claimLink(token) {
+        if (!LINK_RE.test(String(token || ''))) return null;
+        const row = await db.maybe(
+            'UPDATE codes_session_import_links SET used_at = now() WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now() RETURNING subject',
+            [hashOf(token)]);
+        return row ? row.subject : null;
+    }
+
+    /** After the upload: the import it made, or the link back for another try when the upload was refused. */
+    async function settleLink(token, importId) {
+        if (importId) await db.exec('UPDATE codes_session_import_links SET import_id = $2 WHERE token_hash = $1', [hashOf(token), importId]);
+        else await db.exec('UPDATE codes_session_import_links SET used_at = NULL WHERE token_hash = $1 AND import_id IS NULL', [hashOf(token)]);
+    }
+
+    return { save, list, get, data, remove, createLink, claimLink, settleLink, MAX_BYTES };
 }
 
-module.exports = { createSessionImports, readDocument, ID, MAX_BYTES };
+module.exports = { createSessionImports, readDocument, ID, MAX_BYTES, LINK_RE, LINK_MINUTES };
