@@ -6,7 +6,8 @@
  *
  *   off       harness ids nobody can pick or run (their runs answer 422 codes.agent_off; the catalogue leaves them out,
  *             GET /api/v1/harnesses?all=1 lists them with off: true so the owner can turn them back on)
- *   defaults  { harness id: agent id }: the agent (model) a harness runs when none is named; it is listed first
+ *   defaults  { harness id: model id }: the model a coding agent runs when the person picks the agent but no model (one
+ *             of GET /api/v1/harnesses/models for that agent; data/models.js parse applies it)
  *
  * gate(base) wraps the static catalogue (server/domain/harnesses.js) so every reader (the catalogue route, the runs,
  * placement, settings) sees the owner's choice at once, without a restart. Ids the catalogue does not know are ignored.
@@ -32,7 +33,7 @@ const SCHEMA = {
         defaults: {
             type: 'object', title: 'Model when nobody picks', 'x-group': 'Coding agents', maxProperties: 100,
             description: 'For each coding agent, the model it runs when the person does not choose one.',
-            additionalProperties: { type: 'string', pattern: ID },
+            additionalProperties: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,159}$' },
         },
     },
 };
@@ -62,8 +63,10 @@ async function create({ db, env = process.env, log = console }) {
             get: (id) => (offSet().has(id) ? null : withOrder(base.get(id))),
             agents: (id) => (offSet().has(id) ? [] : ordered(id)),
             /** Every harness, off ones marked, for the owner's page (GET /api/v1/harnesses?all=1). */
-            all: () => { const off = offSet(); const d = defaultsOf(); return base.list().map((h) => ({ ...withOrder(h), off: off.has(h.id), default_agent: d[h.id] && base.agents(h.id).some((a) => a.id === d[h.id]) ? d[h.id] : ((base.agents(h.id)[0] || {}).id || null) })); },
+            all: () => { const off = offSet(); const d = defaultsOf(); return base.list().map((h) => ({ ...withOrder(h), off: off.has(h.id), default_model: typeof d[h.id] === 'string' ? d[h.id] : null, default_agent: d[h.id] && base.agents(h.id).some((a) => a.id === d[h.id]) ? d[h.id] : ((base.agents(h.id)[0] || {}).id || null) })); },
             isOff: (id) => offSet().has(id),
+            /** The model this agent runs when none is named (the owner's choice), or null. */
+            defaultModel: (id) => (typeof defaultsOf()[id] === 'string' ? defaultsOf()[id] : null),
             known: (id) => !!base.get(id),
         };
     }

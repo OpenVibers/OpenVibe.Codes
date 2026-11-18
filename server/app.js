@@ -66,6 +66,7 @@ const { createActorLimits } = require('./http/actor-limits');
 const createAiCatalogConfig = require('./ai-catalog-config').create;
 const createOwnerInputs = require('./owner-inputs-config').create;
 const createHarnessConfig = require('./harness-config').create;
+const { createModelDirectory } = require('./data/model-directory');
 const { createOwnerInputTests } = require('./owner-inputs-tests');
 const { createMachines } = require('./domain/machines');
 const { createMemory } = require('./domain/memory');
@@ -117,6 +118,10 @@ async function createApp(opts = {}) {
     // The harness catalog (server/data/harness-offers.json), read once: a bad seed row fails boot.
     // The owner's switches apply at once (codes.harnesses): an off agent leaves the catalogue, a default model leads.
     const harnesses = harnessConfig.gate(createHarnesses());
+    // Every model each agent runs, from AI's model directory, read at start and every 30 minutes (data/model-directory.js).
+    const modelDirectory = createModelDirectory({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    require('./data/models').useDirectory(modelDirectory);
+    if (opts.modelDirectory !== false && process.env.NODE_ENV !== 'test') modelDirectory.start();   // its own drill check inside
     // Sessions, the run.job.* consumer and the codes.task.* outbox share one store and one clock.
     const sessions = createSessionLines({ store, config, log, media: require('./media').createMedia({ config, log }) });
     const outbox = createOutbox({ store, log, baseUrl: config.baseUrl });
