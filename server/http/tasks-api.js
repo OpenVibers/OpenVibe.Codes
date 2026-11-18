@@ -40,6 +40,8 @@ const { readMultipart, isMultipart } = require('./upload');
 const { corsOpenVibe } = require('./openvibe-origins');
 const start = require('./start');
 const models = require('../data/models');
+const roads = require('openvibe-sdk/agents/roads');
+const { roadFacts } = require('../domain/fleet');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -264,6 +266,31 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         const agents = await fleet.agents(subject, harnesses);
         const latest = await fleet.latest(subject);
         return res.json({ ok: out.ok !== false, machines: latest.machines, agents, at: latest.at, ...(out.problem ? { problem: out.problem } : {}) });
+    });
+
+    /**
+     * What would run the person's next coding task (SDK 0.186.0 roads' coding order, plan §AD.28 item 4): their pick
+     * (?harness=), a coding agent signed in with their own plan on an online machine, their key, the free AI. The same
+     * reading as /fleet; the answer is roads' result and its sentence, for the Frame and the Code chip.
+     */
+    r.get('/me/road', actorLimits.reads('codes.read'), async (req, res) => {
+        let subject = null;
+        let token = null;
+        if (signedIn(req)) { subject = req.viewer.subject; token = req.viewer.token || null; }
+        else {
+            const header = String(req.headers.authorization || '');
+            if (header.startsWith('Bearer ') && !principalToken(header.slice(7).trim())) { token = header.slice(7).trim(); subject = await personOf(token); }
+        }
+        if (!subject) return problem(req, res, 401, 'token.required', 'sign in, or send your own Network access token, to read what would run your work');
+        let rows = [];
+        if (fleet) {
+            try { if (token) await fleet.refresh(subject, token); } catch { /* the kept reading answers */ }
+            rows = await fleet.agents(subject, harnesses).catch(() => []);
+        }
+        const asked = String(req.query.harness || '').trim().toLowerCase();
+        const choice = /^[a-z][a-z0-9-]{0,63}$/.test(asked) ? { harness: asked } : null;
+        const result = roads.pick({ mode: 'code', fleet: roadFacts(rows), choice, keys: [], allowance: null, app: 'codes' });
+        return res.json({ ...result, say: roads.say(result) });
     });
 
     // One read for a coding harness on the person's machines. Attempts, not the task's initial agent, decide

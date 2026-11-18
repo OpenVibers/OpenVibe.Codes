@@ -165,6 +165,21 @@ const RESET_MONTH = new Date(Date.now() + 2.5 * 86400000).toISOString();
             assert.ok(mm.machines.some((m) => m.machine === 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2N1'));
             assert.strictEqual(body.problem, undefined, 'Bot answered, so there is no problem beside the fleet');
         });
+
+        // 11-18 (plan §AD.28 item 4): what would run the next coding task, on the shared ladder (openvibe-sdk roads).
+        await check('/api/v1/me/road: the agent with room on an online machine, in words; a pick wins; signed out is 401', async () => {
+            const r = await t.get('/api/v1/me/road', { as: ada });
+            assert.strictEqual(r.status, 200, r.text);
+            const body = r.json();
+            assert.strictEqual(body.road, 'plan', r.text);
+            assert.strictEqual(body.harness, 'minimax-code', 'Codex and OpenCode are full, Command Code nearly');
+            assert.strictEqual(body.machine.name, 'ada-laptop');
+            assert.match(body.say, /runs it on ada-laptop, on your MiniMax plan\.$/, body.say);
+            assert.deepStrictEqual(body.ladder.map((x) => x.road), ['choice', 'plan']);
+            const picked = (await t.get('/api/v1/me/road?harness=codex', { as: ada })).json();
+            assert.deepStrictEqual([picked.road, picked.harness], ['choice', 'codex']);
+            assert.strictEqual((await t.get('/api/v1/me/road')).status, 401);
+        });
     } catch (e) {
         console.error(e);
         process.exitCode = 1;
