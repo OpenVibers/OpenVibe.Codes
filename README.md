@@ -188,5 +188,5 @@ Part of the [OpenVibe network](https://openvibe.network). Built in the open by [
 <!-- versions:start -->
 - openvibe-contracts: v0.444.0
 - openvibe-sdk: v0.186.1
-- openvibe-shared: v4.313.0
+- openvibe-shared: v4.314.0
 <!-- versions:end -->
