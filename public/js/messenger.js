@@ -1,0 +1,163 @@
+/* openvibe.codes, signed in: the start page is the network's messenger full-page (openvibe-shared ov-run.js
+   OpenVibeRun.page, 4.250.0; plan §AB.8/47, the owner: "Combine, remake entire system … the same conversation system
+   everywhere"). Your agents and conversations on the left, the open one on the right; one box for everything, and one
+   engine (the Frame's Run API) decides per message whether it is code, a chat, a task or a computer's work, so a coding
+   task started here is the same run in the menu's Vibe on every site.
+   It takes over only once ov-run.js has `page` and the navbar has the person's token: until then, and when either never
+   comes, the server-rendered page (public/js/chat.js) stays and works. ?prompt= fills the box. */
+(function () {
+  'use strict';
+  var app = document.querySelector('[data-chat]');
+  if (!app) return;
+  var STARTERS = [
+    ['code', 'Make me a one-page site for my stream'],
+    ['code', 'Fix a bug in one of my repositories'],
+    ['spark', 'Build a goal bar overlay for my stream'],
+    ['search', 'What changed in OpenVibe this week?'],
+  ];
+  function loadRun() {
+    if (window.OpenVibeRun && window.OpenVibeRun.page) return Promise.resolve(window.OpenVibeRun);
+    return new Promise(function (resolve, reject) {
+      var sc = document.createElement('script'); sc.src = '/shared/ov-run.js'; sc.async = true;
+      sc.onload = function () { return window.OpenVibeRun && window.OpenVibeRun.page ? resolve(window.OpenVibeRun) : reject(new Error('ov-run.js has no page')); };
+      sc.onerror = function () { reject(new Error('ov-run.js')); };
+      document.head.appendChild(sc);
+    });
+  }
+  // 11-15 (the owner: the messenger is Actor's; Codes gets "a coding agent harness layout … the same underlying shared
+  // modular powerful system"): openvibe-shared 4.257.0's ov-harness.js draws the same runs as a harness (projects and
+  // their threads, the thread, what it changed). Before Codes serves it, the messenger stays.
+  function loadHarness() {
+    if (window.OpenVibeHarness && window.OpenVibeHarness.page) return Promise.resolve(window.OpenVibeHarness);
+    return new Promise(function (resolve) {
+      var sc = document.createElement('script'); sc.src = '/shared/ov-harness.js'; sc.async = true;
+      sc.onload = function () { resolve(window.OpenVibeHarness && window.OpenVibeHarness.page ? window.OpenVibeHarness : null); };
+      sc.onerror = function () { resolve(null); };
+      document.head.appendChild(sc);
+    });
+  }
+  /** The person's recent repositories, as the server-rendered page lists them (its chips and its repository field). */
+  function recentRepos() {
+    var out = [];
+    app.querySelectorAll('[data-ch-saved-repo]').forEach(function (b) { var t = (b.textContent || '').trim(); if (t && out.indexOf(t) < 0) out.push(t); });
+    var field = app.querySelector('input[name="repo"]');
+    var v = field && field.value ? String(field.value).trim().replace(/^https?:\/\/(www\.)?github\.com\//, '').replace(/\.git$/, '') : '';
+    if (v && out.indexOf(v) < 0) out.unshift(v);
+    return out.slice(0, 8);
+  }
+  /** Where a new task may run: OpenVibe, and the machines the server-rendered page offers (its Runs on picker). */
+  function places() {
+    var out = [{ kind: 'openvibe', name: 'OpenVibe' }];
+    app.querySelectorAll('select[name="machine"] option').forEach(function (o) {
+      var id = String(o.value || ''); if (!/^dev_[A-Za-z0-9_-]{1,80}$/.test(id) || o.disabled) return;
+      out.push({ kind: 'machine', id: id, name: (o.textContent || id).trim().slice(0, 60) });
+    });
+    return out;
+  }
+  /** Every harness Codes runs (its catalog), for the Agent picker; null when it does not answer. */
+  function harnesses() {
+    return fetch('/api/v1/harnesses', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { return j && Array.isArray(j.harnesses) ? j.harnesses.map(function (h) { return { id: h.id, name: h.name || h.id }; }) : null; })
+      .catch(function () { return null; });
+  }
+  // 11-15 night (plan §AD.8; the owner: "a complete rethink and redesign … way smarter, intelligent type system
+  // sessions, kind of like Claude Code … but make it way better"): openvibe-shared 4.265.0's ov-session.js is the one
+  // session surface for every agent: sessions in a drawer (a column on a computer), the thread as a harness draws it
+  // (grouped tools, the files it changed and their diffs, the plan above the box), one box with one context chip, / and @.
+  // Codes opens it on Codes (the chip can pick any agent). Before Codes serves it, the harness above stays.
+  function loadSession() {
+    if (window.OpenVibeSession && window.OpenVibeSession.mount) return Promise.resolve(window.OpenVibeSession);
+    return new Promise(function (resolve) {
+      var sc = document.createElement('script'); sc.src = '/shared/ov-session.js'; sc.async = true;
+      sc.onload = function () { resolve(window.OpenVibeSession && window.OpenVibeSession.mount ? window.OpenVibeSession : null); };
+      sc.onerror = function () { resolve(null); };
+      document.head.appendChild(sc);
+    });
+  }
+  function tokenSoon() {
+    return new Promise(function (resolve) {
+      var start = Date.now();
+      (function look() {
+        var N = window.OpenVibeNavbar; var t = N && typeof N.token === 'function' ? N.token() : null;
+        if (t) return resolve(t);
+        if (Date.now() - start > 8000) return resolve(null);
+        setTimeout(look, 150);
+      })();
+    });
+  }
+  var q = null; try { q = new URLSearchParams(location.search); } catch (e) { q = null; }
+  var prompt = q ? String(q.get('prompt') || '').slice(0, 4000) : '';
+  var open = q ? String(q.get('run') || '') : '';
+  tokenSoon().then(function (token) {
+    if (!token) return;
+    return loadSession().then(function (S) {
+      if (S) return showSession(S, token);
+      return loadRun().then(function (R) {
+        return Promise.all([loadHarness(), harnesses()]).then(function (two) { show(R, two[0], token, two[1]); });
+      });
+    });
+  }).catch(function () { /* nothing loaded: the server-rendered page stays */ });
+
+  var place = function (p) {
+    try { if (p && p.ref) history.replaceState(null, '', '/?run=' + encodeURIComponent(p.ref)); else if (p && p.blank) history.replaceState(null, '', '/'); } catch (e) { /* the address stays */ }
+  };
+  function showSession(S, token) {
+    var repos = recentRepos();
+    var host = document.createElement('div'); host.className = 'co-messenger co-session';
+    app.replaceWith(host);
+    document.documentElement.classList.add('co-has-messenger');
+    var opened = /^[a-z][a-z0-9-]{0,30}:[A-Za-z0-9._~-]{1,160}$/.test(open) ? open : null;
+    var s = S.mount(host, {
+      base: 'https://openvibe.network/api/frame',
+      token: function () { var N = window.OpenVibeNavbar; return (N && N.token && N.token()) || token; },
+      sibling: function (file) { return '/shared/' + file; },
+      agent: 'codes',
+      works: repos.map(function (r) { return { value: r, name: r, line: 'A repository you worked on here' }; }),
+      starters: STARTERS,
+      open: opened,
+      title: 'Codes',
+      helloTitle: 'What should we build?',
+      line: 'Type anything: it writes the code, gives you a space for it, reads a GitHub repository or copies one to OpenVibe.Git. It runs on a shared node or your own computer, never on OpenVibe\'s own server.',
+      placeholder: 'Describe what to build, or ask about code',
+      onEvent: function (type, d) { if (type === 'session.opened' && d && d.ref) place({ ref: d.ref }); else if (type === 'session.blank') place({ blank: true }); },
+    });
+    if (prompt && s && typeof s.prefill === 'function') s.prefill(prompt);
+  }
+
+  function show(R, H, token, agents) {
+    var repos = recentRepos();
+    var where = places();
+    var host = document.createElement('div'); host.className = 'co-messenger';
+    app.replaceWith(host);
+    document.documentElement.classList.add('co-has-messenger');
+    var opened = /^[a-z][a-z0-9-]{0,30}:[A-Za-z0-9._~-]{1,160}$/.test(open) ? open : null;
+    if (H) {
+      document.documentElement.classList.add('co-has-harness');
+      var h = H.page(host, {
+        base: 'https://openvibe.network/api/frame',
+        token: function () { var N = window.OpenVibeNavbar; return (N && N.token && N.token()) || token; },
+        sibling: function (file) { return '/shared/' + file; },
+        repos: repos,
+        target: repos[0] ? { repo: repos[0] } : 'new',
+        // 4.258.0: which harness, and where it runs (Link machines from the page's own picker).
+        agents: agents || undefined,
+        places: where.length > 1 ? where : undefined,
+        open: opened,
+        onPlace: place,
+      });
+      if (prompt && h && typeof h.prefill === 'function') h.prefill(prompt);
+      return;
+    }
+    var page = R.page(host, {
+      base: 'https://openvibe.network/api/frame',
+      token: function () { var N = window.OpenVibeNavbar; return (N && N.token && N.token()) || token; },
+      agent: true, starters: STARTERS,
+      actions: { base: 'https://openvibe.network' },
+      sibling: function (file) { return '/shared/' + file; },
+      open: opened,
+      onPlace: place,
+    });
+    if (prompt && page.main && page.main.prefill) page.main.prefill(prompt);
+  }
+})();

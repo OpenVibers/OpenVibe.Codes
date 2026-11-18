@@ -69,6 +69,27 @@ const answer = (doc) => ({ ok: true, status: 200, json: async () => doc });
             assert.equal(by['minimax-code'].machines[0].machine, 'dev_ada_laptop');
         });
 
+        await check('roadFacts: the fleet as the coding ladder\'s facts; roads picks the agent with room, signed in, online', async () => {
+            const { roadFacts } = require('../server/domain/fleet');
+            const roads = require('openvibe-sdk/agents/roads');
+            const fleet = createFleet({ config: { bot: { internalUrl: 'http://bot.test' } }, store, log, now: () => NOW, fetchImpl: async () => machines([
+                { id: 'dev_ada_laptop', node_id: 'lnk_ada', name: 'ada-laptop', online: true, fleet: [
+                    { agent: 'codex', installed: true, signed_in: true, windows: [{ name: 'week', used: 100, limit: 100, resets_at: RESET }] },
+                    { agent: 'minimax-code', installed: true, signed_in: true, windows: [{ name: 'week', used: 10, limit: 100, resets_at: RESET }] },
+                    { agent: 'opencode', installed: true, signed_in: false, windows: [] },
+                ] },
+            ]) });
+            await fleet.refresh(SUBJECT, 'tok');
+            const facts = roadFacts(await fleet.agents(SUBJECT, null));
+            const by = Object.fromEntries(facts.map((f) => [f.harness, f]));
+            assert.deepStrictEqual([by.codex.online, by.codex.window_left, by.codex.plan], [false, 0, 'OpenAI'], 'a full week is no room');
+            assert.equal(by.opencode.online, false, 'not signed in is not a road');
+            assert.deepStrictEqual([by['minimax-code'].machine_name, by['minimax-code'].plan, by['minimax-code'].online], ['ada-laptop', 'MiniMax', true]);
+            const r = roads.pick({ mode: 'code', fleet: facts, allowance: null });
+            assert.deepStrictEqual([r.road, r.harness, r.machine.name, r.plan], ['plan', 'minimax-code', 'ada-laptop', 'MiniMax']);
+            assert.match(roads.say(r), /runs it on ada-laptop, on your MiniMax plan\.$/);
+        });
+
         await check('the router reads the fleet per runner, with the machine that has room', async () => {
             const fleet = createFleet({ config: { bot: { internalUrl: 'http://bot.test' } }, store, log, now: () => NOW, fetchImpl: async () => machines([
                 { id: 'dev_ada_laptop', node_id: 'lnk_ada', name: 'ada-laptop', online: true, fleet: [

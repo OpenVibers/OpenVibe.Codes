@@ -20,8 +20,8 @@ const MOVED_EXACT = ['/policy/rfc', '/policy/compatibility', '/policy/licensing'
 // The console's API: everything under /api/v1 but the agent catalog, the coding tasks (codes.task.*), the person's
 // own API (/me), the Action Center read (codes.actions.read), a person's own connections (Codes C3), the conductor
 // with its approvals inbox (Codes C9b), the fleet their machines report (Codes C9c) and the workspace knowledge
-// their own agents read and add (Know K5).
-const API_STAYS = /^\/api\/v1\/(harnesses|runs|tasks|model-plans|repos$|admin\/repo-sources$|task\/[^/]+\/share|skill\/[^/]+\/share|skills|memory-store|share|shared-with-me|actions|me|connections|conductor|approvals|fleet|knowledge|attachments)(\/|$)/;
+// their own agents read and add (Know K5), and the sessions a person carries here (plan §AD.22).
+const API_STAYS = /^\/api\/v1\/(harnesses|runs|tasks|model-plans|repos$|admin\/repo-sources$|task\/[^/]+\/share|skill\/[^/]+\/share|skills|memory-store|share|shared-with-me|actions|me|connections|conductor|approvals|fleet|knowledge|attachments|sessions\/imports|sessions\/import-links|runner)(\/|$)/;
 
 const under = (p, prefix) => p === prefix || p.startsWith(`${prefix}/`);
 

@@ -26,6 +26,20 @@ const { boundedEvidence } = require('../engine/goal');
 const { validatePlan } = require('../engine/model-plan');
 const { repositoryPlan, selectPlan, resolveRepositoryPlan, runModelPlan } = require('./model-plan');
 const skills = require('../engine/skills');
+const codeMode = require('./code-mode');
+/** A job's code mode: true (strict where the harness can), 'strict', 'beside' (its own tools stay), or none. */
+function codeModeArg(a) {
+    const v = a.code_mode !== undefined ? a.code_mode : a.codeMode;
+    return v === true ? true : v === 'strict' || v === 'beside' ? v : null;
+}
+/** A harness's kind for code mode's plan: one of the CLIs, an ACP agent, or an API harness (Codes' own loop). */
+function harnessKind(agent) {
+    if (!agent) return null;
+    const cli = require('./adapters/cli');
+    if (Object.values(cli).some((x) => x && typeof x === 'object' && x.id === agent)) return 'cli';
+    try { if (require('./acp-agents.json').agents.some((a) => a.id === agent)) return 'acp'; } catch { /* no registry */ }
+    return 'api';
+}
 
 const JOB_PROTOCOL = '1.0.0';
 /** The agents a conductor's turn may run on: every harness Codes offers. */
@@ -215,18 +229,24 @@ function parseArgs(raw, env = process.env) {
         const resume = typeof resumeIn === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(resumeIn) ? resumeIn : null;
         const wanted = jobEnv(a);
         const agent = CONDUCTOR_AGENTS.includes(a.agent) ? a.agent : 'claude-code';
+        // A session carried to openvibe.codes (plan §AD.22): where to read it (the person's server, https or this
+        // machine's own) and the session it is, which this turn resumes.
+        const imported = a.import && typeof a.import === 'object' && typeof a.import.url === 'string' && /^https?:\/\/[^\s]{1,500}$/.test(a.import.url)
+            && typeof a.import.session === 'string' && /^[A-Za-z0-9-]{8,80}$/.test(a.import.session) ? { url: a.import.url, session: a.import.session } : null;
         // Claude Code asks the owner through its permission prompt tool; Codex and OpenCode have none, so "ask" and
         // "project" run them with edits only (their own sandbox), and "full" with the whole computer.
         const permission = agent !== 'claude-code' && safety === 'full' ? 'full' : 'edit';
         return {
             kind, repo: null, ref: null, prompt, permission, push: null,
             folder, safety, mcp: a.mcp === true, codesUrl,
+            ...(codeModeArg(a) ? { codeMode: codeModeArg(a) } : {}),
             taskId: typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? a.task_id : null,
             model: typeof a.model === 'string' && a.model.length <= 100 ? a.model : null,
             ...(effort ? { effort } : {}),
             agent,
             ...(files.length ? { attachments: files } : {}),
             ...(resume ? { resume } : {}),
+            ...(imported ? { import: imported } : {}),
             ...(Object.keys(wanted).length ? { env: wanted } : {}),
         };
     }
@@ -282,6 +302,8 @@ function parseArgs(raw, env = process.env) {
     const planSource = ['task', 'project', 'account'].includes(a.plan_source) ? a.plan_source : 'task';
     return {
         kind, repo: repo ? repo.toString() : null, ref, prompt, permission, push,
+        // Code mode (2026-11-18, harness/code-mode.js): the agent may run one script for many steps.
+        ...(codeModeArg(a) ? { codeMode: codeModeArg(a) } : {}),
         // The task this job is an attempt of, when the server names it: the checkpoint refs carry it.
         ...(typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? { taskId: a.task_id } : {}),
         ...(attached.length ? { attachments: attached } : {}),
@@ -537,6 +559,32 @@ function opencodeConfig(file, server) {
 }
 
 /**
+ * A session carried to openvibe.codes (plan §AD.22), placed where this machine's Claude Code finds it, before the turn
+ * resumes it: `<CLAUDE_CONFIG_DIR>/projects/<folder slug>/<session>.jsonl`, every record's folder moved to this one.
+ * Once there it is the agent's own and grows with each turn, so a later turn leaves it alone. → the file, or null.
+ */
+async function placeImport(job, { work, env, fetchImpl, say }) {
+    if (!job.import) return null;
+    const portable = require('../engine/portable');
+    const configDir = env.CLAUDE_CONFIG_DIR || path.join(env.HOME || os.homedir(), '.claude');
+    const target = path.join(configDir, 'projects', portable.slug(work), `${job.import.session}.jsonl`);
+    if (fs.existsSync(target)) return target;
+    const token = codesToken(env);
+    say({ t: 'step', text: 'Bringing your imported session to this machine' });
+    const response = await fetchImpl(job.import.url, {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), Accept: 'application/gzip' },
+        signal: AbortSignal.timeout(120_000),
+    });
+    if (!response.ok) throw new Error(`the imported session could not be read (the server answered ${response.status})`);
+    const gz = Buffer.from(await response.arrayBuffer());
+    const doc = JSON.parse(require('zlib').gunzipSync(gz, { maxOutputLength: 200 * 1024 * 1024 }).toString('utf8'));
+    if (doc.session_id !== job.import.session) throw new Error('the imported session is not the one this turn resumes');
+    const file = portable.placeClaude(doc, { configDir, cwd: work });
+    say({ t: 'step', text: `Your session is here: ${doc.counts ? doc.counts.messages : '?'} messages, resumed in ${work}` });
+    return file;
+}
+
+/**
  * The owner's attached files, written where the agent can read them: `<root>/.openvibe/attachments/<dir>/<name>`. For a
  * coding task root is the clone (and .openvibe/ is kept out of the diff); for a conductor it is the person's folder.
  * Returns [{ path, rel, name, mime, size }] for the ones that arrived.
@@ -573,6 +621,38 @@ async function writeAttachments(job, { dir, env, fetchImpl, say, root = null }) 
         }
     }
     return out;
+}
+
+/**
+ * The map of the network for an OpenVibe repository's task (2026-11-16; the owner: agents should know "all the
+ * different repositories and how they're interconnected … which repositories it needs"): openvibe-contracts' system
+ * map writes the repositories this task likely needs, how the network fits and every service into
+ * .openvibe/OPENVIBE.md, kept out of git like the attachments. Another repository's task gets nothing; an older
+ * openvibe-contracts without the map, nothing either.
+ */
+function loadSystemMap() {
+    // Only the map, not the whole package: the runner loads contracts on first use (0.10.0, the 5x faster start).
+    try { return require('openvibe-contracts/lib/system-map'); } catch { return null; }
+}
+function systemBrief(job, work, env = process.env, map = loadSystemMap()) {
+    if (env.OPENVIBE_CODES_SYSTEM_MAP === '0') return null;
+    const ours = /(^|[/:])OpenVibers\//i.test(String(job.repo || '')) || /git\.openvibe\.codes\//i.test(String(job.repo || ''));
+    if (!ours && env.OPENVIBE_CODES_SYSTEM_MAP !== '1') return null;
+    if (!map || typeof map.markdown !== 'function') return null;
+    try {
+        const dir = path.join(work, '.openvibe');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'OPENVIBE.md'), map.markdown(job.prompt || ''));
+        try { fs.appendFileSync(path.join(work, '.git', 'info', 'exclude'), '\n.openvibe/\n'); } catch { /* not a git checkout */ }
+        const picks = map.reposFor(job.prompt || '', { limit: 4 }).picks.map((p) => p.name);
+        return { rel: '.openvibe/OPENVIBE.md', picks };
+    } catch { return null; }
+}
+
+/** The line a turn's prompt gets for the map. */
+function briefPrompt(brief) {
+    if (!brief) return '';
+    return `\n\n---\nThis repository is part of OpenVibe, a network of services that work together. Before you start, read \`${brief.rel}\`: the repositories this task likely needs${brief.picks.length ? ` (${brief.picks.join(', ')})` : ''}, how they connect, and every service. A fix often belongs in a shared library (openvibe-shared, openvibe-sdk, openvibe-contracts) rather than in this repository: say so in your summary when it does.`;
 }
 
 /** The lines a turn's prompt gets for its files: exactly where they are in the workspace. */
@@ -753,6 +833,10 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
     let work = path.join(dir, 'repo');
     const result = { protocol: JOB_PROTOCOL, ok: false, kind: job.kind, repo: job.repo ? scrub(job.repo) : null, ref: job.ref, agents: [], summary: '' };
     let base = null;
+    // Code mode's project files (opencode.json, .mcp.json) go back as they were when the agent is done (runner 0.14.0).
+    let codeModeRun = null;
+    const conductorRestores = [];
+    const putBack = () => { if (codeModeRun) codeModeRun.cleanup(); while (conductorRestores.length) { try { conductorRestores.pop()(); } catch { /* best effort */ } } };
     try {
         let adapterOptions = null;
         if (job.kind === 'code') {
@@ -783,6 +867,11 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                     result.base_patch = 'failed';
                     say({ t: 'note', level: 'warning', text: 'The earlier turns\' changes no longer apply to the branch; this turn starts from the branch as it is.' });
                 }
+            }
+            const brief = systemBrief(job, work, env);
+            if (brief) {
+                job = { ...job, prompt: job.prompt + briefPrompt(brief) };
+                say({ t: 'step', text: `The map of OpenVibe for this task${brief.picks.length ? `: ${brief.picks.join(', ')}` : ''}` });
             }
             // The owner's files are part of the workspace, not of the change: .openvibe/ stays out of git.
             const files = await writeAttachments(job, { dir, env, fetchImpl, say, root: work });
@@ -820,6 +909,10 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                 job = { ...job, prompt: job.prompt + attachmentPrompt(files) };
                 say({ t: 'step', text: `${files.length} file${files.length === 1 ? '' : 's'} attached` });
             }
+            if (job.import && (job.agent === 'claude-code' || job.agent === 'claude-other')) {
+                await placeImport(job, { work, env, fetchImpl, say });
+                job = { ...job, resume: job.import.session };
+            }
             if (job.agent === 'claude-code' || job.agent === 'claude-other') {
                 adapterOptions = {
                     // "ask" is Claude Code's own default mode, where every risky call goes to the permission prompt tool
@@ -832,7 +925,7 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
                 // The same Codes tools, started by a launcher script for an agent that takes no MCP config argument.
                 const server = job.mcp ? conductorMcpLauncher(path.join(dir, 'codes-mcp.sh'), job, env) : null;
                 adapterOptions = server
-                    ? (job.agent === 'codex' ? { mcpServer: server } : { configFile: opencodeConfig(path.join(dir, 'opencode.json'), server) })
+                    ? (job.agent === 'codex' ? { mcpServer: server } : { mcpServers: [server], restores: conductorRestores })
                     : {};
                 say({ t: 'step', text: `This turn runs on ${job.agent === 'codex' ? 'Codex' : 'OpenCode'}` });
             } else {
@@ -844,6 +937,39 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         } else {
             fs.mkdirSync(work, { recursive: true });
             say({ t: 'step', text: 'Preparing an empty benchmark workspace' });
+        }
+        // Code mode (2026-11-18): Claude Code's own works only in an interactive terminal, so a job that asks for it
+        // gets Codes' ov_code server beside the agent (harness/code-mode.js): one script for many reads, searches and
+        // edits, within the job's own permission.
+        const plan = job.codeMode ? (job.agent ? codeMode.planFor(job.agent, harnessKind(job.agent)) : { via: 'any', strict: true }) : null;
+        if (plan && !plan.via) say({ t: 'note', text: `Code mode does not apply to ${job.agent}: ${plan.note}` });
+        else if (plan && plan.via === 'own') say({ t: 'step', text: `Code mode: ${plan.note}` });
+        if (plan && plan.via && plan.via !== 'own') {
+            const why = codeMode.ready();
+            if (why) say({ t: 'note', level: 'warning', text: `Code mode is off for this run: ${why}` });
+            else {
+                const permission = job.kind === 'conductor'
+                    ? ({ ask: 'read', project: 'files', full: 'full' }[job.safety] || 'read')
+                    : ({ read: 'read', edit: 'edit', full: 'full' }[job.permission] || 'read');
+                // Strict on a cloned repository and at "full" (nothing asks the owner there): the agent's own file and
+                // shell tools are off and the work goes through scripts. A conductor at "ask" or "project" keeps its
+                // own tools, whose risky calls ask the owner, and has code mode beside them.
+                // job.codeMode 'beside' never turns the agent's own tools off; true or 'strict' does where the harness
+                // can (PLANS) and nothing asks the owner (a repository task, or a conductor at "full").
+                const strict = job.codeMode !== 'beside' && plan.strict && (job.kind !== 'conductor' || job.safety === 'full');
+                const cm = codeMode.mcpOptions({ file: path.join(dir, 'mcp-code.json'), root: work, permission, existing: adapterOptions && adapterOptions.mcpConfig });
+                codeModeRun = codeMode.descriptor({ root: work, permission, strict });
+                codeModeRun.hintText = codeMode.hintFor({ strict, permission });
+                adapterOptions = {
+                    ...(adapterOptions || {}),
+                    // Claude Code: a config file and the allow list; every other harness reads codeMode.server its own way.
+                    mcpConfig: cm.mcpConfig,
+                    allowedTools: [...((adapterOptions && adapterOptions.allowedTools) || []), cm.tool],
+                    codeMode: { ...codeModeRun, hint: codeModeRun.hint, strict, claudeHint: codeModeRun.hintText },
+                };
+                result.code_mode = { permission, strict, via: plan.via };
+                say({ t: 'step', text: `Code mode: the agent works in scripts${strict ? '' : ' beside its own tools'} (${permission})` });
+            }
         }
         const run = job.plan ? {
             runId: job.taskId || 'plan',
@@ -899,6 +1025,8 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
             for (const line of Array.isArray(c) ? c : c ? [c] : []) say(line);
             if (e.type === 'system' && e.subtype === 'init' && e.agent && !result.agents.includes(e.agent)) result.agents.push(e.agent);
         }
+        // The agent is done: code mode's project files go back before the diff and the push see the tree.
+        putBack();
         result.ok = !!(last && last.type === 'result' && !last.is_error);
         const answer = last && typeof last.result === 'string' ? last.result : '';
         result.summary = answer.slice(0, 4000);
@@ -997,6 +1125,7 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         result.error = scrub(e.message);
         say({ t: 'note', text: result.error });
     } finally {
+        putBack();
         result.duration_ms = Date.now() - started;
         fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -1018,4 +1147,4 @@ function resultWriter(emit) {
     };
 }
 
-module.exports = { CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, localGitSource, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments, attachmentPrompt, agentPrompt, jobAttachments };
+module.exports = { placeImport, systemBrief, briefPrompt, CONDUCTOR_AGENTS, conductorMcpLauncher, opencodeConfig, gitAuthFor, credentialFor, giteaHosts, pushForge, cloneProblem, runJob, parseArgs, compact, sessionLog, stepInput, resultWriter, scrub, githubRepo, pushTarget, jobEnv, localGitSource, ENV_NAMES, JOB_PROTOCOL, codesToken, conductorMcpConfig, writeAttachments, attachmentPrompt, agentPrompt, jobAttachments };

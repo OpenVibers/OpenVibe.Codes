@@ -85,6 +85,39 @@ const { boot, check, done } = require('./helpers/boot');
             const r = await call('POST', '/tasks', { as: ada, body: ask, origin: 'https://evil.example' });
             assert.strictEqual(r.status, 403);
         });
+
+        await check('signing an agent in on a machine: only yours, only a known agent, and only by its person (2026-11-16)', async () => {
+            const codeOf = (r) => { try { return JSON.parse(r.text).code; } catch { return undefined; } };   // problem+json
+            assert.strictEqual((await call('POST', '/agents/claude-code/sign-in', { body: { machine: 'lnk_x' } })).status, 401, 'a guest');
+            const unknown = await call('POST', '/agents/no-such-agent/sign-in', { as: ada, body: { machine: 'lnk_x' } });
+            assert.deepStrictEqual([unknown.status, codeOf(unknown)], [422, 'codes.agent_unknown']);
+            const none = await call('POST', '/agents/claude-code/sign-in', { as: ada, body: {} });
+            assert.deepStrictEqual([none.status, codeOf(none)], [422, 'codes.machine_required']);
+            const notHers = await call('POST', '/agents/claude-code/sign-in', { as: ada, body: { machine: 'dev_01J8Z3Q4R5S6T7V8W9X0Y1Z2ZZ' } });
+            assert.ok([404, 503].includes(notHers.status), `a machine that is not hers is never pinned (${notHers.status} ${notHers.text})`);
+            assert.ok(!calls.some((c) => c[0] === 'submit' && c[1] && c[1].args && c[1].args.mode === 'login'), 'nothing was started');
+            const cross = await call('POST', '/agents/claude-code/sign-in', { as: ada, body: { machine: 'lnk_x' }, origin: 'https://evil.example' });
+            assert.strictEqual(cross.status, 403);
+            const code = await call('POST', '/agents/sign-in/job_01J8Z3Q4R5S6T7V8W9X0Y1Z2J9/code', { as: bo, body: { code: 'x' } });
+            assert.deepStrictEqual([code.status, codeOf(code)], [404, 'codes.sign_in_not_found'], 'nobody types to a sign-in that is not theirs');
+        });
+
+        await check('the map of OpenVibe: signed in only; the whole map, a task\'s repositories, or the brief (2026-11-16)', async () => {
+            assert.strictEqual((await call('GET', '/system-map')).status, 401);
+            let map = null;
+            try { map = require('openvibe-contracts/lib/system-map'); } catch { map = null; }
+            const whole = await call('GET', '/system-map', { as: ada });
+            if (!map) { assert.strictEqual(whole.status, 503, 'an older openvibe-contracts: said plainly'); return; }
+            assert.strictEqual(whole.status, 200);
+            const body = JSON.parse(whole.text);
+            assert.ok(body.services.length > 20 && body.libraries.length === 3, 'services and the three libraries');
+            assert.ok(!JSON.stringify(body).includes('127.0.0.1'), 'no internal origins');
+            const picked = JSON.parse((await call('GET', `/system-map?task=${encodeURIComponent('the search box in the menu shows its label twice')}`, { as: ada })).text);
+            assert.strictEqual(picked.picks[0].name, 'OpenVibe.Shared');
+            const md = await call('GET', `/system-map?format=md&task=${encodeURIComponent('Actor shows its bookkeeping as thoughts')}`, { as: ada });
+            assert.match(md.headers.get('content-type') || '', /text\/markdown/);
+            assert.match(md.text, /OpenVibe\.Actor/);
+        });
     } finally {
         await t.close();
     }

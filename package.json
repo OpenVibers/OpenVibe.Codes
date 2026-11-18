@@ -1,6 +1,6 @@
 {
   "name": "openvibe-codes",
-  "version": "0.8.1",
+  "version": "0.14.1",
   "private": true,
   "description": "OpenVibe.Codes: the open coding-agent harness. Run a coding task on Claude Code, Codex, OpenCode, Command Code, Aider, the DeepSeek API or your own model, with routing by capability and cost and hand-offs between agents; plus the site with the agent catalog, a public routing API and the way to improve OpenVibe itself.",
   "main": "harness/index.js",
@@ -30,9 +30,9 @@
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.1.0",
     "iovalkey": "^0.4.0",
-    "openvibe-contracts": "https://codeload.github.com/OpenVibers/OpenVibe.Contracts/tar.gz/refs/tags/v0.422.0",
-    "openvibe-sdk": "https://codeload.github.com/OpenVibers/OpenVibe.SDK/tar.gz/refs/tags/v0.168.0",
-    "openvibe-shared": "https://codeload.github.com/OpenVibers/OpenVibe.Shared/tar.gz/refs/tags/v4.248.0",
+    "openvibe-contracts": "https://git.openvibe.codes/api/v1/repos/openvibers/openvibe.contracts/archive/v0.444.0.tar.gz",
+    "openvibe-sdk": "https://git.openvibe.codes/api/v1/repos/openvibers/openvibe.sdk/archive/v0.186.1.tar.gz",
+    "openvibe-shared": "https://git.openvibe.codes/api/v1/repos/openvibers/openvibe.shared/archive/v4.314.0.tar.gz",
     "pg": "^8.23.0",
     "yaml": "^2.9.1"
   },

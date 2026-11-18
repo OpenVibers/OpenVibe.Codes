@@ -258,7 +258,7 @@
                 const form = document.querySelector('[data-c4-conductor-form]');
                 if (form) form.hidden = true;
                 const view = window.OpenVibeAgentSession.mount(host, {
-                    title: run.title || 'Conductor', status: run.status || 'running', follow: live, files: false,
+                    title: run.title || 'Orchestrator', status: run.status || 'running', follow: live, files: false,
                     onSend: (text) => fetch('/api/v1/conductor/' + encodeURIComponent(taskId) + '/messages', {
                         method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text })
                     }).then((r) => { if (!r.ok) throw new Error('The message could not be sent.'); window.location.reload(); })

@@ -14,7 +14,7 @@ const path = require('path');
 const http = require('http');
 const { createHarness } = require('../harness');
 const { createStore } = require('../harness/sessions');
-const { refusedCommand, runTool, adviceTranscript } = require('../harness/adapters/api');
+const { refusedCommand, runTool, adviceTranscript, grepTool, trimContext, forResume, retriesFor, retryWait } = require('../harness/adapters/api');
 const { check, done } = require('./helpers/boot');
 
 /** A chat-completions server that answers from a script: each request gets the next scripted message. Advice calls
@@ -66,7 +66,7 @@ const toolResults = (events) => events.filter((e) => e.type === 'user').flatMap(
     fs.symlinkSync(path.join(dir, 'outside.txt'), path.join(work, 'outside-link'));
     fs.symlinkSync(path.join(work, '.env'), path.join(work, 'env-link'));
     fs.symlinkSync(path.join(dir, 'outside-dir'), path.join(work, 'dir-link'));
-    const env = { PATH: '/nonexistent', OPENVIBE_CODES_HOME: path.join(dir, 'home'), OPENVIBE_CODES_BASE_URL: api.url, OPENVIBE_CODES_MODEL: 'tiny', OPENVIBE_CODES_API_KEY: 'k-123' };
+    const env = { PATH: '/nonexistent', OPENVIBE_CODES_HOME: path.join(dir, 'home'), OPENVIBE_CODES_BASE_URL: api.url, OPENVIBE_CODES_MODEL: 'tiny', OPENVIBE_CODES_API_KEY: 'k-123', OPENVIBE_CODES_RETRY_MS: '0' };
     const h = createHarness({ env, store: createStore({ env }) });
     // The same stand-in as OpenVibe.AI: the advice route hangs off the chat base without its /v1.
     const aiEnv = { ...env, OPENVIBE_AI_URL: api.url, OPENVIBE_AI_TOKEN: 'ov-task-token' };
@@ -291,13 +291,86 @@ const toolResults = (events) => events.filter((e) => e.type === 'user').flatMap(
         assert.ok(!('effort' in api.requests[0].body), 'no effort names no level');
     });
 
-    await check('an HTTP error ends the run with the server\'s message', async () => {
-        api.set([{ status: 429, error: 'rate limited, slow down' }]);
+    await check('an HTTP error ends the run with the server\'s message (a 429 after it was asked again twice)', async () => {
+        api.set([1, 2, 3].map(() => ({ status: 429, error: 'rate limited, slow down' })));
         const events = await collect(h.run({ prompt: 'x', agent: 'openai-compatible', cwd: work, handoff: false }));
         const r = events.find((e) => e.type === 'result');
         assert.strictEqual(r.is_error, true);
         assert.match(r.result, /HTTP 429: rate limited/);
+        assert.strictEqual(api.requests.length, 3, 'asked three times in all');
+        assert.strictEqual(events.filter((e) => e.subtype === 'warning' && /answered HTTP 429; asking again/.test(e.text)).length, 2);
     });
+
+    await check('a busy API is asked again and the run goes on; a refusal is not asked again', async () => {
+        api.set([{ status: 503, error: 'overloaded' }, { content: 'answered after the wait' }]);
+        const events = await collect(h.run({ prompt: 'x', agent: 'openai-compatible', cwd: work, handoff: false }));
+        const r = events.find((e) => e.type === 'result');
+        assert.strictEqual(r.is_error, false, r.result);
+        assert.strictEqual(r.result, 'answered after the wait');
+        assert.strictEqual(api.requests.length, 2);
+        api.set([{ status: 400, error: 'bad request' }]);
+        const refused = await collect(h.run({ prompt: 'x', agent: 'openai-compatible', cwd: work, handoff: false }));
+        assert.match(refused.find((e) => e.type === 'result').result, /HTTP 400: bad request/);
+        assert.strictEqual(api.requests.length, 1, 'a 400 is the answer');
+        assert.deepStrictEqual([429, 503, 500, 502, 504, null, 400, 401, 404].map(retriesFor), [2, 2, 1, 1, 1, 1, 0, 0, 0]);
+        assert.strictEqual(retryWait(0, '3', 2000), 3000, 'Retry-After wins');
+        assert.strictEqual(retryWait(0, '600', 2000), 30_000, 'at most 30 s');
+        assert.deepStrictEqual([0, 1].map((a) => retryWait(a, null, 2000)), [2000, 6000]);
+    });
+
+    await check('past its size limit the conversation drops its oldest tool output, never the system message or its end', async () => {
+        fs.writeFileSync(path.join(work, 'wide.txt'), `${'x'.repeat(149)}\n`.repeat(100));
+        api.set([{ calls: Array.from({ length: 10 }, () => ['read_file', { path: 'wide.txt' }]) }, { content: 'read them all' }]);
+        const events = await collect(h.run({ prompt: 'read wide.txt ten times', agent: 'openai-compatible', cwd: work, handoff: false, adapterOptions: { contextChars: 20_000 } }));
+        assert.strictEqual(events.find((e) => e.type === 'result').result, 'read them all');
+        const sent = api.requests[1].body.messages;
+        const tools = sent.filter((m) => m.role === 'tool');
+        assert.strictEqual(tools.length, 10);
+        assert.ok(/^\[dropped: \d+ characters of earlier output; run the tool again if it is needed\]$/.test(tools[0].content), tools[0].content);
+        assert.ok(!tools[9].content.startsWith('[dropped:'), 'the end of the conversation is kept whole');
+        assert.strictEqual(sent[0].role, 'system');
+        assert.ok(events.some((e) => e.subtype === 'warning' && /older tool output \(\d+ characters\) was dropped/.test(e.text)));
+        // Old file writes keep their path, not their text; a small conversation is left alone.
+        const msgs = [{ role: 'system', content: 's' }, { role: 'user', content: 'u' },
+            { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ path: 'a.txt', content: 'y'.repeat(30_000) }) } }] },
+            { role: 'tool', tool_call_id: 'c1', content: 'wrote a.txt' }, ...Array.from({ length: 8 }, () => ({ role: 'user', content: 'z' }))];
+        assert.ok(trimContext(msgs, 20_000) > 29_000);
+        assert.deepStrictEqual(JSON.parse(msgs[2].tool_calls[0].function.arguments), { path: 'a.txt', content: '[dropped: 30000 characters]' });
+        assert.strictEqual(trimContext(msgs, 20_000), 0, 'nothing left to drop under the limit');
+    });
+
+    await check('a saved conversation starts at the system message and then a person\'s message, never a cut-off tool result', async () => {
+        const msgs = [{ role: 'system', content: 's' }];
+        for (let i = 0; i < 80; i++) msgs.push({ role: 'user', content: `u${i}` }, { role: 'assistant', content: '', tool_calls: [{ id: `c${i}`, type: 'function', function: { name: 'list_dir', arguments: '{}' } }] }, { role: 'tool', tool_call_id: `c${i}`, content: 'x' });
+        const kept = forResume(msgs, 200);
+        assert.ok(kept.length <= 200);
+        assert.strictEqual(kept[0].role, 'system');
+        assert.strictEqual(kept[1].role, 'user');
+        assert.strictEqual(kept[kept.length - 1], msgs[msgs.length - 1]);
+        assert.strictEqual(forResume(msgs.slice(0, 10), 200).length, 10, 'a short one is kept whole');
+    });
+
+    await check('grep answers the same way through ripgrep: no .env, no skipped directory, no link followed; JavaScript-only patterns still work', async () => {
+        const g = path.join(dir, 'grep');
+        fs.mkdirSync(path.join(g, 'src'), { recursive: true });
+        fs.mkdirSync(path.join(g, 'node_modules', 'dep'), { recursive: true });
+        fs.writeFileSync(path.join(g, 'src', 'a.js'), 'const needle = 1;\nmodule.exports = needle;\n');
+        fs.writeFileSync(path.join(g, '.env'), 'needle=secret\n');
+        fs.writeFileSync(path.join(g, 'node_modules', 'dep', 'i.js'), 'needle\n');
+        fs.writeFileSync(path.join(dir, 'outside-needle.txt'), 'needle outside\n');
+        fs.symlinkSync(path.join(dir, 'outside-needle.txt'), path.join(g, 'link.txt'));
+        const [hits, err] = await grepTool({ pattern: 'needle' }, g);
+        assert.strictEqual(err, false);
+        assert.deepStrictEqual(hits.split('\n').sort(), ['src/a.js:1: const needle = 1;', 'src/a.js:2: module.exports = needle;']);
+        const [one] = await grepTool({ pattern: 'exports', path: 'src' }, g);
+        assert.strictEqual(one, 'src/a.js:2: module.exports = needle;');
+        const [behind, berr] = await grepTool({ pattern: '(?<=const )needle' }, g);
+        assert.strictEqual(berr, false);
+        assert.strictEqual(behind, 'src/a.js:1: const needle = 1;', 'a look-behind goes to the JavaScript grep');
+        assert.deepStrictEqual(await grepTool({ pattern: 'nothing-here' }, g), ['no matches', false]);
+        assert.match((await grepTool({ pattern: 'x', path: '../' }, g))[0], /outside the working directory/);
+    });
+
 
     await check('advise is offered only on OpenVibe.AI when the run asked for an advisor', async () => {
         api.set([{ content: 'done' }]);

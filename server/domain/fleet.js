@@ -80,6 +80,30 @@ function stateOf(row) {
     return 'ok';
 }
 
+/**
+ * The fleet as openvibe-sdk/agents/roads' coding facts (SDK 0.186.0, plan §AD.28 item 4): one entry per coding agent and
+ * machine it is on, in the rows' own order (the one with the most room first). An agent counts on a machine only when
+ * that machine is online and the agent has room there (installed, signed in, no window full); the plan is the account
+ * the agent signs in to (engine/logins.js: Anthropic, OpenAI …), so an agent with no sign-in of its own is no plan road.
+ *   roadFacts(agents(subject, harnesses)) → [{ machine, machine_name, harness, harness_name, plan, online, window_left }]
+ */
+function roadFacts(rows) {
+    const { CLIS } = require('../../engine/logins');
+    const out = [];
+    for (const r of Array.isArray(rows) ? rows : []) {
+        if (!r || !r.agent) continue;
+        const login = CLIS.find((c) => c.id === r.agent);
+        for (const m of Array.isArray(r.machines) ? r.machines : []) {
+            out.push({
+                machine: m.machine || null, machine_name: m.name || null, harness: r.agent, harness_name: r.name || r.agent,
+                plan: login ? login.provider : null, online: m.online !== false && m.room !== false,
+                window_left: r.state === 'limited' || r.state === 'empty' ? 0 : null,
+            });
+        }
+    }
+    return out;
+}
+
 function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = console, now = () => Date.now(), balance = null } = {}) {
     const db = store.db;
     const base = String((config.bot && config.bot.internalUrl) || '').replace(/\/+$/, '');
@@ -265,4 +289,4 @@ function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = c
     return { refresh, latest, byHarness, forRouter, agents, deviceFor, balances, stateOf, windowOf, mergeWindows, enabled: !!base };
 }
 
-module.exports = { createFleet, stateOf, windowOf, mergeWindows, FULL_PCT, LOW_PCT, MIN_BALANCE_USD, STATE };
+module.exports = { createFleet, stateOf, windowOf, mergeWindows, FULL_PCT, LOW_PCT, MIN_BALANCE_USD, STATE, roadFacts };

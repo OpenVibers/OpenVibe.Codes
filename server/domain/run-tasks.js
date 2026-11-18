@@ -166,7 +166,7 @@ function usageOf(result) {
     };
 }
 
-function createRunTasks({ store, run, config, log = console, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null, modelPlans = null, goalVerifier = null, raceSideEnded = null }) {
+function createRunTasks({ store, run, config, log = console, userSettings = null, sessions = null, outbox = null, runTokens = null, connections = null, attempts = null, proof = null, benchAttemptEnded = null, conductor = null, fleet = null, notices = null, placementContext = null, harnesses = null, knowledge = null, report = null, sharing = null, attachments: filesStore = null, modelPlans = null, goalVerifier = null, raceSideEnded = null }) {
     const db = store.db;
     const who = (row) => ({ subject: row.subject, project: row.project_id });
     // Lazily, so a caller that only reads tasks does not need the session/outbox modules (and there is no cycle).
@@ -298,7 +298,17 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
     async function withEnv(subject, args, env) {
         const git = forge && args && args.repo ? await forge.jobEnv(subject, args.repo).catch(() => null) : null;
         const all = { ...(env || {}), ...(git || {}) };
-        return Object.keys(all).length ? { ...args, env: all } : args;
+        // The person's settings for the job's agent (2026-11-18, server/domain/harness-prefs.js): code mode (the agent's
+        // own choice, else their switch), the model and reasoning when the task named none, and standing instructions.
+        let out = args;
+        if (userSettings && subject) {
+            try {
+                const settings = await userSettings.get(subject);
+                const offer = args && args.agent && harnesses && harnesses.get ? harnesses.get(args.agent) : null;
+                out = require('./harness-prefs').applyPrefs(args, settings, { name: offer && offer.name });
+            } catch { out = args; }
+        }
+        return Object.keys(all).length ? { ...out, env: all } : out;
     }
 
     async function attemptEnv({ subject, taskId, attemptId = null, agent = null, budget = null }) {
@@ -526,6 +536,9 @@ function createRunTasks({ store, run, config, log = console, sessions = null, ou
                             cost_usd: usage.cost_usd, tokens: usage.tokens, steps: usage.steps, turns: usage.turns, session: usage.session,
                             model: usage.model, machine: machineOf(next.job),
                             budget_hit: hit,
+                            // What this attempt changed by itself (Codes next (4)): the harness's turn diff, or the
+                            // file lists of this result and the one before it.
+                            turn_files: require('./turn-files').of(updated.result, current.result),
                             finished_at: updated.finished_at || store.iso(),
                         });
                     }

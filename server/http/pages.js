@@ -23,6 +23,7 @@ const { asyncRouter } = require('./router');
 const { createDiscoveryRoutes, homeJsonLd, SERVICES_ORIGIN } = require('./discovery');
 const { html, raw, table, notice } = require('../render/html');
 const kit = require('openvibe-shared/kit');
+const ACP_AGENTS = require('../../harness/acp-agents.json').agents;
 const { send } = require('../render/layout');
 const { markdown } = require('../render/markdown');
 const placement = require('../domain/harness-placement');
@@ -183,7 +184,7 @@ for await (const event of harness.run({ prompt: 'fix the failing test', cwd: '.'
             title: 'Get started with the coding-agent harness',
             description: 'Install openvibe-codes and run coding tasks on Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code, the DeepSeek API or your own model, with hand-offs between them, from your terminal or your own code.',
             crumbs: [{ label: 'Get started' }],
-            body: html`<h1>Get started</h1>
+            body: html`<h1>Get started with coding agents</h1>
 <p><code>openvibe-codes</code> runs a coding task on whichever agent fits it, hands it to the next one when an agent fails, hits its limit or goes quiet, and keeps the whole run. It runs on your machine with the agents and keys you already have: nothing goes through OpenVibe, and it needs no account.</p>
 <h2 id="install">Install</h2>
 <p>Node.js 22 or newer, then:</p>
@@ -203,12 +204,18 @@ ${table(['Agent', 'What it needs'], [
                 [html`<a href="/harnesses#deepseek">DeepSeek</a>`, html`<code>DEEPSEEK_API_KEY</code>; the harness runs its own agent loop against the API`],
                 [html`<a href="/harnesses#openvibe-ai">OpenVibe.AI</a>`, html`<code>OPENVIBE_APP_ID</code> and <code>OPENVIBE_APP_SECRET</code> (an app of your project on openvibe.services with <code>ai.app.run</code>), or a Network token in <code>OPENVIBE_AI_TOKEN</code>. For tool-capable models, keep your provider's key as a project secret granted to <code>ai</code> and name it in <code>OPENVIBE_AI_SECRET</code>, with <code>OPENVIBE_AI_PROVIDER_URL</code> and <code>OPENVIBE_AI_PROVIDER_MODEL</code>: the key never sits on this machine`],
                 [html`<a href="/harnesses#openai-compatible">Your own model</a>`, html`<code>OPENVIBE_CODES_BASE_URL</code> (an OpenAI-compatible server: llama.cpp, vLLM, Ollama, LM Studio…), <code>OPENVIBE_CODES_MODEL</code>, and <code>OPENVIBE_CODES_API_KEY</code> if it wants one`],
+                // The Agent Client Protocol's agents (harness/acp-agents.json): one client, each agent at its pinned version.
+                ...ACP_AGENTS.map((a) => {
+                    const d = a.distribution.npx || a.distribution.uvx;
+                    return [html`<a href="/harnesses#${a.id}">${a.name}</a>`, html`<code>${a.distribution.npx ? 'npx' : 'uvx'}</code> on PATH (it fetches <code>${d.package}</code>), signed in to ${a.name} on this machine; runs over the Agent Client Protocol`];
+                }),
             ])}
 <h2 id="use">Use it</h2>
 <pre tabindex="0"><code>${example}</code></pre>
 ${table(['Command', 'What it does'], [
                 [html`<code>agents</code>`, 'Which agents this machine can run, and why not the others.'],
                 [html`<code>route [--task edit] [--need harness:resume]</code>`, 'Which agent a task would go to, with the reason for every candidate.'],
+                [html`<code>swarm [--tickets 4] [--concurrency 3] [--agents a,b] "goal"</code>`, 'Split a goal into tickets that run at once, each on its own agent in its own git worktree, and merge them into one branch: yours is never touched.'],
                 [html`<code>run [options] "task"</code>`, html`Run a task. <code>--agent</code> skips routing, <code>--model</code> picks the first agent's model, <code>--cwd</code> sets where it works, <code>--attempts</code> caps the hand-offs (default 3), <code>--no-handoff</code> stops at the first result, <code>--json</code> prints the events. A task of <code>-</code> is read from stdin.`],
                 [html`<code>runs</code>`, 'The latest runs on this machine.'],
                 [html`<code>show &lt;run id&gt; [--json]</code>`, 'One run: each attempt, its session and the result; every event with --json.'],

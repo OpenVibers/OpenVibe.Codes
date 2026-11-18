@@ -66,7 +66,7 @@ function createApprovals({ store, config = {}, log = console, notify = null, use
             await notify.push({
                 subject: task.subject,
                 type: 'APPROVAL_NEEDED',
-                title: 'Your conductor needs you',
+                title: 'Your orchestrator needs you',
                 message: `${row.tool}: ${row.summary || 'a tool wants to run'}`,
                 url: `${String(config.baseUrl || '').replace(/\/+$/, '')}/tasks/${task.id}#approvals`,
                 priority: 'high',

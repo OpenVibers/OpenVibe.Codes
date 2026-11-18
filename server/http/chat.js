@@ -116,7 +116,7 @@ const firstLine = (s, n = 64) => {
     return line.length > n ? `${line.slice(0, n - 1)}…` : line;
 };
 const folderName = (f) => String(f || '').replace(/\/+$/, '').split('/').pop() || 'a folder';
-const titleOf = (row) => (row.kind === 'conductor' ? `Conductor · ${folderName(row.folder)}` : (row.title || firstLine(row.prompt) || 'New task'));
+const titleOf = (row) => (row.kind === 'conductor' ? `Orchestrator · ${folderName(row.folder)}` : (row.title || firstLine(row.prompt) || 'New task'));
 const stateOf = (row) => {
     if (LIVE.includes(row.state)) return row.state === 'queued' ? ['Getting ready', 'busy'] : ['Working', 'busy'];
     if (row.outcome === 'stopped' || row.state === 'cancelled') return ['Stopped', 'idle'];
@@ -190,7 +190,7 @@ function createChatRoutes(ctx) {
         const item = (row) => {
             const [, tone] = stateOf(row);
             const dot = waitingIds.has(row.id) ? 'needs' : tone === 'busy' ? 'busy' : tone === 'bad' ? 'bad' : null;
-            const mark = row.kind === 'conductor' ? thread.face({ name: 'Conductor', mark: ico('conductor'), color: 'var(--accent)' }) : avatar(agentOf(row.agent, names));
+            const mark = row.kind === 'conductor' ? thread.face({ name: 'Orchestrator', mark: ico('conductor'), color: 'var(--accent)' }) : avatar(agentOf(row.agent, names));
             return { href: `/tasks/${encodeURIComponent(row.id)}`, label: titleOf(row), mark, meta: dot ? '' : ago(row.updated_at || row.created_at), here: row.id === currentId, dot };
         };
         const pinned = rows.filter((x) => x.kind === 'conductor' && x.outcome !== 'stopped').slice(0, 2);
@@ -206,7 +206,7 @@ function createChatRoutes(ctx) {
             action: { href: '/', label: 'New chat', icon: 'pencil' },
             find: { action: '/tasks', name: 'q', placeholder: 'Search conversations', label: 'Search your conversations' },
             nav: [
-                place('Conductor', '/conductor', 'conductor'),
+                place('Orchestrator', '/orchestrator', 'conductor'),
                 place('Agents', '/agents', 'agents'),
                 place('Machines', 'https://openvibe.link/machines', 'machines'),
                 place('OpenVibe Git', '/git', 'repo'),
@@ -290,6 +290,24 @@ function createChatRoutes(ctx) {
             : live ? '' : `<p class="ovt-muted">${esc(attempt && attempt.end_why ? attempt.end_why : 'It ended without a word.')}</p>`;
         return { who: { ...a, sub: ran }, reply: workHtml(all, ms, { live, liveText }) + body };
     }
+    /**
+     * What one turn changed by itself (plan §AD.6, Codes next (4); the attempt's turn_files): a fold at the end of that
+     * turn's reply, when the task took more than one. A file the turn's own tools did not write (a patch, an install, a
+     * formatter) is marked as from elsewhere.
+     */
+    function turnChanges(a) {
+        // The attempt row's own column (migration 0043): codes.task@1's attempts do not carry it.
+        const tf = require('../domain/turn-files').read(a && a.turn_files);
+        const files = tf && Array.isArray(tf.files) ? tf.files.filter((f) => f && f.path) : [];
+        if (!files.length) return '';
+        const added = files.reduce((n, f) => n + (Number(f.added) || 0), 0), removed = files.reduce((n, f) => n + (Number(f.removed) || 0), 0);
+        const elsewhere = files.filter((f) => f.authored === false).length;
+        const word = { A: 'new', D: 'deleted', R: 'renamed', 'put back': 'put back' };
+        const row = (f) => `<li><code>${esc(f.path)}</code>${word[f.status] ? `<span>${esc(word[f.status])}</span>` : ''}${f.authored === false ? '<span>from elsewhere</span>' : ''}<span class="ch-add">+${esc(f.added ?? '·')}</span><span class="ch-del">−${esc(f.removed ?? '·')}</span></li>`;
+        const hint = tf.source === 'files' ? 'Measured file by file against the turn before.' : (elsewhere ? 'From elsewhere: the turn\'s own tools did not write it (a patch, an install or a formatter).' : '');
+        return `<div class="ch-result ch-turn-files"><details class="ch-res-fold"><summary>${ico('files')}<b>This turn: ${files.length}${tf.truncated ? '+' : ''} file${files.length === 1 ? '' : 's'}</b><span class="ch-add">+${added}</span><span class="ch-del">−${removed}</span>${elsewhere ? `<span class="ch-muted">${elsewhere} from elsewhere</span>` : ''}${ico('chevron', 'ch-caret')}</summary><ul>${files.map(row).join('')}</ul>${hint ? `<p class="ch-res-line ch-muted">${esc(hint)}</p>` : ''}</details></div>`;
+    }
+
     async function taskThread(row) {
         const names = agentNames();
         const attempts = tasks?.attempts ? (await tasks.attempts.list(row.id)).map((a) => ({ ...a, ...(tasks.attempts.present ? tasks.attempts.present(a) : {}) })) : [];
@@ -312,7 +330,9 @@ function createChatRoutes(ctx) {
                 else if (a.why) parts.push({ divider: String(a.why) });
             }
             const isLive = live && n === Number(attempts[attempts.length - 1].n);
-            parts.push({ n, open: isLive, you: mine, ...agentReply(agentOf(a.agent || row.agent, names), byAttempt.get(n) || [], { live: isLive, attempt: a }) });
+            const reply = agentReply(agentOf(a.agent || row.agent, names), byAttempt.get(n) || [], { live: isLive, attempt: a });
+            if (!isLive && attempts.length > 1) reply.reply += turnChanges(a);
+            parts.push({ n, open: isLive, you: mine, ...reply });
             mine = null;
             prev = a;
         }
@@ -511,6 +531,7 @@ function createChatRoutes(ctx) {
             view && view.usage ? usageSection(view.usage) : null,
             people.length ? { title: 'Agents', rows: people } : null,
             where.length ? { title: 'Where', rows: where } : null,
+            view ? null : await replaySection(row),
         ] });
     }
 
@@ -629,6 +650,9 @@ function createChatRoutes(ctx) {
         const hello = `<div class="ch-hello"><span class="ov-mark" data-size="40" aria-hidden="true" data-ovt-fold></span><h1>${ask}</h1><p data-ovt-fold>Say it the way you would to a friend.</p>${error ? `<p class="ch-error" role="alert">${esc(error)}</p>` : ''}${modes}</div>`;
         return frame(req, res, {
             title: 'New chat', heading: 'New chat', start: true, empty: hello,
+            // 4.250.0 (plan §AB.8/47): the network's messenger full-page swaps in over this page once the site's Shared has
+            // OpenVibeRun.page and the navbar has the person's token (public/js/messenger.js); until then this page works.
+            scripts: ['js/messenger.js'],
             composerHtml: composer({ action: '/chat', id: 'ch-start', placeholder: mode === 'new' ? 'Describe your website, game or app' : 'What should change?', pickers, options, examples: (sets[mode] || []).slice(0, 12).map((i) => i.text), where, files: true, value: prompt }) + nudge + ideas,
         });
     });
@@ -742,7 +766,7 @@ function createChatRoutes(ctx) {
             const pickers = `<span class="ch-chip ch-chip-static" title="${esc(`The next turn runs ${nextAgent.name} on your machine`)}">${avatar(nextAgent)}${esc(String(next.model || 'its default model'))}</span>`;
             const options = whoPicker(`${next.agent}|${next.model || ''}`, { label: 'Who leads this task', ready: await readyFor(req), catalog: await aiModels() });
             return frame(req, res, {
-                currentId: row.id, title: 'Conductor', heading: titleOf(row), state, panel: await sideHtml(row, view),
+                currentId: row.id, title: 'Orchestrator', heading: titleOf(row), state, panel: await sideHtml(row, view),
                 turns: [...errorTurns, ...await conductorThread(row, view)],
                 streamUrl: `/api/v1/tasks/${encodeURIComponent(row.id)}/events?last_event_id=${last && last.seq != null ? Number(last.seq) : 0}`,
                 composerHtml: row.outcome === 'stopped' ? '' : composer({ action: `/tasks/${encodeURIComponent(row.id)}/messages`, api: `/api/v1/conductor/${encodeURIComponent(row.id)}/messages`, placeholder: live ? 'Say something: it is the next turn' : 'What next?', pickers, options, files: true, note: live ? 'A message waits until the current turn ends; it is not lost.' : '' }),
@@ -799,6 +823,64 @@ function createChatRoutes(ctx) {
         if (!row) return res.status(404).send('Not found');
         const out = await tasks.stopTask(row);
         return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}${out.error ? `?error=${encodeURIComponent(out.error)}` : ''}`);
+    });
+
+    // ── Replays (plan §AD.6, Codes next (6)): a link anyone can open to read a task as it happened ──
+    // One live link a task (codes_task_shares). The owner makes it and stops it; a stopped link never comes back.
+    const SHARE_TOKEN = /^[A-Za-z0-9_-]{32}$/;
+    const liveShare = (taskId) => db.maybe('SELECT token, created_at FROM codes_task_shares WHERE task_id = $1 AND revoked_at IS NULL', [taskId]);
+    const replayUrl = (token) => `${String(config.baseUrl || '').replace(/\/+$/, '')}/r/${token}`;
+    async function replaySection(row) {
+        const s = await liveShare(row.id).catch(() => null);
+        const id = encodeURIComponent(row.id);
+        const html = s
+            ? `<div class="ch-replay" id="replay"><label class="ch-replay-link"><span>Anyone with this link can read it</span><input type="text" readonly value="${esc(replayUrl(s.token))}" data-ch-copy-src aria-label="The replay's link"></label>`
+                + `<div class="ch-replay-acts"><button type="button" class="ovk-btn ovk-btn--quiet" data-ch-copy>Copy</button><a class="ovk-btn ovk-btn--quiet" href="/r/${esc(s.token)}" target="_blank" rel="noopener">Open</a>`
+                + `<form method="post" action="/tasks/${id}/unshare"><button class="ovk-btn ovk-btn--quiet" type="submit">Stop sharing</button></form></div></div>`
+            : `<div class="ch-replay" id="replay"><p>A link anyone can open to read this task as it happened: the brief, every turn, the steps and the answers. No sign-in, not in search.</p>`
+                + `<form method="post" action="/tasks/${id}/share"><button class="ovk-btn" type="submit">Share a replay</button></form></div>`;
+        return { title: 'Replay', html };
+    }
+    async function ownTask(req, res) {
+        if (!viewer(req)) { res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`); return null; }
+        if (!sameOrigin(req)) { res.status(403).type('text/plain').send('Cross-site form posts are refused.\n'); return null; }
+        if (!safeId(req.params.id)) { res.status(404).send('Not found'); return null; }
+        const row = await db.maybe("SELECT * FROM run_tasks WHERE id = $1 AND subject = $2 AND kind <> 'conductor'", [req.params.id, req.viewer.subject]);
+        if (!row) { res.status(404).send('Not found'); return null; }
+        return row;
+    }
+    r.post('/tasks/:id/share', form, async (req, res) => {
+        const row = await ownTask(req, res);
+        if (!row) return;
+        if (!(await liveShare(row.id))) {
+            const token = require('crypto').randomBytes(24).toString('base64url');
+            await db.query('INSERT INTO codes_task_shares (token, task_id, subject) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [token, row.id, req.viewer.subject]);
+        }
+        return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}#replay`);
+    });
+    r.post('/tasks/:id/unshare', form, async (req, res) => {
+        const row = await ownTask(req, res);
+        if (!row) return;
+        await db.query('UPDATE codes_task_shares SET revoked_at = now() WHERE task_id = $1 AND subject = $2 AND revoked_at IS NULL', [row.id, req.viewer.subject]);
+        return res.redirect(303, `/tasks/${encodeURIComponent(row.id)}#replay`);
+    });
+    /** The replay: the task's thread, read only, for anyone with the link (no sign-in, noindex, no composer). */
+    r.get('/r/:token', async (req, res) => {
+        const gone = () => send(res, 404, { viewer: req.viewer, config, path: req.originalUrl, title: 'Replay · Codes', styles: ['kit.css'],
+            body: raw(`<div class="ovk-wrap">${kit.empty({ icon: 'code', title: 'This replay is not shared', text: 'Its owner stopped sharing it, or the link is not whole.', action: { href: '/', label: 'Codes' } })}</div>`) });
+        if (!SHARE_TOKEN.test(String(req.params.token || ''))) return gone();
+        const s = await db.maybe('SELECT task_id, subject FROM codes_task_shares WHERE token = $1 AND revoked_at IS NULL', [req.params.token]);
+        if (!s) return gone();
+        const row = await db.maybe("SELECT * FROM run_tasks WHERE id = $1 AND subject = $2 AND kind <> 'conductor'", [s.task_id, s.subject]);
+        if (!row) return gone();
+        const [word, tone] = stateOf(row);
+        const head = thread.head({ title: titleOf(row), actions: `<span class="ch-state is-${esc(tone)}">${esc(word)}</span>` });
+        const note = '<p class="ch-replay-note">A replay its owner shared: the brief, every turn and the answers, as it happened. <a href="/">Make your own on Codes</a></p>';
+        const view = thread.page({ head: head + note, turns: await taskThread(row), label: 'Replay', cls: 'is-replay' });
+        res.set('Cache-Control', 'private, no-store');
+        return send(res, 200, { viewer: req.viewer, config, path: req.originalUrl, title: `${titleOf(row)} · Replay · Codes`,
+            description: 'A coding task on OpenVibe.Codes, shared as a replay.', css: ['css/chat.css'], styles: ['kit.css', 'thread.css'],
+            sharedScripts: ['kit-web.js', 'ov-thread.js'], scripts: ['js/md.js'], body: raw(`<div class="ch ch-is-replay">${view}</div>`) });
     });
 
     return r;

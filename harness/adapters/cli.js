@@ -1,4 +1,7 @@
 'use strict';
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
 
 /**
  * The coding agents that run as a command on the person's machine. Each adapter says how to start its CLI for a task
@@ -19,6 +22,22 @@ const ev = require('../events');
 const { spawnAgent, exitReason } = require('../process');
 const { effortFor } = require('../../engine/adapters/base');
 const { DENIED: CLAUDE_DENIED } = require('../../engine/adapters/claude-code');
+const cmCodeMode = require('../code-mode');
+/** Code mode as the job handed it (harness/code-mode.js descriptor), or null. */
+const codeModeOf = (t) => (t && t.options && t.options.codeMode && t.options.codeMode.server ? t.options.codeMode : null);
+/** OpenCode v2's own file and shell tools, which strict code mode denies (its policies). */
+const OPENCODE_OWN = ['read', 'edit', 'write', 'glob', 'grep', 'list', 'shell', 'bash', 'patch', 'multiedit'];
+/** OpenCode's permission names for those tools (its permissions ruleset). */
+const OPENCODE_PERMISSIONS = ['read', 'edit', 'glob', 'grep', 'list', 'bash'];
+/** The project's .mcp.json (Command Code, Muse) with a server merged in; → restore(). */
+function mcpJson(root, server, extra) {
+    return cmCodeMode.withProjectFile(root, '.mcp.json', (cfg) => {
+        cfg.mcpServers = { ...(cfg.mcpServers || {}), [server.name]: { ...extra, command: server.command, args: server.args } };
+        return cfg;
+    });
+}
+// Strict code mode: the agent's own file and shell tools, which only its script reaches (through ov_code's tools).
+const CODE_MODE_OFF = ['Read', 'Edit', 'MultiEdit', 'Write', 'Grep', 'Glob', 'Bash', 'NotebookEdit'];
 
 /** A parser that reads JSON lines, hands each object to onEvent, and ends the run with exactly one result. */
 function jsonLines(agent, onEvent, onEnd) {
@@ -72,15 +91,25 @@ const claudeCode = {
         if (o.mcpConfig) args.push('--mcp-config', o.mcpConfig);
         if (Array.isArray(o.allowedTools) && o.allowedTools.length) args.push('--allowedTools', o.allowedTools.join(' '));
         if (o.permissionPromptTool) args.push('--permission-prompt-tool', o.permissionPromptTool);
+        // Code mode (2026-11-18, harness/code-mode.js): the line that says how to use it rides in the system prompt; strict
+        // code mode turns the agent's own file and shell tools off, so the work goes through one script (Claude Code's
+        // own Code Mode does the same, in a terminal only).
+        const cm = o.codeMode && typeof o.codeMode === 'object' ? o.codeMode : null;
+        const cmHint = cm && (cm.claudeHint || (typeof cm.hint === 'string' ? cm.hint : null));
+        if (cmHint) args.push('--append-system-prompt', String(cmHint));
         // The portal's deny list rides along (no commits, resets, stashes, sudo, recursive rm, .env reads); even
         // unattended, a run never pushes: publishing is the person's step, the one rule full keeps.
-        args.push('--disallowedTools', t.permission === 'full' ? 'Bash(git push:*)' : CLAUDE_DENIED.join(' '));
+        const denied = t.permission === 'full' ? ['Bash(git push:*)'] : CLAUDE_DENIED.slice();
+        if (cm && cm.strict) denied.push(...CODE_MODE_OFF);
+        args.push('--disallowedTools', denied.join(' '));
+        // MCP tools wait behind Claude Code's tool search unless it is off; code mode's execute is shown from the start.
+        const env = cm ? { ...(ctx.env || {}), ENABLE_TOOL_SEARCH: 'false' } : ctx.env;
         const parser = jsonLines(claudeCode, (o, emit, st) => {
             if (o.type === 'system' && o.subtype === 'init') { st.sessionId = o.session_id; st.model = o.model; emit(ev.init(o.session_id, 'claude-code', o.model)); return; }
             if (o.type === 'result') { emit({ ...o, result: ev.scrub(o.result || '') }); return; }
             if (o.type === 'assistant' || o.type === 'user') emit(o);
         });
-        return spawnAgent({ cmd: this.bin, args, cwd: t.cwd, env: ctx.env, timeoutMs: t.timeoutMs, signal: t.signal, parser });
+        return spawnAgent({ cmd: this.bin, args, cwd: t.cwd, env, timeoutMs: t.timeoutMs, signal: t.signal, parser });
     },
 };
 
@@ -102,12 +131,15 @@ const codex = {
         { const effort = effortFor('codex', t.effort); if (effort) args.push('-c', `model_reasoning_effort="${effort}"`); }
         // An MCP server this session may use (the conductor's Codes tools, when Codex takes a conductor's turn): its
         // command and arguments as config overrides, TOML values. Nothing secret rides here: the launcher holds the token.
-        const mcp = t.options && t.options.mcpServer;
-        if (mcp && /^[a-z][a-z0-9_-]{0,30}$/.test(String(mcp.name || '')) && mcp.command) {
+        const cmo = codeModeOf(t);
+        for (const mcp of [t.options && t.options.mcpServer, cmo && cmo.server].filter(Boolean)) {
+            if (!/^[a-z][a-z0-9_-]{0,30}$/.test(String(mcp.name || '')) || !mcp.command) continue;
             args.push('-c', `mcp_servers.${mcp.name}.command=${JSON.stringify(String(mcp.command))}`);
             args.push('-c', `mcp_servers.${mcp.name}.args=${JSON.stringify((mcp.args || []).map(String))}`);
         }
-        args.push(t.prompt);
+        // Code mode sits beside Codex's own tools (with its shell off it hangs): the line that says how to use it leads
+        // the prompt.
+        args.push(cmCodeMode.withHint(cmo, t.prompt, false));
         const startedAt = Date.now();
         const parser = jsonLines(codex, (e, emit, st) => {
             st.startedAt = startedAt;
@@ -171,6 +203,33 @@ const opencode = {
         args.push('--', t.prompt);
         // A config file for this run (the conductor's Codes MCP server), merged over the person's own by OpenCode.
         const configFile = t.options && typeof t.options.configFile === 'string' ? t.options.configFile : null;
+        // OpenCode v2 reads MCP servers, tool policies and instructions from the project's opencode.json (it ignored
+        // OPENCODE_CONFIG and OPENCODE_CONFIG_CONTENT, 2.2.6): the conductor's Codes tools and code mode go there, merged
+        // into what the project has, and the file is put back when the job ends.
+        const cmo = codeModeOf(t);
+        const servers = [...(Array.isArray(t.options && t.options.mcpServers) ? t.options.mcpServers : []), ...(cmo ? [cmo.server] : [])];
+        if (servers.length && t.cwd) {
+            const hintFile = cmo ? path.join(os.tmpdir(), `openvibe-codes-hint-${process.pid}-${Date.now()}.md`) : null;
+            if (hintFile) fs.writeFileSync(hintFile, `${cmo.hint(cmo.strict !== false)}\n`);
+            const restore = cmCodeMode.withProjectFile(t.cwd, 'opencode.json', (cfg) => {
+                cfg.mcp = cfg.mcp && typeof cfg.mcp === 'object' ? cfg.mcp : {};
+                cfg.mcp.servers = { ...(cfg.mcp.servers || {}) };
+                for (const s of servers) cfg.mcp.servers[s.name] = { type: 'local', command: [s.command, ...(s.args || [])] };
+                if (cmo && cmo.strict !== false) {
+                    // Both: the policies (tool.use) and the permission rules, since --auto approves whatever a permission
+                    // rule does not explicitly deny (an unattended run passes --auto).
+                    cfg.policies = [...(Array.isArray(cfg.policies) ? cfg.policies : []), ...OPENCODE_OWN.map((tool) => ({ action: 'tool.use', resource: tool, effect: 'deny' }))];
+                    cfg.permissions = [...(Array.isArray(cfg.permissions) ? cfg.permissions : []), ...OPENCODE_PERMISSIONS.map((action) => ({ action, resource: '*', effect: 'deny' }))];
+                    // Measured 11-18 (v2.2.6, --auto): only the older permission object held the deny (the run used execute
+                    // and nothing else); policies and permissions alone did not.
+                    cfg.permission = { ...(cfg.permission && typeof cfg.permission === 'object' ? cfg.permission : {}), ...Object.fromEntries(OPENCODE_PERMISSIONS.map((k) => [k, 'deny'])) };
+                }
+                if (hintFile) cfg.instructions = [...(Array.isArray(cfg.instructions) ? cfg.instructions : []), hintFile];
+                return cfg;
+            });
+            const restores = cmo ? cmo.restores : (t.options.restores || null);
+            if (restores) restores.push(restore, () => { if (hintFile) fs.rmSync(hintFile, { force: true }); });
+        }
         const startedAt = Date.now();
         const parser = jsonLines(opencode, (e, emit, st) => {
             st.startedAt = startedAt;
@@ -214,7 +273,9 @@ const commandCode = {
     // --yolo approves everything: there is no edits-only mode (harness/index.js unattended()).
     editsOnly: false,
     start(t, ctx = {}) {
-        const args = [`--print=${t.prompt}`, '--output-format', 'json', '--skip-onboarding', '--no-auto-update', '-t'];
+        const cmo = codeModeOf(t);
+        if (cmo && t.cwd) cmo.restores.push(mcpJson(t.cwd, cmo.server, { transport: 'stdio', enabled: true }));
+        const args = [`--print=${cmCodeMode.withHint(cmo, t.prompt, false)}`, '--output-format', 'json', '--skip-onboarding', '--no-auto-update', '-t'];
         if (unattended(t)) args.push('--yolo');
         if (t.model) args.push('-m', t.model);
         { const effort = effortFor('command-code', t.effort); if (effort) args.push('--effort', effort); }
@@ -339,6 +400,7 @@ const minimaxCode = {
 const muse = {
     id: 'muse', name: 'Muse Code', kind: 'cli', bin: 'muse',
     version: (env) => versionOf('muse', env),
+    checkTtlMs: 120_000,   // the check asks Meta for its usage (0.35 s): it holds two minutes
     check(env = {}) {
         try {
             const raw = execFileSync('muse', ['usage', '--json'], { env: { ...process.env, ...env }, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] });
@@ -347,6 +409,9 @@ const muse = {
         } catch { return { available: false, reason: 'sign in with your Muse plan (`muse login`)' }; }
     },
     start(t, ctx = {}) {
+        const cmo = codeModeOf(t);
+        if (cmo && t.cwd) cmo.restores.push(mcpJson(t.cwd, cmo.server, {}));
+        if (cmo) t = { ...t, prompt: cmCodeMode.withHint(cmo, t.prompt, false) };
         const args = ['exec', '--json', '--prompt-file', '-', '--workspace', t.cwd || process.cwd(),
             '--disable-request-user-input', '--approval-mode', 'never', '--trust-workspace',
             '--contributor-mode', 'off', '--sandbox-network', 'restricted'];
@@ -388,9 +453,18 @@ const claudeOther = {
             '--permission-mode', mode, '--exclude-dynamic-system-prompt-sections'];
         if (t.maxTurns) args.push('--max-turns', String(t.maxTurns));
         if (t.resume) args.push('--resume', String(t.resume));
+        // Code mode (runner 0.14.0): as Claude Code's own, on another provider too.
+        const oo = t.options && typeof t.options === 'object' ? t.options : {};
+        const ocm = oo.codeMode && typeof oo.codeMode === 'object' ? oo.codeMode : null;
+        if (oo.mcpConfig) args.push('--mcp-config', oo.mcpConfig);
+        if (Array.isArray(oo.allowedTools) && oo.allowedTools.length) args.push('--allowedTools', oo.allowedTools.join(' '));
+        if (ocm && ocm.claudeHint) args.push('--append-system-prompt', String(ocm.claudeHint));
         // The portal's deny list rides along (no commits, resets, stashes, sudo, recursive rm, .env reads); even
         // unattended, a run never pushes: publishing is the person's step, the one rule full keeps.
-        args.push('--disallowedTools', t.permission === 'full' ? 'Bash(git push:*)' : CLAUDE_DENIED.join(' '));
+        const otherDenied = t.permission === 'full' ? ['Bash(git push:*)'] : CLAUDE_DENIED.slice();
+        if (ocm && ocm.strict) otherDenied.push(...CODE_MODE_OFF);
+        args.push('--disallowedTools', otherDenied.join(' '));
+        if (ocm) env.ENABLE_TOOL_SEARCH = 'false';
         // The harness's environment (PATH finds the CLI), with the connection's own names on top: the endpoint, the
         // token and the model id. The key travels in the environment, never in argv: the process list of this machine
         // is readable.

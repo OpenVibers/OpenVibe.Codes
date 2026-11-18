@@ -116,6 +116,22 @@ openvibe-codes task stop <task>
 It needs a personal Network token (`OPENVIBE_TOKEN`, or `~/.config/openvibe/token`). `docs/cli.md` in the repository
 has its flags and the task API it maps onto.
 
+## Tools: find one, run it, or make one
+
+OpenVibe Tools (180+ tools and the ones people make) from the terminal, through https://openvibe.tools/mcp:
+
+```sh
+openvibe-codes tools find "merge pdf"                       # tools for a need, with what each takes
+openvibe-codes tools run dns target=example.com             # run one (--input '{"…"}' for any JSON)
+openvibe-codes tools mine                                   # the tools you made
+openvibe-codes tools make "turn meeting notes into actions" # a model drafts a tool and makes it (private)
+openvibe-codes tools make "add sales tax to a price" --code # the same, as JavaScript that computes it
+```
+
+`--json` prints the answer as JSON; a failed run exits 1. Signed out, the catalogue and public tools work;
+`OPENVIBE_TOOLS_TOKEN` (else `OPENVIBE_TOKEN`) adds your own tools and `make` (`--public`, `--unlisted`, `--model`).
+A made tool's runs are paid by whoever runs it.
+
 ## The rules of this machine
 
 - Do not parse the human log: use `--for-agent`.

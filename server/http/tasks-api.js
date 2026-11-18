@@ -39,6 +39,9 @@ const childReport = require('../domain/child-report');
 const { readMultipart, isMultipart } = require('./upload');
 const { corsOpenVibe } = require('./openvibe-origins');
 const start = require('./start');
+const models = require('../data/models');
+const roads = require('openvibe-sdk/agents/roads');
+const { roadFacts } = require('../domain/fleet');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -49,7 +52,48 @@ const DOCK_MODES = ['create', 'openvibe', 'repo', 'make'];
 // of the person's own recent repositories (prose like "and/or" is not a repository).
 const GIT_URL = /(?:https?:\/\/(?:www\.)?(?:github\.com|gitlab\.com|codeberg\.org|bitbucket\.org|git\.openvibe\.codes)\/[\w.-]+\/[\w.-]+|git@[\w.-]+:[\w.-]+\/[\w.-]+)/i;
 
-function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, modelPlans = null, fleet = null, sharing = null, conductor = null, attachments = null, races = null, log = console }) {
+/** A Run API run id (a task, "codes:" before it or "~N" after it, as the Frame writes it) → the task id, or null. */
+function runTaskId(raw) {
+    const m = /^(?:codes:)?(tsk_[0-9A-HJKMNP-TV-Z]{26})(?:~[1-9][0-9]*)?$/.exec(String(raw || ''));
+    return m ? m[1] : null;
+}
+
+const RUN_EFFORTS = ['low', 'medium', 'high', 'max'];
+const RUN_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:\/#-]{0,99}$/;
+
+/**
+ * agents.message@1's USE as Codes runs it: { harness, model, effort } (a model by its id), null when absent, or
+ * { status, code, error } for one that is malformed (422) or names something Codes cannot run (409
+ * agents.use_unavailable: a model on the person's machine, an id Codes cannot pass to a harness, another field).
+ */
+function runUse(raw) {
+    if (raw === undefined || raw === null) return null;
+    const bad = (error) => ({ status: 422, code: 'runs.bad_use', error });
+    const cannot = (error) => ({ status: 409, code: 'agents.use_unavailable', error });
+    if (typeof raw !== 'object' || Array.isArray(raw)) return bad('use is { model, harness, effort }');
+    const other = Object.keys(raw).filter((k) => !['model', 'harness', 'effort'].includes(k));
+    if (other.length) return cannot(`a Codes run cannot change its ${other.join(' or ')}`);
+    const out = {};
+    if (raw.harness !== undefined) {
+        if (typeof raw.harness !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(raw.harness)) return bad('use.harness is a harness id');
+        out.harness = raw.harness;
+    }
+    if (raw.model !== undefined) {
+        const m = raw.model;
+        if (!m || typeof m !== 'object' || typeof m.id !== 'string' || !m.id) return bad('use.model is { id, … }');
+        if (m.source === 'machines') return cannot('a Codes run cannot use a model on your own machine yet: pick one from OpenVibe, your keys or a plan');
+        if (!RUN_MODEL.test(m.id)) return cannot(`Codes cannot run the model ${m.id.slice(0, 100)}`);
+        out.model = m.id;
+        if (RUN_EFFORTS.includes(m.effort)) out.effort = m.effort;
+    }
+    if (raw.effort !== undefined) {
+        if (!RUN_EFFORTS.includes(raw.effort)) return bad('use.effort is low, medium, high or max');
+        out.effort = raw.effort;
+    }
+    return Object.keys(out).length ? out : bad('use names a model, a harness or an effort');
+}
+
+function createTasksApi({ config, store, keys, run, harnesses, actorLimits, tasks = null, modelPlans = null, fleet = null, sharing = null, conductor = null, attachments = null, races = null, machines = null, log = console }) {
     const r = asyncRouter();
     const db = store.db;
     /** The repository the words name: a Git address in them, or one of the person's recent repositories by its name. */
@@ -224,6 +268,31 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         return res.json({ ok: out.ok !== false, machines: latest.machines, agents, at: latest.at, ...(out.problem ? { problem: out.problem } : {}) });
     });
 
+    /**
+     * What would run the person's next coding task (SDK 0.186.0 roads' coding order, plan §AD.28 item 4): their pick
+     * (?harness=), a coding agent signed in with their own plan on an online machine, their key, the free AI. The same
+     * reading as /fleet; the answer is roads' result and its sentence, for the Frame and the Code chip.
+     */
+    r.get('/me/road', actorLimits.reads('codes.read'), async (req, res) => {
+        let subject = null;
+        let token = null;
+        if (signedIn(req)) { subject = req.viewer.subject; token = req.viewer.token || null; }
+        else {
+            const header = String(req.headers.authorization || '');
+            if (header.startsWith('Bearer ') && !principalToken(header.slice(7).trim())) { token = header.slice(7).trim(); subject = await personOf(token); }
+        }
+        if (!subject) return problem(req, res, 401, 'token.required', 'sign in, or send your own Network access token, to read what would run your work');
+        let rows = [];
+        if (fleet) {
+            try { if (token) await fleet.refresh(subject, token); } catch { /* the kept reading answers */ }
+            rows = await fleet.agents(subject, harnesses).catch(() => []);
+        }
+        const asked = String(req.query.harness || '').trim().toLowerCase();
+        const choice = /^[a-z][a-z0-9-]{0,63}$/.test(asked) ? { harness: asked } : null;
+        const result = roads.pick({ mode: 'code', fleet: roadFacts(rows), choice, keys: [], allowance: null, app: 'codes' });
+        return res.json({ ...result, say: roads.say(result) });
+    });
+
     // One read for a coding harness on the person's machines. Attempts, not the task's initial agent, decide
     // attribution: a task may switch harnesses midway. Codes has no per-harness memory or schedule records.
     r.get('/me/agents/:id/sheet', guardAny('codes.task.read'), actorLimits.reads('codes.read'), async (req, res) => {
@@ -340,9 +409,20 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
                     : 'Pick a repository (owner/name or any Git URL), choose an OpenVibe site, or start something new.');
             }
         }
+        // The composer's choice, through the Frame's run start (openvibe-shared 4.259.0; the owner, 11-15: "choose your
+        // harness … configure your model … choose a node"): a harness from GET /api/v1/harnesses, a model it offers
+        // (one it does not offer leaves the harness's own choice), and the person's computer, checked by Link.
+        const harnessIn = String(first(b.harness) || '').trim().slice(0, 64);
+        const modelIn = String(first(b.model) || '').trim().slice(0, 120);
+        let who = null;
+        if (harnessIn) {
+            const aiCatalog = !!(config.aiCatalog && config.aiCatalog.enabled);
+            who = models.parse(`${harnessIn}|${modelIn}`, harnesses, { aiCatalog }) || models.parse(`${harnessIn}|`, harnesses, { aiCatalog });
+            if (!who || !who.agent) return problem(req, res, 422, 'codes.agent_unknown', 'harness is one of GET /api/v1/harnesses, or absent for the router to pick');
+        }
         let args;
         try {
-            args = parseArgs(JSON.stringify({ repo: repoUrl, prompt: text, permission: 'edit' }));
+            args = parseArgs(JSON.stringify({ repo: repoUrl, prompt: text, permission: 'edit', ...(who && who.agent ? { agent: who.agent } : {}), ...(who && who.model ? { model: who.model } : {}) }));
         } catch (e) {
             return problem(req, res, 422, 'codes.task_invalid', e.message);
         }
@@ -361,7 +441,16 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
                 args = { ...args, plan: selected.plan, plan_source: selected.source, preset: selected.preset, model_fallbacks: selected.fallbacks };
             } catch (e) { return problem(req, res, e.status || 500, e.code || 'codes.model_plan_invalid', e.message); }
         }
-        const jobInput = (repo, prompt) => JSON.stringify({ repo, prompt, permission: 'edit' });
+        const jobInput = (repo, prompt) => JSON.stringify({ repo, prompt, permission: 'edit', ...(who && who.agent ? { agent: who.agent } : {}), ...(who && who.model ? { model: who.model } : {}) });
+        // The person's computer: Link checks it is theirs and can run coding tasks, then the task is pinned to it.
+        let pin = null;
+        const machineIn = String(first(b.machine) || '').trim();
+        if (machineIn) {
+            if (!machines || typeof machines.pick !== 'function') return problem(req, res, 503, 'codes.machines_unavailable', 'Codes cannot reach Link to check that computer right now');
+            const chosen = await machines.pick(token, machineIn).catch(() => null);
+            if (!chosen || !chosen.ok || !chosen.choice || !chosen.choice.id) return problem(req, res, 409, 'codes.machine_unavailable', (chosen && chosen.problem && chosen.problem.detail) || 'Link could not check that computer.');
+            pin = chosen.choice.id;
+        }
         let firstRow = null;
         try {
             if (targets && targets.length > 1) {
@@ -371,11 +460,11 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
                     const note = `\n\n(This request spans ${names.join(', ')}. This task is the ${names[i]} part; the others are separate tasks. Change only what this repository needs, and keep the names and behaviour consistent with the other parts.)`;
                     const each = { ...parseArgs(jobInput(x.url, `${text}${note}`.slice(0, 16000))),
                         ...(args.plan ? { plan: args.plan, plan_source: args.plan_source, preset: args.preset, model_fallbacks: args.model_fallbacks } : {}) };
-                    const row = await taskStore.start({ subject: p.subject, project, args: each, attachmentIds: i === 0 ? ids : [], mode: 'openvibe' });
+                    const row = await taskStore.start({ subject: p.subject, project, args: each, attachmentIds: i === 0 ? ids : [], pin, mode: 'openvibe' });
                     if (!firstRow) firstRow = row;
                 }
             } else {
-                firstRow = await taskStore.start({ subject: p.subject, project, args, attachmentIds: ids, mode: mode === 'openvibe' ? 'openvibe' : 'repo' });
+                firstRow = await taskStore.start({ subject: p.subject, project, args, attachmentIds: ids, pin, mode: mode === 'openvibe' ? 'openvibe' : 'repo' });
             }
         } catch (e) {
             return problem(req, res, e.status || 502, e.code || 'codes.task_failed', String((e && e.message) || 'the task could not start').slice(0, 300));
@@ -588,6 +677,67 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
         return agentRuns.stream(req, res, row);
     });
 
+    /**
+     * The Run API's message (agents.message@1, Contracts 0.434.0), on the runs the Frame reads above. TEXT carries the
+     * task on, or waits for the next attempt while one runs (as /tasks/:id/message). USE swaps what runs from this turn
+     * on, in the same task and thread: another harness (a hand-over carrying the conversation so far), another model,
+     * another effort. A swap needs the task between attempts (409 agents.run_busy while one runs); a task stopped on
+     * purpose is 409 agents.run_closed; a model or harness Codes cannot run is 409 agents.use_unavailable, and nothing
+     * changes. The answer is the person's step (agents.step@1): 201 when the task carried on, 202 when it waits. An
+     * Idempotency-Key answers a repeat with the first answer for ten minutes.
+     */
+    const runMessages = new Map();
+    r.post('/runs/:id/messages', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        const id = runTaskId(req.params.id);
+        if (id) req.params.id = id;
+        const row = id && await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
+        const b = req.body || {};
+        const text = typeof b.text === 'string' ? b.text.trim() : '';
+        if (!text) return problem(req, res, 422, 'runs.say_needs_words', 'Say something ({ text })');
+        if (Array.isArray(b.attachments) && b.attachments.length) return problem(req, res, 422, 'codes.attachments_unsupported', 'A Codes run takes words here: attach files on the task\'s page');
+        const use = runUse(b.use);
+        if (use && use.error) return problem(req, res, use.status, use.code, use.error);
+        if (use && use.harness && !harnesses.list().some((a) => a.id === use.harness)) return problem(req, res, 409, 'agents.use_unavailable', `Codes has no harness ${use.harness}: see GET /api/v1/harnesses`);
+        const key = String(req.get('idempotency-key') || (typeof b.idempotency_key === 'string' ? b.idempotency_key : '') || '');
+        if (key && !/^[A-Za-z0-9._:~-]{8,200}$/.test(key)) return problem(req, res, 422, 'runs.bad_key', 'Idempotency-Key is 8 to 200 letters, digits or ._:~-');
+        const memo = key ? `${row.id}|${key}` : null;
+        if (memo && runMessages.has(memo)) { const seen = runMessages.get(memo); return res.status(seen.status).json(seen.body); }
+        const out = use
+            ? await taskStore.continueTask(row, { note: text, agent: use.harness || null, model: use.model || null, effort: use.effort || null })
+            : await taskStore.messageTask(row, { note: text });
+        if (out.error) {
+            if (out.error === 'no such task') return problem(req, res, 404, 'codes.task_not_found', out.error);
+            if (/needs words|at most/.test(out.error)) return problem(req, res, 422, 'codes.message_invalid', out.error);
+            if (/stopped on purpose/.test(out.error)) return problem(req, res, 409, 'agents.run_closed', out.error);
+            if (/still running/.test(out.error)) return problem(req, res, 409, 'agents.run_busy', out.error);
+            return problem(req, res, 409, 'codes.task_conflict', out.error);
+        }
+        if (use && out.live) return problem(req, res, 409, 'agents.run_busy', 'an attempt is running: stop it or let it end, then swap');
+        const last = await store.db.maybe('SELECT MAX(seq) AS seq FROM codes_session_lines WHERE task_id = $1', [row.id]);
+        const step = { run_id: row.id, seq: Number((last && last.seq) || 0) + 1, kind: 'message', from: 'person', text: text.slice(0, 4000), started_at: new Date().toISOString() };
+        const status = out.queued ? 202 : 201;
+        if (memo) {
+            runMessages.set(memo, { status, body: step });
+            const timer = setTimeout(() => runMessages.delete(memo), 600_000);
+            if (timer.unref) timer.unref();
+        }
+        if (!out.queued) log.info(`[Codes] task ${row.id} carried on by a run message${use ? ` (${Object.keys(use).join(', ')} swapped)` : ''}`);
+        return res.status(status).json(step);
+    });
+
+    /** The Run API's stop: the running attempt stops, as /tasks/:id/stop; the answer is the run, stopped. */
+    r.post('/runs/:id/stop', guardAny('codes.task.cancel'), actorLimits.budget('codes.task.start'), async (req, res) => {
+        const id = runTaskId(req.params.id);
+        if (id) req.params.id = id;
+        const row = id && await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');
+        const out = await taskStore.stopTask(row);
+        if (out.error) return problem(req, res, 409, 'codes.task_conflict', out.error);
+        log.info(`[Codes] task ${row.id} stopped through the Run API by ${req.principal.via || req.principal.subject}`);
+        return res.json({ id: row.id, ref: `codes:${row.id}`, status: 'stopped' });
+    });
+
     /** The next attempt now: the owner carries the task on, or hands it to another agent. */
     r.post('/tasks/:id/continue', guardAny('codes.task.start'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
         const row = await mine(req);
@@ -656,6 +806,54 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, task
      * gets { ok }; a service keeps the timeline its capability was built on. Another person's task is 404, never
      * a refusal that says it exists.
      */
+    /**
+     * A replay link from the API (plan §AD.6 (6), §AD.8: the session surface shares a coding run from any site): the
+     * same one live link a task as /tasks/:id/share, made or read here by the person themself (their own token, not a
+     * service acting for them). DELETE stops it; a stopped link never comes back. A conductor is not shared.
+     *   POST   /api/v1/tasks/:id/replay  → { url, created_at, created }   (…/share is the uniform share-with-people API)
+     *   DELETE /api/v1/tasks/:id/replay  → { stopped }
+     */
+    const replayUrl = (token) => `${String(config.baseUrl).replace(/\/+$/, '')}/r/${token}`;
+    r.post('/tasks/:id/replay', guardAny('codes.task.read'), actorLimits.budget('codes.task.start'), async (req, res) => {
+        if (!req.principal.owner) return problem(req, res, 403, 'codes.share_owner_required', 'only the person themself shares a task');
+        const row = await mine(req);
+        if (!row || row.kind === 'conductor') return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours to share');
+        let live = await db.maybe('SELECT token, created_at FROM codes_task_shares WHERE task_id = $1 AND revoked_at IS NULL', [row.id]);
+        let created = false;
+        if (!live) {
+            const token = require('crypto').randomBytes(24).toString('base64url');
+            await db.query('INSERT INTO codes_task_shares (token, task_id, subject) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [token, row.id, req.principal.subject]);
+            live = await db.maybe('SELECT token, created_at FROM codes_task_shares WHERE task_id = $1 AND revoked_at IS NULL', [row.id]);
+            created = true;
+        }
+        res.set('Cache-Control', 'private, no-store');
+        return res.status(created ? 201 : 200).json({ url: replayUrl(live.token), created_at: live.created_at, created });
+    });
+    r.delete('/tasks/:id/replay', guardAny('codes.task.read'), actorLimits.budget('codes.task.start'), async (req, res) => {
+        if (!req.principal.owner) return problem(req, res, 403, 'codes.share_owner_required', 'only the person themself stops sharing a task');
+        const row = await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours');
+        const gone = await db.many('UPDATE codes_task_shares SET revoked_at = now() WHERE task_id = $1 AND subject = $2 AND revoked_at IS NULL RETURNING token', [row.id, req.principal.subject]);
+        return res.json({ stopped: gone.length > 0 });
+    });
+
+    /**
+     * Rename (plan §AD.8, the session's ⋯ menu): the person names their task; an empty or null title gives it back the
+     * brief's first line. Only the person themself (their own token).
+     *   PATCH /api/v1/tasks/:id { title } → codes.task@1
+     */
+    r.patch('/tasks/:id', guardAny('codes.task.read'), actorLimits.budget('codes.task.start'), json, async (req, res) => {
+        if (!req.principal.owner) return problem(req, res, 403, 'codes.rename_owner_required', 'only the person themself renames a task');
+        const row = await mine(req);
+        if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours');
+        const raw = req.body && Object.prototype.hasOwnProperty.call(req.body, 'title') ? req.body.title : undefined;
+        if (raw !== null && typeof raw !== 'string') return problem(req, res, 422, 'codes.title_needed', 'send the new name ({ title })');
+        const title = raw == null ? null : (String(raw).replace(/\s+/g, ' ').trim().slice(0, 200) || null);
+        const updated = await db.maybe('UPDATE run_tasks SET title = $1, updated_at = $2 WHERE id = $3 AND subject = $4 RETURNING *', [title, store.now(), row.id, req.principal.subject]);
+        if (!updated) return problem(req, res, 404, 'codes.task_not_found', 'no such task of yours');
+        return res.json({ task: taskStore.present(updated) });
+    });
+
     r.post('/tasks/:id/stop', guardAny('codes.task.cancel'), actorLimits.budget('codes.task.start'), async (req, res) => {
         const row = await mine(req);
         if (!row) return problem(req, res, 404, 'codes.task_not_found', 'no such task of this service for this person');

@@ -52,6 +52,37 @@ openvibe-codes task stop tsk_01J…
 `GET /api/v1/tasks/:id/events` and prints the session's lines, each attempt and why it happened, ending when the
 outcome is decided.
 
+## Your agent home: `home apply`
+
+What your agents need on a machine, written once (`openvibe.home@1`):
+
+```json
+{
+  "format": "openvibe.home@1",
+  "tools": { "node": "24.19.0", "go": "1.27.1", "rust": "1.96.0" },
+  "agents": ["claude-code", "codex"],
+  "repos": ["OpenVibers/OpenVibe.Live", "https://git.openvibe.codes/you/site"],
+  "git": { "name": "Your Name", "email": "you@example.com" }
+}
+```
+
+```bash
+openvibe-codes home apply home.json      # set it up here (in your sandbox, or this account's home)
+openvibe-codes home show                 # what was set up, and what failed
+```
+
+- **Tools** are pinned with [mise](https://mise.jdx.dev). mise itself is fetched from its release, with its SHA-256
+  checked against the release's list. Everything lands in your home, nothing global.
+- **Agents** are installed by Codes' own installer, as `openvibe-codes setup` does.
+- **Repositories** are partial clones (`--filter=blob:none`) under `work/`. When one is there already, it is fetched.
+  A private one uses the machine's token (`GITHUB_TOKEN`), or your OpenVibe Git token when it is on
+  git.openvibe.codes. An address with a user or password in it is refused.
+- **Every step runs**, even when one fails. The failures are listed, and `.openvibe-home.json` keeps the result.
+
+You can also save it once on <https://openvibe.codes/setup#step-home> and press **Set up**. The machine you pick
+does it as a Codes job (mode `home`) in your sandbox there, and every step appears on the page as it happens. Nobody
+logs in to the machine. The runner needs 0.12.0 or later.
+
 ## For an agent: `--for-agent` and `skills get`
 
 A supervising agent should not read the human log. `--for-agent` is the machine face of every command in this
@@ -118,3 +149,49 @@ const { task } = await res.json();
 What the portal had and Codes does not (yet): a *named machine* per task, a transcript endpoint separate from the
 event stream (the stream carries the session's lines), and fencing a whole chain of jobs — here the **task** is
 the unit, and a continue is an attempt on the same task.
+
+## Code mode for every harness (runner 0.14.0)
+
+Each harness takes code mode its own way (harness/code-mode.js PLANS), measured 11-18 on a rename across three files:
+
+| Harness | How | Its own tools |
+|---|---|---|
+| Claude Code, Claude Code on another provider | `--mcp-config`, the line in `--append-system-prompt` | off (strict): 2 scripts, 3 turns |
+| OpenCode (v2) | the project's `opencode.json`: `mcp.servers`, `instructions`, and `permission` denies | off (strict): only execute ran |
+| Codex | `-c mcp_servers.ov_code.*`, the line before the prompt | on (its shell cannot be turned off: it hangs): 2 scripts and nothing else |
+| Command Code, Muse | the project's `.mcp.json`, the line before the prompt | on |
+| every ACP agent | `mcpServers` in `session/new` | on |
+| Codes' own API loop (DeepSeek, OpenVibe AI, your own model) | `execute` is one of its tools | off (strict): only execute is offered |
+| MiniMax Code | its own code mode (`--ptc`, run_code), always on | — |
+| Aider | none: it has no tools of its own to script | — |
+
+A project file is merged into what the project has, kept out of git, and put back when the agent is done (before the
+diff and the push). A job with no fixed agent hands code mode to whichever harness runs. `code_mode: 'beside'` keeps every
+harness's own tools on.
+
+## Code mode (runner 0.13.0)
+
+Claude Code's own Code Mode works only in an interactive terminal, and every Codes run is headless. A job with
+`code_mode: true` brings Codes' own instead: `openvibe-codes code-mode` (harness/code-mode.js), an MCP server started
+beside Claude Code with two tools.
+
+- `search { query }`: the repository tools a script may call, with their input types.
+- `execute { code }`: one JavaScript script in openvibe-sdk/code-mode's sandbox. Its only way out is
+  `await tools.<name>(input)`: `read`, `grep` (ripgrep when there is one), `glob`, `ls`, and as the job allows `edit`,
+  `write` and `sh`. Only what it returns (32 KB) and its console lines come back; ten minutes and 300 calls at most.
+
+Every tool stays inside the job's folder, never touches a `.env` file, and keeps the job's permission:
+
+| Job | Code mode may | Claude's own file and shell tools |
+|---|---|---|
+| a task on a repository (`edit`) | read, edit, write, run commands (no git push/commit/reset/clean/stash, sudo, rm -rf) | off (strict) |
+| `read` | read, grep, glob, ls | off (strict) |
+| `full` | everything but git push | off (strict) |
+| a conductor turn at `ask` | read only | on, and they ask the owner |
+| a conductor turn at `project` | read and change files, no commands | on |
+| a conductor turn at `full` | everything but git push | off (strict) |
+
+Measured on Claude Code 2.1 with Haiku (11-18, a rename across three files): with its own tools it took 4 to 7 turns;
+in strict code mode, two `execute` calls in three turns. The system prompt says how to use it, and Claude Code's tool
+search is off for the run so `execute` is visible from the start. Node.js 22.13 or newer is needed for the sandbox; an
+older runner says code mode is off and runs as before.

@@ -68,6 +68,8 @@ async function start() {
     // codes.task.* events: the outbox relay and the session-retention loop (both off under CODES_DRILL).
     ctx.publisher.start();
     ctx.sessionRetention.start();
+    // GitHub issues as tasks: a watched repository's newly labeled issues, every five minutes (off under CODES_DRILL).
+    if (ctx.issueTickets) ctx.issueTickets.start();
 
     createLifecycle({ server, ctx });
     return { server, ctx };

@@ -1,0 +1,279 @@
+{
+  "source": "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json",
+  "read_at": "2026-11-15",
+  "agents": [
+    {
+      "id": "claude-acp",
+      "registry_id": "claude-acp",
+      "name": "Claude Agent",
+      "version": "0.107.0",
+      "description": "ACP wrapper for Anthropic's Claude",
+      "repository": "https://github.com/agentclientprotocol/claude-agent-acp",
+      "license": "proprietary",
+      "distribution": {
+        "npx": {
+          "package": "@agentclientprotocol/claude-agent-acp@0.107.0",
+          "args": []
+        }
+      }
+    },
+    {
+      "id": "codex-acp",
+      "registry_id": "codex-acp",
+      "name": "Codex",
+      "version": "2.6.0",
+      "description": "ACP adapter for OpenAI's coding assistant",
+      "repository": "https://github.com/agentclientprotocol/codex-acp",
+      "license": "Apache-2.0",
+      "distribution": {
+        "npx": {
+          "package": "@agentclientprotocol/codex-acp@2.6.0",
+          "args": []
+        }
+      }
+    },
+    {
+      "id": "gemini-cli",
+      "registry_id": "gemini",
+      "name": "Gemini CLI",
+      "version": "0.68.0",
+      "description": "Google's official CLI for Gemini",
+      "repository": "https://github.com/google-gemini/gemini-cli",
+      "license": "Apache-2.0",
+      "distribution": {
+        "npx": {
+          "package": "@google/gemini-cli@0.68.0",
+          "args": [
+            "--acp"
+          ]
+        }
+      }
+    },
+    {
+      "id": "qwen-code",
+      "registry_id": "qwen-code",
+      "name": "Qwen Code",
+      "version": "0.27.3",
+      "description": "Alibaba's Qwen coding assistant",
+      "repository": "https://github.com/QwenLM/qwen-code",
+      "license": "Apache-2.0",
+      "distribution": {
+        "npx": {
+          "package": "@qwen-code/qwen-code@0.27.3",
+          "args": [
+            "--acp",
+            "--experimental-skills"
+          ]
+        }
+      }
+    },
+    {
+      "id": "kimi-code",
+      "registry_id": "kimi-code",
+      "name": "Kimi Code",
+      "version": "2.6.2",
+      "description": "Moonshot AI's next-gen coding agent",
+      "repository": "https://github.com/MoonshotAI/kimi-code",
+      "license": "MIT",
+      "distribution": {
+        "npx": {
+          "package": "@moonshot-ai/kimi-code@2.6.2",
+          "args": [
+            "acp"
+          ]
+        }
+      }
+    },
+    {
+      "id": "grok-build",
+      "registry_id": "grok-build",
+      "name": "Grok Build",
+      "version": "1.0.87",
+      "description": "xAI's coding agent and CLI",
+      "repository": null,
+      "license": "proprietary",
+      "distribution": {
+        "npx": {
+          "package": "@xai-official/grok@1.0.87",
+          "args": [
+            "agent",
+            "stdio"
+          ]
+        }
+      }
+    },
+    {
+      "id": "copilot-cli",
+      "registry_id": "github-copilot-cli",
+      "name": "GitHub Copilot",
+      "version": "1.0.112",
+      "description": "GitHub's AI pair programmer",
+      "repository": "https://github.com/github/copilot-cli",
+      "license": "proprietary",
+      "distribution": {
+        "npx": {
+          "package": "@github/copilot@1.0.112",
+          "args": [
+            "--acp"
+          ]
+        }
+      }
+    },
+    {
+      "id": "cline",
+      "registry_id": "cline",
+      "name": "Cline",
+      "version": "3.0.74",
+      "description": "Autonomous coding agent CLI - capable of creating/editing files, running commands, using the browser, and more",
+      "repository": "https://github.com/cline/cline",
+      "license": "Apache-2.0",
+      "distribution": {
+        "npx": {
+          "package": "cline@3.0.74",
+          "args": [
+            "--acp"
+          ]
+        }
+      }
+    },
+    {
+      "id": "kilo",
+      "registry_id": "kilo",
+      "name": "Kilo",
+      "version": "7.8.27",
+      "description": "The open source coding agent",
+      "repository": "https://github.com/Kilo-Org/kilocode",
+      "license": "MIT",
+      "distribution": {
+        "npx": {
+          "package": "@kilocode/cli@7.8.27",
+          "args": [
+            "acp"
+          ]
+        }
+      }
+    },
+    {
+      "id": "deepagents",
+      "registry_id": "deepagents",
+      "name": "DeepAgents",
+      "version": "0.1.7",
+      "description": "Batteries-included AI coding and general purpose agent powered by LangChain.",
+      "repository": "https://github.com/langchain-ai/deepagentsjs",
+      "license": "MIT",
+      "distribution": {
+        "npx": {
+          "package": "deepagents-acp@0.1.7",
+          "args": []
+        }
+      }
+    },
+    {
+      "id": "auggie",
+      "registry_id": "auggie",
+      "name": "Auggie CLI",
+      "version": "0.37.0",
+      "description": "Augment Code's powerful software agent, backed by industry-leading context engine",
+      "repository": "https://github.com/augmentcode/auggie",
+      "license": "proprietary",
+      "distribution": {
+        "npx": {
+          "package": "@augmentcode/auggie@0.37.0",
+          "args": [
+            "--acp"
+          ],
+          "env": {
+            "AUGMENT_DISABLE_AUTO_UPDATE": "1"
+          }
+        }
+      }
+    },
+    {
+      "id": "qoder",
+      "registry_id": "qoder",
+      "name": "Qoder CLI",
+      "version": "1.1.89",
+      "description": "AI coding assistant with agentic capabilities",
+      "repository": null,
+      "license": "proprietary",
+      "distribution": {
+        "npx": {
+          "package": "@qoder-ai/qodercli@1.1.89",
+          "args": [
+            "--acp"
+          ]
+        }
+      }
+    },
+    {
+      "id": "codebuddy-code",
+      "registry_id": "codebuddy-code",
+      "name": "Codebuddy Code",
+      "version": "2.185.0",
+      "description": "Tencent Cloud's official intelligent coding tool",
+      "repository": null,
+      "license": "Proprietary",
+      "distribution": {
+        "npx": {
+          "package": "@tencent-ai/codebuddy-code@2.185.0",
+          "args": [
+            "--acp"
+          ]
+        }
+      }
+    },
+    {
+      "id": "glm-acp",
+      "registry_id": "glm-acp-agent",
+      "name": "GLM Agent",
+      "version": "1.17.1",
+      "description": "ACP agent powered by Zhipu AI's GLM Coding Plan models (glm-5.1, glm-5-turbo, glm-4.7, glm-4.5-air). Supports streaming, tool calls, mid-session model switching, image input via Z.AI Coding Plan Visio",
+      "repository": "https://github.com/stefandevo/glm-acp-agent",
+      "license": "Apache-2.0",
+      "distribution": {
+        "npx": {
+          "package": "glm-acp-agent@1.17.1",
+          "args": []
+        }
+      }
+    },
+    {
+      "id": "pi",
+      "registry_id": "pi-acp",
+      "name": "pi ACP",
+      "version": "0.0.34",
+      "description": "ACP adapter for pi coding agent",
+      "repository": "https://github.com/svkozak/pi-acp",
+      "license": "MIT",
+      "distribution": {
+        "npx": {
+          "package": "pi-acp@0.0.34",
+          "args": []
+        }
+      }
+    },
+    {
+      "id": "droid",
+      "registry_id": "factory-droid",
+      "name": "Factory Droid",
+      "version": "1.12.1",
+      "description": "Factory Droid - AI coding agent powered by Factory AI",
+      "repository": null,
+      "license": "proprietary",
+      "distribution": {
+        "npx": {
+          "package": "droid@1.12.1",
+          "args": [
+            "exec",
+            "--output-format",
+            "acp-daemon"
+          ],
+          "env": {
+            "DROID_DISABLE_AUTO_UPDATE": "true",
+            "FACTORY_DROID_AUTO_UPDATE_ENABLED": "false"
+          }
+        }
+      }
+    }
+  ]
+}

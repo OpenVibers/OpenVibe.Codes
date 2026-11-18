@@ -20,6 +20,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { createExchangeClient } = require('openvibe-sdk/exchange');
 const ev = require('../events');
+const { applyEdit } = require('./edit-match');
 
 const SYSTEM = `You are a careful coding agent working in a repository on the user's machine. Use the tools to look before
 you change anything: list and read the files involved, make the smallest change that does what was asked, and keep the
@@ -31,7 +32,7 @@ const TOOL_DEFS = {
     read_file: { level: 'read', description: 'Read a text file. Optional 1-based line offset and line limit.', parameters: { type: 'object', properties: { path: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer' } }, required: ['path'] } },
     grep: { level: 'read', description: 'Search files for a regular expression; returns path:line: text matches.', parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' } }, required: ['pattern'] } },
     write_file: { level: 'edit', description: 'Create or replace a file with the given content.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } },
-    edit_file: { level: 'edit', description: 'Replace one exact, unique occurrence of old_string with new_string in a file.', parameters: { type: 'object', properties: { path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' } }, required: ['path', 'old_string', 'new_string'] } },
+    edit_file: { level: 'edit', description: 'Replace one unique occurrence of old_string with new_string in a file (replace_all: every one). Copy old_string from read_file without its line numbers; small whitespace or quote differences are forgiven.', parameters: { type: 'object', properties: { path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean' } }, required: ['path', 'old_string', 'new_string'] } },
     run_command: { level: 'full', description: 'Run a shell command in the working directory (two-minute limit).', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } },
 };
 const LEVELS = { read: 1, edit: 2, full: 3 };
@@ -40,6 +41,207 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'co
 
 /** What one read_file answer may hold: 40 KB, enforced here, not in the prompt. */
 const MAX_READ = 40_000;
+
+/**
+ * The conversation's size limit, in characters (about 65k tokens), and how much of its end is never trimmed. Every turn
+ * sends the whole conversation again, so a long run's old tool output is paid for on every later turn and, past the
+ * model's window, fails the run. When the conversation passes the limit, the oldest tool output (and the bodies of
+ * old file writes and edits) is replaced by a short note, down to 60% of the limit in one go: the provider's cached
+ * prefix breaks once per trim, not on every turn. OPENVIBE_CODES_CONTEXT_CHARS or the run's adapterOptions.contextChars changes it.
+ */
+const CONTEXT_CHARS = 240_000;
+const KEEP_TAIL = 8;
+const DROPPED = '[dropped:';
+
+function messageSize(m) {
+    let n = typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content || '').length;
+    if (Array.isArray(m.tool_calls)) for (const c of m.tool_calls) n += String((c && c.function && c.function.arguments) || '').length;
+    return n;
+}
+
+/**
+ * Trims messages in place when they pass budget characters: old tool results become a note saying how much was
+ * dropped, and old write_file/edit_file arguments keep their path with the text dropped. The system message and the
+ * last KEEP_TAIL messages are never touched. Answers how many characters were dropped (0: nothing to do).
+ */
+function trimContext(messages, budget, keepTail = KEEP_TAIL) {
+    let total = 0;
+    for (const m of messages) total += messageSize(m);
+    if (total <= budget) return 0;
+    const goal = Math.floor(budget * 0.6);
+    let dropped = 0;
+    for (let i = 1; i < messages.length - keepTail && total > goal; i++) {
+        const m = messages[i];
+        if (m.role === 'tool' && typeof m.content === 'string' && m.content.length > 200 && !m.content.startsWith(DROPPED)) {
+            const note = `${DROPPED} ${m.content.length} characters of earlier output; run the tool again if it is needed]`;
+            total -= m.content.length - note.length;
+            dropped += m.content.length - note.length;
+            m.content = note;
+        } else if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+            for (const c of m.tool_calls) {
+                const args = c && c.function && c.function.arguments;
+                if (typeof args !== 'string' || args.length <= 2000) continue;
+                let a;
+                try { a = JSON.parse(args); } catch { continue; }
+                if (!a || typeof a !== 'object') continue;
+                for (const k of ['content', 'old_string', 'new_string']) {
+                    if (typeof a[k] === 'string' && a[k].length > 500) a[k] = `${DROPPED} ${a[k].length} characters]`;
+                }
+                const short = JSON.stringify(a);
+                if (short.length < args.length) {
+                    total -= args.length - short.length;
+                    dropped += args.length - short.length;
+                    c.function.arguments = short;
+                }
+            }
+        }
+    }
+    return dropped;
+}
+
+/**
+ * The second compaction tier (after DeepSeek Harness and Codex, studied 11-15): when dropping old tool output was not
+ * enough, the earlier turns are replaced by a summary the model writes. Which messages: from the third (the system
+ * message and the person's first words, the task itself, always stay) up to a person's message, so every tool call keeps
+ * its result; the current turn (from the last person's message on) is never summarized. The smallest span that brings
+ * the conversation under 80% of the limit, else everything before the current turn. → { from, to } (to exclusive) or
+ * null when there is nothing to summarize.
+ */
+function compactPlan(messages, budget) {
+    let lastUser = -1;
+    for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === 'user') { lastUser = i; break; }
+    if (lastUser <= 2) return null;
+    let total = 0;
+    for (const m of messages) total += messageSize(m);
+    if (total <= budget) return null;
+    const head = messageSize(messages[0]) + messageSize(messages[1]) + 4000;   // room for the summary itself
+    const suffix = new Array(messages.length + 1).fill(0);
+    for (let i = messages.length - 1; i >= 0; i--) suffix[i] = suffix[i + 1] + messageSize(messages[i]);
+    for (let cut = 3; cut <= lastUser; cut++) {
+        if (messages[cut].role !== 'user') continue;
+        if (head + suffix[cut] <= budget * 0.8) return { from: 2, to: cut };
+    }
+    return { from: 2, to: lastUser };
+}
+
+/** The span as a transcript a model can summarize: words as they are, tool calls as lines, results clipped. */
+function spanTranscript(span) {
+    const out = [];
+    for (const m of span) {
+        if (m.role === 'tool') { out.push(`[tool result] ${String(m.content || '').slice(0, 2000)}`); continue; }
+        if (typeof m.content === 'string' && m.content.trim()) out.push(`[${m.role === 'user' ? 'person' : m.role === 'assistant' ? 'agent' : m.role}] ${m.content.slice(0, 6000)}`);
+        if (Array.isArray(m.tool_calls)) for (const c of m.tool_calls) out.push(`[agent called] ${c.function && c.function.name}(${String((c.function && c.function.arguments) || '').slice(0, 300)})`);
+    }
+    return out.join('\n').slice(0, 120_000);
+}
+
+const SUMMARY_SYSTEM = `You compress the earlier part of a coding agent's conversation so it can keep working with less
+context. Write the state of the work, not a story: the task as understood, the facts found (files, functions, commands
+and what they showed), what was changed and where, what failed and why, what is still left. Keep exact names, paths and
+numbers. At most 500 words. No preamble.`;
+const SUMMARY_LABEL = '[The earlier conversation, summarized to save context]';
+
+/**
+ * The conversation kept for resume: at most max messages, the system message first and the rest starting at a
+ * person's message, so a resumed run never opens on a tool result whose call was cut off (a request the API refuses).
+ */
+function forResume(messages, max = 200) {
+    if (messages.length <= max) return messages;
+    const head = messages[0] && messages[0].role === 'system' ? [messages[0]] : [];
+    let i = messages.length - (max - head.length);
+    while (i < messages.length && messages[i].role !== 'user') i++;
+    return head.concat(messages.slice(i));
+}
+
+/**
+ * How many times a failed turn is asked again: a 429 or a 503 (nothing ran) twice, a 500/502/504/408 or a dropped
+ * connection once (it may have run, so only once), anything else never: a refusal is the answer.
+ */
+function retriesFor(status) {
+    if (status === 429 || status === 503) return 2;
+    if (status == null || status === 408 || status === 500 || status === 502 || status === 504) return 1;
+    return 0;
+}
+
+/** The wait before attempt+1: the server's Retry-After (at most 30 s), else base × 3^attempt. */
+function retryWait(attempt, retryAfter, base) {
+    const ra = Number(retryAfter);
+    if (retryAfter != null && String(retryAfter).trim() !== '' && Number.isFinite(ra) && ra >= 0) return Math.min(30_000, ra * 1000);
+    return Math.min(30_000, base * Math.pow(3, attempt));
+}
+
+function pause(ms, signal) {
+    return new Promise((resolve) => {
+        if (!ms) return resolve();
+        const timer = setTimeout(resolve, ms);
+        if (signal) signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
+}
+
+let rgPath;
+/** ripgrep's path when it is installed (OPENVIBE_CODES_RG names it, "off" turns it off), else null. Looked up once. */
+function findRg() {
+    if (rgPath !== undefined) return rgPath;
+    rgPath = null;
+    const named = process.env.OPENVIBE_CODES_RG;
+    if (named === 'off') return rgPath;
+    const dirs = named ? [] : String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
+    for (const p of named ? [named] : dirs.map((d) => path.join(d, 'rg'))) {
+        try { fs.accessSync(p, fs.constants.X_OK); rgPath = p; break; } catch { /* not here */ }
+    }
+    return rgPath;
+}
+
+/**
+ * grep through ripgrep where it is installed: the same answer as runTool's grep (path:line: text, 200 matches at most,
+ * lines cut at 300 characters, no .env file, no symlink followed, the skipped directories skipped), without reading
+ * every file in JavaScript on the server's event loop; it also leaves out what .gitignore ignores and binary files.
+ * A pattern ripgrep cannot read (JavaScript-only syntax such as a look-behind) and a missing ripgrep go to runTool.
+ */
+function grepTool(args, cwd, signal) {
+    const a = args || {};
+    const rg = findRg();
+    if (!rg) return Promise.resolve(runTool('grep', a, cwd));
+    const base = inside(cwd, a.path);
+    if (base instanceof Error) return Promise.resolve([base.message, true]);
+    const root = fs.realpathSync(cwd);
+    const globs = ['!.env*', ...[...SKIP_DIRS].map((d) => `!${d}/`)];
+    const argv = ['--null', '--line-number', '--no-heading', '--color', 'never', '--hidden', '--max-filesize', '1M',
+        '--max-columns', '2000', ...globs.flatMap((g) => ['-g', g]), '-e', String(a.pattern), '--', path.relative(root, base) || '.'];
+    return new Promise((resolve) => {
+        const child = spawn(rg, argv, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+        const hits = [];
+        let rest = '';
+        let err = '';
+        let full = false;
+        const timer = setTimeout(() => child.kill('SIGKILL'), 30_000);
+        const abort = () => child.kill('SIGKILL');
+        if (signal) signal.addEventListener('abort', abort, { once: true });
+        child.stdout.on('data', (d) => {
+            if (full) return;
+            const lines = (rest + d.toString()).split('\n');
+            rest = lines.pop();
+            for (const line of lines) {
+                const z = line.indexOf('\u0000');
+                const c = line.indexOf(':', z + 1);
+                if (z < 0 || c < 0) continue;
+                const file = path.relative(cwd, path.join(root, line.slice(0, z)));
+                hits.push(`${file}:${line.slice(z + 1, c)}: ${line.slice(c + 1, c + 301)}`);
+                if (hits.length >= 200) { full = true; child.kill('SIGKILL'); break; }
+            }
+        });
+        child.stderr.on('data', (d) => { err = (err + d.toString()).slice(-2000); });
+        const finish = (code) => {
+            clearTimeout(timer);
+            if (signal) signal.removeEventListener('abort', abort);
+            // 2: ripgrep could not read the pattern (or a path): JavaScript's own grep answers instead, as before.
+            if (code === 2 && !full && !hits.length) return resolve(runTool('grep', a, cwd));
+            resolve([hits.join('\n') || 'no matches', false]);
+        };
+        child.on('close', finish);
+        child.on('error', () => { clearTimeout(timer); resolve(runTool('grep', a, cwd)); });
+    });
+}
 
 /**
  * The shell a job may not run (the portal's deny list, enforced where the command would spawn).
@@ -228,12 +430,14 @@ function runTool(name, args, cwd) {
     if (name === 'edit_file') {
         const f = inside(cwd, a.path, { write: true });
         if (f instanceof Error) return [f.message, true];
+        // OpenCode's matching (harness/adapters/edit-match.js): exact, then forgiving quotes and dashes, then trailing
+        // whitespace, CRLF-safe; a miss says where the closest lines are. The text is spliced in, never through
+        // String.replace (whose $& and $1 would rewrite a new_string that contains them).
         const text = fs.readFileSync(f, 'utf8');
-        const old = String(a.old_string || '');
-        const count = old ? text.split(old).length - 1 : 0;
-        if (count !== 1) return [count ? `old_string occurs ${count} times: add context so it is unique` : 'old_string not found: read the file first', true];
-        fs.writeFileSync(f, text.replace(old, String(a.new_string == null ? '' : a.new_string)));
-        return [`edited ${path.relative(cwd, f)}`, false];
+        const out = applyEdit(text, a.old_string, a.new_string, { replaceAll: a.replace_all === true });
+        if (out.error) return [out.error === 'old_string not found' ? `old_string not found${out.hint ? `. ${out.hint}` : ': read the file first'}` : out.error, true];
+        fs.writeFileSync(f, out.text);
+        return [`edited ${path.relative(cwd, f)}${out.count > 1 ? ` (${out.count} places)` : ''}${out.tier !== 'exact' ? ` (matched ignoring ${out.tier === 'unicode' ? 'typographic quotes and dashes' : 'trailing whitespace'})` : ''}`, false];
     }
     return [`unknown tool ${name}`, true];
 }
@@ -369,13 +573,27 @@ function apiAgent(spec) {
             // advise joins the list only when the run asked for an advisor (off unless asked) and this adapter is
             // OpenVibe.AI's: the other API paths have no advice endpoint. It stays for every turn, asked out or not,
             // so the prefix stays stable; past its budget it answers a refusal instead of calling.
-            const defs = spec.advisorEndpoint === true && t.advisor ? { ...TOOL_DEFS, advise: ADVISE } : TOOL_DEFS;
+            // Code mode (runner 0.14.0): execute runs one script over the repository's tools (harness/code-mode.js), at
+            // this loop's own levels (read; edit = files, no commands; full = commands too). Strict offers only it.
+            const cmo = t.options && t.options.codeMode && t.options.codeMode.server ? t.options.codeMode : null;
+            const cmRepo = cmo ? require('../code-mode').createRepoTools({ root: t.cwd, permission: { read: 'read', edit: 'files', full: 'full' }[t.permission] || 'read' }) : null;
+            const cmBase = cmo && cmo.strict !== false ? {} : TOOL_DEFS;
+            const withCode = cmo ? { ...cmBase, execute: {
+                level: 'read',
+                description: `Run one JavaScript script that calls \`await tools.<name>(input)\` (${cmRepo.defs.map((d) => d.name).join(', ')}) in the working directory, and return a value; only the value and console.log lines come back. Do several steps in one script. ${cmRepo.defs.map((d) => `${d.name}: ${d.description}`).join(' ')}`,
+                parameters: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] },
+            } } : TOOL_DEFS;
+            const defs = spec.advisorEndpoint === true && t.advisor ? { ...withCode, advise: ADVISE } : withCode;
             const tools = Object.entries(defs).filter(([, d]) => LEVELS[d.level] <= level)
                 .sort(([a], [b]) => a.localeCompare(b))
                 .map(([name, d]) => ({ type: 'function', function: { name, description: d.description, parameters: d.parameters } }));
             const sessionId = t.resume || `api_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
             const startedAt = Date.now();
             const maxTurns = Math.max(1, Number(t.maxTurns) || 40);
+            const budget = Math.max(20_000, Number(t.contextChars) || Number(t.options && t.options.contextChars) || Number(env.OPENVIBE_CODES_CONTEXT_CHARS) || CONTEXT_CHARS);
+            const compact = !(t.options && t.options.compact === false) && env.OPENVIBE_CODES_COMPACT !== 'off';
+            const retryBase = Number.isFinite(Number(env.OPENVIBE_CODES_RETRY_MS)) && env.OPENVIBE_CODES_RETRY_MS !== undefined
+                ? Math.max(0, Number(env.OPENVIBE_CODES_RETRY_MS)) : 2000;
             let cancelled = false;
             const controller = new AbortController();
             if (t.signal) t.signal.addEventListener('abort', () => { cancelled = true; controller.abort(); }, { once: true });
@@ -390,6 +608,25 @@ function apiAgent(spec) {
                 let lastText = '';
                 let turns = 0;
                 let failure = null;
+                /** One call without tools for the summary tier, through the same transport; its tokens and cost count. */
+                const summarize = async (span) => {
+                    const payload = { ...(spec.extra ? spec.extra(env) : {}), model, messages: [{ role: 'system', content: SUMMARY_SYSTEM }, { role: 'user', content: spanTranscript(span) }] };
+                    let body;
+                    if (spec.exchange) body = await exchangeTurn(spec, { env, doFetch, payload, signal: controller.signal });
+                    else {
+                        const bearer = spec.token ? await spec.token(env, doFetch) : key;
+                        const res = await doFetch(`${base}/chat/completions`, { method: 'POST', signal: controller.signal,
+                            headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...extraHeaders(env) }, body: JSON.stringify(payload) });
+                        body = await res.json().catch(() => null);
+                        if (!res.ok) return { error: `HTTP ${res.status}` };
+                    }
+                    const usage = (body && body.usage) || {};
+                    u.input += +usage.prompt_tokens || 0; u.output += +usage.completion_tokens || 0;
+                    const x = body && body.x_openvibe;
+                    if (x && Number.isFinite(+x.cost_usd)) { reported.usd += +x.cost_usd; reported.any = true; }
+                    const text = body && body.choices && body.choices[0] && body.choices[0].message && String(body.choices[0].message.content || '').trim();
+                    return text ? { text: text.slice(0, 8000) } : { error: 'an empty summary' };
+                };
                 // The model AI says ran, and its route disclosure (x_openvibe), recorded on the run's result.
                 let resolvedModel = null;
                 let disclosure = null;
@@ -399,8 +636,22 @@ function apiAgent(spec) {
                 let receiptId = null;
                 let adviceUsed = 0;
                 try {
-                    while (turns < maxTurns && !cancelled) {
+                    turnLoop: while (turns < maxTurns && !cancelled) {
                         turns++;
+                        const dropped = trimContext(messages, budget);
+                        if (dropped) yield ev.warning(`older tool output (${dropped} characters) was dropped to keep the conversation under ${budget} characters`);
+                        // The second tier: still over the limit, the earlier turns become a summary the model writes.
+                        const plan = compact ? compactPlan(messages, budget) : null;
+                        if (plan) {
+                            const span = messages.slice(plan.from, plan.to);
+                            const sum = await summarize(span).catch((err) => ({ error: err.message }));
+                            if (sum && sum.text) {
+                                messages.splice(plan.from, plan.to - plan.from, { role: 'user', content: `${SUMMARY_LABEL}\n${sum.text}` });
+                                yield ev.warning(`the earlier conversation (${span.length} messages) was summarized to stay under ${budget} characters`);
+                            } else {
+                                yield ev.warning(`the earlier conversation could not be summarized (${(sum && sum.error) || 'no answer'}): it is sent as it is`);
+                            }
+                        }
                         const payload = { ...(spec.extra ? spec.extra(env) : {}), model, messages, tools, tool_choice: 'auto',
                             // Codes L31/AI AL3: the reasoning level the caller asked for, and the option to ask
                             // the AI router's advisor for guidance. AI ignores both when its own request does not
@@ -408,27 +659,56 @@ function apiAgent(spec) {
                             ...(t.effort ? { effort: t.effort } : {}), ...(t.advisor ? { advisor: t.advisor } : {}) };
                         let body;
                         let res = null;
-                        if (spec.exchange) {
-                            // The default path: the Exchange's compatible API through the SDK's Exchange client (the
-                            // person's or the service's Exchange key), with the same tool loop as before.
-                            try {
-                                body = await exchangeTurn(spec, { env, doFetch, payload, signal: controller.signal });
-                            } catch (err) {
-                                failure = err.status
-                                    ? `${spec.name} was refused by the Exchange (HTTP ${err.status}${err.code ? `, ${err.code}` : ''}): ${err.message}`
-                                    : `${spec.name} could not reach the Exchange: ${err.message}`;
-                                yield ev.error(failure);
-                                break;
+                        // A busy or briefly broken API is asked again (retriesFor), and the reader is told; a
+                        // refusal, or the last failure, ends the run as before.
+                        for (let attempt = 0; ; attempt++) {
+                            let wait = null;
+                            let why = '';
+                            res = null;
+                            if (spec.exchange) {
+                                // The default path: the Exchange's compatible API through the SDK's Exchange client (the
+                                // person's or the service's Exchange key), with the same tool loop as before.
+                                try {
+                                    body = await exchangeTurn(spec, { env, doFetch, payload, signal: controller.signal });
+                                } catch (err) {
+                                    const status = err.status == null ? null : Number(err.status);
+                                    if (!cancelled && err.code !== 'exchange.no_key' && attempt < retriesFor(status)) {
+                                        wait = retryWait(attempt, err.retryAfter, retryBase);
+                                        why = status ? `HTTP ${status}` : err.message;
+                                    } else {
+                                        failure = err.status
+                                            ? `${spec.name} was refused by the Exchange (HTTP ${err.status}${err.code ? `, ${err.code}` : ''}): ${err.message}`
+                                            : `${spec.name} could not reach the Exchange: ${err.message}`;
+                                        yield ev.error(failure);
+                                        break turnLoop;
+                                    }
+                                }
+                            } else {
+                                const bearer = spec.token ? await spec.token(env, doFetch) : key;
+                                try {
+                                    res = await doFetch(`${base}/chat/completions`, {
+                                        method: 'POST',
+                                        headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...extraHeaders(env) },
+                                        body: JSON.stringify(payload),
+                                        signal: controller.signal,
+                                    });
+                                } catch (err) {
+                                    if (cancelled || attempt >= retriesFor(null)) throw err;
+                                    wait = retryWait(attempt, null, retryBase);
+                                    why = err.message;
+                                }
+                                if (res && !res.ok && attempt < retriesFor(res.status)) {
+                                    wait = retryWait(attempt, res.headers && res.headers.get ? res.headers.get('retry-after') : null, retryBase);
+                                    why = `HTTP ${res.status}`;
+                                    await res.text().catch(() => null);
+                                } else if (res) {
+                                    body = await res.json().catch(() => null);
+                                }
                             }
-                        } else {
-                            const bearer = spec.token ? await spec.token(env, doFetch) : key;
-                            res = await doFetch(`${base}/chat/completions`, {
-                                method: 'POST',
-                                headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...extraHeaders(env) },
-                                body: JSON.stringify(payload),
-                                signal: controller.signal,
-                            });
-                            body = await res.json().catch(() => null);
+                            if (wait == null) break;
+                            yield ev.warning(`${spec.name} answered ${why}; asking again in ${Math.ceil(wait / 1000)} s`);
+                            await pause(wait, controller.signal);
+                            if (cancelled) break turnLoop;
                         }
                         const x = body && body.x_openvibe && typeof body.x_openvibe === 'object' ? body.x_openvibe : null;
                         if (x) {
@@ -503,6 +783,11 @@ function apiAgent(spec) {
                                 out = finished;
                                 }
                             }
+                            else if (name === 'execute' && cmRepo) {
+                                const r = await require('openvibe-sdk/code-mode').runCode(String(args.code || ''), { tools: cmRepo.defs.map((d) => d.name), call: (kind, toolName, input) => (kind === 'tool' ? cmRepo.call(toolName, input) : { ok: false, error: 'no functions here' }), limits: require('../code-mode').LIMITS });
+                                out = [JSON.stringify({ ok: r.ok, ...(r.ok ? { value: r.value } : { error: r.error }), logs: (r.logs || []).slice(0, 60), calls: r.calls }), !r.ok];
+                            }
+                            else if (name === 'grep') { try { out = await grepTool(args, t.cwd, controller.signal); } catch (err) { out = [err.message, true]; } }
                             else { try { out = runTool(name, args, t.cwd); } catch (err) { out = [err.message, true]; } }
                             yield ev.toolResult(call.id, out[0], out[1]);
                             messages.push({ role: 'tool', tool_call_id: call.id, content: String(out[0]).slice(0, 16_000) });
@@ -513,7 +798,7 @@ function apiAgent(spec) {
                     failure = cancelled ? `${spec.name} was stopped` : `${spec.name} could not be reached: ${err.message}`;
                     yield ev.error(failure);
                 }
-                if (ctx.sessions) ctx.sessions.save(sessionId, { agent: spec.id, model: resolvedModel || model, messages: messages.slice(-200) });
+                if (ctx.sessions) ctx.sessions.save(sessionId, { agent: spec.id, model: resolvedModel || model, messages: forResume(messages, 200) });
                 const cost = reported.any ? reported.usd : (u.input * (spec.priceIn || 0) + u.output * (spec.priceOut || 0)) / 1000;
                 yield ev.result({ ok: !failure && !cancelled, text: failure || lastText, sessionId, model: resolvedModel || model, startedAt, turns, costUsd: cost,
                     ...(resolvedModel ? { resolved_model: resolvedModel } : {}),
@@ -528,4 +813,4 @@ function apiAgent(spec) {
     return adapter;
 }
 
-module.exports = { apiAgent, exchangeTurn, refusalOf, extraHeaders, runTool, inside, refusedCommand, adviceTranscript, TOOL_DEFS, SYSTEM };
+module.exports = { apiAgent, exchangeTurn, refusalOf, extraHeaders, runTool, grepTool, trimContext, compactPlan, spanTranscript, forResume, retriesFor, retryWait, inside, refusedCommand, adviceTranscript, TOOL_DEFS, SYSTEM };

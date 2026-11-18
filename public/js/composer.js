@@ -12,8 +12,11 @@
     var value = form.getAttribute('data-c4-model-value') || '';
     var c = window.OpenVibeComposer.mount(document.createElement('div'), {
       preset: 'agent', name: ta.name || 'text', maxLength: 16000,
-      placeholder: ta.placeholder || 'Tell your conductor what to do next', label: 'Message the conductor',
+      placeholder: ta.placeholder || 'Tell your orchestrator what to do next', label: 'Message the conductor',
       submitLabel: 'Send', tools: [],
+      // The task already has its agent and computer; its model is the chip below (openvibe-shared 4.259.0 added agent,
+      // model and place chips to every agent box: here they would say "Any agent" beside the real choice).
+      run: false,
       mode: options.length ? { name: 'who', label: 'Model', options: options, value: value } : null,
     });
     if (!c) return;

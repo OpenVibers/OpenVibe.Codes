@@ -23,6 +23,7 @@ const { createHarnesses } = require('../server/domain/harnesses');
 const placement = require('../server/domain/harness-placement');
 const cli = require('./adapters/cli');
 const { apiAgent } = require('./adapters/api');
+const acp = require('./adapters/acp');
 const ev = require('./events');
 const { createStore } = require('./sessions');
 
@@ -150,7 +151,21 @@ function adaptersFor(env) {
         // provider (OPENVIBE_AI_PROVIDER_URL, OPENVIBE_AI_PROVIDER_MODEL) with that key, revealed per request by Network.
         'openvibe-ai': apiAgent({ id: 'openvibe-ai', name: 'OpenVibe.AI', baseUrl: env.OPENVIBE_AI_URL || 'https://ai.openvibe.services/v1', token: networkToken(), model: 'openvibe', extra: projectProvider, advisorEndpoint: true }),
         'openai-compatible': apiAgent({ id: 'openai-compatible', name: 'Your own model', baseUrl: env.OPENVIBE_CODES_BASE_URL || 'http://127.0.0.1:8080/v1', keyEnv: 'OPENVIBE_CODES_API_KEY', model: env.OPENVIBE_CODES_MODEL || 'local' }),
+        // The Agent Client Protocol's agents (harness/acp-agents.json, pinned from the public ACP registry): Gemini CLI,
+        // Qwen Code, Kimi Code, Grok, Copilot, Cline, Kilo, deepagents, Claude and Codex through their ACP bridges, …,
+        // all through one client (harness/adapters/acp.js), each with the person's own sign-in on the machine.
+        ...acpAdapters(),
     };
+}
+
+/** One ACP adapter per pinned agent, launched with npx or uvx at its exact version. */
+function acpAdapters() {
+    const out = {};
+    for (const a of require('./acp-agents.json').agents) {
+        const launch = acp.launchOf(a);
+        if (launch) out[a.id] = acp.acpAgent({ id: a.id, name: a.name, cmd: launch.cmd, args: launch.args, env: launch.env });
+    }
+    return out;
 }
 
 /** Is the executable on PATH? (No shell, no `which`.) */
@@ -161,6 +176,34 @@ function onPath(bin, env) {
     return null;
 }
 
+// A binary's version, asked once per binary and kept by its path and modification time (`agents` asked every CLI on every
+// call: about 1 s on a machine with six of them).
+let versionCache = null;
+function cachedVersion(bin, ask, env) {
+    let key = null;
+    try { const st = fs.statSync(bin); key = `${bin}|${st.mtimeMs}|${st.size}`; } catch { return ask(); }
+    const file = path.join(env.OPENVIBE_CODES_HOME || path.join(env.HOME || require('os').homedir(), '.openvibe-codes'), 'cache', 'versions.json');
+    if (!versionCache) { try { versionCache = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { versionCache = {}; } }
+    if (Object.prototype.hasOwnProperty.call(versionCache, key)) return versionCache[key];
+    const v = ask() || null;
+    versionCache[key] = v;
+    try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(versionCache)); } catch { /* a read-only home: ask next time */ }
+    return v;
+}
+
+const checkCache = new Map();
+function cachedCheck(adapter, env) {
+    const file = path.join(env.OPENVIBE_CODES_HOME || path.join(env.HOME || require('os').homedir(), '.openvibe-codes'), 'cache', 'checks.json');
+    const key = `${adapter.id}|${env.OPENVIBE_CODES_PROFILE || ''}`;
+    if (!checkCache.size) { try { for (const [k, v] of Object.entries(JSON.parse(fs.readFileSync(file, 'utf8')))) checkCache.set(k, v); } catch { /* none yet */ } }
+    const hit = checkCache.get(key);
+    if (hit && Date.now() - hit.at < adapter.checkTtlMs) return hit.value;
+    const value = adapter.check(env);
+    checkCache.set(key, { at: Date.now(), value });
+    try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(Object.fromEntries(checkCache))); } catch { /* read-only: check next time */ }
+    return value;
+}
+
 function availability(adapter, env) {
     if (!adapter) return { available: false, reason: 'no adapter for this harness yet' };
     if (adapter.kind === 'cli') {
@@ -169,12 +212,13 @@ function availability(adapter, env) {
         // A harness that needs something else besides the binary (Claude Code on another provider needs its endpoint
         // and its token) says so in its own words.
         if (adapter.check) {
-            const c = adapter.check(env) || {};
+            // A check may ask a server (Muse asks Meta for its usage: 0.35 s): its answer holds for two minutes.
+            const c = (adapter.checkTtlMs ? cachedCheck(adapter, env) : adapter.check(env)) || {};
             if (!c.available) return { available: false, reason: c.reason || `${adapter.name} is not set up here` };
         }
         const out = { available: true, where };
         // The version the binary reports about itself, when it answers.
-        if (adapter.version) { const v = adapter.version(env); if (v) out.version = v; }
+        if (adapter.version) { const v = cachedVersion(where, () => adapter.version(env), env); if (v) out.version = v; }
         return out;
     }
     if (typeof adapter.available === 'function') return adapter.available(env);

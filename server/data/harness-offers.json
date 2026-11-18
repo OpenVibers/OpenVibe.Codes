@@ -491,7 +491,7 @@
         "concurrency": 8,
         "price_per_1k_tokens": {
           "fresh_usd": 0.00027,
-          "cached_usd": 0.00007,
+          "cached_usd": 7e-05,
           "output_usd": 0.0011
         },
         "availability_windows": []
@@ -585,6 +585,872 @@
         "context_limits": {
           "input_tokens": 32000,
           "output_tokens": 4096
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "claude-acp",
+    "name": "Claude Agent",
+    "provider": "anthropic",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "claude-acp-default",
+        "harness": "claude-acp",
+        "provider": "anthropic",
+        "model": "claude-acp",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "codex-acp",
+    "name": "Codex",
+    "provider": "openai",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "codex-acp-default",
+        "harness": "codex-acp",
+        "provider": "openai",
+        "model": "codex-acp",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "gemini-cli",
+    "name": "Gemini CLI",
+    "provider": "google",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "gemini-cli-default",
+        "harness": "gemini-cli",
+        "provider": "google",
+        "model": "gemini-cli",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "qwen-code",
+    "name": "Qwen Code",
+    "provider": "alibaba",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "qwen-code-default",
+        "harness": "qwen-code",
+        "provider": "alibaba",
+        "model": "qwen-code",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "kimi-code",
+    "name": "Kimi Code",
+    "provider": "moonshot",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "kimi-code-default",
+        "harness": "kimi-code",
+        "provider": "moonshot",
+        "model": "kimi-code",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "grok-build",
+    "name": "Grok Build",
+    "provider": "xai",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "grok-build-default",
+        "harness": "grok-build",
+        "provider": "xai",
+        "model": "grok-build",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "copilot-cli",
+    "name": "GitHub Copilot",
+    "provider": "github",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "copilot-cli-default",
+        "harness": "copilot-cli",
+        "provider": "github",
+        "model": "copilot-cli",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "cline",
+    "name": "Cline",
+    "provider": "cline",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "cline-default",
+        "harness": "cline",
+        "provider": "cline",
+        "model": "cline",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "kilo",
+    "name": "Kilo",
+    "provider": "kilocode",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "kilo-default",
+        "harness": "kilo",
+        "provider": "kilocode",
+        "model": "kilo",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "deepagents",
+    "name": "DeepAgents",
+    "provider": "langchain",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "deepagents-default",
+        "harness": "deepagents",
+        "provider": "langchain",
+        "model": "deepagents",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "auggie",
+    "name": "Auggie CLI",
+    "provider": "augment",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "auggie-default",
+        "harness": "auggie",
+        "provider": "augment",
+        "model": "auggie",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "qoder",
+    "name": "Qoder CLI",
+    "provider": "qoder",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "qoder-default",
+        "harness": "qoder",
+        "provider": "qoder",
+        "model": "qoder",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "codebuddy-code",
+    "name": "CodeBuddy Code (WorkBuddy)",
+    "provider": "tencent",
+    "capabilities": {
+      "host_access": true,
+      "mcp": true,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": true,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 1048576
+    },
+    "agents": [
+      {
+        "id": "codebuddy-code-default",
+        "harness": "codebuddy-code",
+        "provider": "tencent",
+        "model": "codebuddy-code",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      },
+      {
+        "id": "codebuddy-code-hy4-flash",
+        "harness": "codebuddy-code",
+        "provider": "tencent",
+        "model": "hy4-flash",
+        "context_limits": {
+          "input_tokens": 983040,
+          "output_tokens": 65536
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      },
+      {
+        "id": "codebuddy-code-hy4",
+        "harness": "codebuddy-code",
+        "provider": "tencent",
+        "model": "hy4",
+        "context_limits": {
+          "input_tokens": 960000,
+          "output_tokens": 64000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "glm-acp",
+    "name": "GLM Agent",
+    "provider": "zhipu",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "glm-acp-default",
+        "harness": "glm-acp",
+        "provider": "zhipu",
+        "model": "glm-acp",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "pi",
+    "name": "pi ACP",
+    "provider": "pi",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "pi-default",
+        "harness": "pi",
+        "provider": "pi",
+        "model": "pi",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
+    "id": "droid",
+    "name": "Factory Droid",
+    "provider": "factory",
+    "capabilities": {
+      "host_access": true,
+      "mcp": false,
+      "long_autonomy": false,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "npx"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "droid-default",
+        "harness": "droid",
+        "provider": "factory",
+        "model": "droid",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
         },
         "concurrency": 2,
         "price_per_1k_tokens": {
