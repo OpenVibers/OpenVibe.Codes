@@ -19,6 +19,8 @@ const ev = require('../events');
 const { spawnAgent, exitReason } = require('../process');
 const { effortFor } = require('../../engine/adapters/base');
 const { DENIED: CLAUDE_DENIED } = require('../../engine/adapters/claude-code');
+// Strict code mode: the agent's own file and shell tools, which only its script reaches (through ov_code's tools).
+const CODE_MODE_OFF = ['Read', 'Edit', 'MultiEdit', 'Write', 'Grep', 'Glob', 'Bash', 'NotebookEdit'];
 
 /** A parser that reads JSON lines, hands each object to onEvent, and ends the run with exactly one result. */
 function jsonLines(agent, onEvent, onEnd) {
@@ -72,15 +74,24 @@ const claudeCode = {
         if (o.mcpConfig) args.push('--mcp-config', o.mcpConfig);
         if (Array.isArray(o.allowedTools) && o.allowedTools.length) args.push('--allowedTools', o.allowedTools.join(' '));
         if (o.permissionPromptTool) args.push('--permission-prompt-tool', o.permissionPromptTool);
+        // Code mode (2026-11-18, harness/code-mode.js): the line that says how to use it rides in the system prompt; strict
+        // code mode turns the agent's own file and shell tools off, so the work goes through one script (Claude Code's
+        // own Code Mode does the same, in a terminal only).
+        const cm = o.codeMode && typeof o.codeMode === 'object' ? o.codeMode : null;
+        if (cm && cm.hint) args.push('--append-system-prompt', String(cm.hint));
         // The portal's deny list rides along (no commits, resets, stashes, sudo, recursive rm, .env reads); even
         // unattended, a run never pushes: publishing is the person's step, the one rule full keeps.
-        args.push('--disallowedTools', t.permission === 'full' ? 'Bash(git push:*)' : CLAUDE_DENIED.join(' '));
+        const denied = t.permission === 'full' ? ['Bash(git push:*)'] : CLAUDE_DENIED.slice();
+        if (cm && cm.strict) denied.push(...CODE_MODE_OFF);
+        args.push('--disallowedTools', denied.join(' '));
+        // MCP tools wait behind Claude Code's tool search unless it is off; code mode's execute is shown from the start.
+        const env = cm ? { ...(ctx.env || {}), ENABLE_TOOL_SEARCH: 'false' } : ctx.env;
         const parser = jsonLines(claudeCode, (o, emit, st) => {
             if (o.type === 'system' && o.subtype === 'init') { st.sessionId = o.session_id; st.model = o.model; emit(ev.init(o.session_id, 'claude-code', o.model)); return; }
             if (o.type === 'result') { emit({ ...o, result: ev.scrub(o.result || '') }); return; }
             if (o.type === 'assistant' || o.type === 'user') emit(o);
         });
-        return spawnAgent({ cmd: this.bin, args, cwd: t.cwd, env: ctx.env, timeoutMs: t.timeoutMs, signal: t.signal, parser });
+        return spawnAgent({ cmd: this.bin, args, cwd: t.cwd, env, timeoutMs: t.timeoutMs, signal: t.signal, parser });
     },
 };
 

@@ -26,6 +26,7 @@ const { boundedEvidence } = require('../engine/goal');
 const { validatePlan } = require('../engine/model-plan');
 const { repositoryPlan, selectPlan, resolveRepositoryPlan, runModelPlan } = require('./model-plan');
 const skills = require('../engine/skills');
+const codeMode = require('./code-mode');
 
 const JOB_PROTOCOL = '1.0.0';
 /** The agents a conductor's turn may run on: every harness Codes offers. */
@@ -225,6 +226,7 @@ function parseArgs(raw, env = process.env) {
         return {
             kind, repo: null, ref: null, prompt, permission, push: null,
             folder, safety, mcp: a.mcp === true, codesUrl,
+            ...(a.code_mode === true ? { codeMode: true } : {}),
             taskId: typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? a.task_id : null,
             model: typeof a.model === 'string' && a.model.length <= 100 ? a.model : null,
             ...(effort ? { effort } : {}),
@@ -287,6 +289,8 @@ function parseArgs(raw, env = process.env) {
     const planSource = ['task', 'project', 'account'].includes(a.plan_source) ? a.plan_source : 'task';
     return {
         kind, repo: repo ? repo.toString() : null, ref, prompt, permission, push,
+        // Code mode (2026-11-18, harness/code-mode.js): the agent may run one script for many steps.
+        ...(a.code_mode === true ? { codeMode: true } : {}),
         // The task this job is an attempt of, when the server names it: the checkpoint refs carry it.
         ...(typeof a.task_id === 'string' && /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(a.task_id) ? { taskId: a.task_id } : {}),
         ...(attached.length ? { attachments: attached } : {}),
@@ -916,6 +920,30 @@ async function runJob({ input, harness, emit, writeResult, env = process.env, tm
         } else {
             fs.mkdirSync(work, { recursive: true });
             say({ t: 'step', text: 'Preparing an empty benchmark workspace' });
+        }
+        // Code mode (2026-11-18): Claude Code's own works only in an interactive terminal, so a job that asks for it
+        // gets Codes' ov_code server beside the agent (harness/code-mode.js): one script for many reads, searches and
+        // edits, within the job's own permission.
+        if (job.codeMode && (!job.agent || job.agent === 'claude-code' || job.agent === 'claude-other')) {
+            const why = codeMode.ready();
+            if (why) say({ t: 'note', level: 'warning', text: `Code mode is off for this run: ${why}` });
+            else {
+                const permission = job.kind === 'conductor'
+                    ? ({ ask: 'read', project: 'files', full: 'full' }[job.safety] || 'read')
+                    : ({ read: 'read', edit: 'edit', full: 'full' }[job.permission] || 'read');
+                // Strict on a cloned repository and at "full" (nothing asks the owner there): the agent's own file and
+                // shell tools are off and the work goes through scripts. A conductor at "ask" or "project" keeps its
+                // own tools, whose risky calls ask the owner, and has code mode beside them.
+                const strict = job.kind !== 'conductor' || job.safety === 'full';
+                const cm = codeMode.mcpOptions({ file: path.join(dir, 'mcp-code.json'), root: work, permission, existing: adapterOptions && adapterOptions.mcpConfig });
+                adapterOptions = {
+                    ...(adapterOptions || {}), mcpConfig: cm.mcpConfig,
+                    allowedTools: [...((adapterOptions && adapterOptions.allowedTools) || []), cm.tool],
+                    codeMode: { strict, hint: codeMode.hintFor({ strict, permission }) },
+                };
+                result.code_mode = { permission, strict };
+                say({ t: 'step', text: `Code mode: the agent works in scripts${strict ? '' : ' beside its own tools'} (${permission})` });
+            }
         }
         const run = job.plan ? {
             runId: job.taskId || 'plan',
