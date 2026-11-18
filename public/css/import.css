@@ -1,0 +1,43 @@
+/* OpenVibe.Codes — Bring a session here (/import): the message for your agent, the command, the drop, your sessions. */
+.c4-imp-card h2,.c4-imp-card .c4-button{display:inline-flex;align-items:center;gap:8px}
+.c4-imp-card h2 [data-ov-icon]{font-size:20px;width:20px;height:20px;display:inline-grid;place-items:center;color:var(--c4-accent)}
+.c4-imp-card .c4-button{min-height:44px}
+.c4-imp-card .c4-button [data-ov-icon]{font-size:18px;width:20px;display:inline-grid;place-items:center}
+.c4-imp-lead{margin:0 0 14px;color:var(--c4-muted);font-size:14px;line-height:1.5}
+.c4-imp-text{display:block;box-sizing:border-box;width:100%;min-height:200px;resize:vertical;border:1px solid var(--c4-line);border-radius:10px;background:var(--c4-bg);color:var(--c4-ink);padding:12px 14px;font:14px/1.55 inherit;font-family:inherit}
+.c4-imp-text:focus,.c4-imp-line:focus{outline:2px solid var(--c4-accent);outline-offset:1px}
+.c4-imp-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-top:12px}
+.c4-imp-label{display:block;margin:14px 0 6px;font-size:13px;font-weight:600;color:var(--c4-ink)}
+.c4-imp-label:first-of-type{margin-top:0}
+.c4-imp-cmd{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
+.c4-imp-line{box-sizing:border-box;width:100%;min-width:0;min-height:44px;padding:0 12px;border:1px solid var(--c4-line);border-radius:8px;background:var(--c4-bg);color:var(--c4-ink);font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;text-overflow:ellipsis}
+.c4-imp-drop{position:relative;margin-top:18px}
+.c4-imp-file{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0 0 0 0)}
+.c4-imp-droplabel{display:flex;align-items:center;gap:14px;min-height:72px;padding:14px 16px;border:1.5px dashed var(--c4-line);border-radius:12px;cursor:pointer;color:var(--c4-ink);transition:border-color .18s ease,background-color .18s ease,transform .18s ease}
+.c4-imp-droplabel [data-ov-icon]{flex:none;width:40px;height:40px;display:grid;place-items:center;border-radius:10px;font-size:22px;background:var(--c4-bg);color:var(--c4-accent)}
+.c4-imp-droplabel span{display:grid;gap:3px;min-width:0}
+.c4-imp-droplabel small{color:var(--c4-muted);font-size:12.5px;line-height:1.4}
+.c4-imp-droplabel:hover,.c4-imp-drop.is-over .c4-imp-droplabel,.c4-imp-file:focus-visible+.c4-imp-droplabel{border-color:var(--c4-accent)}
+.c4-imp-drop.is-over .c4-imp-droplabel{transform:scale(calc(1 - .01 * var(--ov-move,1)))}
+.c4-imp-drop.is-busy .c4-imp-droplabel{opacity:.6;pointer-events:none}
+.c4-imp-drop [data-imp-status]{margin:8px 0 0;min-height:1em}
+.c4-imp-drop [data-imp-status] a{font-weight:600}
+.c4-imp-where{margin-top:14px;font-size:13px}
+.c4-imp-where summary{min-height:44px;display:flex;align-items:center;cursor:pointer;color:var(--c4-accent);font-weight:600}
+.c4-imp-where ul{margin:4px 0 0;padding:0 0 0 18px;display:grid;gap:8px;color:var(--c4-muted)}
+.c4-imp-where strong{color:var(--c4-ink)}
+.c4-imp-list{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:10px}
+.c4-imp-item{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 14px;padding:12px 14px;border:1px solid var(--c4-line);border-radius:10px}
+.c4-imp-main{display:grid;gap:3px;min-width:0;flex:1 1 220px}
+.c4-imp-main strong,.c4-imp-main .c4-hint{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c4-imp-actions{display:flex;gap:8px;align-items:center}
+.c4-imp-actions form{margin:0}
+.c4-imp-actions .c4-button{min-height:44px;display:inline-flex;align-items:center}
+.c4-imp-card,.c4-imp-made,.c4-imp-item{animation:c4-imp-in .32s cubic-bezier(.2,.8,.2,1) both}
+.c4-imp-card+.c4-imp-card{animation-delay:.05s}
+@keyframes c4-imp-in{from{opacity:0;transform:translateY(calc(8px * var(--ov-move,1)))}to{opacity:1;transform:none}}
+html[data-ov-motion="off"] .c4-imp-card,html[data-ov-motion="off"] .c4-imp-made,html[data-ov-motion="off"] .c4-imp-item{animation:none}
+html[data-ov-motion="off"] .c4-imp-droplabel{transition:none}
+@media (min-width:900px){.c4-imp-text{min-height:230px}}
+.c4-imp-drop [data-imp-status]:empty{display:none}
+@media (min-width:1100px){.c4-imp-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;margin-bottom:16px}.c4-imp-two>.c4-card{margin:0}}

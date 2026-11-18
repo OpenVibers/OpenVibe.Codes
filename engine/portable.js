@@ -417,6 +417,8 @@ function fromText(text, { name = null, title = null } = {}) {
             if (value && value.format === FORMAT) doc = value;
             else if (value && !Array.isArray(value) && value.info && Array.isArray(value.messages)) doc = opencodeExport(value);
             else if (Array.isArray(value) || (value && Array.isArray(value.messages))) doc = geminiSession(value, { name });
+            // JSON that is no session this knows is refused, not read as a hand-over's words.
+            else throw new Error('this JSON is not a session of a harness this reads (Claude Code, Codex, Gemini CLI, OpenCode)');
         }
     }
     if (!doc && (trimmed.startsWith('{'))) {

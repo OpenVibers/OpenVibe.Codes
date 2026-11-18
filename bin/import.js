@@ -23,11 +23,12 @@ const portable = require('../engine/portable');
 const { auth, EXIT } = require('./task');
 
 const USAGE = `openvibe-codes import [--session <id> | --file <session.jsonl> | --codex <rollout.jsonl>] [--cwd <folder>]
-                      [--title "…"] [--out <file.json.gz>] [--json]
+                      [--title "…"] [--link cdi_…] [--out <file.json.gz>] [--json]
 
 Carries a coding agent's session to openvibe.codes under your account, to continue on any of your machines.
 Default: the newest Claude Code session of this folder (or --cwd). CLAUDE_CONFIG_DIR is where Claude Code keeps them
-(default ~/.claude). Token: OPENVIBE_TOKEN or ~/.config/openvibe/token. Server: OPENVIBE_CODES_URL.`;
+(default ~/.claude). Signed by --link (a one-time link from openvibe.codes/import), else OPENVIBE_TOKEN or
+~/.config/openvibe/token. Server: OPENVIBE_CODES_URL. Any other harness: openvibe.codes/import.`;
 
 function opt(args, name) {
     const i = args.indexOf(name);
@@ -50,8 +51,9 @@ function build(args, env = process.env) {
     return { doc: portable.portable(records, meta, { title: opt(args, '--title') }), from: file };
 }
 
-async function upload(doc) {
-    const c = auth();
+async function upload(doc, { link = null } = {}) {
+    // A one-time link from openvibe.codes/import signs this one upload; without one, your Network token does.
+    const c = link ? { base: String(process.env.OPENVIBE_CODES_URL || 'https://openvibe.codes').replace(/\/+$/, ''), token: link } : auth();
     const body = zlib.gzipSync(JSON.stringify(doc));
     let res;
     try {
@@ -81,11 +83,13 @@ async function importCommand(args, { out = (l) => process.stdout.write(`${l}\n`)
         return 0;
     }
     try {
-        const r = await upload(doc);
+        const link = opt(args, '--link') || process.env.OPENVIBE_IMPORT_LINK || null;
+        if (link && !/^cdi_[A-Za-z0-9_-]{32}$/.test(link)) { out('That is not an import link (cdi_…): make one at openvibe.codes/import'); return EXIT.usage; }
+        const r = await upload(doc, { link });
         if (args.includes('--json')) { out(JSON.stringify(r.import)); return 0; }
         out(`Imported ${what}`);
         out(`  ${r.import.title}`);
-        out(`  ${r.base}/run/imports/${r.import.id} : continue it on one of your machines`);
+        out(`  ${r.base}/conductor?import=${r.import.id} : continue it on one of your machines`);
         return 0;
     } catch (e) {
         out(e.message);

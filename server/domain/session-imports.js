@@ -15,7 +15,8 @@
  */
 const zlib = require('zlib');
 const crypto = require('crypto');
-const { FORMAT } = require('../../engine/portable');
+const portable = require('../../engine/portable');
+const { FORMAT } = portable;
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const ID = /^imp_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -55,6 +56,26 @@ function readDocument(buffer) {
     return { doc, records, messages };
 }
 
+/**
+ * The upload as a conversation.import@1 document: one already (the importer's), or a session file of any harness as
+ * it is on disk (the /import page's drop: a Claude Code session from its last compaction, a Codex rollout, a Gemini CLI
+ * session, an OpenCode export, a hand-over in Markdown), read by engine/portable.js's fromText.
+ */
+function asDocument(upload, { name = null } = {}) {
+    if (!Buffer.isBuffer(upload) || !upload.length) throw fail(422, 'import.empty', 'the upload is empty');
+    if (upload.length > MAX_BYTES) throw fail(413, 'import.too_large', `an import is at most ${MAX_BYTES / 1048576} MB compressed`);
+    let text;
+    try {
+        text = (upload[0] === 0x1f && upload[1] === 0x8b ? zlib.gunzipSync(upload, { maxOutputLength: MAX_UNPACKED }) : upload).toString('utf8');
+    } catch { throw fail(422, 'import.unreadable', 'the upload is not gzip or text'); }
+    const head = text.slice(0, 4096);
+    if (/"format"\s*:\s*"conversation\.import@1"/.test(head) && head.trimStart().startsWith('{"format"')) return upload;
+    let doc;
+    try { doc = portable.fromText(text, { name: name ? String(name).slice(0, 120) : null }); }
+    catch (e) { throw fail(422, 'import.unreadable', `the file is not a session this can read: ${String((e && e.message) || e).slice(0, 200)}`); }
+    return zlib.gzipSync(JSON.stringify(doc));
+}
+
 function createSessionImports({ store, log = console }) {
     const db = store.db;
     const requireUser = (subject) => {
@@ -75,8 +96,9 @@ function createSessionImports({ store, log = console }) {
         ...(preview ? { preview: Array.isArray(row.preview) ? row.preview : (typeof row.preview === 'string' ? JSON.parse(row.preview) : []) } : {}),
     };
 
-    async function save(subject, buffer) {
+    async function save(subject, upload, { name = null } = {}) {
         requireUser(subject);
+        const buffer = asDocument(upload, { name });
         const { doc, records, messages } = readDocument(buffer);
         const gz = buffer[0] === 0x1f && buffer[1] === 0x8b ? buffer : zlib.gzipSync(buffer);
         const row = await db.one(
