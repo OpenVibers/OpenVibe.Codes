@@ -241,6 +241,25 @@ ${extra}    with:
         assert.strictEqual(ran.conclusion, 'success', ran.reason);
     });
 
+    await check('the checkout act copies keeps a ref, so git in the job finds its repository (11-18: act leaves empty refs/ out)', async () => {
+        const dir = tmpDir('codes-check-stub-');
+        const record = path.join(dir, 'refs.json');
+        const script = path.join(dir, 'act');
+        fs.writeFileSync(script, `#!${process.execPath}
+const fs = require('fs');
+fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify(fs.readdirSync('.git/refs/heads')));
+process.stdout.write('[ci/test] \u2b50 Run Main x\\n[ci/test]   \u2705  Success - Main x [1ms]\\n[ci/test] \ud83c\udfc1  Job succeeded\\n');
+`, { mode: 0o755 });
+        const repo = repository({ 'ci.yml': workflow() });
+        const jobEnv = { ...process.env, OPENVIBE_CODES_ALLOW_FILE_REPO: '1', OPENVIBE_CODES_ACT_BIN: script };
+        const named = await runCheck({ input: checkInput(repo, { ref: 'feature/x' }), env: jobEnv, tmp: tmpDir('codes-check-tmp-') });
+        assert.strictEqual(named.conclusion, 'success', named.reason);
+        assert.ok(fs.existsSync(record), 'the stand-in act ran in the checkout');
+        assert.deepStrictEqual(JSON.parse(fs.readFileSync(record, 'utf8')), ['feature'], 'a branch named like the ref (feature/x lives under heads/feature/)');
+        await runCheck({ input: checkInput(repo), env: jobEnv, tmp: tmpDir('codes-check-tmp-') });
+        assert.deepStrictEqual(JSON.parse(fs.readFileSync(record, 'utf8')), ['check'], 'no ref: a branch named check');
+    });
+
     await check('act runs with a pinned binary, the expected argv, and no GITHUB_TOKEN or job environment variable', async () => {
         const repo = repository({ 'ci.yml': workflow() });
         const stub = stubAct({

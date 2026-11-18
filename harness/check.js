@@ -792,6 +792,13 @@ async function runCheck({ input, emit = () => {}, writeResult = () => {}, env = 
         const head = (await git(['rev-parse', 'HEAD'], { cwd: work })).trim().toLowerCase();
         if (job.sha && head !== job.sha) throw new Error('the cloned commit is not the one asked for');
         job.sha = head;
+        // act copies the checkout into the job file by file and leaves empty directories out. A detached clone has
+        // nothing under .git/refs, so the job's copy had no refs/ and git there said "not a git repository" (11-18:
+        // Live's and Codes' tests that ask git failed on the node). One branch at the commit keeps refs/ in the copy.
+        const branch = typeof job.ref === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(job.ref.replace(/^refs\/heads\//, ''))
+            && !/\.\.|\/\/|\.lock$|\/$|@\{/.test(job.ref) ? job.ref.replace(/^refs\/heads\//, '') : 'check';
+        await git(['update-ref', `refs/heads/${branch}`, head], { cwd: work })
+            .catch(() => git(['update-ref', 'refs/heads/check', head], { cwd: work }));
         if (auth.env) say({ t: 'step', text: 'Cloned with this machine\'s token for a private repository' });
         const called = await readCalled(work, { env, dir, say });
 
