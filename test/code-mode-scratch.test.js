@@ -59,6 +59,15 @@ const { boot, check, done } = require('./helpers/boot');
             const task = await row(r.json().id);
             assert.strictEqual(task.mode, 'repo');
             assert.strictEqual(task.repo, 'https://git.openvibe.codes/ada/bakery-site-today-hours-2.git');
+            // Kept with the task (migration 0051): its summary says which repository Codes made, with its page.
+            const { summarize } = require('../server/domain/task-summary');
+            const whole = await t.ctx.store.db.maybe('SELECT * FROM run_tasks WHERE id = $1', [r.json().id]);
+            assert.deepStrictEqual(summarize([whole])[0].made_repo, { full_name: 'ada/bakery-site-today-hours-2', url: 'https://git.openvibe.codes/ada/bakery-site-today-hours-2' });
+            assert.ok(!('made_repo' in summarize([{ ...whole, made_repo: null }])[0]), 'a task Codes made nothing for has no made_repo');
+            // The run the session reads (GET /api/v1/runs/:id) says it too, where run streams are on.
+            const runRes = await t.get(`/api/v1/runs/${r.json().id}`, { as: ada });
+            if (runRes.status === 200) assert.deepStrictEqual(runRes.json().made_repo, { full_name: 'ada/bakery-site-today-hours-2', url: 'https://git.openvibe.codes/ada/bakery-site-today-hours-2' });
+            else assert.strictEqual(runRes.json().code, 'codes.runs_disabled', runRes.text);
         });
 
         await check('her own bearer token works the same (the Frame calls as the person)', async () => {
