@@ -944,6 +944,7 @@ ${watches.length ? `<ul class="c4-issue-watches">${watches.map(row).join('')}</u
 <div class="c4-checks">
   <label class="c4-check"><input type="checkbox" name="no_cloud" value="1"${settings.no_cloud ? ' checked' : ''}><span><b>Never send my code to the cloud</b><small>Keep every task on your own machine. With no machine of yours available, nothing can run it.</small></span></label>
   <label class="c4-check"><input type="checkbox" name="only_free" value="1"${settings.only_free ? ' checked' : ''}><span><b>Only free</b><small>Use free allowances and your own machine; never a paid option.</small></span></label>
+  <label class="c4-check"><input type="checkbox" name="code_mode" value="1"${settings.code_mode ? ' checked' : ''}><span><b>Code mode for Claude Code</b><small>Claude Code works in scripts: one step reads, searches, edits and tests many files, so a task takes fewer turns. It stays inside the task's folder and its permission.</small></span></label>
 </div>
 <h3 class="c4-subhead">Notifications</h3>
 <div class="c4-checks">
@@ -969,6 +970,7 @@ ${conductorSection}
                 notify_needs: b.notify_needs === '1',
                 no_cloud: b.no_cloud === '1',
                 only_free: b.only_free === '1',
+                code_mode: b.code_mode === '1',
                 ...(b.safety ? { safety: b.safety } : {}),
                 ...(b.conductor_who !== undefined ? (() => { const [agent, model = ''] = String(b.conductor_who || '').split('|'); return { conductor_agent: agent, conductor_model: model }; })() : {}),
                 steps: b.steps === undefined ? undefined : b.steps,
