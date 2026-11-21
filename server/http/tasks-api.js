@@ -42,6 +42,7 @@ const start = require('./start');
 const models = require('../data/models');
 const roads = require('openvibe-sdk/agents/roads');
 const { roadFacts } = require('../domain/fleet');
+const { readiness, SETUP } = require('../domain/readiness');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -295,6 +296,44 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, forg
         const choice = /^[a-z][a-z0-9-]{0,63}$/.test(asked) ? { harness: asked } : null;
         const result = roads.pick({ mode: 'code', fleet: roadFacts(rows), choice, keys: [], allowance: null, app: 'codes' });
         return res.json({ ...result, say: roads.say(result) });
+    });
+
+    /**
+     * Each coding agent as it stands for this person (the owner, 11-21: the panel said Claude Code was Ready while it
+     * was neither installed nor signed in on any machine of theirs): read from their machines now (the fleet, refreshed
+     * through Bot with their token), with what to do when it is not ready. For the Frame's agent picker and its guided
+     * setup sheet.
+     *   → { harnesses: [{ id, name, ready, state, badge, line, plan, install, sign_in, sign_in_note, docs, setup_url,
+     *       machines: [{ name, online, signed_in }] }], read_at }
+     */
+    r.get('/me/harnesses', actorLimits.reads('codes.read'), async (req, res) => {
+        let subject = null;
+        let token = null;
+        if (signedIn(req)) { subject = req.viewer.subject; token = req.viewer.token || null; }
+        else {
+            const header = String(req.headers.authorization || '');
+            if (header.startsWith('Bearer ') && !principalToken(header.slice(7).trim())) { token = header.slice(7).trim(); subject = await personOf(token); }
+        }
+        if (!subject) return problem(req, res, 401, 'token.required', 'sign in, or send your own Network access token, to read your coding agents');
+        let rows = [];
+        if (fleet) {
+            try { if (token) await fleet.refresh(subject, token); } catch { /* the kept reading answers */ }
+            rows = await fleet.agents(subject, harnesses).catch(() => []);
+        }
+        const ready = readiness(rows);
+        const base = String(config.baseUrl || '').replace(/\/+$/, '');
+        const list = harnesses.list().filter((h) => h && h.id && h.id !== 'openvibe-ai').map((h) => {
+            const info = ready.get(h.id) || { state: 'off', badge: 'Set up', desc: 'Not on a machine of yours yet', ready: false };
+            const how = SETUP[h.id] || {};
+            const row = rows.find((x) => x.agent === h.id) || {};
+            return {
+                id: h.id, name: how.name || h.name || h.id, ready: !!info.ready, state: info.state, badge: info.ready ? info.badge : (info.badge === 'No reading' ? 'Set up' : info.badge),
+                line: info.desc, plan: how.plan || null, install: how.install || null, sign_in: how.signIn || null, sign_in_note: how.signInNote || null,
+                docs: how.docs || null, setup_url: `${base}/setup#agent-${h.id}`,
+                machines: (row.machines || []).slice(0, 6).map((m) => ({ name: m.name || m.machine || null, online: m.online !== false, signed_in: !!m.signed_in })),
+            };
+        });
+        return res.json({ harnesses: list, read_at: new Date().toISOString() });
     });
 
     // One read for a coding harness on the person's machines. Attempts, not the task's initial agent, decide

@@ -180,6 +180,27 @@ const RESET_MONTH = new Date(Date.now() + 2.5 * 86400000).toISOString();
             assert.deepStrictEqual([picked.road, picked.harness], ['choice', 'codex']);
             assert.strictEqual((await t.get('/api/v1/me/road')).status, 401);
         });
+
+        // 11-21 (the owner: the panel said Claude Code was Ready while no machine of theirs had it): each coding agent
+        // as it stands for this person, with what to do when it is not ready.
+        await check('/api/v1/me/harnesses: ready only where signed in on a machine of theirs, else the way to set it up', async () => {
+            const r = await t.get('/api/v1/me/harnesses', { as: ada });
+            assert.strictEqual(r.status, 200, r.text);
+            const list = r.json().harnesses;
+            const by = Object.fromEntries(list.map((h) => [h.id, h]));
+            assert.ok(!by['openvibe-ai'], 'OpenVibe AI is not a harness to set up');
+            assert.strictEqual(by['minimax-code'].ready, true, JSON.stringify(by['minimax-code']));
+            assert.strictEqual(by.codex.ready, false, 'a full window is not ready');
+            const claude = by['claude-code'];
+            assert.ok(claude, 'Claude Code is listed');
+            if (!claude.ready) {
+                assert.ok(['Set up', 'Sign in', 'Not installed', 'Full', 'Out of credit'].includes(claude.badge), claude.badge);
+                assert.match(claude.setup_url, /\/setup#agent-claude-code$/);
+            }
+            assert.strictEqual(claude.install, 'npm install -g @anthropic-ai/claude-code');
+            assert.strictEqual(claude.sign_in, 'claude');
+            assert.strictEqual((await t.get('/api/v1/me/harnesses')).status, 401);
+        });
     } catch (e) {
         console.error(e);
         process.exitCode = 1;
