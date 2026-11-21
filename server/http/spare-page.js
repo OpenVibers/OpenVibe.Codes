@@ -6,6 +6,7 @@
  */
 const { asyncRouter } = require('./router');
 const { esc } = require('../render/html');
+const { LOOPS, taskFor } = require('../domain/loops');
 
 const SPT = /^spt_[0-9A-HJKMNP-TV-Z]{26}$/;
 const STATE_WORDS = { queued: 'Waiting', running: 'Running', done: 'Done', failed: 'Did not finish', paused: 'Paused' };
@@ -71,6 +72,13 @@ function createSparePage(ctx, { page, wrap, header, flash, sameOrigin, viewer, f
 </div>
 <p class="c4-hint">An agent takes a task only when it is not working on anything of yours. Each task is an ordinary Codes task: its approvals and pull request are yours as always. The same list is in the API: <code>GET /api/v1/me/spare</code>.</p>
 <div class="mp-savebar"><button class="c4-button" type="submit">Save</button></div></form></section>
+<section class="c4-card"><h3 class="c4-subhead">Loops</h3>
+<p class="c4-hint">Work that keeps a product right after it ships, on the time your plans would lose. Each loop measures with real tools, fixes what matters most, proves it, and opens a pull request for you; then it comes back for the next window.</p>
+<form method="post" action="/settings/spare/loops" class="sp-add sp-loops">
+<fieldset class="sp-loop-pick"><legend class="c4-subhead-sm">Which loop</legend>${LOOPS.map((l, i) => `<label class="c4-check"><input type="radio" name="loop" value="${esc(l.id)}"${i === 0 ? ' checked' : ''}><span><b>${esc(l.name)}</b><small>${esc(l.what)}</small></span></label>`).join('')}</fieldset>
+<label>Repository <input name="repo" maxlength="300" required placeholder="owner/name or https://…" autocomplete="off" spellcheck="false"></label>
+<label>Live site <span class="c4-hint">optional: where the checks look, when it is live</span><input name="site" type="url" maxlength="300" placeholder="https://…" autocomplete="off"></label>
+<div class="mp-savebar"><button class="c4-button" type="submit">Add the loop</button></div></form></section>
 <section class="c4-card"><h3 class="c4-subhead">The list</h3>
 <ul class="sp-tasks">${v.tasks.length ? v.tasks.map(taskRow).join('') : '<li class="c4-hint">Nothing yet. Good spare-time work: tests for an untested module, accessibility fixes, docs that lag the code, a refactor you keep putting off.</li>'}</ul>
 <form method="post" action="/settings/spare/tasks" class="sp-add">
@@ -101,6 +109,19 @@ function createSparePage(ctx, { page, wrap, header, flash, sameOrigin, viewer, f
         try {
             await spare.add(req.viewer.subject, req.body || {});
             return res.redirect(303, '/settings/spare?ok=Added%20to%20the%20list');
+        } catch (e) {
+            return res.redirect(303, `/settings/spare?error=${encodeURIComponent(String((e && e.message) || 'not added').slice(0, 180))}`);
+        }
+    });
+    r.post('/settings/spare/loops', form, async (req, res) => {
+        if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/settings/spare')}`);
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
+        const b = req.body || {};
+        const made = taskFor(String(b.loop || ''), { repo: b.repo, site: b.site });
+        if (made.error) return res.redirect(303, `/settings/spare?error=${encodeURIComponent(made.error)}`);
+        try {
+            await spare.add(req.viewer.subject, made.body);
+            return res.redirect(303, '/settings/spare?ok=Loop%20added');
         } catch (e) {
             return res.redirect(303, `/settings/spare?error=${encodeURIComponent(String((e && e.message) || 'not added').slice(0, 180))}`);
         }

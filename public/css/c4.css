@@ -491,3 +491,6 @@ html[data-ov-motion="off"] .ag-fold > summary::after { transition: none; }
 .sp-tmain strong { overflow-wrap: anywhere; }
 .sp-tact { display: flex; gap: 8px; flex-wrap: wrap; }
 @media (prefers-reduced-motion: reduce) { .sp-bar > span, .sp-agent { transition: none; } }
+.sp-loop-pick { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); gap: 8px; min-width: 0; }
+.sp-loop-pick legend { font-weight: 650; margin-bottom: 6px; }
+.sp-loops .c4-check { min-height: 0; }

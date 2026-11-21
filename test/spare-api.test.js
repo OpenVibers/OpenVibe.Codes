@@ -69,12 +69,29 @@ const { boot, check, done } = require('./helpers/boot');
         assert.equal((await t.get('/api/v1/me/spare', { headers: as(reader) })).status, 422, 'a service names the person');
     });
 
+    await check('loops: the templates, a loop added over the API (a repeating task with its brief), and refusals', async () => {
+        const loops = await api('GET', '/me/spare/loops');
+        assert.equal(loops.status, 200);
+        assert.deepEqual(loops.json().loops.map((l) => l.id), ['accessibility', 'security', 'latency', 'tests', 'docs', 'dependencies']);
+        const made = await api('POST', '/me/spare/tasks', { bearer: t.network.userToken(ada), body: { loop: 'accessibility', repo: 'OpenVibers/OpenVibe.Live', site: 'https://openvibe.live' } });
+        assert.equal(made.status, 201, made.text);
+        const task = made.json().task;
+        assert.deepEqual([task.title, task.repeat, task.priority], ['Accessibility loop', true, 4]);
+        assert.match(task.prompt, /axe-core through Playwright/);
+        assert.match(task.prompt, /live at https:\/\/openvibe\.live/);
+        assert.match(task.prompt, /Open one pull request/);
+        assert.equal((await api('POST', '/me/spare/tasks', { bearer: t.network.userToken(ada), body: { loop: 'vibes', repo: 'a/b' } })).status, 422);
+        assert.equal((await api('POST', '/me/spare/tasks', { bearer: t.network.userToken(ada), body: { loop: 'security', repo: 'a/b', site: 'javascript:alert(1)' } })).status, 422);
+        await api('DELETE', `/me/spare/tasks/${task.id}`, { bearer: t.network.userToken(ada) });
+    });
+
     await check('the page: meters, settings and the list; its forms add, pause and remove', async () => {
             const page = await t.get('/settings/spare', { as: ada });
             assert.equal(page.status, 200);
             assert.match(page.text, /What your agents have left/);
             assert.match(page.text, /name="reset_within_hours" min="1" max="168" value="24"/);
             assert.match(page.text, /Add tests for fleet.js/);
+            assert.match(page.text, /name="loop" value="security"/);
             assert.match((await t.get('/settings/agents', { as: ada })).text, /href="\/settings\/spare">Spare usage<\/a>/);
             const add = await t.get('/settings/spare/tasks', { as: ada, method: 'POST', form: { prompt: 'Fix the accessibility findings on the home page', repo: 'OpenVibers/OpenVibe.Live', agent: 'any', priority: '3' }, redirect: 'manual' });
             assert.equal(add.status, 303, add.text);
