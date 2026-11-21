@@ -479,11 +479,11 @@ html[data-ov-motion="off"] .ag-fold > summary::after { transition: none; }
 .sp-window.is-full .sp-bar > span { background: var(--c4-danger); }
 .sp-form, .sp-add { display: grid; gap: 12px; }
 .sp-form label, .sp-add label { display: grid; gap: 6px; min-width: 0; }
+.sp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 9.5rem), 1fr)); gap: 12px; }
 .sp-num { display: inline-flex; align-items: center; gap: 8px; }
-.sp-num input { width: 6.5rem; min-height: 44px; }
-.sp-switch { display: flex !important; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
-.sp-switch input { width: 20px; height: 20px; }
-.sp-add textarea { min-height: 5.5rem; resize: vertical; }
+.sp-num input { width: 100%; max-width: 6.5rem; min-height: 44px; }
+.sp-form label.c4-check, .sp-add label.c4-check { display: flex; }
+.sp-add textarea { min-height: 5.5rem; resize: vertical; font: inherit; }
 .sp-task { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--c4-line); min-width: 0; }
 .sp-task.is-running { border-color: var(--c4-accent); }
 .sp-task.is-done, .sp-task.is-paused { opacity: .75; }

@@ -55,7 +55,21 @@ const { boot, check, done } = require('./helpers/boot');
             assert.deepEqual(usage.json().spare, { enabled: true, queued: 0 });
         });
 
-        await check('the page: meters, settings and the list; its forms add, pause and remove', async () => {
+        await check('a first-party service acts for the person named in X-OV-Subject, with codes.task.read to read and codes.task.start to change', async () => {
+        const reader = t.network.mintService('svc:actor', 'openvibe.codes', ['codes.task.read']);
+        const starter = t.network.mintService('svc:actor', 'openvibe.codes', ['codes.task.start', 'codes.task.read']);
+        const as = (token, subject) => ({ authorization: `Bearer ${token}`, ...(subject ? { 'x-ov-subject': subject } : {}) });
+        const read = await t.get('/api/v1/me/spare', { headers: as(reader, ada.subject) });
+        assert.equal(read.status, 200, read.text);
+        assert.equal(read.json().settings.enabled, true);
+        const refused = await t.get('/api/v1/me/spare/tasks', { method: 'POST', json: { prompt: 'x', repo: 'a/b' }, headers: as(reader, ada.subject) });
+        assert.equal(refused.status, 403, 'reading is not changing');
+        const added = await t.get('/api/v1/me/spare/tasks', { method: 'POST', json: { prompt: 'Docs for the API', repo: 'a/b' }, headers: as(starter, ada.subject) });
+        assert.equal(added.status, 201, added.text);
+        assert.equal((await t.get('/api/v1/me/spare', { headers: as(reader) })).status, 422, 'a service names the person');
+    });
+
+    await check('the page: meters, settings and the list; its forms add, pause and remove', async () => {
             const page = await t.get('/settings/spare', { as: ada });
             assert.equal(page.status, 200);
             assert.match(page.text, /What your agents have left/);
@@ -65,10 +79,10 @@ const { boot, check, done } = require('./helpers/boot');
             const add = await t.get('/settings/spare/tasks', { as: ada, method: 'POST', form: { prompt: 'Fix the accessibility findings on the home page', repo: 'OpenVibers/OpenVibe.Live', agent: 'any', priority: '3' }, redirect: 'manual' });
             assert.equal(add.status, 303, add.text);
             const list = (await api('GET', '/me/spare', { as: ada })).json().tasks;
-            assert.equal(list.length, 2);
+            assert.equal(list.length, 3, 'the API\'s, the service\'s and the form\'s');
             const rm = await t.get(`/settings/spare/tasks/${id}`, { as: ada, method: 'POST', form: { do: 'remove' }, redirect: 'manual' });
             assert.equal(rm.status, 303);
-            assert.equal((await api('GET', '/me/spare', { as: ada })).json().tasks.length, 1);
+            assert.equal((await api('GET', '/me/spare', { as: ada })).json().tasks.length, 2);
         });
     } finally {
         await t.close();
