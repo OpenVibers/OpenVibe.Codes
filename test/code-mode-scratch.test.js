@@ -47,6 +47,15 @@ const { boot, check, done } = require('./helpers/boot');
         const first = await api({ text: 'Add a test for the date parser.', mode: 'repo', repo: 'https://github.com/octocat/Hello-World' });
         assert.strictEqual(first.status, 201, first.text);
 
+        await check('words that ask for nothing to be made ("Test") make no repository: Codes asks which one (11-21)', async () => {
+            const before = made.length;
+            const r = await api({ text: 'Test', mode: 'make', scratch: true });
+            assert.strictEqual(r.status, 422, r.text);
+            assert.strictEqual(r.json().code, 'codes.repo_needed');
+            assert.match(r.json().detail, /Which repository\?/);
+            assert.strictEqual(made.length, before, 'no repository was made');
+        });
+
         await check('Code mode with no repository: a private repository in her name, named from her words, and the task on it', async () => {
             const r = await api({ text: 'A bakery site with today’s hours', mode: 'make', scratch: true });
             assert.strictEqual(r.status, 201, r.text);

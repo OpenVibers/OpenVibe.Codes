@@ -625,6 +625,8 @@ function createRunTasks({ store, run, config, log = console, userSettings = null
             args = { ...args, plan: selected.plan, plan_source: selected.source, preset: selected.preset, model_fallbacks: selected.fallbacks };
         }
         let agent = args.plan ? 'openvibe-ai' : args.agent || null;
+        // The person named the agent (not a model plan, not the router): it is theirs, never swapped without them.
+        const agentChosen = !args.plan && !!args.agent;
         let model = args.plan ? (args.plan.roles.find((role) => role.role === 'builder')?.model || 'auto') : args.model || null;
         if (model === 'auto') model = 'openvibe/auto';
         let why = agent ? `the first try, with ${attemptStore.nameOf(agent)}` : 'the first try, with the agent that fits the task';
@@ -685,9 +687,9 @@ function createRunTasks({ store, run, config, log = console, userSettings = null
         const placementKind = placed ? `harness.${taskKind}` : null;
         let inserted;
         await store.tx(async () => {
-            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, pin, goal, mode, model_plan, plan_source, preset, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $17::jsonb, $18, $19::jsonb, $20, $21, $22, $22) RETURNING *`,
-            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, pin, runArgs.goal ? JSON.stringify(runArgs.goal) : null, startMode, runArgs.plan ? JSON.stringify(runArgs.plan) : null, runArgs.plan_source || null, runArgs.preset || null, at]);
+            inserted = await db.one(`INSERT INTO run_tasks (id, subject, project_id, repo, ref, prompt, agent, push, pull_request, state, via, idempotency_key, actor_ref, placement_line, placement_option_key, placement_step_kind, pin, goal, mode, model_plan, plan_source, preset, created_at, updated_at, agent_chosen)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'queued', $10, $11, $12::jsonb, $13, $14, $15, $16, $17::jsonb, $18, $19::jsonb, $20, $21, $22, $22, $23) RETURNING *`,
+            [id, subject, project, runArgs.repo || 'bench://', runArgs.ref, runArgs.prompt, agent, !!runArgs.push, !!(runArgs.push && runArgs.push.pull_request), via, key, actorRefValue, placementLine, placementKey, placementKind, pin, runArgs.goal ? JSON.stringify(runArgs.goal) : null, startMode, runArgs.plan ? JSON.stringify(runArgs.plan) : null, runArgs.plan_source || null, runArgs.preset || null, at, agentChosen]);
             if (claims.length) await filesStore.link(subject, claims, { taskId: id, attemptN: 1, messageId: turnId });
             await taskOutbox.emitTask(inserted, null);
             return inserted;

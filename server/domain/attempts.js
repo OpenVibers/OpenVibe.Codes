@@ -475,6 +475,11 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
             };
         }
 
+        // An agent the person chose is theirs (migrations/0054): it is never swapped for another without them. The task
+        // ends saying what stopped it and where to set it up; sending again, or picking Auto, lets another agent take it.
+        if (step.action === 'switch' && task.agent_chosen && ending.agent && ending.agent === task.agent) {
+            return { outcome: 'unfinished', note: chosenNote(ending, words) };
+        }
         if (step.action === 'switch') {
             const choice = nextAgent(task.prompt, ctx, runnerOf(ending.agent));
             const agent = choice ? choice.agent : (step.runner ? HARNESS_OF[step.runner] : null);
@@ -487,6 +492,14 @@ function createAttempts({ store, config = {}, log = console, harnesses = null })
         }
 
         return { outcome: 'unfinished', note: `${step.why || 'the task stopped'}. What is left is in the session.` };
+    }
+
+    /** Why the agent the person chose stopped, and the way on: set it up, or let another agent take the task. */
+    function chosenNote(ending, words) {
+        const name = nameOf(ending.agent);
+        const where = ending.machine && !/^dev_/.test(String(ending.machine)) ? ` on ${ending.machine}` : '';
+        const setup = `${String(config.baseUrl || 'https://openvibe.codes').replace(/\/+$/, '')}/setup#step-agents`;
+        return `${name} ${words || 'stopped'}${where}. You chose ${name}, so no other agent took over. Set it up (installed and signed in with your own account): ${setup}. Or send again with Auto to let another agent do it.`;
     }
 
     /** An attempt as the API and the page show it. */

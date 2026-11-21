@@ -47,8 +47,8 @@ const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
     };
 
     /** A task for Ada, started through the API (so it has its first attempt). */
-    const startTask = async (prompt = 'Fix the parser and add a test for it.') => {
-        const r = await call('POST', '/tasks', { body: { repo: 'https://github.com/octocat/Hello-World', prompt, idempotency_key: `act_${Math.random().toString(36).slice(2, 10)}` } });
+    const startTask = async (prompt = 'Fix the parser and add a test for it.', extra = {}) => {
+        const r = await call('POST', '/tasks', { body: { repo: 'https://github.com/octocat/Hello-World', prompt, idempotency_key: `act_${Math.random().toString(36).slice(2, 10)}`, ...extra } });
         assert.strictEqual(r.status, 201, JSON.stringify(r.json));
         return r.json.task.id;
     };
@@ -144,6 +144,20 @@ const TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
             assert.strictEqual(pressed.json.attempts.length, 2, 'no second continuation was started');
             assert.strictEqual(pressed.json.attempts[1].session, 'sess-live', 'the live continuation is the one returned');
             assert.strictEqual(calls.filter((c) => c[0] === 'submit').length, submits, 'no job was started beside it');
+        });
+
+        await check('an agent the person chose is never swapped: the task ends saying why and where to set it up (11-21)', async () => {
+            const id = await startTask('Test', { agent: 'claude-code' });
+            const row = await db.one('SELECT agent, agent_chosen FROM run_tasks WHERE id = $1', [id]);
+            assert.deepStrictEqual([row.agent, row.agent_chosen], ['claude-code', true]);
+            const submits = calls.filter((c) => c[0] === 'submit').length;
+            await endAttempt(id, { state: 'failed', result: { ok: false, summary: '', files: [], log: [{ t: 'done', ok: false, text: 'claude-code is not available here: not signed in' }] }, error: 'claude-code is not available here: not signed in' });
+            const attempts = await attemptsOf(id);
+            assert.strictEqual(attempts.length, 1, 'no other agent took over');
+            assert.strictEqual(calls.filter((c) => c[0] === 'submit').length, submits, 'no job was started for another agent');
+            const ended = await db.one('SELECT outcome, outcome_note FROM run_tasks WHERE id = $1', [id]);
+            assert.strictEqual(ended.outcome, 'unfinished');
+            assert.match(ended.outcome_note, /^Claude Code .*You chose Claude Code, so no other agent took over\. Set it up .*\/setup#step-agents/);
         });
 
         await check('a limit: another agent takes over, with a hand-over note of what the last one did', async () => {
