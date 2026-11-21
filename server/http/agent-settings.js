@@ -72,6 +72,7 @@ ${efforts.length ? `<label>Reasoning <select name="p_${esc(a.id)}_effort"><optio
         const all = list;
         const content = `${header('Coding agents', 'How each agent works for you: code mode, the model it starts on, and what it should always remember.')}${flash(req)}
 <section class="c4-card"><form method="post" action="/settings/agents" class="ag-form">
+<p class="c4-hint"><a href="/settings/spare">Spare usage</a>: what each agent's plan has left before it resets, and a list it works through with what would be lost.</p>
 <p class="c4-hint">A task that picks its own model or reasoning keeps it. Your default for code mode is the switch on <a href="/settings">Settings</a> (${settings.code_mode ? 'on' : 'off'} now). The same settings are in the API: <code>PUT /api/v1/me/settings</code> with <code>harness_prefs</code>.</p>
 ${section('On your computers', 'Coding agents your machines run, signed in with your own plans.', all.filter((a) => group(a) === 'cli'))}
 ${section('Agent Client Protocol agents', 'Agents Codes talks to over ACP, each with your own sign-in on the machine.', all.filter((a) => group(a) === 'acp'))}

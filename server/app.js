@@ -162,6 +162,9 @@ async function createApp(opts = {}) {
     const ctx = { sessionImports, homes, actorTasks, config, store, keys, aiCatalogConfig, sso, harnesses, log, sessions, outbox, run, tasks, connections, aiCatalog, modelPlans, runTokens, attempts, fleet, notices, notify, userSettings, attachments, benchPublisher, placementOutcomes, benchPriors, placementContext, knowledge, sharing, skills };
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
+    // Spare usage (plan §AD.37): the person's list, started on an agent whose plan resets soon with time left.
+    ctx.spare = opts.spare || require('./domain/spare').createSpare({ store, fleet, harnesses, tasks, log, now: store.now, config });
+    if (opts.spareWorker !== false && process.env.NODE_ENV !== 'test') ctx.spare.start();   // its own drill check inside
     // The person's own memory store (OpenVibe Memory M2b): the notes live in OpenVibe.AI, sealed there, and only the
     // person's own token opens them. Codes forwards the token and renders the answer; it never holds a note.
     ctx.memory = createMemory({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
@@ -346,6 +349,7 @@ async function createApp(opts = {}) {
         if (timer.unref) timer.unref();
         app.locals.sharingTimer = timer;
     }
+    app.use('/api/v1', require('./http/spare-api').createSpareApi({ config, keys, spare: ctx.spare, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createApi(ctx));
     app.use('/api/v1', createSkillsApi({ config, skills: ctx.skills, actorLimits: ctx.actorLimits, log }));
     app.use('/api/v1', createTasksApi({ config, store, keys, run, harnesses, forge: ctx.forge, tasks, modelPlans, fleet: ctx.fleet, conductor: ctx.conductor, attachments: ctx.attachments, actorLimits: ctx.actorLimits, sharing, races: ctx.races, machines: ctx.machines, log }));
