@@ -163,7 +163,7 @@ async function createApp(opts = {}) {
     // The C4b screens: the person's machines (from Network), their own choices, the GitHub reader and their usage.
     ctx.machines = createMachines({ config, fetchImpl: fetchImpl || globalThis.fetch, log });
     // Spare usage (plan §AD.37): the person's list, started on an agent whose plan resets soon with time left.
-    ctx.spare = opts.spare || require('./domain/spare').createSpare({ store, fleet, harnesses, tasks, log, now: store.now, config });
+    ctx.spare = opts.spare || require('./domain/spare').createSpare({ store, fleet, harnesses, tasks, notify, log, now: store.now, config });
     if (opts.spareWorker !== false && process.env.NODE_ENV !== 'test') ctx.spare.start();   // its own drill check inside
     // The person's own memory store (OpenVibe Memory M2b): the notes live in OpenVibe.AI, sealed there, and only the
     // person's own token opens them. Codes forwards the token and renders the answer; it never holds a note.

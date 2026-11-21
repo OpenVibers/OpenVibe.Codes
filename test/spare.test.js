@@ -62,28 +62,51 @@ const task = (id, extra = {}) => ({ id, state: 'queued', priority: 3, agent: 'an
         async latestProject() { return null; },
     };
     const fleet = { async agents() { return [agent('codex', [{ name: 'week', pct: 30, resets_at: inH(5) }])]; } };
-    const spare = createSpare({ store, fleet, tasks: fakeTasks, log: { warn() {}, info() {} }, now: () => NOW });
+    const pushed = [];
+    const notify = { async push(n) { pushed.push(n); return { sent: true }; } };
+    const spare = createSpare({ store, fleet, tasks: fakeTasks, notify, log: { warn() {}, info() {} }, now: () => NOW });
     try {
         await check('the list starts its next task on the agent with time left, as an ordinary Codes task, and settles it', async () => {
             const t = await spare.add(SUBJECT, { title: 'Fleet tests', prompt: 'Add tests for fleet.js', repo: 'OpenVibers/OpenVibe.Codes', repeat: true });
             assert.equal(t.state, 'queued');
-            assert.deepEqual(await spare.tick(), { started: 0, settled: 0 }, 'nothing while the list is off');
+            const off = await spare.tick();
+            assert.deepEqual([off.started, off.settled], [0, 0], 'nothing while the list is off');
             await spare.saveSettings(SUBJECT, { enabled: true }, { project: null });
             await spare.tick();
             assert.match((await spare.list(SUBJECT))[0].note, /which project to run in/, 'without a project it says what is missing');
             await spare.saveSettings(SUBJECT, { enabled: true }, { project: 'prj_01J8Z3Q4R5S6T7V8W9X0Y1Z2AB' });
-            assert.deepEqual(await spare.tick(), { started: 1, settled: 0 });
+            const first = await spare.tick();
+            assert.deepEqual([first.started, first.settled], [1, 0]);
             assert.deepEqual(started.map((s) => [s.agent, s.repo, s.via]), [['codex', 'https://github.com/OpenVibers/OpenVibe.Codes', 'spare']]);
             const running = (await spare.list(SUBJECT))[0];
             assert.equal(running.state, 'running');
             assert.match(running.note, /70% of its week window left, resetting in 5 h/);
-            assert.deepEqual(await spare.tick(), { started: 0, settled: 0 }, 'one at a time, and codex is busy with it');
+            const again = await spare.tick();
+            assert.deepEqual([again.started, again.settled], [0, 0], 'one at a time, and codex is busy with it');
             await store.db.exec("UPDATE run_tasks SET state = 'succeeded' WHERE id = $1", [running.task_id]);
-            assert.deepEqual(await spare.tick(), { started: 1, settled: 1 }, 'settled (it repeats: back on the list) and started again');
+            const third = await spare.tick();
+            assert.deepEqual([third.started, third.settled], [1, 1], 'settled (it repeats: back on the list) and started again');
             assert.equal((await spare.list(SUBJECT))[0].runs, 2);
         });
 
-        await check('the view says per agent what it has left and why it would or would not take a task', async () => {
+        await check('a plan about to reset with much left and nothing to use it: the person is told once per window', async () => {
+        const OTHER = 'usr_01J8Z3Q4R5S6T7V8W9X0Y1Z2AC';
+        const nudgeFleet = { async agents() { return [agent('claude-code', [{ name: 'week', pct: 25, resets_at: inH(6) }])]; } };
+        const told = [];
+        const s2 = createSpare({ store, fleet: nudgeFleet, tasks: fakeTasks, notify: { async push(n) { told.push(n); return { sent: true }; } }, log: { warn() {}, info() {} }, now: () => NOW, config: { baseUrl: 'https://openvibe.codes' } });
+        await s2.saveSettings(OTHER, { enabled: false });
+        await s2.tick();
+        const mine = told.filter((n) => n.subject === OTHER);
+        assert.equal(mine.length, 1);
+        assert.equal(mine[0].type, 'WATCH_TRIGGERED');
+        assert.equal(mine[0].title, 'claude-code: 75% of its week left');
+        assert.match(mine[0].message, /resets in 6 h and what is left is lost\. Turn on spare usage: give it something to do\./);
+        assert.equal(mine[0].url, 'https://openvibe.codes/settings/spare');
+        await s2.tick();
+        assert.equal(told.filter((n) => n.subject === OTHER).length, 1, 'once per window');
+    });
+
+    await check('the view says per agent what it has left and why it would or would not take a task', async () => {
             const v = await spare.view(SUBJECT);
             assert.equal(v.settings.enabled, true);
             assert.ok(!('project_id' in v.settings), 'the project stays inside');
