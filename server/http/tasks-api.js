@@ -53,6 +53,13 @@ const DOCK_MODES = ['create', 'openvibe', 'repo', 'make'];
 const GIT_URL = /(?:https?:\/\/(?:www\.)?(?:github\.com|gitlab\.com|codeberg\.org|bitbucket\.org|git\.openvibe\.codes)\/[\w.-]+\/[\w.-]+|git@[\w.-]+:[\w.-]+\/[\w.-]+)/i;
 
 /** A Run API run id (a task, "codes:" before it or "~N" after it, as the Frame writes it) → the task id, or null. */
+
+/** Words that ask for something to be made, so a Code-mode task with no repository may start a new one. */
+const MAKE_WORDS = /\b(build|make|create|start|scaffold|set ?up|write|generate|prototype|design|code|implement|add|new|app|site|page|game|bot|tool|script|api|landing)\b/i;
+function asksToMake(text) {
+    const t = String(text || '').trim();
+    return t.split(/\s+/).length >= 3 && MAKE_WORDS.test(t);
+}
 function runTaskId(raw) {
     const m = /^(?:codes:)?(tsk_[0-9A-HJKMNP-TV-Z]{26})(?:~[1-9][0-9]*)?$/.exec(String(raw || ''));
     return m ? m[1] : null;
@@ -404,6 +411,11 @@ function createTasksApi({ config, store, keys, run, harnesses, actorLimits, forg
         // and says why. The site's own "Something new" (mode create, no scratch) keeps its handover.
         let madeRepo = null, scratchProblem = null;
         const scratch = first(b.scratch) === true || ['1', 'true', 'yes', 'on'].includes(String(first(b.scratch) ?? '').toLowerCase());
+        // A new repository only for words that ask for something to be made (11-21: "Test" in Code mode made goosely/test).
+        // Anything else names no repository and asks for nothing new: the answer asks which, or what to build.
+        if (mode === 'create' && scratch && !asksToMake(text)) {
+            return problem(req, res, 422, 'codes.repo_needed', 'Which repository? Name one of yours, or say what to build ("Build a landing page for my stream") and Codes starts a new one.');
+        }
         if (mode === 'create' && scratch) {
             const out = await makeScratchRepo(p, text);
             if (out.repo) { madeRepo = out.repo; repoIn = out.repo.clone_url; mode = 'repo'; }
