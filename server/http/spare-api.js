@@ -10,6 +10,9 @@
  *   GET    /me/spare              → { settings, tasks, agents }
  *   PUT    /me/spare              { enabled, reset_within_hours, min_left_pct, keep_pct, max_running, agents } → { settings }
  *   POST   /me/spare/tasks        { title?, prompt, repo, agent?, priority?, repeat? } → { task } (201); repo: owner/name or https
+ *                                  or { loop, repo, site? }: a loop (domain/loops.js: accessibility, security, latency, tests,
+ *                                  docs, dependencies), a repeating task with its own brief, ending in a pull request
+ *   GET    /me/spare/loops        → { loops: [{ id, name, what }] }
  *   PATCH  /me/spare/tasks/:id    any of those, or state queued|paused → { task }
  *   DELETE /me/spare/tasks/:id    → 204
  */
@@ -82,9 +85,20 @@ function createSpareApi({ config, keys, spare, actorLimits, log = console }) {
         const subject = await guard(req, res, true); if (!subject) return;
         try { return res.json({ settings: await spare.saveSettings(subject, req.body || {}) }); } catch (e) { return fail(req, res, e); }
     });
+    r.get('/me/spare/loops', (req, res) => {
+        res.set('Cache-Control', 'public, max-age=300');
+        return res.json({ loops: require('../domain/loops').LOOPS.map(({ id, name, what }) => ({ id, name, what })) });
+    });
     r.post('/me/spare/tasks', writes, json, async (req, res) => {
         const subject = await guard(req, res, true); if (!subject) return;
-        try { return res.status(201).json({ task: await spare.add(subject, req.body || {}) }); } catch (e) { return fail(req, res, e); }
+        const b = req.body || {};
+        let body = b;
+        if (b.loop != null) {
+            const made = require('../domain/loops').taskFor(String(b.loop), { repo: b.repo, site: b.site });
+            if (made.error) return problem(req, res, 422, 'spare.invalid', made.error);
+            body = { ...made.body, ...(b.agent ? { agent: b.agent } : {}), ...(b.priority ? { priority: b.priority } : {}) };
+        }
+        try { return res.status(201).json({ task: await spare.add(subject, body) }); } catch (e) { return fail(req, res, e); }
     });
     r.patch('/me/spare/tasks/:id', writes, json, async (req, res) => {
         const subject = await guard(req, res, true); if (!subject) return;
