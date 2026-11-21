@@ -97,7 +97,12 @@ function usable(login) {
  * @param {object} [opts.env] the environment (PATH)
  * @returns {object[]} one row per CLI: { id, installed, signed_in, windows }
  */
-function probe({ home, env = process.env } = {}) {
+function probe(opts = {}) {
+    return rowsWithFiles(opts).map(({ file, ...row }) => row);
+}
+
+/** probe()'s rows, each with the path of its login file (kept on this machine: never reported). */
+function rowsWithFiles({ home, env = process.env } = {}) {
     const h = home || os.homedir();
     return CLIS.map((c) => {
         const where = onPath(c.bin, env);
@@ -111,6 +116,31 @@ function probe({ home, env = process.env } = {}) {
             installed: !!where,
             signed_in: signedIn(login),
             windows: windowsOf(login),
+            file,
+        };
+    });
+}
+
+/**
+ * probe(), with each plan's windows asked of its provider (engine/usage.js: Claude Code, Codex, Command Code), the way
+ * the CLI's own usage screen asks; a window the provider gives replaces one of the same name from the login file.
+ * OPENVIBE_CODES_USAGE=0 asks nothing (the login files' own windows only).
+ */
+async function probeWithUsage({ home, env = process.env, fetchImpl, now, cacheFile } = {}) {
+    const rows = rowsWithFiles({ home, env });
+    if (env.OPENVIBE_CODES_USAGE === '0') return rows.map(({ file, ...row }) => row);
+    const usage = await require('./usage').readAll(rows, { home: home || os.homedir(), fetchImpl, now, cacheFile }).catch(() => ({}));
+    return rows.map(({ file, ...row }) => {
+        const u = usage[row.id];
+        if (!u) return row;
+        const names = new Set((u.windows || []).map((w) => w.name));
+        return {
+            ...row,
+            windows: [...(u.windows || []), ...row.windows.filter((w) => !names.has(w.name))],
+            ...(u.plan ? { plan: u.plan } : {}),
+            ...(u.credits ? { credits: u.credits } : {}),
+            ...(u.error || u.note ? { usage_note: u.error || u.note } : {}),
+            usage_at: new Date(u.at).toISOString(),
         };
     });
 }
@@ -120,4 +150,4 @@ function probeOne(id, opts = {}) {
     return probe(opts).find((r) => r.id === id) || null;
 }
 
-module.exports = { CLIS, probe, probeOne, windowsOf, signedIn, onPath };
+module.exports = { CLIS, probe, probeWithUsage, probeOne, windowsOf, signedIn, onPath };
