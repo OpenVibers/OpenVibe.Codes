@@ -14,7 +14,9 @@
  *   createSpare({ store, fleet, harnesses, tasks: runTasks, log, now })
  *     get(subject) / saveSettings(subject, patch, project) / add / update / remove   the list, the person's own
  *     view(subject)    the list, the settings, and per agent its windows and why it would or would not take a task now
- *     tick()           start what may start, and settle what ended (the job runs it every 5 minutes)
+ *     tick()           start what may start, settle what ended, and tell the person once per window when a plan is
+ *                      about to reset with much left and nothing on the list can use it (a WATCH_TRIGGERED notification:
+ *                      the bell on every OpenVibe site); the job runs it every 5 minutes
  *
  * A reading older than its window's reset counts as that window reset (nothing used). A task the list started is an
  * ordinary Codes task (via 'spare'): its level, its approvals and its pull request are the person's as for any other.
@@ -25,6 +27,8 @@ const DEFAULTS = { enabled: false, reset_within_hours: 12, min_left_pct: 15, kee
 const LIMITS = { reset_within_hours: [1, 168], min_left_pct: [1, 100], keep_pct: [0, 50], max_running: [1, 4] };
 const AGENT = /^[a-z0-9-]{1,40}$/;
 const MAX_TASKS = 100;
+// Worth telling the person: at least this much of a window left when it is about to reset and nothing will use it.
+const NUDGE_LEFT_PCT = 40;
 const ENDED = new Set(['succeeded', 'failed', 'cancelled', 'expired']);   // run-tasks TERMINAL
 const OK_END = new Set(['succeeded']);
 
@@ -133,7 +137,7 @@ function taskFields(b, { partial = false } = {}) {
     return { fields: f };
 }
 
-function createSpare({ store, fleet = null, harnesses = null, tasks = null, log = console, now = () => Date.now(), config = {} }) {
+function createSpare({ store, fleet = null, harnesses = null, tasks = null, notify = null, log = console, now = () => Date.now(), config = {} }) {
     const db = store.db;
     const fleetOf = () => (typeof fleet === 'function' ? fleet() : fleet);
 
@@ -231,7 +235,8 @@ function createSpare({ store, fleet = null, harnesses = null, tasks = null, log 
             await db.exec('UPDATE codes_spare_tasks SET state = $2, ended_at = now(), note = $3, updated_at = now() WHERE id = $1', [r.id, next, r.task_state ? `ended ${r.task_state}` : 'its task is gone']);
             settled++;
         }
-        if (!tasks || typeof tasks.start !== 'function') return { started, settled };
+        const nudged = await nudgeAll().catch((e) => { log.warn(`[Codes] spare nudges failed: ${e.message}`); return 0; });
+        if (!tasks || typeof tasks.start !== 'function') return { started, settled, nudged };
         const subjects = await db.many("SELECT s.subject FROM codes_spare_settings s WHERE s.enabled AND EXISTS (SELECT 1 FROM codes_spare_tasks t WHERE t.subject = s.subject AND t.state = 'queued')");
         for (const { subject } of subjects) {
             const settings = await settingsOf(subject);
@@ -252,8 +257,51 @@ function createSpare({ store, fleet = null, harnesses = null, tasks = null, log 
                 }
             }
         }
-        return { started, settled };
+        return { started, settled, nudged };
     }
+    /**
+     * Once per window: a plan about to reset with NUDGE_LEFT_PCT or more left, that the list will not use (off, empty, or
+     * nothing for that agent), and an agent that is not busy. Only for people who set spare usage up (a settings row).
+     */
+    async function nudgeAll() {
+        if (!notify || typeof notify.push !== 'function') return 0;
+        let sent = 0;
+        const rows = await db.many('SELECT subject, nudged FROM codes_spare_settings');
+        for (const row of rows) {
+            const settings = await settingsOf(row.subject);
+            const list = await list_(row.subject);
+            const agents = await agentsOf(row.subject);
+            const busy = await busyOf(row.subject);
+            const p = plan({ settings: { ...settings, max_running: 4 }, tasks: list, agents, busy, running: 0, now: now() });
+            const taking = new Set(settings.enabled ? p.picks.map((x) => x.agent) : []);
+            const done = Array.isArray(row.nudged) ? row.nudged : [];
+            const next = [...done];
+            for (const a of agents) {
+                if (taking.has(a.agent) || busy.has(a.agent) || !a.signed_in) continue;
+                for (const w of a.windows || []) {
+                    if (!w || !w.resets_at) continue;
+                    const hours = (Date.parse(w.resets_at) - now()) / 3600e3;
+                    const left = 100 - (usedOf(w, now()) ?? 100);
+                    if (!(hours > 0 && hours <= settings.reset_within_hours && left >= Math.max(NUDGE_LEFT_PCT, settings.min_left_pct))) continue;
+                    const key = `${a.agent}:${w.name}:${w.resets_at}`;
+                    if (next.includes(key)) continue;
+                    const queued = list.filter((t) => t.state === 'queued').length;
+                    const why = !settings.enabled ? (queued ? 'Your spare list is off' : 'Turn on spare usage') : queued ? 'Nothing on your spare list is for it' : 'Your spare list is empty';
+                    const out = await notify.push({
+                        subject: row.subject, type: 'WATCH_TRIGGERED', category: 'codes.spare', icon: '⏳',
+                        title: `${a.name || a.agent}: ${Math.round(left)}% of its ${w.name} left`,
+                        message: `It resets in ${hours < 1 ? `${Math.round(hours * 60)} min` : `${Math.round(hours)} h`} and what is left is lost. ${why}: give it something to do.`,
+                        url: `${String(config.baseUrl || 'https://openvibe.codes').replace(/\/+$/, '')}/settings/spare`,
+                    }).catch(() => null);
+                    if (out && out.sent) sent++;
+                    next.push(key);
+                }
+            }
+            if (next.length !== done.length) await db.exec('UPDATE codes_spare_settings SET nudged = $2::jsonb WHERE subject = $1', [row.subject, JSON.stringify(next.slice(-30))]);
+        }
+        return sent;
+    }
+    const list_ = (subject) => list(subject);
     let stopTimer = null;
     return {
         get: settingsOf, list, saveSettings, add, update, remove, view, tick, plan,
