@@ -62,11 +62,13 @@ function createSparePage(ctx, { page, wrap, header, flash, sameOrigin, viewer, f
 <ul class="sp-agents">${v.agents.length ? v.agents.map((a) => meter(a, now)).join('') : '<li class="c4-hint">Nothing reported yet. Sign your coding agents in on a computer with OpenVibe Link, and their windows show here.</li>'}</ul></section>
 <section class="c4-card"><h3 class="c4-subhead">When the list may run</h3>
 <form method="post" action="/settings/spare" class="sp-form">
-<label class="sp-switch"><input type="checkbox" name="enabled" value="true"${s.enabled ? ' checked' : ''}> <span>Use spare usage on this list</span></label>
-<label>When a window resets within <span class="sp-num"><input type="number" name="reset_within_hours" min="1" max="168" value="${s.reset_within_hours}"> hours</span></label>
-<label>and at least <span class="sp-num"><input type="number" name="min_left_pct" min="1" max="100" value="${s.min_left_pct}"> % is left</span></label>
-<label>Keep back <span class="sp-num"><input type="number" name="keep_pct" min="0" max="50" value="${s.keep_pct}"> % for yourself</span></label>
-<label>At most <span class="sp-num"><input type="number" name="max_running" min="1" max="4" value="${s.max_running}"> at once</span></label>
+<label class="c4-check"><input type="checkbox" name="enabled" value="true"${s.enabled ? ' checked' : ''}><span><b>Use spare usage on this list</b><small>An agent whose plan resets soon with time left, and that is not busy, works through the list below.</small></span></label>
+<div class="sp-grid">
+<label>Resets within <span class="sp-num"><input type="number" name="reset_within_hours" min="1" max="168" value="${s.reset_within_hours}" inputmode="numeric"> h</span></label>
+<label>At least left <span class="sp-num"><input type="number" name="min_left_pct" min="1" max="100" value="${s.min_left_pct}" inputmode="numeric"> %</span></label>
+<label>Keep back for you <span class="sp-num"><input type="number" name="keep_pct" min="0" max="50" value="${s.keep_pct}" inputmode="numeric"> %</span></label>
+<label>At most at once <span class="sp-num"><input type="number" name="max_running" min="1" max="4" value="${s.max_running}" inputmode="numeric"></span></label>
+</div>
 <p class="c4-hint">An agent takes a task only when it is not working on anything of yours. Each task is an ordinary Codes task: its approvals and pull request are yours as always. The same list is in the API: <code>GET /api/v1/me/spare</code>.</p>
 <div class="mp-savebar"><button class="c4-button" type="submit">Save</button></div></form></section>
 <section class="c4-card"><h3 class="c4-subhead">The list</h3>
@@ -77,7 +79,7 @@ function createSparePage(ctx, { page, wrap, header, flash, sameOrigin, viewer, f
 <label>Repository <input name="repo" maxlength="300" required placeholder="owner/name or https://…" autocomplete="off" spellcheck="false"></label>
 <label>Agent <select name="agent">${agentOptions.map((id) => `<option value="${esc(id)}">${esc(id === 'any' ? 'Any with time left' : names.get(id) || id)}</option>`).join('')}</select></label>
 <label>Priority <select name="priority">${[1, 2, 3, 4, 5].map((n) => `<option value="${n}"${n === 3 ? ' selected' : ''}>${n}${n === 1 ? ' (first)' : n === 5 ? ' (last)' : ''}</option>`).join('')}</select></label>
-<label class="sp-switch"><input type="checkbox" name="repeat" value="true"> <span>Put it back on the list after each run</span></label>
+<label class="c4-check"><input type="checkbox" name="repeat" value="true"><span><b>Put it back on the list after each run</b><small>For chores worth repeating: tests, docs, an accessibility sweep.</small></span></label>
 <div class="mp-savebar"><button class="c4-button" type="submit">Add to the list</button></div></form></section>`;
         page(req, res, 'Spare usage', wrap(content));
     });
