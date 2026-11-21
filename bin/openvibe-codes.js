@@ -19,7 +19,7 @@ const { skills } = require('./skills');
 const agentOut = require('./agent-output');
 const { createProofAdapters } = require('../harness/proof');
 const { version: VERSION } = require('../package.json');
-const { probe: probeLogins } = require('../engine/logins');
+const { probe: probeLogins, probeWithUsage } = require('../engine/logins');
 
 const USAGE = `openvibe-codes ${VERSION} — code with any agent, from your terminal
 
@@ -347,14 +347,15 @@ async function main() {
     if (cmd === 'logins') {
         // What this machine has: each CLI, whether it is signed in, and the limit windows it can read. Nothing else:
         // no key, no token, no account name.
-        const rows = probeLogins({ home: env.HOME, env });
+        // With each plan's windows asked of its provider (engine/usage.js), the fleet's meters (Link → Bot → Codes).
+        const rows = await probeWithUsage({ home: env.HOME, env });
         if (o.forAgent) {
             for (const r of rows) out(agentOut.line({ event: 'login', id: r.id, installed: !!r.installed, signed_in: !!r.signed_in, windows: r.windows || [] }));
             return 0;
         }
         if (o.json) { out(JSON.stringify(rows, null, 2)); return 0; }
         for (const r of rows) {
-            const windows = r.windows.length ? r.windows.map((w) => `${w.name}${w.used != null ? ` ${w.used}/${w.limit}` : ''}${w.resets_at ? ` (resets ${w.resets_at})` : ''}`).join(', ') : '';
+            const windows = r.windows.length ? r.windows.map((w) => `${w.name}${w.used != null ? (w.limit === 100 ? ` ${w.used}% used` : ` ${w.used}/${w.limit}`) : ''}${w.resets_at ? ` (resets ${w.resets_at})` : ''}`).join(', ') : (r.usage_note || '');
             out(`${r.installed ? '✔' : '·'} ${r.id.padEnd(16)} ${r.signed_in ? 'signed in' : 'not signed in'}${windows ? dim(' · ' + windows) : ''}`);
         }
         return 0;
