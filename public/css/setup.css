@@ -28,7 +28,7 @@
 .c4-setup-how>li{min-width:0}
 .c4-setup-how a{color:var(--c4-accent)}
 .c4-setup-cmd{display:grid;gap:4px;margin-top:6px;min-width:0}
-.c4-setup-cmd-label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--c4-muted)}
+.c4-setup-cmd-label{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--c4-muted)}
 .c4-setup-cmd-box{display:flex;align-items:flex-start;gap:8px;min-width:0;padding:8px 8px 8px 12px;border-radius:10px;background:var(--c4-ghost);border:1px solid var(--c4-line)}
 .c4-setup-cmd code{flex:1;min-width:0;padding:4px 0;font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--c4-ink);white-space:pre-wrap;overflow-wrap:anywhere;user-select:all;-webkit-user-select:all}
 .c4-setup-copy{flex:none;min-height:32px;padding:0 12px;border:1px solid var(--c4-line);border-radius:8px;background:var(--c4-surface);color:var(--c4-ink);font:inherit;font-size:12px;font-weight:650;cursor:pointer}
