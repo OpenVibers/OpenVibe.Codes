@@ -13,7 +13,7 @@ const { check, done } = require('./helpers/boot');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agui-adapters-'));
     fs.writeFileSync(path.join(dir, 'a.js'), 'const a = 1;');
     try {
-        for (const [fixture, adapter, title] of [['claude', cli.claudeCode, 'Read server/auth/handoff.js'], ['codex', cli.codex, 'Ran ls'], ['opencode', cli.opencode, 'Read a.js'], ['muse', cli.muse, 'Ran ls']]) {
+        for (const [fixture, adapter, title] of [['claude', cli.claudeCode, 'Read server/auth/handoff.js'], ['codex', cli.codex, 'Ran ls'], ['opencode', cli.opencode, 'Read a.js'], ['muse', cli.muse, 'Ran ls'], ['antigravity', cli.antigravity, 'Ran ls']]) {
             await check(`${fixture}: recorded feed through its real adapter and job parser to AG-UI`, async () => {
                 const bin = path.join(dir, fixture);
                 fs.writeFileSync(bin, '#!' + process.execPath + '\nprocess.stdout.write(require("fs").readFileSync(' + JSON.stringify(path.join(__dirname, 'fixtures/agent-ui', fixture + '.jsonl')) + '));\n', { mode: 0o700 });

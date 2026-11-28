@@ -398,6 +398,58 @@
     ]
   },
   {
+    "id": "antigravity",
+    "name": "Antigravity CLI",
+    "provider": "google",
+    "capabilities": {
+      "host_access": true,
+      "mcp": true,
+      "long_autonomy": true,
+      "resume": true,
+      "edit": true,
+      "review": true,
+      "tools": true,
+      "vision": false,
+      "browser": false,
+      "computer_use": false,
+      "runtimes": [
+        "code"
+      ]
+    },
+    "address": {
+      "kind": "cli",
+      "target": "agy"
+    },
+    "price": {
+      "amount_usd": 0,
+      "unit": "hour"
+    },
+    "limits": {
+      "max_duration_seconds": 7200,
+      "max_concurrent_runs": 2,
+      "max_context_tokens": 128000
+    },
+    "agents": [
+      {
+        "id": "antigravity-default",
+        "harness": "antigravity",
+        "provider": "google",
+        "model": "antigravity",
+        "context_limits": {
+          "input_tokens": 128000,
+          "output_tokens": 32000
+        },
+        "concurrency": 2,
+        "price_per_1k_tokens": {
+          "fresh_usd": 0,
+          "cached_usd": 0,
+          "output_usd": 0
+        },
+        "availability_windows": []
+      }
+    ]
+  },
+  {
     "id": "aider",
     "name": "Aider",
     "provider": "aider",

@@ -22,6 +22,7 @@ const { commandCode } = require('../engine/adapters/command-code');
 const { opencode } = require('../engine/adapters/opencode');
 const { minimaxCode } = require('../engine/adapters/minimax-code');
 const { muse } = require('../engine/adapters/muse');
+const { antigravity } = require('../engine/adapters/antigravity');
 const transcript = require('../engine/transcript');
 const { runAttempt } = require('../engine/jobrunner');
 const { assemble } = require('../engine/prompt');
@@ -35,13 +36,32 @@ function dry(adapter, ctx = {}) {
 
 (async () => {
     await check('every harness Codes can run is an adapter, and each one names the portal script it came from', () => {
-        assert.deepStrictEqual(ids().sort(), ['claude-code', 'claude-other', 'codex', 'command-code', 'minimax-code', 'muse', 'opencode']);
+        assert.deepStrictEqual(ids().sort(), ['antigravity', 'claude-code', 'claude-other', 'codex', 'command-code', 'minimax-code', 'muse', 'opencode']);
         for (const id of ids()) {
             const a = adapterFor(id);
             assert.ok(a.portal, `${id} names no portal script`);
             assert.ok(typeof a.build === 'function' && typeof a.feed === 'function', `${id} is not a full adapter`);
         }
         assert.equal(adapterFor('nope'), null);
+    });
+
+    await check('Antigravity CLI: headless stream-json, model, effort, conversation, and the permission as its mode', () => {
+        const d = dry(antigravity, { model: 'gemini-3.8-flash-medium', effort: 'high', resume: 'conv-1', permission: 'edit' });
+        assert.equal(d.cmd, 'agy');
+        assert.deepEqual(d.argv.slice(0, 4), ['--input-format', 'stream-json', '--output-format', 'stream-json']);
+        assert.ok(!d.argv.includes('do the thing'), 'the brief never rides in argv (the process list is readable)');
+        assert.deepEqual(JSON.parse(d.stdin), { event: 'user', message: { content: 'do the thing' } }, 'the brief is one user event on stdin');
+        assert.match(JSON.parse(dry(antigravity, { prompt: '/model x' }).stdin).message.content, /^The brief:\n\/model x$/, 'a leading slash is not a slash command');
+        assert.ok(d.argv.includes('--model') && d.argv.includes('gemini-3.8-flash-medium'));
+        assert.ok(d.argv.includes('--effort') && d.argv.includes('high'));
+        assert.ok(d.argv.includes('--conversation') && d.argv.includes('conv-1'));
+        assert.deepEqual(d.argv.slice(-2), ['--mode', 'auto'], 'edit: workspace edits and safe commands');
+        assert.deepEqual(dry(antigravity, { permission: 'read' }).argv.slice(-2), ['--mode', 'default'], 'read: anything needing approval is refused');
+        const full = dry(antigravity, { permission: 'full' }).argv;
+        assert.ok(full.includes('--dangerously-skip-permissions') && !full.includes('--mode'), 'full: nothing asked');
+        assert.ok(!dry(antigravity, { effort: 'ultra' }).argv.includes('--effort'), 'a level agy does not take is not sent');
+        assert.equal(effortFor('antigravity', 'ultra'), 'max', 'the nearest level it takes');
+        assert.equal(adapterFor('antigravity'), antigravity);
     });
 
     await check('Muse Code uses its local sign-in, model and reasoning flags with contributor mode off', () => {
@@ -282,6 +302,33 @@ function dry(adapter, ctx = {}) {
         assert.ok(st3.events.some((e) => e.t === 'tool' && e.name === 'Read'));
         assert.ok(st3.events.some((e) => e.t === 'final'), 'the attempt ended');
         assert.ok(st3.events.some((e) => e.text === 'opencode did it'), 'the answer is there');
+
+        // Antigravity CLI: init, a tool step, the answer in deltas, the result with its usage.
+        const ag = [];
+        const fa1 = antigravity.feed({ model: null, onEvent: (e) => ag.push(e) });
+        fa1.line(JSON.stringify({ event: 'init', conversation_id: 'agy-c1', init: { cwd: '/tmp/work', tools: ['run_command'], permission_mode: 'request-review', model: 'gemini-3.8-flash-medium' } }));
+        fa1.line(JSON.stringify({ event: 'step_update', step_update: { conversation_id: 'agy-c1', step_index: 0, state: 'DONE', step_type: 'user_input' } }));
+        fa1.line(JSON.stringify({ event: 'step_update', step_update: { conversation_id: 'agy-c1', step_index: 2, state: 'DONE', step_type: 'tool', tool_name: 'view_file', tool_info: { name: 'view_file', parameters: { AbsolutePath: '/tmp/work/a.js' }, output: 'const a = 1;' } } }));
+        fa1.line(JSON.stringify({ event: 'step_update', step_update: { conversation_id: 'agy-c1', step_index: 3, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'agy ' } }));
+        fa1.line(JSON.stringify({ event: 'step_update', step_update: { conversation_id: 'agy-c1', step_index: 3, state: 'DONE', step_type: 'agent_response', text_delta: 'did it' } }));
+        fa1.line(JSON.stringify({ event: 'result', result: { conversation_id: 'agy-c1', status: 'SUCCESS', response: 'agy did it', num_turns: 1, usage: { input_tokens: 100, output_tokens: 5, thinking_tokens: 3, cache_read_tokens: 40, total_tokens: 108 } } }));
+        fa1.end({ code: 0 });
+        const stAg = transcript.parseText(ag.map((e) => JSON.stringify(e)).join('\n'));
+        assert.equal(stAg.session, 'agy-c1');
+        assert.ok(stAg.events.some((e) => e.t === 'tool' && e.name === 'Read'), 'Antigravity\'s tools get Claude Code\'s names');
+        assert.ok(stAg.events.some((e) => e.t === 'final'), 'the attempt ended');
+        const doneAg = ag.find((e) => e.type === 'result');
+        assert.equal(doneAg.is_error, false);
+        assert.equal(doneAg.result, 'agy did it');
+        assert.deepEqual(doneAg.usage, { input_tokens: 60, output_tokens: 8, cache_read_input_tokens: 40, cache_creation_input_tokens: 0 });
+        // A run that ends in an error says so, with agy's own first line.
+        const ag2 = [];
+        const fa2 = antigravity.feed({ model: 'm', onEvent: (e) => ag2.push(e) });
+        fa2.line(JSON.stringify({ event: 'result', result: { conversation_id: '', status: 'ERROR', response: '', error: 'invalid model selection (--model "x")\nAvailable models:\n  …' } }));
+        fa2.end({ code: 1 });
+        const bad = ag2.find((e) => e.type === 'result');
+        assert.equal(bad.is_error, true);
+        assert.equal(bad.result, 'API Error: invalid model selection (--model "x")');
 
         // MiniMax Code
         const mm = [];

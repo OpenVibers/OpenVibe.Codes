@@ -430,6 +430,58 @@ const muse = {
     },
 };
 
+// ── Antigravity CLI: Google's agent for people's own accounts (free, AI Pro / Ultra since 2026-06-18) ──
+// The engine's adapter (engine/adapters/antigravity.js) says why and how: the brief as one stream-json user event on
+// stdin, the permission as agy's mode, its events read into the shared ones here.
+const antigravity = {
+    id: 'antigravity', name: 'Antigravity CLI', kind: 'cli', bin: 'agy',
+    version: (env) => versionOf('agy', env),
+    // Signing in is one interactive `agy` run, and its credentials are its own: a machine with agy is offered, and a run
+    // that is not signed in ends at once with agy's own "authentication required".
+    check(env = {}) {
+        return versionOf('agy', env) ? { available: true } : { available: false, reason: 'install Antigravity CLI (antigravity.google/download), then run `agy` once to sign in with Google' };
+    },
+    start(t, ctx = {}) {
+        const agy = require('../../engine/adapters/antigravity');
+        const built = agy.antigravity.build({ prompt: t.prompt, model: t.model, effort: effortFor('antigravity', t.effort), resume: t.resume, permission: t.permission });
+        const startedAt = Date.now();
+        const parser = jsonLines(antigravity, (e, emit, st) => {
+            st.startedAt = startedAt;
+            const body = e[e.event] && typeof e[e.event] === 'object' ? e[e.event] : {};
+            const conv = e.conversation_id || body.conversation_id;
+            if (conv && !st.sessionId) { st.sessionId = String(conv); emit(ev.init(st.sessionId, 'antigravity', body.model || t.model)); }
+            if (e.event === 'step_update') {
+                if (body.step_type === 'agent_response' && typeof body.text_delta === 'string' && body.text_delta) {
+                    st.lastText = `${st.lastText || ''}${body.text_delta}`;
+                    emit(ev.text(body.text_delta, t.model));
+                } else if (body.step_type === 'tool' && body.state === 'DONE') {
+                    const info = body.tool_info && typeof body.tool_info === 'object' ? body.tool_info : {};
+                    const name = String(info.name || body.tool_name || 'tool');
+                    const id = `agy-${st.sessionId || 'run'}-${body.step_index != null ? body.step_index : (st.tools = (st.tools || 0) + 1)}`;
+                    const err = info.error && typeof info.error === 'object' ? info.error : null;
+                    emit(ev.toolUse(id, agy.AGY_TOOLS[name] || name, agy.inputOf(info.parameters), t.model));
+                    emit(ev.toolResult(id, err ? String(err.message || err.type || 'the tool failed') : typeof info.output === 'string' ? info.output : JSON.stringify(info.output || ''), !!err));
+                }
+                if (body.state === 'DONE' && body.step_type !== 'user_input') st.turns = (st.turns || 0) + 1;
+            } else if (e.event === 'result') {
+                st.usageRaw = body.usage || null;
+                if (typeof body.response === 'string' && body.response.trim()) st.lastText = body.response;
+                if (body.status && body.status !== 'SUCCESS') {
+                    const why = typeof body.error === 'string' ? body.error : body.error && (body.error.message || body.error.type);
+                    st.failed = String(why || `the run ended ${String(body.status).toLowerCase()}`).split('\n')[0].slice(0, 400);
+                    emit(ev.error(st.failed));
+                }
+            }
+        }, (info, emit, st) => {
+            const u = agy.usageOf(st.usageRaw);
+            const final = String(st.lastText || '').trim();
+            emit(ev.result({ ok: !!final && !st.failed && info.code === 0, text: st.failed || final || exitReason(info, 'Antigravity CLI'), sessionId: st.sessionId, model: t.model, startedAt, turns: st.turns || 0,
+                usage: ev.usage({ input: u.input_tokens, output: u.output_tokens, cacheRead: u.cache_read_input_tokens, cacheWrite: 0 }) }));
+        });
+        return spawnAgent({ cmd: this.bin, args: built.argv, cwd: t.cwd, env: ctx.env, timeoutMs: t.timeoutMs, signal: t.signal, parser, stdin: built.stdin });
+    },
+};
+
 // ── Claude Code on another provider: the same CLI, the cm-style environment (the portal's cm-run.sh) ──
 // The endpoint and the model come from the person's own connection (Codes C3): the base URL and the run token travel
 // in the environment, and the model id rides in ANTHROPIC_MODEL. No provider is named here: this harness is whatever
@@ -494,4 +546,4 @@ const claudeOther = {
     },
 };
 
-module.exports = { claudeCode, claudeOther, codex, opencode, commandCode, aider, minimaxCode, muse, jsonLines, versionOf };
+module.exports = { claudeCode, claudeOther, codex, opencode, commandCode, aider, minimaxCode, muse, antigravity, jsonLines, versionOf };

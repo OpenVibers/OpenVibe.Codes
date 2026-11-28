@@ -114,6 +114,12 @@ const MANIFEST = Object.freeze({
         terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'none', context_handoff: 'session', enforcement: 'native',
     }),
+    // Antigravity CLI: a structured result event, --conversation resumes, and its own modes (default / auto, or
+    // --dangerously-skip-permissions) decide what it may do. Its subagents run inside it, not as tools Codes sees.
+    antigravity: Object.freeze({
+        terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
+        subagents: 'none', context_handoff: 'session', enforcement: 'native',
+    }),
     deepseek: Object.freeze({
         terminal_status: 'structured', steering: 'resume', checkpointing: 'git',
         subagents: 'none', context_handoff: 'session', enforcement: 'client-boundary',

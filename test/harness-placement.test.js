@@ -69,7 +69,7 @@ function priced(row, freshUsd) {
     await check('every seed offer validates as platform.resource-offer@1 of kind harness', async () => {
         const harnesses = createHarnesses({ catalogPath });
         const offers = harnesses.list().flatMap((harness) => harnesses.agents(harness.id).map((agent) => [harness, toOffer(harness, agent, { now })]));
-        assert.strictEqual(offers.length, 13 + require('../harness/acp-agents.json').agents.length + 2, 'the thirteen, one per pinned ACP agent, and CodeBuddy\'s Hy4 flash and Hy4 (WorkBuddy\'s models, 2026-11-17)');
+        assert.strictEqual(offers.length, 14 + require('../harness/acp-agents.json').agents.length + 2, 'the fourteen (Antigravity CLI since 11-28), one per pinned ACP agent, and CodeBuddy\'s Hy4 flash and Hy4 (WorkBuddy\'s models, 2026-11-17)');
         for (const [harness, offer] of offers) {
             const result = contracts.validate('platform.resource-offer@1', JSON.parse(JSON.stringify(offer)));
             assert.ok(result.valid, `${offer.offer_id}: ${JSON.stringify(result.errors)}`);
@@ -136,7 +136,7 @@ function priced(row, freshUsd) {
         const [harnessId] = r.selected.split(':');
         assert.ok(toOffer(harnesses.get(harnessId), harnesses.agents(harnessId)[0]).capabilities.includes('task:review'));
         assert.ok(r.reasons.length);
-        assert.deepStrictEqual(r.candidates.map((c) => c.id), ['claude-code:claude-code-sonnet', 'claude-other:claude-other-default', 'codex:codex-default', 'command-code:command-code-default', 'opencode:opencode-default', 'minimax-code:minimax-code-default', 'muse:muse-spark-1.3', 'muse:muse-wonder-full', 'muse:muse-ember-1.0', 'aider:aider-default', 'deepseek:deepseek-chat', 'openvibe-ai:openvibe-ai-router', 'openai-compatible:openai-compatible-local', ...require('../harness/acp-agents.json').agents.flatMap((a) => [`${a.id}:${a.id}-default`, ...(a.id === 'codebuddy-code' ? ['codebuddy-code:codebuddy-code-hy4-flash', 'codebuddy-code:codebuddy-code-hy4'] : [])])]);
+        assert.deepStrictEqual(r.candidates.map((c) => c.id), ['claude-code:claude-code-sonnet', 'claude-other:claude-other-default', 'codex:codex-default', 'command-code:command-code-default', 'opencode:opencode-default', 'minimax-code:minimax-code-default', 'muse:muse-spark-1.3', 'muse:muse-wonder-full', 'muse:muse-ember-1.0', 'antigravity:antigravity-default', 'aider:aider-default', 'deepseek:deepseek-chat', 'openvibe-ai:openvibe-ai-router', 'openai-compatible:openai-compatible-local', ...require('../harness/acp-agents.json').agents.flatMap((a) => [`${a.id}:${a.id}-default`, ...(a.id === 'codebuddy-code' ? ['codebuddy-code:codebuddy-code-hy4-flash', 'codebuddy-code:codebuddy-code-hy4'] : [])])]);
     });
 
     await check('an offer whose health is down is excluded with a reason', async () => {

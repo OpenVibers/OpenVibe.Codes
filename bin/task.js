@@ -31,6 +31,7 @@ const ALIASES = {
     cx: 'codex', codex: 'codex',
     cc: 'command-code', 'command-code': 'command-code',
     oc: 'opencode', opencode: 'opencode',
+    agy: 'antigravity', antigravity: 'antigravity',
     claude: 'claude-code', cm: 'claude-code', 'claude-code': 'claude-code',
     dsh: 'deepseek', deepseek: 'deepseek',
     aider: 'aider',

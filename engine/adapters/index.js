@@ -13,6 +13,7 @@
  *   opencode       OpenCode                                         oc-run.sh
  *   minimax-code   MiniMax Code                                     mm-run.sh
  *   muse           Muse Code                                         muse exec
+ *   antigravity    Antigravity CLI (Google: free, AI Pro / Ultra)    agy -p … --output-format stream-json
  */
 
 const { claudeCode, claudeOther } = require('./claude-code');
@@ -21,6 +22,7 @@ const { commandCode } = require('./command-code');
 const { opencode } = require('./opencode');
 const { minimaxCode } = require('./minimax-code');
 const { muse } = require('./muse');
+const { antigravity } = require('./antigravity');
 const { effortFor, EFFORT_LEVELS } = require('./base');
 
 const ADAPTERS = {
@@ -31,6 +33,7 @@ const ADAPTERS = {
     opencode,
     'minimax-code': minimaxCode,
     muse,
+    antigravity,
 };
 
 /** The adapter of a harness, or null. */
