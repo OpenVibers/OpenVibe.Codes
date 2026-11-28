@@ -21,6 +21,7 @@
 
 const { roomFor, windowFull, FULL_PCT, MIN_BALANCE_USD } = require('../../engine/router');
 const { readBalances } = require('../../engine/balance');
+const { serviceAuth } = require('openvibe-contracts');
 
 const USER = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const AGENT = /^[a-z0-9-]{1,40}$/;
@@ -124,12 +125,12 @@ function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = c
     }
 
     /** One read of Bot's machines for this person. → { status, doc } */
-    async function read(token) {
+    async function read(token, forSubject = null) {
         if (!base) throw Object.assign(new Error('OpenVibe.Bot is not configured, so the fleet cannot be read'), { status: 503, code: 'fleet.unavailable' });
         let res;
         try {
             res = await fetchImpl(`${base}/api/v1/machines`, {
-                headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+                headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', ...(forSubject ? { 'X-OV-Subject': forSubject } : {}) },
                 signal: AbortSignal.timeout(8000),
             });
         } catch (e) {
@@ -147,10 +148,10 @@ function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = c
      * Read Bot now and replace what Codes holds for each machine whose answer names a fleet. A machine that is gone from
      * the answer is gone here too; a machine that answers no fleet keeps its last reading (the Link may be older).
      */
-    async function refresh(subject, token) {
+    async function refresh(subject, token, { asService = false } = {}) {
         if (!USER.test(String(subject || '')) || !token) return { ok: false, problem: { status: 401, detail: 'sign in again to see your machines' } };
         let doc;
-        try { doc = await read(token); } catch (e) {
+        try { doc = await read(token, asService ? subject : null); } catch (e) {
             if (e.status === 401) throw e;
             log.warn(`[Codes] the fleet could not be read: ${String(e && e.message).slice(0, 200)}`);
             return { ok: false, problem: { status: e.status || 503, detail: String(e.message || 'the fleet could not be read').slice(0, 300) } };
@@ -286,7 +287,28 @@ function createFleet({ config = {}, store, fetchImpl = globalThis.fetch, log = c
         return hit ? { device: String(hit.id), node_id: str(hit.node_id, 128), name: str(hit.name, 120), online: hit.online !== false } : null;
     }
 
-    return { refresh, latest, byHarness, forRouter, agents, deviceFor, balances, stateOf, windowOf, mergeWindows, enabled: !!base };
+    // Codes' own read of a person's machines (bot.machine.read, Contracts 0.455.0, Bot #537): the spare-usage planner
+    // refreshes in the background without the person's token. Off without the client secret or Bot.
+    const serviceTokens = base && config.oauth && config.oauth.clientSecret && config.networkInternalUrl ? serviceAuth.createTokenClient({
+        tokenUrl: `${String(config.networkInternalUrl).replace(/\/+$/, '')}/oauth/token`,
+        clientId: config.oauth.clientId,
+        clientSecret: config.oauth.clientSecret,
+        audience: 'openvibe.bot',
+        scope: 'bot.machine.read',
+        fetchImpl,
+    }) : null;
+    /** Refresh a person's fleet as Codes itself, at most once per `maxAgeMs` of the newest stored reading. */
+    async function refreshAsService(subject, { maxAgeMs = 10 * 60_000 } = {}) {
+        if (!serviceTokens || !USER.test(String(subject || ''))) return { ok: false, skipped: 'unavailable' };
+        const newest = await db.one('SELECT max(updated_at) AS at FROM codes_machine_fleet WHERE subject = $1', [subject]).catch(() => null);
+        const at = newest && newest.at ? Date.parse(iso(newest.at)) : 0;
+        if (at && now() - at < maxAgeMs) return { ok: true, skipped: 'fresh' };
+        let token;
+        try { token = await serviceTokens.getToken(); } catch (e) { return { ok: false, skipped: 'no_token' }; }
+        try { return await refresh(subject, token, { asService: true }); } catch (e) { return { ok: false, problem: { status: e.status || 503 } }; }
+    }
+
+    return { refresh, refreshAsService, latest, byHarness, forRouter, agents, deviceFor, balances, stateOf, windowOf, mergeWindows, enabled: !!base };
 }
 
 module.exports = { createFleet, stateOf, windowOf, mergeWindows, FULL_PCT, LOW_PCT, MIN_BALANCE_USD, STATE, roadFacts };

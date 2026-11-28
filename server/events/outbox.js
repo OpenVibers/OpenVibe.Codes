@@ -220,7 +220,7 @@ function createPublisher({ config, store, fetchImpl = globalThis.fetch, log = co
         clientSecret: config.oauth.clientSecret,
         audience: 'openvibe.events',
         scope: (config.events && config.events.scope) || 'events.event.publish',
-        fetch: fetchImpl,
+        fetchImpl,
     }) : null;
     const stats = { published: 0, failed: 0, dead: 0, last_error: null };
     // How many tries an event gets before it is marked dead: a refusal (its envelope can never pass) fewer than a
