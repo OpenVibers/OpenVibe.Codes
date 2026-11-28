@@ -78,7 +78,7 @@ function load(env = process.env) {
         // harnesses run. Codes talks to it with its own Network token (audience openvibe.ai).
         ai: {
             // The public address: what a harness on the person's own machine is given.
-            url: trim(env.CODES_AI_URL || 'https://ai.openvibe.services'),
+            url: trim(env.CODES_AI_URL || (nodeEnv === 'test' ? 'http://127.0.0.1:9' : 'https://ai.openvibe.services')),   // tests never reach production (11-28)
             // Codes' own address for AI: the vault (a person's keys) is a host-local API, so Codes reaches it over
             // the loopback. The public address answers 403 there (nginx: /api/ is host-local only).
             internalUrl: trim(env.CODES_AI_INTERNAL_URL || 'http://127.0.0.1:4700'),
@@ -89,7 +89,7 @@ function load(env = process.env) {
         },
         // OpenVibe.Exchange's compatible API: the deepseek harness's default path (openvibe-sdk/exchange). The run
         // token names the person; the Exchange speaks the same chat-completions API and the same model ids.
-        exchange: { url: trim(env.CODES_EXCHANGE_URL || 'https://api.openvibe.exchange') },
+        exchange: { url: trim(env.CODES_EXCHANGE_URL || (nodeEnv === 'test' ? 'http://127.0.0.1:9' : 'https://api.openvibe.exchange')) },
         // AI Exchange P9: OpenVibe.AI's real model catalog (GET /v1/models) in the pickers. Off by default; with the
         // flag on, AI's own AI_MODEL_CATALOG still decides whether it answers more than the legacy `openvibe` model,
         // and Codes keeps today's picker until it does. The answer is cached for about five minutes.
