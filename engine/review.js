@@ -43,6 +43,7 @@ const HARNESS_FAMILY = {
     codex: 'openai',
     'command-code': 'deepseek',
     muse: 'meta',
+    antigravity: 'google',
     opencode: 'qwen',
     deepseek: 'deepseek',
     aider: 'openai',

@@ -141,6 +141,8 @@ function adaptersFor(env) {
         // MiniMax Code: the person's own MiniMax sign-in on this machine.
         'minimax-code': cli.minimaxCode,
         muse: cli.muse,
+        // Antigravity CLI: the person's own Google sign-in on this machine (engine/adapters/antigravity.js).
+        antigravity: cli.antigravity,
         codex: cli.codex,
         opencode: cli.opencode,
         'command-code': cli.commandCode,

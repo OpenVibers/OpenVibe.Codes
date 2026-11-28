@@ -25,6 +25,9 @@ const SETUP = {
     'minimax-code': { name: 'MiniMax Code', plan: 'a MiniMax coding plan', install: null, signIn: null, docs: 'https://www.minimax.io' },
     'codebuddy-code': { name: 'CodeBuddy Code (WorkBuddy)', plan: 'a WorkBuddy or CodeBuddy account (Hy4 flash is free there to 30 November 2026)', install: 'npm install -g @tencent-ai/codebuddy-code', signIn: 'codebuddy', signInNote: 'and type /login (Google, GitHub or WeChat), or set CODEBUDDY_API_KEY', docs: 'https://www.workbuddy.ai/docs/cli/cli-reference' },
     muse: { name: 'Muse Code', plan: 'your Muse plan', install: null, signIn: 'muse login', docs: 'https://dev.meta.ai/docs/muse-ember' },
+    // Google's agent for people's own accounts since 2026-06-18 (Gemini CLI is left to Code Assist Standard / Enterprise).
+    // It installs from its download page, and a first interactive run signs in.
+    antigravity: { name: 'Antigravity CLI', plan: 'a Google account: the free tier, or Google AI Pro or Ultra', install: null, signIn: 'agy', signInNote: 'and sign in with Google when it asks', docs: 'https://antigravity.google/product/antigravity-cli' },
 };
 
 function readiness(rows) {

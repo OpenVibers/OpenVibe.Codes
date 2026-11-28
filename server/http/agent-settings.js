@@ -12,7 +12,7 @@ const { esc } = require('../render/html');
 const prefsOf = require('../domain/harness-prefs');
 const codeMode = require('../../harness/code-mode');
 
-const CLI_IDS = new Set(['claude-code', 'claude-other', 'codex', 'opencode', 'command-code', 'minimax-code', 'muse', 'aider']);
+const CLI_IDS = new Set(['claude-code', 'claude-other', 'codex', 'opencode', 'command-code', 'minimax-code', 'muse', 'antigravity', 'aider']);
 const API_IDS = new Set(['deepseek', 'openvibe-ai', 'openai-compatible']);
 const MODE_WORDS = { '': 'Your default', strict: 'Scripts only', beside: 'Scripts beside its own tools', off: 'Off' };
 const VIA_WORDS = {

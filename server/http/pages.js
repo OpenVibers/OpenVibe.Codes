@@ -197,6 +197,7 @@ ${table(['Agent', 'What it needs'], [
                 [html`<a href="/harnesses#claude-other">Claude Code (another provider)</a>`, html`<code>claude</code> on PATH, plus your own Anthropic-compatible endpoint in <code>ANTHROPIC_BASE_URL</code>, its token in <code>ANTHROPIC_AUTH_TOKEN</code> and the model id in <code>ANTHROPIC_MODEL</code>`],
                 [html`<a href="/harnesses#minimax-code">MiniMax Code</a>`, html`<code>mcode</code> on PATH, signed in to your own MiniMax account`],
                 [html`<a href="/harnesses#muse">Muse Code</a>`, html`<code>muse</code> on PATH, signed in with <code>muse login</code>; uses your Muse plan with contributor mode off`],
+                [html`<a href="/harnesses#antigravity">Antigravity CLI</a>`, html`<code>agy</code> on PATH, signed in with Google by one <code>agy</code> run; your free tier or Google AI Pro or Ultra`],
                 [html`<a href="/harnesses#codex">Codex</a>`, html`<code>codex</code> on PATH, signed in`],
                 [html`<a href="/harnesses#opencode">OpenCode</a>`, html`<code>opencode</code> on PATH`],
                 [html`<a href="/harnesses#command-code">Command Code</a>`, html`<code>cmd</code> on PATH`],

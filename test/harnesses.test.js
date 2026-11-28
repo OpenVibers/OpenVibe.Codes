@@ -13,7 +13,7 @@ const rows = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
 
 (async () => {
     await check('every seed row matches the pinned harness and agent contracts', async () => {
-        assert.strictEqual(rows.length, 11 + require('../harness/acp-agents.json').agents.length, 'the eleven, and one per pinned ACP agent');
+        assert.strictEqual(rows.length, 12 + require('../harness/acp-agents.json').agents.length, 'the twelve (Antigravity CLI since 11-28), and one per pinned ACP agent');
         for (const row of rows) {
             // The row is one contract instance: the offer and the agents (models) it runs.
             const harnessCheck = contracts.validate('platform.harness-offer@1', row);
