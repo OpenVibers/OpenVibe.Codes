@@ -13,7 +13,8 @@
  *   and searches; edit: also edits; full: also commands), fs/read_text_file and fs/write_text_file inside the working
  *   directory only (the same checks as the API harness's tools); anything else is "method not found".
  *
- * A stop sends session/cancel and gives the agent eight seconds to end its turn before its process is killed.
+ * A stop sends session/cancel and gives the agent eight seconds to end its turn before SIGTERM, then two before
+ * SIGKILL. Setup cancellation stops waiting immediately; a task already stopped never launches a process.
  */
 const fs = require('fs');
 const path = require('path');
@@ -27,6 +28,9 @@ const LEVELS = { read: 1, edit: 2, full: 3 };
 const KIND_LEVEL = { read: 1, search: 1, think: 1, fetch: 1, edit: 2, delete: 2, move: 2, execute: 3, switch_mode: 3, other: 3 };
 const PROTOCOL_VERSION = 1;
 const MAX_LINE = 8 * 1024 * 1024;
+// Stable v1 requires stopReason: agentclientprotocol/typescript-sdk (Apache-2.0),
+// src/v1/schema/zod.gen.ts at be320929c2b0a0fe7764023f83fbe307445c36d1. Validation idea, no copied code.
+const STOP_REASONS = new Set(['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled']);
 
 /** The option a permission request is answered with: the first allow (once, else always) when the level allows the
  *  tool, else the first reject; null when there is nothing to pick (answered as cancelled). */
@@ -86,6 +90,9 @@ function acpAgent(spec) {
             let tools = 0;
             let cancelled = false;
             let killTimer = null;
+            let hardKillTimer = null;
+            let timeoutTimer = null;
+            let termSent = false;
             const seen = new Map();   // toolCallId → { title, done }
             const cost = { usd: 0, any: false };
 
@@ -98,7 +105,17 @@ function acpAgent(spec) {
             });
             const reply = (id, result) => send({ id, result });
             const replyError = (id, code, message) => send({ id, error: { code, message } });
-            const kill = () => { if (child && child.exitCode === null && !child.signalCode) { try { child.kill('SIGTERM'); } catch { /* gone */ } } };
+            // Lifecycle ideas from openclaw/acpx (MIT), src/acp/client.ts at
+            // e6a5e1751ec9cc8ed563bba8e0f0358f4181acbf: abort setup and escalate teardown. No copied code.
+            const kill = () => {
+                if (!child || child.exitCode !== null || child.signalCode || termSent) return;
+                termSent = true;
+                try { child.kill('SIGTERM'); } catch { /* gone */ }
+                hardKillTimer = setTimeout(() => {
+                    if (child.exitCode === null && !child.signalCode) { try { child.kill('SIGKILL'); } catch { /* gone */ } }
+                }, 2000);
+                if (hardKillTimer.unref) hardKillTimer.unref();
+            };
 
             function onUpdate(params) {
                 if (replaying || !params || params.sessionId !== sessionId) return;
@@ -177,8 +194,15 @@ function acpAgent(spec) {
             }
 
             const stop = () => {
-                if (cancelled) return;
+                if (cancelled || finished) return;
                 cancelled = true;
+                // Only a prompt has final updates to drain after session/cancel. A stuck setup RPC must not hold
+                // cancellation until the task timeout or advance to the next setup step when its answer arrives.
+                for (const [id, p] of pending) {
+                    if (p.method === 'session/prompt') continue;
+                    pending.delete(id);
+                    p.reject(new Error(`${spec.name} was stopped`));
+                }
                 if (sessionId) send({ method: 'session/cancel', params: { sessionId } });
                 killTimer = setTimeout(kill, 8000);
                 if (killTimer.unref) killTimer.unref();
@@ -189,6 +213,7 @@ function acpAgent(spec) {
             const acpCm = t.options && t.options.codeMode && t.options.codeMode.server ? t.options.codeMode : null;
             const acpServers = acpCm ? [{ name: acpCm.server.name, command: acpCm.server.command, args: acpCm.server.args, env: [] }] : [];
             async function run() {
+                if (cancelled) return;
                 try {
                     child = spawn(spec.cmd, spec.args || [], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
                 } catch (err) { failure = `${spec.name} could not start: ${err.message}`; return; }
@@ -200,8 +225,10 @@ function acpAgent(spec) {
                 readline.createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', onLine);
                 child.stderr.on('data', (d) => { stderr = (stderr + d.toString()).slice(-4096); });
                 const died = closed.then(() => { throw new Error(`${spec.name} ended${stderr.trim() ? `: ${ev.scrub(stderr.trim().split('\n').pop()).slice(0, 200)}` : ''}`); });
-                const timeout = new Promise((_, reject) => { const tm = setTimeout(() => reject(new Error(`${spec.name} ran past its time limit`)), Number(t.timeoutMs) || 45 * 60_000); if (tm.unref) tm.unref(); });
-                const call = (method, params) => Promise.race([request(method, params), died, timeout]);
+                const timeout = new Promise((_, reject) => { timeoutTimer = setTimeout(() => reject(new Error(`${spec.name} ran past its time limit`)), Number(t.timeoutMs) || 45 * 60_000); if (timeoutTimer.unref) timeoutTimer.unref(); });
+                const call = (method, params) => cancelled
+                    ? Promise.reject(new Error(`${spec.name} was stopped`))
+                    : Promise.race([request(method, params), died, timeout]);
                 try {
                     const init = await call('initialize', { protocolVersion: PROTOCOL_VERSION, clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: false }, clientInfo: { name: 'openvibe-codes', version: '1' } });
                     const caps = (init && init.agentCapabilities) || {};
@@ -225,7 +252,11 @@ function acpAgent(spec) {
                     }
                     if (cancelled) { stopReason = 'cancelled'; return; }
                     const answer = await call('session/prompt', { sessionId, prompt: [{ type: 'text', text: String(require('../code-mode').withHint(acpCm, t.prompt || '', false)) }] });
-                    stopReason = String((answer && answer.stopReason) || 'end_turn');
+                    // No result, or a reason that is not one of v1's, is a failure. A result without stopReason at all
+                    // is a finished turn, as Codes always read it: some of the agents we run leave it out.
+                    const reason = answer && typeof answer === 'object' && answer.stopReason === undefined ? 'end_turn' : answer && answer.stopReason;
+                    if (!answer || typeof answer !== 'object' || !STOP_REASONS.has(reason)) throw new Error(`${spec.name} returned an invalid session/prompt stopReason`);
+                    stopReason = reason;
                 } catch (err) {
                     // What the agent said before it failed is often the real reason (a plan's usage limit, a missing
                     // sign-in) when its error is only "Internal error": the result carries both.
@@ -240,11 +271,17 @@ function acpAgent(spec) {
                     if (grace.unref) grace.unref();
                     await closed;
                     clearTimeout(grace);
-                    if (killTimer) clearTimeout(killTimer);
                 }
             }
 
             run().then(() => {
+                clearTimeout(timeoutTimer);
+                clearTimeout(killTimer);
+                clearTimeout(hardKillTimer);
+                if (t.signal) t.signal.removeEventListener('abort', stop);
+                for (const p of pending.values()) p.reject(new Error(`${spec.name} ended`));
+                pending.clear();
+                if (cancelled) failure = `${spec.name} was stopped`;
                 if (!failure && stopReason && stopReason !== 'end_turn') {
                     failure = stopReason === 'cancelled' ? `${spec.name} was stopped` : `${spec.name} stopped: ${stopReason}`;
                 }

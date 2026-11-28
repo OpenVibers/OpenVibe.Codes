@@ -117,8 +117,12 @@ added to its list by hand.
   edits, deletes and moves; full: also commands; a kind the protocol adds later needs full), and file reads and writes
   inside the working directory only, with the API harness's own checks (no `..`, no link out, no `.env`, no `.git`
   write). Anything else is "method not found".
-- **Stop:** `session/cancel`, then eight seconds before the process is killed. An agent's own words before a bare
-  "Internal error" (a plan's usage limit, a missing sign-in) are kept in the result.
+- **Stop:** an already cancelled task never launches an agent; cancellation during setup stops waiting immediately.
+  An active turn gets `session/cancel` and eight seconds to finish before SIGTERM, then two seconds before SIGKILL.
+  Normal completion and timeout close stdin, allow two seconds for exit, then use the same TERM/KILL escalation.
+  Cancellation stays stopped even if the agent answers `end_turn`. An agent's own words before a bare "Internal error"
+  (a plan's usage limit, a missing sign-in) are kept in the result. No prompt result, or a `stopReason` that is not one of
+  v1's, fails the run (received text is retained); a result without `stopReason` at all is a finished turn. An explicit `end_turn` needs no final prose to count as complete.
 - **What it needs:** Node.js (`npx`) or uv (`uvx`) on the machine and the agent's own sign-in there; the first run fetches
   the pinned package. Checked 11-15 against the real `claude-acp` (a read-only task: one tool call, the answer, the cost)
   and `codex-acp` (the session opened; the plan's usage limit came back in words).
