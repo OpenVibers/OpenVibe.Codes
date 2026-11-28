@@ -34,6 +34,7 @@ const PAGE_TEXT = {
     '/start': ['Get started with the coding-agent harness', 'Install openvibe-codes; the agents it can use and what each needs; the commands, permission levels, hand-offs, the event format and using it from your own code.'],
     '/harnesses': ['The coding agents', 'Every harness the router can pick (Claude Code, Codex, OpenCode, Command Code, Aider, Muse Code, DeepSeek, your own model) with its models, capabilities, prices and limits.'],
     '/model-plans': ['Model plans', 'Single, pair, council and escalating plans for coding tasks, with model roles, checks, configuration and API.'],
+    '/loops': ['Loops', 'Checks that keep a product right after it ships (accessibility, security, speed, tests, docs, dependencies): each loop measures with real tools, fixes what matters most, proves the fix and opens a pull request, on your coding agents\' spare plan time.'],
     '/skills': ['The skills hub', 'Skills, rules and MCP servers kept per person and per project, versioned, shared through the four audiences, and synced into each coding tool on your own machine with a dry run and an undo.'],
     '/improve': ['Improve OpenVibe', 'How OpenVibe is built in the open: every repository, and the path from a change to a reviewed pull request.'],
     '/updates': ['What shipped on OpenVibe.Codes', 'This site\'s update log, from the network changelog feed.'],
@@ -73,6 +74,7 @@ function publicPages({ governance = [] }) {
         { path: '/harnesses', changefreq: 'weekly', priority: 0.9 },
         { path: '/model-plans', changefreq: 'monthly', priority: 0.6 },
         { path: '/skills', changefreq: 'weekly', priority: 0.9 },
+        { path: '/loops', changefreq: 'weekly', priority: 0.8 },
         { path: '/improve', changefreq: 'weekly', priority: 0.8 },
         { path: '/updates', changefreq: 'daily', priority: 0.5 },
         { path: '/policy', changefreq: 'monthly', priority: 0.4 },
@@ -160,6 +162,7 @@ function createDiscoveryRoutes(ctx) {
                     { title: 'Code with any agent', url: abs('/'), note: 'what the harness is, how a task finds its agent, what works today' },
                     { title: 'Get started', url: abs('/start'), note: 'install, agents, commands, permission levels, hand-offs, events, from your own code' },
                     { title: 'The coding agents', url: abs('/harnesses'), note: 'every harness with its models, capabilities, prices and limits' },
+                    { title: 'Loops', url: abs('/loops'), note: 'evergreen checks that end in pull requests, on spare plan time' },
                     { title: 'Improve OpenVibe', url: abs('/improve'), note: 'every repository and the path to a reviewed pull request' },
                 ] },
                 { title: 'Community', links: [

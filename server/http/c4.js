@@ -990,6 +990,7 @@ ${conductorSection}
     // Settings → Coding agents (2026-11-18): each agent's code mode, model, reasoning and standing instructions.
     r.use(require('./agent-settings').createAgentSettings(ctx, { page, wrap, header, flash, sameOrigin, viewer, form, signIn }));
     r.use(require('./spare-page').createSparePage(ctx, { page, wrap, header, flash, sameOrigin, viewer, form, signIn }));
+    r.use(require('./loops-page').createLoopsPage(ctx, { page, wrap, header, flash, viewer }));
 
     // The Memory page (OpenVibe Memory M2b): the person's own notes, in Codes' own kit. The routes live in their own
     // module and borrow this one's kit (the page, the frame, the card, the pill, the flash and the same-origin check).
