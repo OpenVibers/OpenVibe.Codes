@@ -19,6 +19,7 @@ function createAgentPages(ctx, publicViews, { home = null } = {}) {
         if (path === '/improve') return twin(views.improve(), path);
         if (path === '/updates') return twin(await views.updates(), path);
         if (path === '/policy') return twin(views.policy(), path);
+        if (path === '/loops') return twin(require('./http/loops-page').publicView(), path);
         let m = /^\/policy\/([^/]+)$/.exec(path);
         if (m) return twin(views.policyDoc(decodeURIComponent(m[1])), path);
         m = /^\/improve\/([^/]+)\/([^/]+)$/.exec(path);

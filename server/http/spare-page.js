@@ -9,6 +9,8 @@ const { esc } = require('../render/html');
 const { LOOPS, taskFor } = require('../domain/loops');
 
 const SPT = /^spt_[0-9A-HJKMNP-TV-Z]{26}$/;
+/** Where a form returns: the Loops page posts here too (back=/loops); anything else is this page. */
+const backOf = (req) => (String((req.body || {}).back || '') === '/loops' ? '/loops' : '/settings/spare');
 const STATE_WORDS = { queued: 'Waiting', running: 'Running', done: 'Done', failed: 'Did not finish', paused: 'Paused' };
 
 /** "in 5 h", "in 40 min", "in 2 days". */
@@ -73,7 +75,7 @@ function createSparePage(ctx, { page, wrap, header, flash, sameOrigin, viewer, f
 <p class="c4-hint">An agent takes a task only when it is not working on anything of yours. Each task is an ordinary Codes task: its approvals and pull request are yours as always. The same list is in the API: <code>GET /api/v1/me/spare</code>.</p>
 <div class="mp-savebar"><button class="c4-button" type="submit">Save</button></div></form></section>
 <section class="c4-card"><h3 class="c4-subhead">Loops</h3>
-<p class="c4-hint">Work that keeps a product right after it ships, on the time your plans would lose. Each loop measures with real tools, fixes what matters most, proves it, and opens a pull request for you; then it comes back for the next window.</p>
+<p class="c4-hint">Work that keeps a product right after it ships, on the time your plans would lose. Each loop measures with real tools, fixes what matters most, proves it, and opens a pull request for you; then it comes back for the next window. <a class="c4-link" href="/loops">Your loops</a></p>
 <form method="post" action="/settings/spare/loops" class="sp-add sp-loops">
 <fieldset class="sp-loop-pick"><legend class="c4-subhead-sm">Which loop</legend>${LOOPS.map((l, i) => `<label class="c4-check"><input type="radio" name="loop" value="${esc(l.id)}"${i === 0 ? ' checked' : ''}><span><b>${esc(l.name)}</b><small>${esc(l.what)}</small></span></label>`).join('')}</fieldset>
 <label>Repository <input name="repo" maxlength="300" required placeholder="owner/name or https://…" autocomplete="off" spellcheck="false"></label>
@@ -98,9 +100,9 @@ function createSparePage(ctx, { page, wrap, header, flash, sameOrigin, viewer, f
         const b = req.body || {};
         try {
             await spare.saveSettings(req.viewer.subject, { ...b, enabled: b.enabled === 'true' }, { project: await projectOf(req, res) });
-            return res.redirect(303, '/settings/spare?ok=Saved');
+            return res.redirect(303, `${backOf(req)}?ok=Saved`);
         } catch (e) {
-            return res.redirect(303, `/settings/spare?error=${encodeURIComponent(String((e && e.message) || 'not saved').slice(0, 180))}`);
+            return res.redirect(303, `${backOf(req)}?error=${encodeURIComponent(String((e && e.message) || 'not saved').slice(0, 180))}`);
         }
     });
     r.post('/settings/spare/tasks', form, async (req, res) => {
@@ -118,25 +120,25 @@ function createSparePage(ctx, { page, wrap, header, flash, sameOrigin, viewer, f
         if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
         const b = req.body || {};
         const made = taskFor(String(b.loop || ''), { repo: b.repo, site: b.site });
-        if (made.error) return res.redirect(303, `/settings/spare?error=${encodeURIComponent(made.error)}`);
+        if (made.error) return res.redirect(303, `${backOf(req)}?error=${encodeURIComponent(made.error)}`);
         try {
             await spare.add(req.viewer.subject, made.body);
-            return res.redirect(303, '/settings/spare?ok=Loop%20added');
+            return res.redirect(303, `${backOf(req)}?ok=${backOf(req) === '/loops' ? 'The%20loop%20waits%20for%20spare%20time' : 'Loop%20added'}`);
         } catch (e) {
-            return res.redirect(303, `/settings/spare?error=${encodeURIComponent(String((e && e.message) || 'not added').slice(0, 180))}`);
+            return res.redirect(303, `${backOf(req)}?error=${encodeURIComponent(String((e && e.message) || 'not added').slice(0, 180))}`);
         }
     });
     r.post('/settings/spare/tasks/:id', form, async (req, res) => {
         if (!viewer(req)) return res.redirect(303, `/auth/login?next=${encodeURIComponent('/settings/spare')}`);
         if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Cross-site form posts are refused.\n');
-        if (!SPT.test(req.params.id)) return res.redirect(303, '/settings/spare?error=No%20such%20task');
+        if (!SPT.test(req.params.id)) return res.redirect(303, `${backOf(req)}?error=No%20such%20task`);
         const what = String((req.body || {}).do || '');
         try {
             if (what === 'remove') await spare.remove(req.viewer.subject, req.params.id);
             else await spare.update(req.viewer.subject, req.params.id, { state: what === 'pause' ? 'paused' : 'queued' });
-            return res.redirect(303, '/settings/spare');
+            return res.redirect(303, backOf(req));
         } catch (e) {
-            return res.redirect(303, `/settings/spare?error=${encodeURIComponent(String((e && e.message) || 'not changed').slice(0, 180))}`);
+            return res.redirect(303, `${backOf(req)}?error=${encodeURIComponent(String((e && e.message) || 'not changed').slice(0, 180))}`);
         }
     });
     return r;
