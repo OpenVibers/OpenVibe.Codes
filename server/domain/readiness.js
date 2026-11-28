@@ -27,6 +27,9 @@ const SETUP = {
     muse: { name: 'Muse Code', plan: 'your Muse plan', install: null, signIn: 'muse login', docs: 'https://dev.meta.ai/docs/muse-ember' },
     // Google's agent for people's own accounts since 2026-06-18 (Gemini CLI is left to Code Assist Standard / Enterprise).
     // It installs from its download page, and a first interactive run signs in.
+    // Gemini CLI is for Gemini Code Assist Standard / Enterprise since 2026-06-18: a personal account (free, AI Pro,
+    // Ultra) is told to use Antigravity CLI, so nobody installs the one their account cannot run.
+    'gemini-cli': { name: 'Gemini CLI', plan: 'Gemini Code Assist Standard or Enterprise (a personal Google account, free or AI Pro / Ultra: use Antigravity CLI)', install: 'npm install -g @google/gemini-cli', signIn: 'gemini', signInNote: 'and sign in with your Code Assist account', docs: 'https://geminicli.com/docs/' },
     antigravity: { name: 'Antigravity CLI', plan: 'a Google account: the free tier, or Google AI Pro or Ultra', install: null, signIn: 'agy', signInNote: 'and sign in with Google when it asks', docs: 'https://antigravity.google/product/antigravity-cli' },
 };
 
