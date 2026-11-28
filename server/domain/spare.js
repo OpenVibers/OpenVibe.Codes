@@ -209,6 +209,8 @@ function createSpare({ store, fleet = null, harnesses = null, tasks = null, noti
     async function agentsOf(subject) {
         const f = fleetOf();
         if (!f || typeof f.agents !== 'function') return [];
+        // The planner runs in the background: bring the person's readings up to date as Codes itself first (Bot #537).
+        if (typeof f.refreshAsService === 'function') await f.refreshAsService(subject).catch(() => null);
         try { return await f.agents(subject, harnesses); } catch (e) { log.warn(`[Codes] spare: the fleet of ${subject} could not be read: ${String(e && e.message).slice(0, 160)}`); return []; }
     }
     /** The list, the settings, and per agent what the planner would do now and why. */

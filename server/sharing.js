@@ -40,7 +40,7 @@ function createSharing({ db, config, fetchImpl = globalThis.fetch, log = console
         clientSecret: config.oauth.clientSecret,
         audience: 'openvibe.network',
         scope: 'identity.subject.resolve network.notifications.push',
-        fetch: fetchImpl,
+        fetchImpl,   // serviceAuth.createTokenClient's name for it (a "fetch" option was ignored: tests could not stand in for Network)
     }) : null;
 
     async function networkJson({ path, method = 'GET', json, query } = {}) {
