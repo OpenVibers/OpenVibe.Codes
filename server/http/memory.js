@@ -30,6 +30,8 @@ const express = require('express');
 const { asyncRouter } = require('./router');
 const { esc } = require('../render/html');
 const ovkKit = require('openvibe-shared/kit');
+// A notice in the page, as the home's (c4.js): the memory page used note() without one (11-28).
+const note = (text, kind = '') => `<div class="notice c4-notice${kind ? ` c4-notice-${kind}` : ''}" role="status">${esc(text)}</div>`;
 
 /** The adapter ids the Link reads and the services that write, and the names a person knows them by. */
 const SOURCE_NAMES = {
