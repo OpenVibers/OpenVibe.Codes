@@ -252,8 +252,11 @@ function acpAgent(spec) {
                     }
                     if (cancelled) { stopReason = 'cancelled'; return; }
                     const answer = await call('session/prompt', { sessionId, prompt: [{ type: 'text', text: String(require('../code-mode').withHint(acpCm, t.prompt || '', false)) }] });
-                    if (!answer || !STOP_REASONS.has(answer.stopReason)) throw new Error(`${spec.name} returned an invalid session/prompt stopReason`);
-                    stopReason = answer.stopReason;
+                    // No result, or a reason that is not one of v1's, is a failure. A result without stopReason at all
+                    // is a finished turn, as Codes always read it: some of the agents we run leave it out.
+                    const reason = answer && typeof answer === 'object' && answer.stopReason === undefined ? 'end_turn' : answer && answer.stopReason;
+                    if (!answer || typeof answer !== 'object' || !STOP_REASONS.has(reason)) throw new Error(`${spec.name} returned an invalid session/prompt stopReason`);
+                    stopReason = reason;
                 } catch (err) {
                     // What the agent said before it failed is often the real reason (a plan's usage limit, a missing
                     // sign-in) when its error is only "Internal error": the result carries both.

@@ -96,7 +96,13 @@ const collect = async (run) => { const events = []; for await (const e of run) e
         controller.abort();
     });
 
-    for (const mode of ['missing', 'null', 'no-result', 'empty-reason', 'bad-reason', 'unknown-reason']) {
+    await check('a result without stopReason is a finished turn (some agents leave it out)', async () => {
+        const r = await exercise('missing');
+        assert.strictEqual(r.result.is_error, false);
+        assert.ok(r.events.some((e) => e.type === 'assistant' && e.message.content.some((c) => c.text === 'Partial answer.')));
+    });
+
+    for (const mode of ['null', 'no-result', 'empty-reason', 'bad-reason', 'unknown-reason']) {
         await check(`${mode} completion fails while retaining received text`, async () => {
             const r = await exercise(mode);
             assert.strictEqual(r.result.is_error, true, 'malformed completion is not success');
